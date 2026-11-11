@@ -154,6 +154,28 @@ try {
     assert.ok(await evaluate(page,"document.documentElement.scrollWidth<=innerWidth+1"));
     assert.ok(await evaluate(page,"[...document.querySelectorAll('[data-log-filters] select,[data-log-filters] input')].every(el=>el.getBoundingClientRect().right<=innerWidth+1)"));
   }
+  const regionBatch=await evaluate(manager,`(async()=>{
+    const {nodeRegionFlag}=await import('/assets/analytics/node-region.js');
+    const {accountRequest}=await import('/assets/modules/account-request.js');
+    const original=window.fetch;let reads=0,reports=0;
+    const session=await original('/api/v1/auth/session').then(response=>response.json());
+    window.fetch=(url,options)=>{
+      if(String(url).endsWith('/tasks/failures'))reports++;
+      if(/\\/agents\\/agt_[a-f0-9]+\\/region$/.test(String(url))){reads++;return Promise.resolve(Response.json({error:'地区读取失败',request_id:'req_region',failure_retention:'not_required'},{status:502}));}
+      return original(url,options);
+    };
+    try {
+      const state={data:{}},controller=new AbortController();
+      const ctx={state,signal:controller.signal,current:()=>!controller.signal.aborted,can:()=>true,api:path=>accountRequest(path,{session,signal:controller.signal})};
+      const nodes=Array.from({length:10},(_,n)=>({id:'agt_'+n.toString(16).padStart(16,'0'),metrics:{public_ipv4:'1.1.1.'+(n+1)}}));
+      nodes.forEach(node=>nodeRegionFlag(ctx,node));
+      await Promise.all([...state.data.agentRegions.values()].map(entry=>entry.request));
+      const flags=nodes.map(node=>nodeRegionFlag(ctx,node));
+      controller.abort();
+      return {reads,reports,scopedErrors:flags.filter(flag=>flag.getAttribute('aria-label')==='国家／地区读取失败'&&flag.title.includes('req_region')).length};
+    } finally {window.fetch=original;}
+  })()`);
+  assert.deepEqual(regionBatch,{reads:10,reports:0,scopedErrors:10},'region batch loses local diagnostics or floods task retention');
   const choose=async(page,field,value)=>evaluate(page,`(()=>{const select=document.querySelector('[data-log-filters] select[name=${field}]');select.value=${JSON.stringify(value)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   const rows=page=>evaluate(page,"[...document.querySelectorAll('.a-log-message')].map(el=>el.textContent)");
   await choose(a,"agent_id",host);
@@ -214,9 +236,14 @@ try {
   await screenshot(manager,"stream-empty");
   await evaluate(manager,"(()=>{const q=document.querySelector('[data-log-filters] [name=q]');q.value='';q.dispatchEvent(new Event('input',{bubbles:true}))})()");
   await wait(manager,"document.querySelectorAll('[data-log-entry]').length>0");
+  const readFailureTasks = await api(manager,admin,"GET","/tasks?action=panel-failure&limit=500");
+  await evaluate(manager,"window.__readBackfills=0;window.__readFetch=window.fetch;window.fetch=(...args)=>{if(String(args[0]).endsWith('/tasks/failures'))window.__readBackfills++;return window.__readFetch(...args);};");
   await evaluate(manager,"window.__layoutFetch=window.fetch;window.fetch=(...args)=>String(args[0]).includes('/core-logs?')?Promise.resolve(new Response(JSON.stringify({error:'日志读取失败，请重试'}),{status:503,headers:{'Content-Type':'application/json'}})):window.__layoutFetch(...args);[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='自动更新').click()");
   await wait(manager,"document.querySelector('[data-log-refresh-label]').textContent.includes('刷新失败')");
   assert.ok(await evaluate(manager,"document.querySelectorAll('[data-log-entry]').length>0"));
+  assert.equal(await evaluate(manager,"document.querySelectorAll('.a-toast.error').length"),0,"a local read failure produced a global operation notification");
+  assert.equal(await evaluate(manager,"window.__readBackfills"),0,"reading source state or a failed window backfilled a task");
+  assert.equal((await api(manager,admin,"GET","/tasks?action=panel-failure&limit=500")).length,readFailureTasks.length,"read failure created a task");
   await screenshot(manager,"stream-error-retained");
   await evaluate(manager,"window.fetch=async(...args)=>{const result=await window.__layoutFetch(...args);if(String(args[0]).includes('/core-logs?'))await new Promise(resolve=>setTimeout(resolve,1200));return result;};[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()");
   await wait(manager,"document.querySelector('[data-log-refresh-label]').getAttribute('aria-busy')==='true'");
@@ -224,6 +251,8 @@ try {
   await screenshot(manager,"stream-loading-retained");
   await wait(manager,"!document.querySelector('[data-log-refresh-label]').hasAttribute('aria-busy') && document.querySelector('[data-log-refresh-label]').textContent==='正在实时更新'");
   await evaluate(manager,"window.fetch=window.__layoutFetch;delete window.__layoutFetch");
+  assert.equal(await evaluate(manager,"window.__readBackfills"),0,"read recovery backfilled a task");
+  assert.equal(await evaluate(manager,"document.querySelectorAll('.a-toast.error').length"),0,"read recovery left stale notifications");
   await choose(manager,"instance_id","");
   await wait(manager,"document.querySelector('[data-log-refresh-label]').textContent==='正在实时更新'");
   await evaluate(manager,"document.querySelector('[data-log-source-status]').click();document.querySelectorAll('dialog[data-log-sources] [data-source-expand][aria-expanded=false]').forEach(item=>item.click());window.scrollTo(0,0)");

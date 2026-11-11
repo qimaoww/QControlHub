@@ -128,21 +128,45 @@ export function diagnosticError(value) {
   return message === raw ? raw : `${message}\n原始错误（供排查）：${raw}`;
 }
 
-export async function requestJSON(url, options, {
+export async function requestJSON(url, options, dependencies = {}) {
+  try { return await performJSON(url, options, dependencies); }
+  catch (error) {
+    error.readOnly = ["GET", "HEAD", "OPTIONS"].includes(String(options?.method || "GET").toUpperCase());
+    error.resource = String(url).split("?")[0];
+    if (error.readOnly) {
+      error.failureRetention = "not_required";
+      delete error.failureSaved;
+      delete error.retentionError;
+    }
+    throw error;
+  }
+}
+
+// Only an explicit lifecycle signal proves intentional cancellation. An
+// unexpected AbortError or a deadline still reports a real read failure.
+export function readCancellation(signal) {
+  const reason = signal?.reason;
+  if (reason && reason.name !== "AbortError") return reason;
+  return Object.assign(new DOMException("读取已取消", "AbortError"), { intentionalCancellation: true });
+}
+
+async function performJSON(url, options, {
   fetchImpl = globalThis.fetch,
   isLogin = false,
   isCurrent = () => true,
   onUnauthorized = () => {},
 } = {}) {
   const assertCurrent = () => {
-    if (!isCurrent()) throw Object.assign(new DOMException("Account changed", "AbortError"), {intentionalCancellation:true});
+    if (!isCurrent()) throw Object.assign(new DOMException("账号已切换", "AbortError"), {intentionalCancellation:true});
+    if (options?.signal?.aborted && options.signal.reason?.name === "AbortError") throw readCancellation(options.signal);
   };
-  const canceled = () => options?.signal?.aborted && options.signal.reason?.name !== "TimeoutError";
+  const canceled = cause => options?.signal?.aborted && options.signal.reason?.name === "AbortError"
+    && (cause === options.signal.reason || cause?.name === "AbortError");
   let response;
   // Validators are opt-in and belong to an exact in-memory representation.
   // Never let a bodyless 304 stand in for a value the caller no longer owns.
   const { conditional, onResponse, ...requestOptions } = options || {};
-  const readOnly = ["GET", "HEAD"].includes((requestOptions.method || "GET").toUpperCase());
+  const readOnly = ["GET", "HEAD", "OPTIONS"].includes((requestOptions.method || "GET").toUpperCase());
   const validator = conditional?.etag && Object.hasOwn(conditional, "value") ? conditional : null;
   if (validator) requestOptions.headers = { ...requestOptions.headers, "If-None-Match": validator.etag };
   try {
@@ -191,6 +215,7 @@ export async function requestJSON(url, options, {
     error.stage = body?.stage || "api_request";
     error.failureTaskID = body?.failure_task_id;
     error.failureSaved = body?.failure_saved;
+    error.failureRetention = body?.failure_retention;
     error.retentionError = body?.retention_error;
     if (body?.code === "task_schema_incompatible" && body?.stage === "task_creation" && response.status === 500) {
       error.code = body.code;

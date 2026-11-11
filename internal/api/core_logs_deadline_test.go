@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,5 +47,34 @@ func TestCoreLogReadDeadlineResponse(t *testing.T) {
 	writeCoreLogReadError(response, request, context.DeadlineExceeded)
 	if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), "读取超时，请重试。") {
 		t.Fatalf("deadline response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestReadCancellationRequiresCanceledRequestAndCause(t *testing.T) {
+	for _, stopped := range []bool{false, true} {
+		for _, cause := range []error{context.Canceled, context.DeadlineExceeded, errors.New("database unavailable")} {
+			request := httptest.NewRequest("GET", "/api/v1/core-logs", nil)
+			ctx, cancel := context.WithCancel(request.Context())
+			defer cancel()
+			request = request.WithContext(ctx)
+			if stopped {
+				cancel()
+			}
+			response := httptest.NewRecorder()
+			writeCoreLogReadError(response, request, cause)
+			expected := 500
+			if stopped && cause == context.Canceled {
+				expected = 499
+			}
+			if response.Code != expected {
+				t.Fatalf("stopped=%t cause=%v status=%d", stopped, cause, response.Code)
+			}
+		}
+	}
+	// A committed write cannot acquire the read-only cancellation meaning.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if writeCanceledRead(httptest.NewRecorder(), httptest.NewRequest("POST", "/api/v1/tasks", nil).WithContext(ctx), context.Canceled) {
+		t.Fatal("write outcome was suppressed")
 	}
 }

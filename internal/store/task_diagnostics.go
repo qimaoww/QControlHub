@@ -106,7 +106,7 @@ func (s *Store) RecordPanelFailure(ctx context.Context, input core.PanelFailure)
 	if input.RequestID != "" {
 		fingerprintDetail = strings.ReplaceAll(fingerprintDetail, "（请求 ID："+input.RequestID+"）", "（请求 ID：[request_id]）")
 	}
-	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s", input.Operation+input.Resource, input.Stage, fingerprintDetail, input.HTTPStatus, input.AgentID, input.Engine, input.InstanceID)))
+	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s", input.Operation, input.Resource, input.Stage, fingerprintDetail, input.HTTPStatus, input.AgentID, input.Engine, input.InstanceID, input.Code, input.Field)))
 	key := hex.EncodeToString(fingerprint[:])
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, scope.OwnerID+key); err != nil {
 		return "", err

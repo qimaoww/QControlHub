@@ -367,7 +367,11 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 	if len(params) > 0 {
 		op["parameters"] = params
 	}
-	if len(response) == 0 {
+	hasSuccess := false
+	for status := range response {
+		hasSuccess = hasSuccess || strings.HasPrefix(status, "2")
+	}
+	if !hasSuccess {
 		response["200"] = object{"description": "成功；无内容响应为 204。"}
 	}
 	for _, status := range []string{"400", "401", "403", "404", "409", "429", "500"} {
@@ -634,7 +638,7 @@ func (g *generator) named(name string) object {
 func commonResponses() object {
 	result := object{}
 	for status, description := range map[string]string{"400": "参数或业务校验失败", "401": "凭据无效、停用、到期、撤销或创建者失效", "403": "模式、权限、来源或资源授权拒绝", "404": "资源不存在或不可见", "409": "并发变更或状态冲突；重新读取并保留草稿", "429": "限流；按 Retry-After 有限等待", "500": "内部错误；记录 X-Request-ID 或 request_id"} {
-		result["error"+status] = object{"description": description, "content": object{"application/json": object{"schema": object{"type": "object", "required": []string{"error"}, "properties": object{"error": object{"type": "string"}, "request_id": object{"type": "string"}, "code": object{"type": "string"}, "stage": object{"type": "string"}}}, "example": object{"error": description, "request_id": "req_example"}}}}
+		result["error"+status] = object{"description": description, "content": object{"application/json": object{"schema": object{"type": "object", "required": []string{"error"}, "properties": object{"error": object{"type": "string"}, "request_id": object{"type": "string"}, "code": object{"type": "string"}, "stage": object{"type": "string"}, "failure_retention": object{"type": "string", "enum": []string{"not_required", "saved", "failed"}}}}, "example": object{"error": description, "request_id": "req_example"}}}}
 	}
 	return result
 }

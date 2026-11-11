@@ -1,10 +1,11 @@
 import { requestCoreLogJSON } from "./core-log-read.js";
+import { readCancellation } from "./errors.js";
 
 // Owned by one authenticated session. Completed values stay with the existing
 // domain caches: sharing an in-flight read never extends a snapshot's lifetime.
 export function createReadCoordinator(transport, { capacity = 128, timeout = 15000 } = {}) {
   const pending = new Map(), active = new Set();
-  const canceled = () => new DOMException("Read canceled", "AbortError");
+  const canceled = () => readCancellation();
   const remove = entry => {
     if (pending.get(entry.key) === entry) pending.delete(entry.key);
     active.delete(entry);
@@ -24,7 +25,7 @@ export function createReadCoordinator(transport, { capacity = 128, timeout = 150
       && Object.keys(options).every(key => ['signal', 'method', 'fresh'].includes(key));
     if (method !== 'GET') return transport(path, options);
     const signal = options.signal;
-    if (signal?.aborted) return Promise.reject(signal.reason || canceled());
+    if (signal?.aborted) return Promise.reject(readCancellation(signal));
     let entry = share && !options.fresh ? pending.get(path) : null;
     if (!entry) {
       if (active.size >= capacity) return Promise.reject(new Error("读取请求过多，请稍后重试。"));
@@ -56,7 +57,7 @@ export function createReadCoordinator(transport, { capacity = 128, timeout = 150
       const reader = { resolve, reject, dispose: () => signal?.removeEventListener('abort', abort) };
       const abort = () => {
         reader.dispose(); entry.readers.delete(reader);
-        reject(signal.reason || canceled());
+        reject(readCancellation(signal));
         if (!entry.readers.size) { remove(entry); entry.controller.abort(); }
       };
       entry.readers.add(reader);

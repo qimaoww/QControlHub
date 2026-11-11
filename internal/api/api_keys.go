@@ -64,7 +64,11 @@ func (s *Server) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (*ht
 		return invalid()
 	}
 	if err != nil {
-		writeInternalError(w, err)
+		if readOnlyMethod(r.Method) {
+			writeCoreLogReadError(w, r, err)
+		} else {
+			writeInternalError(w, err)
+		}
 		return r, false
 	}
 	invalidKnownKey := func() (*http.Request, bool) {
@@ -83,7 +87,11 @@ func (s *Server) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (*ht
 			return invalidKnownKey()
 		}
 		if err != nil {
-			writeInternalError(w, err)
+			if readOnlyMethod(r.Method) {
+				writeCoreLogReadError(w, r, err)
+			} else {
+				writeInternalError(w, err)
+			}
 			return r, false
 		}
 		v.Role = user.Role

@@ -60,7 +60,7 @@ func agentGeoIP(agent core.Agent) netip.Addr {
 func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
 	if err != nil {
-		writeStoreError(w, err)
+		writeCoreLogReadError(w, request, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -82,6 +82,13 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 	}
 	region, err := s.geoip.LookupCountry(request.Context(), address)
 	if err != nil {
+		if writeCanceledRead(w, request, err) {
+			return
+		}
+		if request.Context().Err() == context.DeadlineExceeded {
+			writeCoreLogReadError(w, request, err)
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -127,6 +134,9 @@ func (s *Server) getRegionFlag(w http.ResponseWriter, request *http.Request) {
 	}
 	flag, err := s.geoip.Flag(request.Context(), code)
 	if err != nil {
+		if writeCanceledRead(w, request, err) {
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}

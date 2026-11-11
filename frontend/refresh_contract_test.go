@@ -48,7 +48,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"{ isLogin: path === \"/auth/login\", isCurrent, onUnauthorized",
 		},
 		"modules/errors.js": {
-			"if (!isCurrent()) throw Object.assign(new DOMException(\"Account changed\", \"AbortError\"), {intentionalCancellation:true})",
+			"if (!isCurrent()) throw Object.assign(new DOMException(\"账号已切换\", \"AbortError\"), {intentionalCancellation:true})",
 			"options?.signal?.aborted",
 		},
 		"analytics/live-dom.js": {

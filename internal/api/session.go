@@ -234,7 +234,11 @@ func (s *Server) validateSession(w http.ResponseWriter, request *http.Request) (
 	}
 	user, err := s.store.UserForSession(request.Context(), value.UserID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		writeInternalError(w, err)
+		if readOnlyMethod(request.Method) {
+			writeCoreLogReadError(w, request, err)
+		} else {
+			writeInternalError(w, err)
+		}
 		return request, false
 	}
 	if err != nil || user.AuthRevision != value.AuthRevision {
