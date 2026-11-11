@@ -270,7 +270,8 @@ ensure_install_tools() {
 require_commands() {
     local command_name
     [ "$ACTION" = uninstall ] || ensure_install_tools
-    for command_name in openssl jq curl awk mktemp install timeout flock; do
+    [ "$ACTION" = uninstall ] || command -v jq >/dev/null 2>&1 || die "缺少依赖：jq"
+    for command_name in openssl curl awk mktemp install timeout flock; do
         command -v "$command_name" >/dev/null 2>&1 || die "缺少依赖：$command_name"
     done
     if [ "$ACTION" = install ]; then

@@ -778,7 +778,8 @@ ensure_install_tools() {
 require_commands() {
     local command_name
     [ "$ACTION" = uninstall ] || ensure_install_tools
-    for command_name in openssl jq curl awk mktemp install timeout flock; do
+    [ "$ACTION" = uninstall ] || command -v jq >/dev/null 2>&1 || die "缺少依赖：jq"
+    for command_name in openssl curl awk mktemp install timeout flock; do
         command -v "$command_name" >/dev/null 2>&1 || die "缺少依赖：$command_name"
     done
     if [ "$ACTION" = install ]; then
@@ -2423,7 +2424,7 @@ configure_compose_args
 
 # Validate the path before opening a lock beside existing deployment state.
 [ ! -L "$WORK_DIR/.qcontrolhub-operation.lock" ] || die "部署锁不能是符号链接"
-command -v flock >/dev/null 2>&1 || { [ "$ACTION" != install ] || ensure_install_tools; }
+command -v flock >/dev/null 2>&1 || { [ "$ACTION" = uninstall ] || ensure_install_tools; }
 command -v flock >/dev/null 2>&1 || die "缺少依赖：flock"
 exec 9>>"$WORK_DIR/.qcontrolhub-operation.lock"
 flock -n 9 || die "此安装目录已有部署操作，请等待其完成后重试"
