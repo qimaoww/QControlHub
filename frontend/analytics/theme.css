@@ -135,8 +135,27 @@ strong, b { font-weight: 600; }
 .a-target-form { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
 .a-form-grid > .a-check { margin-top: 28px; }
 .a-form-fields { border: 0; padding: 0; margin: 0; min-width: 0; gap: 20px; }
-.a-code, .a-editor textarea { font-family: ui-monospace, SFMono-Regular, Consolas, "Analytics Sans", monospace; font-size: var(--text-label); font-weight: 400; line-height: 1.75; font-variant-ligatures: none; }
+.a-code, .a-editor textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: var(--text-label); font-weight: 400; line-height: 1.75; font-variant-ligatures: none; }
 .a-code { max-height: 55dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--tint); padding: 16px; margin: 0; border-radius: 8px; }
+.a-source-editor { position: relative; min-width: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: var(--text-label); line-height: 1.75; font-variant-ligatures: none; isolation: isolate; }
+.a-field .a-source-editor textarea, .a-source-editor pre { font: inherit; letter-spacing: 0; tab-size: 2; }
+.a-source-editor pre { position: absolute; inset: 1px; margin: 0; padding: 9px 12px; border: 0; white-space: pre; overflow: hidden; pointer-events: none; scrollbar-gutter: stable; }
+.a-source-json .a-source-highlight { inset-inline-start: calc(3.5em + 1px); background: var(--paper); color: var(--ink); }
+.a-source-json .a-source-lines { inset-inline-end: auto; width: 3.5em; padding-inline: 4px 8px; background: var(--canvas); color: var(--soft-ink); border-inline-end: 1px solid var(--border); text-align: end; scrollbar-gutter: auto; z-index: 2; }
+.a-field .a-source-json textarea { position: relative; z-index: 1; padding-inline-start: calc(3.5em + 12px); background: transparent; color: transparent; caret-color: var(--ink); white-space: pre; overflow-wrap: normal; }
+.a-field .a-source-json textarea:disabled { color: transparent; background: transparent; }
+.a-source-json:has(textarea:disabled) .a-source-highlight { background: var(--canvas); }
+.a-source-json textarea::selection { color: var(--paper); background: var(--ink); }
+.a-json-key { color: var(--ink); font-weight: 600; }
+.a-json-string { color: #155731; }
+.a-json-number { color: #754511; }
+.a-json-literal { color: #a41a2b; }
+.a-json-punctuation { color: var(--soft-ink); }
+.a-json-preview { counter-reset: source-line; }
+.a-json-preview-line { display: block; min-height: 1.75em; padding-inline-start: 3.5em; position: relative; }
+.a-json-preview-line::before { counter-increment: source-line; content: counter(source-line); position: absolute; inset-inline-start: 0; width: 2.5em; text-align: end; color: var(--soft-ink); user-select: none; font-weight: 400; }
+@media (max-width: 767px) { .a-source-editor { font-size: 1rem; line-height: 24px; } }
+@media (forced-colors: active) { .a-field .a-source-json textarea, .a-field .a-source-json textarea:disabled { color: CanvasText; } .a-source-highlight { visibility: hidden; } }
 .a-dialog { width: min(680px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); color: var(--ink); box-shadow: 0 20px 70px #18181b35; }
 .a-dialog.wide { width: min(1120px, calc(100% - 32px)); }
 .a-dialog::backdrop { position: fixed; inset: 0; background: #18181b74; }

@@ -1,3 +1,4 @@
+import { formatConfigContent } from "../modules/code-format.js";
 import { assert, pause, waitFor, createConfigFixture as fixture } from './config-fixture.mjs';
 import { testConfigOutboundsRuntime } from './config-outbounds.mjs';
 import { testCommonConfigRuntime } from './config-common.mjs';
@@ -156,8 +157,8 @@ export async function testConfigInboundsRuntime(preview = false) {
 }
 
 async function testSourceCorrection() {
-  for (const shared of [false, true]) {
-    const test = await fixture('sing-box', {shared});
+  for (const engine of ['sing-box', 'ss-rust']) for (const shared of [false, true]) {
+    const test = await fixture(engine, {shared});
     const form = test.root.querySelector('form:has([name=content])'), input = form.elements.content;
     const edit = value => { input.value=value; input.dispatchEvent(new Event('input',{bubbles:true})); };
     test.confirm=true;
@@ -165,8 +166,8 @@ async function testSourceCorrection() {
     assert(form.querySelector('.a-save-state').textContent==='有未保存的修改','source draft still claims saved');
     await waitFor(()=>form.textContent.includes('测试源码保存失败')&&!form.hasAttribute('aria-busy'),'source rejection did not settle');
     assert(input.value==='{}'&&!form.querySelector('[type=submit]').disabled&&!test.writes.length,'validation failure discarded or permanently blocked draft');
-    const valid=JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
-    test.sourceFailure=null; test.normalizedSource=JSON.stringify({...JSON.parse(valid),log:{level:'warn'}},null,2);
+    const valid=engine==='ss-rust'?test.saved().content:JSON.stringify({inbounds:[{type:'http',tag:'corrected',listen:'127.0.0.1',listen_port:21001}],outbounds:[{type:'direct',tag:'original'}]});
+    test.sourceFailure=null; test.normalizedSource=engine==='ss-rust'?formatConfigContent(valid,"JSON"):formatConfigContent(JSON.stringify({...JSON.parse(valid),log:{level:'warn'}}),'JSON');
     edit(valid); form.requestSubmit(); form.requestSubmit(); await test.settle(1);
     assert(test.writes[0].content===valid&&test.writes[0].version===1,'retry submitted old source or baseline');
     assert(input.value===test.normalizedSource&&input.defaultValue===test.normalizedSource,'saved editor does not match normalized server source');
@@ -231,7 +232,7 @@ async function testNodeConfigHistory(){
     test.restoreError=403;test.clickButton('恢复此档案',test.topDialog());await pause();assert(test.saved().version===2,'authorization failure changed config');
     test.restoreError=null;let release;test.restoreGate=new Promise(resolve=>{release=resolve;});test.clickButton('恢复此档案',test.topDialog());test.clickButton('恢复此档案',test.topDialog());await pause();assert(test.topDialog()?.open,'pending restore closed early');release();await waitFor(()=>test.saved().version===3&&!test.topDialog(),'restore failed');
     assert(test.restores.length===1&&test.restores[0].expected_version===2&&test.revisions.size===3,'restore replaced history or used historical CAS');assert(!test.calls.some(call=>call.path==='/tasks'),'restore implicitly deployed');
-    assert(!source.querySelector('[type=submit]').disabled&&!source.textContent.includes('测试源码保存失败')&&source.elements.content.value===test.saved().content&&source.querySelector('.a-save-state').textContent.includes('已保存'),'successful restore retained the old source conflict or draft');
+    assert(!source.querySelector('[type=submit]').disabled&&!source.textContent.includes('测试源码保存失败')&&source.elements.content.value===(engine==='mihomo'?test.saved().content:formatConfigContent(test.saved().content,"JSON"))&&source.querySelector('.a-save-state').textContent.includes('已保存'),'successful restore retained the old source conflict or draft');
     test.click('history');await waitFor(()=>test.topDialog()?.querySelector('tbody tr'),'restored history missing');test.clickButton('预览',test.topDialog().querySelector('tbody tr'));await waitFor(()=>test.topDialog()?.querySelector('pre'),'current archive preview missing');assert(![...test.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'current revision permits duplicate restore');test.dispose();
   }
   const readonly=await fixture('xray',{history:true,readonly:true});readonly.click('history');await waitFor(()=>readonly.topDialog()?.querySelector('tbody tr'),'readonly history missing');readonly.clickButton('预览',[...readonly.topDialog().querySelectorAll('tbody tr')].at(-1));await waitFor(()=>readonly.topDialog()?.querySelector('pre'),'readonly preview missing');assert(![...readonly.topDialog().querySelectorAll('button')].some(button=>button.textContent==='恢复此档案'),'readonly restore exposed');readonly.dispose();

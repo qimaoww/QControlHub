@@ -1,3 +1,5 @@
+import { readableConfigSource } from '../modules/code-format.js';
+import { testJSONEditor } from './json-editor.mjs';
 import { assert, delay, waitFor } from "./assertions.mjs";
 
 export async function testConfigLayoutRuntime({ testAPI }) {
@@ -29,7 +31,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       const previousTarget = target();
       location.hash = hash;
       await waitFor(() => target() && target() !== previousTarget && target().elements.agent.value === agent && target().elements.engine.value === engine && editor(), `旧链接目标未保留：${hash}`); await settled();
-      assert.equal(editor().value, testAPI.layoutConfigs.get(`${agent}-${engine}`).content, "源码与链接目标不符");
+      assert.equal(editor().value, readableConfigSource(testAPI.layoutConfigs.get(`${agent}-${engine}`).content,engine), "源码与链接目标不符");
       if (testAPI.agents.find(item => item.id === agent).status === "offline") {
         assert.ok(root().textContent.includes("离线"), "离线节点无状态提示");
         assert.ok(configForm().querySelector("[type=submit]").disabled, "离线仍允许部署");
@@ -65,7 +67,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     const common = await confirm("通用配置项");
     change(common.querySelector('[name="mutation"]'), "modify");
     await waitFor(() => common.querySelector('[name="fragment"]').value.includes("1.1.1.1"), "通用配置未通过字段 API 读取");
-    assert.equal(editor().value, testAPI.layoutConfigs.get("alpha-xray").content);
+    assert.equal(editor().value, readableConfigSource(testAPI.layoutConfigs.get("alpha-xray").content,"xray"));
     common.dispatchEvent(new Event("cancel", { cancelable: true })); await waitFor(() => !common.open, "Escape 未关闭工具弹窗");
     assert.equal(document.activeElement, button("通用配置项"), "关闭工具未恢复焦点");
     button("保存历史").click(); const history = await confirm("节点配置历史");
@@ -81,9 +83,56 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     await close(await confirm("任务详情"));
     assert.ok(button("重置修改").disabled, "已保存仍显示待重置");
     input(form.elements.name, "丢弃此修改"); input(form.elements.description, "丢弃此说明"); input(editor(), "{}"); button("重置修改").click();
-    assert.equal(form.elements.name.value, "源码保存后的名称"); assert.equal(form.elements.description.value, "保存后重置基线"); assert.equal(editor().value, submitting, "重置回到旧保存内容");
+    assert.equal(form.elements.name.value, "源码保存后的名称"); assert.equal(form.elements.description.value, "保存后重置基线"); assert.equal(editor().value, readableConfigSource(submitting,"xray"), "重置回到旧保存内容");
     // A clean source must leave without an unnecessary discard prompt.
     change(target().elements.engine, "sing-box"); await waitFor(() => target()?.elements.engine.value === "sing-box" && editor(), "保存并重置后仍阻止导航"); await settled();
+
+    const writesBeforeOpen = testAPI.calls.filter(call => call.method === "POST" && /\/configs\//.test(call.path)).length;
+    change(target().elements.engine, "ss-rust"); await waitFor(() => target()?.elements.engine.value === "ss-rust" && editor(), "无法打开 SS Rust"); await settled();
+    const readable = () => {
+      assert.match(editor().value, /\n  "/, "SS Rust 正文没有实际缩进换行");
+      const style = getComputedStyle(editor()), metrics = document.createElement("canvas").getContext("2d");
+      metrics.font = `${style.fontSize} ${style.fontFamily}`;
+      const widths = [...' iW0{}"'].map(char => metrics.measureText(char).width);
+      assert.ok(Math.max(...widths) - Math.min(...widths) < 0.01, "SS Rust 源码字体不等宽，缩进层级不清晰");
+      assert.ok(editor().value.includes("9007199254740993"), "SS Rust 大整数精度丢失");
+      assert.equal(editor().value, editor().defaultValue, "自动格式化未同步基线");
+      assert.ok(button("重置修改").disabled, "自动格式化误报未保存");
+    };
+    await document.fonts.ready;
+    readable();
+    assert.equal(testAPI.calls.filter(call => call.method === "POST" && /\/configs\//.test(call.path)).length, writesBeforeOpen, "首次展示自动保存了配置");
+    const beforeReads = testAPI.calls.filter(call => call.method === "POST").length;
+    const ssBaseline = editor().value;
+    button("格式化 JSON").click(); button("格式化 JSON").click();
+    assert.equal(editor().value, ssBaseline, "重复格式化不稳定"); readable();
+    assert.equal(testAPI.calls.filter(call => call.method === "POST").length, beforeReads, "展示或格式化自动写入");
+    for (let round = 0; round < 2; round++) {
+      input(editor(), editor().value.trim()); button("格式化 JSON").click();
+      configForm().requestSubmit(); const deployment = await confirm("部署并重启"); button("部署并重启", deployment).click();
+      await settled(); await close(await confirm("任务详情")); readable();
+      assert.equal(editor().value, ssBaseline, "保存回填压缩正文");
+      input(editor(), "{}"); button("重置修改").click(); assert.equal(editor().value, ssBaseline, "重置基线错误");
+      change(target().elements.engine, "xray"); await waitFor(() => target()?.elements.engine.value === "xray" && editor(), "离开 SS Rust 误报草稿"); await settled();
+      change(target().elements.engine, "ss-rust"); await waitFor(() => target()?.elements.engine.value === "ss-rust" && editor(), "重新进入失败"); await settled(); readable();
+    }
+    input(editor(), '{"server":'); button("格式化 JSON").click();
+    assert.equal(editor().value, '{"server":', "无效 JSON 被替换");
+    assert.ok(!button("重置修改").disabled, "无效草稿未保留");
+    button("重置修改").click(); readable();
+    button("读取托管配置").click(); await settled();
+    await waitFor(() => button("重置修改").disabled, "托管配置读取未结束"); readable();
+    const ssConfig = testAPI.layoutConfigs.get("alpha-ss-rust"), validContent = ssConfig.content;
+    change(target().elements.engine, "sing-box"); await waitFor(() => target()?.elements.engine.value === "sing-box" && editor(), "读取后无法离开"); await settled();
+    ssConfig.content = '{"server":';
+    change(target().elements.engine, "ss-rust"); await waitFor(() => target()?.elements.engine.value === "ss-rust" && editor(), "无法读取无效历史配置"); await settled();
+    assert.equal(editor().value, ssConfig.content, "无效历史正文未原样保留");
+    assert.equal(editor().defaultValue, ssConfig.content, "无效正文误报草稿");
+    assert.ok(root().textContent.includes("JSON 语法错误"), "无效历史正文缺少提示");
+    assert.ok(button("重置修改").disabled, "无效正文自动产生修改");
+    ssConfig.content = validContent;
+    change(target().elements.engine, "sing-box"); await waitFor(() => target()?.elements.engine.value === "sing-box" && editor(), "无效正文阻止离开"); await settled();
+    await testJSONEditor({change,target,editor,settled,button});
   }
   const workspace = editor().closest(".a-card"), frame = editor().getBoundingClientRect(), panel = workspace.getBoundingClientRect();
   const inbound = root().querySelector('[aria-label="入站配置"]').getBoundingClientRect();

@@ -181,7 +181,7 @@ func TestSourceSubmissionRepairsBrokenSavedAccounting(t *testing.T) {
 				t.Fatal("repair did not preserve separately dated archives")
 			}
 			client.call("GET", "/configs/"+saved.ID+"/revisions/1", nil, http.StatusOK, &current)
-			if current.Content != `{}` {
+			if current.Content != saved.Content {
 				t.Fatal("repair modified original archive")
 			}
 			submit(plan.Content, saved.Version, http.StatusConflict)

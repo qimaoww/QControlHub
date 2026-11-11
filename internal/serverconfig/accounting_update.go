@@ -116,8 +116,8 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 			}
 			delete(entry, "outbound_fwmark")
 		}
-		data, err := json.Marshal(root)
-		return string(data), err
+		data, err := json.MarshalIndent(root, "", "  ")
+		return string(data) + "\n", err
 	}
 	outsKey, tagKey, routeKey, targetKey := "outbounds", "tag", "route", "outbound"
 	if engine == core.EngineXray {
@@ -204,7 +204,8 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 	if engine == core.EngineMihomo {
 		data, err = yaml.Marshal(root)
 	} else {
-		data, err = json.Marshal(root)
+		data, err = json.MarshalIndent(root, "", "  ")
+		data = append(data, '\n')
 	}
 	return string(data), err
 }

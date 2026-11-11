@@ -1,3 +1,4 @@
+import { readableConfigSource } from '../modules/code-format.js';
 import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mjs";
 
 const failureButton = test => test.row("second")?.querySelector('button[aria-label*="部署失败"]');
@@ -74,7 +75,7 @@ async function testSupersededDeploymentReceipts() {
       test.workspaceResponses=[new Promise(resolve=>{release=()=>resolve(oldReceipt);})];
       await waitFor(()=>test.workspaceResponses.length===0,'old deployment poll did not begin');
       const form=source();form.elements.content.value+='\n  ';form.elements.content.dispatchEvent(new Event('input',{bubbles:true}));
-      const latest=form.elements.content.value;form.requestSubmit();await test.settle(2);
+      const latest=readableConfigSource(form.elements.content.value,'xray');form.requestSubmit();await test.settle(2);
       assert(test.saved().version===3&&form.elements.content.value===latest,'new source submission lost current revision');
       release();release=null;await pause();
       assert(source()===form&&form.elements.content.value===latest&&test.row('first').cells[3].innerText==='等待执行','old successful receipt overwrote newer pending configuration');

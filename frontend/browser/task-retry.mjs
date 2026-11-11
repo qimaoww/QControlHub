@@ -1,3 +1,4 @@
+import { readableConfigSource } from '../modules/code-format.js';
 import { startAnalytics } from "../analytics/app.js";
 import { assert, delay, waitFor } from "./assertions.mjs";
 
@@ -105,7 +106,7 @@ export async function testEditedRetryDialog(preview = false) {
     assert.ok(form.querySelector('[type="submit"]').disabled&&attempts===0,"invalid retry source can submit");
     source.value='{"inbounds":[],"log":{"level":"info"},"exact":9007199254740993}';source.dispatchEvent(new Event("input",{bubbles:true}));button("格式化源码",form).click();
     assert.ok(source.value.includes("\n")&&source.value.includes("9007199254740993")&&!form.querySelector('[type="submit"]').disabled,"format corrupts source or keeps save disabled");
-    button("重置源码",form).click();assert.equal(source.value,config.content,"reset did not restore saved source");
+    button("重置源码",form).click();assert.equal(source.value,readableConfigSource(config.content,config.engine),"reset did not restore saved source");
     source.value='{"inbounds":[],"log":{"level":"info"}}';source.dispatchEvent(new Event("input",{bubbles:true}));
     dialog.querySelector('[aria-label="关闭"]').click();const discard=await waitFor(()=>box("放弃更改"),"dirty close has no confirmation");button("取消",discard).click();assert.ok(dialog.open,"cancel discarded retry draft");
     form.requestSubmit();await confirm(false);await settled();assert.equal(attempts,0,"canceled retry wrote configuration");assert.ok(dialog.open&&source.value.includes('"log"'),"canceled retry lost draft");

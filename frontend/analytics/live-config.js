@@ -11,6 +11,7 @@ import { diagnosticError } from "../modules/errors.js";
 import { configStudio } from "./config-studio.js";
 import { nodeName } from "./node-region.js";
 import { formatConfigContent } from "../modules/code-format.js";
+import { bindJSONEditor, sourcePreview } from './json-editor.js';
 import { formatSharedPorts } from "../modules/user-model.js";
 import { filterbar, node, button, actions, stack, section, table, badge, field, pathID, list, muted, notice, formData, empty, code, link } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
@@ -177,8 +178,24 @@ export async function liveConfigPage(ctx) {
     return result;
   };
   let canDeploy = !configDeployBlockReason(agent, engine, ctx.can);
+  const formatNotice = notice("");
+  formatNotice.hidden = true;
+  const readableSource = (text, report = true) => {
+    if (engine === "mihomo") return text;
+    try {
+      const formatted = formatConfigContent(text, "JSON");
+      if (report) formatNotice.hidden = true;
+      return formatted;
+    } catch (error) {
+      if (report) {
+        formatNotice.textContent = error.message;
+        formatNotice.hidden = false;
+      }
+      return text;
+    }
+  };
   const intent = node("input", {type:"hidden", name:"intent", value:importSource ? "import" : "deploy"});
-  const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : workspace.source_content ?? saved?.content ?? defaultSource(engine), {
+  const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : readableSource(workspace.source_content ?? saved?.content ?? defaultSource(engine)), {
     multiline: 20, required: true, readonly: importSource || !editable, spellcheck: false,
   });
   const dependencyPreview = node("details", {}, node("summary", {}, "依赖资源"));
@@ -193,7 +210,7 @@ export async function liveConfigPage(ctx) {
     node("div", { className: "a-grid" },
       field("名称", "name", saved?.name || `${agent.name} ${engine}`, { required: true, maxlength: 100, readonly: !editable }),
       field("说明", "description", saved?.description || "", { maxlength: 300, readonly: !editable }), intent),
-    sourcePaths, node("div", { className: "a-editor" }, content), dependencyPreview, liveNotice, recovery,
+    sourcePaths, node("div", { className: "a-editor" }, content), formatNotice, dependencyPreview, liveNotice, recovery,
   ], importSource ? "导入并迁移" : "保存并部署", async (values, element) => {
     if (!editable || sourceBlocked) return;
     if (!importSource && !canDeploy) throw new Error("没有配置部署权限，草稿已保留。");
@@ -255,6 +272,7 @@ export async function liveConfigPage(ctx) {
     }
     element.elements.content.defaultValue = element.elements.content.value;
   });
+  bindJSONEditor(form.elements.content, engine === 'mihomo' ? 'YAML' : 'JSON', ctx.signal);
   function blockSource(error, committed, hasTask = false) {
     if (!ctx.current()) return;
     sourceBlocked = true;
@@ -276,9 +294,9 @@ export async function liveConfigPage(ctx) {
           if (!error.configSubmissionRejected) {
             form.elements.name.value=saved.name;
             form.elements.description.value=saved.description||"";
-            form.elements.content.value=saved.content;
+            form.elements.content.value=readableSource(saved.content);
           }
-          form.elements.content.defaultValue=saved.content;
+          form.elements.content.defaultValue=readableSource(saved.content);
           liveNotice.textContent=`已保存 · ${date(saved.updated_at)}`;
           sourceBlocked=false;recovery.replaceChildren();ctx.setDirty(false);syncDraft();
           const feedback=form.querySelector(':scope > .a-notice');
@@ -296,6 +314,7 @@ export async function liveConfigPage(ctx) {
     liveNotice.textContent = changed ? "有未保存的修改" : source ? `已读取 · ${date(source.readAt)}` : saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存";
   };
   function acceptSavedSource(config, sourceContent = config.content) {
+    sourceContent = readableSource(sourceContent);
     saved = config; workspace.config = config; workspace.source_content = sourceContent; source = null;
     form.elements.name.value = config.name;
     form.elements.description.value = config.description || "";
@@ -359,8 +378,7 @@ export async function liveConfigPage(ctx) {
             stack(muted("原资源"), node("span", {}, item.source), muted("托管去向"), node("span", {}, item.destination)),
           ])),
         );
-        form.elements.content.value = source.content;
-        form.elements.content.defaultValue = source.content;
+        form.elements.content.value = form.elements.content.defaultValue = readableSource(source.content);
         syncDraft();
         liveNotice.textContent = `已读取 · ${date(source.readAt)}`;
       } catch (error) {
@@ -375,6 +393,7 @@ export async function liveConfigPage(ctx) {
     try {
       const editor = form.elements.content;
       editor.value = formatConfigContent(editor.value, "JSON");
+      formatNotice.hidden = true;
       syncDraft();
     } catch(error) { void ctx.recordFailure?.(error,`${agent.name || agent.id} · ${engine} JSON 格式化`,"format_validation");ctx.announce(`JSON 格式无效，请检查配置。\n${error.message}`,"error"); }
   });
@@ -388,7 +407,7 @@ export async function liveConfigPage(ctx) {
         const previewRead = readRegion(dialogContext(ctx, historyBox), "配置预览", async () => {
         const revision = await ctx.api(`/configs/${pathID(saved.id)}/revisions/${record.version}`);
         if (!ctx.current() || !historyBox.isConnected) return;
-        preview.replaceChildren(stack(code(revision.content), ctx.can("configs.restore") && record.version !== saved.version && button("恢复此档案", async event => {
+        preview.replaceChildren(stack(sourcePreview(revision.content, engine), ctx.can("configs.restore") && record.version !== saved.version && button("恢复此档案", async event => {
           const control = event.currentTarget;
           if (!await ctx.confirm(`恢复 ${date(revision.updated_at)} 的配置？将按当前时间新增记录，原档案保留。`, "恢复配置") || !ctx.current()) return;
           await ctx.mutate(control, async () => {

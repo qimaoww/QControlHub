@@ -1,4 +1,6 @@
 import { actions, badge, field, node, pathID } from './ui.js';
+import { bindJSONEditor } from './json-editor.js';
+import { readableConfigSource } from '../modules/code-format.js';
 
 // Full native objects cover options that cannot be represented by a preset.
 export async function editInboundSource(ctx, {target, agent, engine, base, workspace, preparing, write, committed, track, isCurrent=ctx.current}) {
@@ -8,6 +10,7 @@ export async function editInboundSource(ctx, {target, agent, engine, base, works
   if (!ctx.current()) return;
   if (!isCurrent()) throw new Error('配置已变化，已保留当前输入，请重新打开入站');
   if (result.version !== config.version) throw new Error('配置已变化，请重新读取后编辑');
+  result.fragment = readableConfigSource(result.fragment, engine);
   const editor = field(engine === 'mihomo' ? '入站配置 · YAML' : '入站配置 · JSON','fragment',result.fragment,{multiline:18,required:true,spellcheck:false});
   const form = ctx.form([
     actions(badge(agent.name),badge(engine),badge(agent.shared_allocation?'共享实例':'主实例'),badge(`端口 ${target.port || '无固定端口'}`)),
@@ -19,6 +22,7 @@ export async function editInboundSource(ctx, {target, agent, engine, base, works
     await committed(saved,box);
   });
   const box = ctx.dialog(`修改入站 · ${target.tag}`,form,{wide:true});
+  bindJSONEditor(form.elements.fragment, engine === 'mihomo' ? 'YAML' : 'JSON', ctx.signal);
   track(form,box,true,()=>form.elements.fragment.value !== result.fragment);
   return box;
 }

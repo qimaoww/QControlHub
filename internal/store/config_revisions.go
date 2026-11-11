@@ -240,6 +240,10 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	if err := core.ValidateConfig(revision.Engine, revision.Content); err != nil {
 		return core.Config{}, fmt.Errorf("%w: stored revision is invalid: %v", ErrInvalid, err)
 	}
+	revision.Content, err = serverconfig.FormatConfigSource(revision.Engine, revision.Content)
+	if err != nil {
+		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
 	if current.AgentID != "" {
 		if err := serverconfig.ValidateIndependentEgress(revision.Engine, revision.Content); err != nil {
 			return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
