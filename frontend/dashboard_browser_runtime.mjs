@@ -144,12 +144,13 @@ export async function testDashboardRuntime(mode, preview = false) {
   const refresh = async () => { await waitFor(settled,"refresh remained busy");const count=reads("/overview");refreshButton().click();await waitFor(()=>reads("/overview")>count&&settled(),"manual refresh did not settle"); };
   await waitFor(() => document.title.startsWith("仪表盘") && reads("/overview"), "dashboard did not render");
   assert(!document.body.textContent.includes("undefined"), "missing overview fields leaked");
+  assert(!document.body.classList.contains("a-tech-dashboard") && getComputedStyle(document.documentElement).getPropertyValue("--paper").trim() === "#fff", "dashboard changed the original theme palette");
   if (!hasPanel) {
     assert(!panel(), "panel-host card leaked");assert(reads("/panel-metrics") === 0, "unauthorized host request");
     if (limited) {
       for (const path of ["/agents", "/tasks", "/traffic-usage", "/settings", "/preferences/node-order"]) assert(reads(path) === 0, `overview-only user requested ${path}`);
       assert(!nodes() && !activity() && !traffic() && !ranking(), "inaccessible shortcuts exposed");
-      await waitFor(() => compact(summary()?.querySelector(".a-dashboard-node-count")?.textContent).includes("3/4个节点"), "overview-only user lost allowed summary");
+      await waitFor(() => compact(summary()?.querySelector(".a-dashboard-topology-hub-value")?.textContent) === "3/4", "overview-only user lost allowed summary");
       assert(!summary().querySelector(".a-dashboard-periods") && !live("节点速率合计"), "overview-only user received traffic or node rates");
     } else {
       assert(traffic() && ranking() && nodes(), "readonly user lost owned dashboard data");
@@ -172,7 +173,7 @@ export async function testDashboardRuntime(mode, preview = false) {
     assert(compact(current.querySelector(".a-dashboard-period-value")?.textContent) === compact(`${expected.total_bytes / GiB} GB`), `${key} period total differs from current_period`);
     assert(current.dataset.state === "ready", `${key} sampled period is not ready`);
   }
-  await waitFor(() => compact(summary()?.querySelector(".a-dashboard-node-count")?.textContent).includes("3/4个节点") && compact(live("节点速率合计")?.querySelector(".a-dashboard-rate")?.textContent) === "9KB/s", "online counts or valid fleet rates did not settle");
+  await waitFor(() => compact(summary()?.querySelector(".a-dashboard-topology-hub-value")?.textContent) === "3/4" && compact(live("节点速率合计")?.querySelector(".a-dashboard-rate")?.textContent) === "9KB/s", "online counts or valid fleet rates did not settle");
   const overviewRegions = summary().querySelector(".a-dashboard-overview").children;
   assert(overviewRegions[0].classList.contains("a-dashboard-live") && overviewRegions[1].classList.contains("a-dashboard-periods"), "live health is not prioritized over cumulative periods");
   const primaryRegions = document.querySelector(".a-dashboard-main").children, diagnosticRegions = document.querySelector(".a-dashboard-secondary").children;
@@ -181,6 +182,9 @@ export async function testDashboardRuntime(mode, preview = false) {
   const engineSummary = nodes()?.querySelector(".a-card-body")?.textContent || "";
   for (const text of ["Mihomo 1/2", "sing-box 1/3", "SS Rust 0/2", "Xray 1/2"]) assert(engineSummary.includes(text), `offline runtime counted as live or scoped installed cores lost: ${text}`);
   assert(compact(live("节点速率合计")?.querySelector(".a-dashboard-rate")?.textContent) === "9KB/s", "valid fleet rates missing or offline node counted");
+  assert(document.querySelectorAll(".a-dashboard-topology-node.online").length === 3 && document.querySelectorAll(".a-dashboard-topology-node.offline").length === 1, "topology does not reflect real node states");
+  assert(document.querySelectorAll(".a-dashboard-topology-flow").length === 3 && document.querySelectorAll(".a-dashboard-gauge").length === 3, "live links or resource gauges are missing");
+  assert(document.querySelector(".a-dashboard-topology-legend")?.textContent.includes("超长节点名称用于验证排行与节点列表在窄屏下安全换行而不会挤破卡片布局"), "topology legend truncated a full node name");
   await waitFor(() => traffic()?.querySelectorAll("path[data-series]").length >= 2, "receive and send series are not independently plotted");
   const receiveSeries = traffic().querySelector('path[data-series="received_bytes"]'), sendSeries = traffic().querySelector('path[data-series="sent_bytes"]');
   assert(receiveSeries && sendSeries && receiveSeries.getAttribute("stroke-dasharray") !== sendSeries.getAttribute("stroke-dasharray"), "traffic directions rely only on color");
@@ -329,6 +333,6 @@ export async function testDashboardRuntime(mode, preview = false) {
   // A pending optional resource cannot delay node/traffic refreshes or page navigation.
   let release;fixture.gate=new Promise(resolve=>{release=resolve;});const beforeGate=reads("/panel-metrics");refreshButton().click();await waitFor(() => reads("/panel-metrics") > beforeGate, "slow metrics read missing");
   const beforeNodes=reads("/agents");await delay(5300);assert(reads("/agents") > beforeNodes, "slow host read blocked node polling");
-  location.hash="#tasks";await waitFor(() => document.title.startsWith("任务"), "route departure blocked on metrics");const afterLeave=reads("/panel-metrics");fixture.gate=null;release();await delay(2200);assert(!panel() && reads("/panel-metrics") === afterLeave, "old metrics response/timer survived navigation");assert(!document.body.classList.contains("a-tech-dashboard"), "dashboard tech theme survived navigation");
+  location.hash="#tasks";await waitFor(() => document.title.startsWith("任务"), "route departure blocked on metrics");const afterLeave=reads("/panel-metrics");fixture.gate=null;release();await delay(2200);assert(!panel() && reads("/panel-metrics") === afterLeave, "old metrics response/timer survived navigation");assert(!document.body.classList.contains("a-tech-dashboard"), "dark dashboard theme survived navigation");
   assert(cspViolations.length === 0, `CSP violations: ${cspViolations.join(", ")}`);
 }

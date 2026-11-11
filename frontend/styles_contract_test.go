@@ -60,7 +60,7 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// unavailable public-IP placeholders aligned with normal address rows, and
 	// readable connection country/node columns within their scroll container,
 	// and a complete source-service selector row on mobile import forms.
-	const expected = "c3eb393e805bd4b6a94c007149180931da4a4ec9fac2b2b03260bcb248092967"
+	const expected = "2e7163c48a8cfa13c35225c917bdac60b33d9334aded880f432f81bfdcd85cc3"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

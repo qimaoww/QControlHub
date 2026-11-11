@@ -136,9 +136,67 @@ function periodCard(key, title, range, value, state) {
     node("div", { className: "a-dashboard-period-foot" }, muted(value?.start && state !== "boundary" ? `${value.start} 起 · ${range}` : range), !usable && muted(message)));
 }
 
+
+function svgElement(tag, attributes = {}, text = "") {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  if (text) element.textContent = text;
+  return element;
+}
+
+function nodeTopology(agents, online, total) {
+  const visible = agents.slice(0, 8), center = [360, 130];
+  const position = index => {
+    const angle = -Math.PI / 2 + (visible.length === 4 ? Math.PI / 4 : 0) + index / visible.length * Math.PI * 2;
+    return [center[0] + 250 * Math.cos(angle), center[1] + 90 * Math.sin(angle)];
+  };
+  const svg = svgElement("svg", { viewBox: "0 0 720 260", class: "a-dashboard-topology-map", role: "img",
+    "aria-label": `节点链路拓扑：共 ${total ?? "未知"} 个节点，在线 ${online ?? "未知"}；显示前 ${visible.length} 个节点`,
+    "aria-describedby": "dashboard-topology-legend", "data-refresh-key": "node-topology" });
+  svg.append(svgElement("circle", { cx: center[0], cy: center[1], r: 69, class: "a-dashboard-topology-orbit" }));
+  svg.append(svgElement("circle", { cx: center[0], cy: center[1], r: 48, class: "a-dashboard-topology-orbit secondary" }));
+  visible.forEach((agent, index) => {
+    const [x, y] = position(index), isOnline = agent.status === "online";
+    const state = isOnline ? "online" : "offline";
+    svg.append(svgElement("line", { x1: center[0], y1: center[1], x2: x, y2: y,
+      class: `a-dashboard-topology-link ${state}`, "data-refresh-key": `link-${agent.id}` }));
+    if (isOnline) svg.append(svgElement("line", { x1: center[0], y1: center[1], x2: x, y2: y,
+      class: "a-dashboard-topology-flow", "data-refresh-key": `flow-${agent.id}` }));
+    const group = svgElement("g", { class: `a-dashboard-topology-node ${state}`, "data-state": state, "data-refresh-key": `node-${agent.id}` });
+    group.append(svgElement("title", {}, `${agent.name} · ${isOnline ? "在线" : "离线"}`));
+    group.append(svgElement("circle", { cx: x, cy: y, r: 18, class: "a-dashboard-topology-node-ring" }));
+    group.append(svgElement("text", { x, y: y + 4, "text-anchor": "middle", class: "a-dashboard-topology-node-index" }, String(index + 1).padStart(2, "0")));
+    svg.append(group);
+  });
+  svg.append(svgElement("circle", { cx: center[0], cy: center[1], r: 34, class: "a-dashboard-topology-hub" }));
+  svg.append(svgElement("text", { x: center[0], y: center[1] - 3, "text-anchor": "middle", class: "a-dashboard-topology-hub-title" }, "控制面"));
+  svg.append(svgElement("text", { x: center[0], y: center[1] + 17, "text-anchor": "middle", class: "a-dashboard-topology-hub-value" }, `${online ?? "—"} / ${total ?? "—"}`));
+  if (agents.length > visible.length) svg.append(svgElement("text", { x: 700, y: 248, "text-anchor": "end", class: "a-dashboard-topology-more" }, `+${agents.length - visible.length} 节点`));
+  return svg;
+}
+
+
+function topologyLegend(agents) {
+  return node("ol", { className: "a-dashboard-topology-legend", id: "dashboard-topology-legend" }, agents.slice(0, 8).map((agent, index) =>
+    node("li", { "data-state": agent.status === "online" ? "online" : "offline", "data-refresh-key": `legend-${agent.id}` },
+      node("span", { className: "a-dashboard-topology-legend-index" }, String(index + 1).padStart(2, "0")),
+      node("a", { href: `#node-settings?agent=${pathID(agent.id)}` }, agent.name || "未命名节点"), status(agent.status))));
+}
+
+function resourceGauge(title, value) {
+  const usable = value !== null, percent = usable ? Math.min(100, Math.max(0, value)) : 0;
+  const circumference = 2 * Math.PI * 32;
+  const svg = svgElement("svg", { viewBox: "0 0 84 84", class: "a-dashboard-gauge", role: "img",
+    "aria-label": usable ? `${title} ${value.toFixed(1)}%` : `${title}不可用` });
+  svg.append(svgElement("circle", { cx: 42, cy: 42, r: 32, class: "a-dashboard-gauge-track" }));
+  svg.append(svgElement("circle", { cx: 42, cy: 42, r: 32, class: "a-dashboard-gauge-value",
+    "stroke-dasharray": `${percent / 100 * circumference} ${circumference}`, transform: "rotate(-90 42 42)" }));
+  const code = title.startsWith("CPU") ? "CPU" : title.startsWith("内存") ? "MEM" : "DISK";
+  svg.append(svgElement("text", { x: 42, y: 47, "text-anchor": "middle" }, code));
+  return svg;
+}
+
 export async function dashboardPage(ctx) {
-  document.body.classList.add("a-tech-dashboard");
-  ctx.signal.addEventListener("abort", () => document.body.classList.remove("a-tech-dashboard"), { once: true });
   let month = ctx.state.data.dashboardMonth || utcMonth();
   const can = permission => ctx.can(permission);
   const readings = new Map(), states = new Map(), requests = new Map(), reading = new Map();
@@ -216,8 +274,9 @@ export async function dashboardPage(ctx) {
     const networkFresh = Number.isFinite(networkTime) && Math.abs(Date.now() - networkTime) <= 15000;
     const network = fresh && networkFresh && metrics.network_available && metrics.network_rate_available === true && finite(metrics.network_rx_bps) && finite(metrics.network_tx_bps);
     const meter = (title, kind, detail) => node("div", { className: "a-dashboard-resource", "data-refresh-key": title },
-      node("div", { className: "a-dashboard-resource-head" }, node("h3", {}, title), node("strong", {}, percent(kind))),
-      metricTrack(parseFloat(percent(kind)), valid(kind)), muted(detail));
+      resourceGauge(title, valid(kind) ? panelMetricUsage(metrics, kind) : null),
+      node("div", { className: "a-dashboard-resource-copy" },
+        node("div", { className: "a-dashboard-resource-head" }, node("h3", {}, title), node("strong", {}, percent(kind))), muted(detail)));
     patch(resourceGrid, node("div", { className: resourceGrid.className },
       meter("CPU 使用率", "cpu", valid("cpu") ? "全部逻辑核心" : !fresh && collected ? "上次采样已过期" : "本次采样不可用"),
       meter("内存使用率", "memory", capacity("memory")), meter("根目录磁盘", "disk", capacity("disk")),
@@ -251,16 +310,16 @@ export async function dashboardPage(ctx) {
     const rateAllowed = can("agents.read") && can("metrics.read");
     const healthTone = count == null || count === 0 ? "" : online === count ? "ok" : online === 0 ? "bad" : "warn";
     patch(liveGrid, node("div", { className: liveGrid.className },
-      node("article", { className: "a-dashboard-live-stat", "data-refresh-key": "节点在线状态" },
-        node("div", { className: "a-dashboard-live-head" }, node("h3", {}, "节点在线状态"), badge(count == null ? "读取中" : count === 0 ? "暂无节点" : online === count ? "全部在线" : online === 0 ? "全部离线" : "部分离线", healthTone)),
-        node("div", { className: "a-dashboard-node-count" }, node("strong", {}, online == null ? "—" : String(online)), muted(`/ ${count == null ? "—" : count} 个节点`)),
-        metricTrack(count ? online / count * 100 : 0, count > 0 && online != null, false),
-        muted(offline == null ? "正在读取授权节点" : count === 0 ? "当前没有获授权节点" : `离线 ${offline}`)),
-      rateAllowed && node("article", { className: "a-dashboard-live-stat", "data-refresh-key": "节点速率合计" },
-        node("div", { className: "a-dashboard-live-head" }, node("h3", {}, "节点速率合计"), badge(readings.has("agents") ? `${fleet.sampled} 个有效采样` : "读取中")),
+      node("article", { className: "a-dashboard-live-stat a-dashboard-topology", "data-refresh-key": "节点在线状态" },
+        node("div", { className: "a-dashboard-live-head" }, node("h3", {}, "节点链路拓扑"), badge(count == null ? "读取中" : count === 0 ? "暂无节点" : online === count ? "全部在线" : online === 0 ? "全部离线" : "部分离线", healthTone)),
+        nodeTopology(agents, online, count ?? agents.length), topologyLegend(agents),
+        node("div", { className: "a-dashboard-topology-foot" }, muted(offline == null ? "正在读取授权节点" : `在线 ${online} · 离线 ${offline}`), muted(`${Math.min(agents.length, 8)} / ${count ?? agents.length} 节点映射`))),
+      rateAllowed && node("article", { className: "a-dashboard-live-stat a-dashboard-telemetry", "data-refresh-key": "节点速率合计" },
+        node("div", { className: "a-dashboard-live-head" }, node("h3", {}, "实时吞吐监视"), badge(readings.has("agents") ? `${fleet.sampled} 个有效采样` : "读取中")),
         node("strong", { className: "a-dashboard-rate" }, readings.has("agents") && fleet.sampled ? `${bytes(fleet.receiveBPS + fleet.sendBPS)}/s` : "—"),
         directionValues(readings.has("agents") && fleet.sampled ? fleet.receiveBPS : null, readings.has("agents") && fleet.sampled ? fleet.sendBPS : null, "/s"),
-        muted(!readings.has("agents") ? "正在读取实时速率" : fleet.sampled ? `在线 ${online ?? "—"} · 15 秒采样窗口` : "离线、过期或异常采样不计入"))));
+        node("div", { className: "a-dashboard-telemetry-window" }, muted("采样窗口"), node("b", {}, "15 秒"), muted("在线节点"), node("b", {}, online == null ? "—" : String(online))),
+        !fleet.sampled && readings.has("agents") && muted("离线、过期或异常采样不计入"))));
     const failed = [...states].filter(([key, state]) => ["overview", "agents", "order"].includes(key) && ["failed", "denied"].includes(state));
     businessState.textContent = failed.length ? "部分节点状态不可用 · 自动重试中" : knownNodes ? "5 秒刷新" : "正在读取节点状态";
     patch(nodeSummary, actions(...fleet.engines.map(item => badge(`${({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS Rust" })[item.engine] || item.engine} ${item.running}/${item.installed}`)),
