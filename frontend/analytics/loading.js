@@ -2,13 +2,13 @@ import { node, notice, actions, button, table, stack, field } from './ui.js';
 
 // A read owns only its region. Navigation and dialog closing never acquire the
 // write lock, and a superseded or closed view cannot accept a late response.
-export function readRegion(ctx, label, read, apply, { active = () => true, clear = () => {}, view } = {}) {
-  const message = notice(`正在读取${label}…`, '');
+export function readRegion(ctx, label, read, apply, { active = () => true, clear = () => {}, view, retry: allowRetry = true, showRefresh = false } = {}) {
+  const message = notice('', '');
   message.removeAttribute('role');
   const retry = button('重新读取', () => void load());
   retry.hidden = true;
   const recovery = actions();
-  const element = node('div', {}, message, recovery);
+  const element = node('div', { hidden: true }, message, recovery);
   let controller, generation = 0, ready = false, pending;
   const current = expected => ctx.current() && active() && expected === generation;
   function load() {
@@ -21,7 +21,7 @@ export function readRegion(ctx, label, read, apply, { active = () => true, clear
     controller = new AbortController();
     const expected = ++generation;
     const signal = AbortSignal.any([ctx.signal, controller.signal]);
-    retry.remove(); retry.hidden = true; element.hidden = ready;
+    retry.remove(); retry.hidden = true; element.hidden = ready && !showRefresh;
     element.setAttribute('aria-busy', 'true');
     if (!message.isConnected) element.prepend(message);
     message.className = 'a-notice'; message.removeAttribute('role');
@@ -32,7 +32,10 @@ export function readRegion(ctx, label, read, apply, { active = () => true, clear
       apply(value); ready = true; element.hidden = true; message.textContent = ''; message.removeAttribute('role'); message.remove();
       return value;
     } catch (error) {
-      if (!current(expected) || signal.aborted || error.intentionalCancellation === true) return;
+      if (!current(expected) || signal.aborted || error.intentionalCancellation === true) {
+        if (expected === generation) { element.hidden = true; message.textContent = ''; }
+        return;
+      }
       await ctx.recordFailure?.(error, label, "region_loading");
       if (!current(expected)) return;
       if ([401, 403, 404].includes(error.status)) { ready = false; clear(); }
@@ -44,12 +47,14 @@ export function readRegion(ctx, label, read, apply, { active = () => true, clear
       element.hidden = false;
       message.className = 'a-notice error'; message.setAttribute('role', 'alert');
       message.textContent = `${error.message}${ready ? '（保留上次数据）' : ''}`;
-      retry.hidden = false; recovery.replaceChildren(retry);
+      if (allowRetry) { retry.hidden = false; recovery.replaceChildren(retry); }
     } finally {
-      if (current(expected)) element.removeAttribute('aria-busy');
+      if (expected === generation) element.removeAttribute('aria-busy');
     }
   }
-  return { element, load, get ready() { return ready; }, stop() { generation++; controller?.abort(); } };
+  return { element, load, get ready() { return ready; }, stop() {
+    generation++; controller?.abort(); element.hidden = true; message.textContent = ''; element.removeAttribute('aria-busy');
+  } };
 }
 
 export const loadingTable = (columns, label, options = {}) => table(columns, [], { ...options, label, loading: true });
