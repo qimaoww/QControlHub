@@ -317,4 +317,17 @@ for network in default shared-edge; do
     cmp "$test_root/external-$network-before.env" "$QCH_INSTALL_DIR/.env"
 done
 
+# A second operation must fail before any Docker call or state mutation.
+: > "$QCH_MODES_TEST_LOG"
+(
+    exec 9>>"$QCH_INSTALL_DIR/.qcontrolhub-operation.lock"
+    flock -n 9
+    if bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/concurrent.out" 2>&1; then
+        printf '%s\n' 'concurrent deployment ignored the operation lock' >&2
+        exit 1
+    fi
+    grep -Fq '此安装目录已有部署操作' "$test_root/concurrent.out"
+)
+[ ! -s "$QCH_MODES_TEST_LOG" ]
+
 printf '%s\n' 'quick-start bundled/external CLI regression passed'

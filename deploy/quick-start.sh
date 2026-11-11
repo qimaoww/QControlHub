@@ -2535,4 +2535,7 @@ case "$MODE" in
         ;;
 esac
 
+# Do not resume reading the on-disk script after the parsed command finishes:
+# another bootstrap can have atomically replaced that file during deployment.
+exit 0
 } # complete quick-start entry
