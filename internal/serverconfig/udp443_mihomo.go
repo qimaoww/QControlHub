@@ -62,7 +62,7 @@ func applyUDP443Mihomo(root map[string]any, tag string, enabled bool) error {
 	}
 	current := stringSliceValue(root["rules"])
 	for _, rule := range current {
-		if strings.Contains(rule, "RULE-SET,"+udp443Provider) && (!owned || udp443RuleTag(rule) == "") {
+		if (strings.Contains(rule, "RULE-SET,"+udp443Provider+",") || strings.Contains(rule, "RULE-SET,"+udp443Provider+")")) && (!owned || udp443RuleTag(rule) == "") {
 			if enabled || owned {
 				return fmt.Errorf("规则集 %s 被自定义规则引用，请在完整源码中调整", udp443Provider)
 			}

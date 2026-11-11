@@ -234,3 +234,25 @@ func TestMihomoUDP443MainlandAndClientExport(t *testing.T) {
 		}
 	}
 }
+
+func TestMihomoUDP443PreservesProviderNamesWithSharedPrefix(t *testing.T) {
+	input := udp443TestPlan(t)
+	source, err := Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := yaml.Unmarshal([]byte(source), &root); err != nil {
+		t.Fatal(err)
+	}
+	custom := "RULE-SET," + udp443Provider + "-custom,DIRECT"
+	root["rules"] = append(stringSliceValue(root["rules"]), custom)
+	for _, enabled := range []bool{true, false, true} {
+		if err := applyUDP443Mihomo(root, input.Tag, enabled); err != nil {
+			t.Fatal("unrelated provider mistaken for reserved provider", err)
+		}
+		if !strings.Contains(strings.Join(stringSliceValue(root["rules"]), "\n"), custom) {
+			t.Fatal("removed unrelated rule")
+		}
+	}
+}
