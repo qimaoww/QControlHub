@@ -163,6 +163,23 @@ if grep -Eq -- 'clone|fetch|merge|pull' "$QCH_BOOTSTRAP_GIT_LOG"; then
 fi
 [ -f "$legacy_git_dir/.qcontrolhub-quick-start" ]
 
+# A Git worktree uses a .git file. It follows the same origin, branch and
+# dirty-runtime protections as a normal checkout, rather than nesting an install.
+worktree_git_dir="$test_root/worktree git install"
+mkdir -p "$worktree_git_dir/deploy"
+printf '%s\n' 'gitdir: fixture' > "$worktree_git_dir/.git"
+printf '%s\n' 'name: qcontrolhub' > "$worktree_git_dir/docker-compose.yml"
+printf '%s\n' '# fixture' > "$worktree_git_dir/deploy/quick-start.sh"
+: > "$QCH_BOOTSTRAP_GIT_LOG"
+(
+    cd "$worktree_git_dir"
+    PATH="$fake_bin:$PATH" bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+)
+[ ! -e "$worktree_git_dir/qcontrolhub" ]
+[ -f "$worktree_git_dir/.qcontrolhub-quick-start" ]
+grep -Fq -- 'remote get-url origin' "$QCH_BOOTSTRAP_GIT_LOG"
+grep -Fxq -- "$worktree_git_dir" "$QCH_BOOTSTRAP_TEST_WORK_DIR"
+
 # The migration marker makes later runs independent of the now-dirty legacy
 # checkout; Git must not be consulted again.
 : > "$QCH_BOOTSTRAP_GIT_LOG"

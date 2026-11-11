@@ -116,7 +116,7 @@ bootstrap_streamed_script() {
     if [ -n "${QCH_INSTALL_DIR:-}" ]; then
         install_dir="$QCH_INSTALL_DIR"
         install_dir_source="explicit"
-    elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -d "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
+    elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -e "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
         install_dir="$PWD"
         install_dir_source="current"
     elif persisted_install_dir="$(read_install_dir_preference)" && [ -n "$persisted_install_dir" ]; then
@@ -147,7 +147,7 @@ bootstrap_streamed_script() {
         [ -d "$install_dir" ] || die "安装路径已存在但不是目录：$install_dir"
         if [ -f "$marker_file" ]; then
             :
-        elif [ -d "$install_dir/.git" ]; then
+        elif [ -e "$install_dir/.git" ]; then
             command -v git >/dev/null 2>&1 || die "迁移旧版 Git 安装目录需要 git"
             origin_url="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
             case "$origin_url" in
