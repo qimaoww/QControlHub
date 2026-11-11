@@ -219,7 +219,12 @@ func (s *Store) commitConfigImportTx(ctx context.Context, tx pgx.Tx, taskID, age
 	if err != nil {
 		return "", 0, fmt.Errorf("%w: 无法留存导入配置的独立出口：%v", ErrInvalid, err)
 	}
-	content = plan.Content
+	// Keep normalized editable originals, matching ordinary preset/source
+	// saves. The immutable task snapshot retains the compiled execution plan.
+	content, err = serverconfig.PresetAccountingSource(engine, plan.Content)
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: 无法留存导入配置：%v", ErrInvalid, err)
+	}
 	var id string
 	var version int
 	err = tx.QueryRow(ctx, `SELECT id,version FROM configs WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL FOR UPDATE`, agentID, engine, owner).Scan(&id, &version)

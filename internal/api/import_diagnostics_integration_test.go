@@ -92,7 +92,8 @@ func TestImportPreparationKeepsManualConfigurationAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := db.AgentConfig(store.WithConfigScope(ctx, owner.userID, false), node.ID, core.EngineXray)
-	if err != nil || cfg.Content != plan.Content || cfg.Version != mutation.Config.Version+1 {
+	source, sourceErr := serverconfig.PresetAccountingSource(core.EngineXray, plan.Content)
+	if err != nil || sourceErr != nil || cfg.Content != source || cfg.Version != mutation.Config.Version+1 {
 		t.Fatalf("successful import not committed atomically: %+v %v", cfg, err)
 	}
 	var diagnostic core.TaskDiagnostic

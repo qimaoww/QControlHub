@@ -51,6 +51,10 @@ func TestImportedAccountingSurvivesEditingAndSharedIsolation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			expectedSource, err := serverconfig.PresetAccountingSource(engine, expected.Content)
+			if err != nil {
+				t.Fatal(err)
+			}
 			claimed, err = db.ClaimTask(ctx, node.ID)
 			if err != nil || claimed == nil || claimed.ConfigContent != expected.Content || claimed.ImportSourceDigest != digest {
 				t.Fatalf("converted execution lost provenance: %+v %v", claimed, err)
@@ -63,15 +67,19 @@ func TestImportedAccountingSurvivesEditingAndSharedIsolation(t *testing.T) {
 			completeConfigScopeAPITask(t, ctx, db, task)
 			var saved core.Config
 			owner.call("GET", base, nil, 200, &saved)
-			if saved.Content != expected.Content || saved.Version != 1 {
+			if saved.Content != expectedSource || saved.Version != 1 {
 				t.Fatal("import did not save its executed plan")
 			}
 			admin.call("GET", "/tasks/"+task.ID, nil, 200, nil)
 			assertPlan := func(config core.Config, count int) {
 				t.Helper()
 				plan, err := serverconfig.PrepareIndependentEgress(engine, config.Content)
-				if err != nil || plan.Content != config.Content || len(plan.Ports) != count {
+				if err != nil || len(plan.Ports) != count {
 					t.Fatalf("stale plan after mutation: %+v %v", plan.Ports, err)
+				}
+				source, err := serverconfig.PresetAccountingSource(engine, plan.Content)
+				if err != nil || source != config.Content {
+					t.Fatalf("saved source lost normalized ownership: %v", err)
 				}
 			}
 			assertPlan(saved, 2)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -31,7 +30,7 @@ func TestNativeTrafficCores(t *testing.T) {
 	if os.Getenv("QCH_NATIVE_TEST_CHILD") != "1" {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 		defer cancel()
-		command := exec.CommandContext(ctx, "unshare", "--net", os.Args[0], "-test.run="+flag.Lookup("test.run").Value.String(), "-test.v")
+		command := exec.CommandContext(ctx, "unshare", "--net", os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v")
 		command.Env = append(os.Environ(), "QCH_NATIVE_TEST_CHILD=1")
 		output, err := command.CombinedOutput()
 		if err != nil {
