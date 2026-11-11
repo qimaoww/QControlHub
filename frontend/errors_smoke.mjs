@@ -83,6 +83,8 @@ for (const [status, raw, summary] of [
   [429, 'too many authentication failures', '登录失败次数过多，请稍后再试。'],
   [401, 'authentication required', '请先登录后再操作。'],
   [401, 'account authorization changed; sign in again', '账号权限或登录凭据已变更，本次操作未提交，请重新登录。'],
+  [403, 'token role does not permit this operation', '当前账号没有执行此操作的权限，请联系管理员。'],
+  [403, 'origin is not allowed', '当前访问地址未获允许，请使用面板配置的地址，或联系管理员检查 QCH_CORS_ORIGINS 中的协议、域名和端口。'],
 ]) await assert.rejects(send(Response.json({error:summary,detail:raw}, {status})), error => error.message === summary);
 for (const status of [401,403,404,408,429,500,502,503,504]) {
   await assert.rejects(send(Response.json({error:'具体错误', detail:'执行阶段失败 password=fixture-secret', request_id:'req_fixture', code:'fixture_code', stage:'fixture_stage'}, {status})), error => {

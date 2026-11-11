@@ -18,7 +18,8 @@ const statusMessages = {
 // Also tolerate older backends and native browser errors during rolling updates.
 const legacyMessages = {
   "cross-site login request rejected": "登录请求被安全校验拒绝，请使用配置的 HTTPS 地址，或联系管理员检查反向代理及 QCH_CORS_ORIGINS 中的协议、域名和端口。",
-  "origin is not allowed": "当前访问地址未获允许，请联系管理员检查 QCH_CORS_ORIGINS 配置。",
+  "origin is not allowed": "当前访问地址未获允许，请使用面板配置的地址，或联系管理员检查 QCH_CORS_ORIGINS 中的协议、域名和端口。",
+  "token role does not permit this operation": "当前账号没有执行此操作的权限，请联系管理员。",
   "invalid admin token": "用户名、密码或管理员令牌不正确，请检查后重试。",
   "session expired": statusMessages[401],
   "登录已失效，请重新登录。": statusMessages[401],

@@ -36,7 +36,7 @@ export async function testSessionErrors(preview = '') {
   };
   if (preview) {
     if (preview === 'expired') { failure = { body: expired, status: 401 }; start(identity('first')); }
-    else { start(null); if (preview !== 'initial') { loginFailure = { body: { error: preview === 'forbidden' ? '权限不足' : '用户名、密码或管理员令牌不正确，请检查后重试。', detail: preview === 'forbidden' ? 'permission denied' : 'invalid admin token' }, status: preview === 'forbidden' ? 403 : 401 }; await submit(); } }
+    else { start(null); if (preview !== 'initial') { loginFailure = { body: { error: preview === 'forbidden' ? '当前账号没有执行此操作的权限，请联系管理员。' : '用户名、密码或管理员令牌不正确，请检查后重试。', detail: preview === 'forbidden' ? 'token role does not permit this operation' : 'invalid admin token' }, status: preview === 'forbidden' ? 403 : 401 }; await submit(); } }
     await waitFor(login, 'preview login missing');
     return;
   }
@@ -46,6 +46,7 @@ export async function testSessionErrors(preview = '') {
     [401, { error: 'invalid admin token' }, '用户名、密码或管理员令牌不正确'],
     [401, { error: '用户名、密码或管理员令牌不正确，请检查后重试。', detail: 'invalid admin token' }, '用户名、密码或管理员令牌不正确'],
     [403, { error: 'missing or invalid CSRF token' }, '页面安全凭据已失效'],
+    [403, { error: '当前账号没有执行此操作的权限，请联系管理员。', detail: 'token role does not permit this operation' }, '当前账号没有执行此操作的权限'],
     [429, { error: 'too many authentication failures' }, '登录失败次数过多'],
     [503, { error: '服务暂不可用，请稍后重试。' }, '服务暂不可用'],
   ]) {
@@ -56,7 +57,7 @@ export async function testSessionErrors(preview = '') {
   }
   loginFailure = null; await submit();
   await waitFor(() => app.querySelector('.a-main'), 'login recovery did not show shell');
-  assert.equal(loginCalls, 6, 'login submits were duplicated');
+  assert.equal(loginCalls, 7, 'login submits were duplicated');
   assert.ok(!app.textContent.includes('登录失败次数过多'), 'successful login retained an old error');
   app.querySelector('[title="退出登录"]').click();
   await waitFor(login, 'logout did not show login');
