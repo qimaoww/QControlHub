@@ -1,3 +1,4 @@
+import { pageSizePreference, recordPages } from './page-size.js';
 import { readRegion, loadingTable } from "./loading.js";
 import { systemBBRState, validateTCPSelection, validateTCPAvailability, hasTCPParameter, taskLabel, actionLabel } from '../modules/system-bbr-model.js';
 import { systemTCPPresets, prepareTCPPreset } from '../modules/system-bbr-presets.js';
@@ -14,8 +15,14 @@ export async function tcpPage(ctx) {
   const drafts = ctx.state?.data ? (ctx.state.data.analyticsTCPDrafts ||= new Map()) : new Map();
   const submitting = new Set();
   const results = node('div');
-  const resultTable = loadingTable(['节点', '状态', '拥塞控制', '队列', '持久配置', '最近任务', '操作'], 'TCP 调优', { rowKey: row => row.refreshKey, motion: false });
+  const resultTable = loadingTable(['节点', '状态', '拥塞控制', '队列', '持久配置', '最近任务', '操作'], 'TCP 调优', { rowKey: row => row.refreshKey, motion: false, paginate: false });
   results.append(resultTable);
+  const paging = recordPages(() => draw());
+  const pageSize = pageSizePreference(ctx, 'tcp', size => paging.setSize(size));
+  const pageCount = muted('');
+  const previous = button('上一页', () => paging.setPage(paging.page - 1));
+  const next = button('下一页', () => paging.setPage(paging.page + 1));
+  const pages = node('div', { className: 'a-pagination', hidden: true }, pageCount, actions(previous, next));
   const refreshStatus = muted('正在读取节点状态…');
   refreshStatus.setAttribute('role', 'status');
   let serial = 0;
@@ -213,7 +220,9 @@ export async function tcpPage(ctx) {
   }
   function draw() {
     if (!agentsReady) return;
-    const ordered = selected();
+    const ordered = paging.slice(selected());
+    pageCount.textContent = paging.summary(); pages.hidden = paging.last <= 1;
+    previous.disabled = paging.page <= 1; next.disabled = paging.page >= paging.last;
     const rows = ordered.map(agent => {
       const current = systemBBRState(agent), metrics = agent.metrics?.bbr || {};
       const task = latest.get(agent.id);
@@ -241,5 +250,5 @@ export async function tcpPage(ctx) {
   ctx.onRefresh(refreshView);
   poll(ctx, refreshView, 5000);
   void refreshView();
-  return stack(agentRead.element, taskRead.element, rulesRead.element, orderRead.element, refreshStatus, section(null, results));
+  return stack(agentRead.element, taskRead.element, rulesRead.element, orderRead.element, pageSize.status, node('div', { className: 'a-probe-toolbar' }, refreshStatus, pageSize.element), section(null, results), pages);
 }

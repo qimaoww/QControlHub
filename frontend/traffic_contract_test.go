@@ -9,7 +9,7 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 	traffic := frontendSources(t, "analytics/traffic.js")
 	for _, required := range []string{
 		`route.get('agent')`, `const agentFilter = field('节点', 'agent'`,
-		`['', '全部节点']`, `filterbar(node('div'`, `search, agentFilter`,
+		`['', '全部节点']`, `filterbar(node('div'`, `agentFilter, search`,
 		`ctx.state.data.analyticsTrafficFilters = currentFilters()`,
 		`const defaults = { search: '', scope: 'current', agent: '', engine: '', status: '' }`,
 		`ctx.api('/traffic-endpoints'`, `mergeTrafficPorts(policies, endpoints)`,
@@ -29,7 +29,7 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 		t.Error("standalone ports must not have a leading colon")
 	}
 	table := frontendSources(t, "analytics/traffic-table.js")
-	for _, required := range []string{`a-probe-grid`, `a-traffic-list`, `button('卡片'`, `button('列表'`, `page * 12`, `patch(old, next)`, `patch(card, fresh)`} {
+	for _, required := range []string{`a-probe-grid`, `a-traffic-list`, `button('卡片'`, `button('列表'`, `paging.slice(items)`, `patch(old, next)`, `patch(card, fresh)`} {
 		if !strings.Contains(table, required) {
 			t.Errorf("traffic views must retain pagination and stable updates: missing %q", required)
 		}

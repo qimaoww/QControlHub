@@ -259,7 +259,11 @@ async function testTrafficScopeAndFormContracts(testAPI) {
   assert.equal(box.querySelectorAll('input[type=checkbox]:checked').length, 0, 'batch selection survived a scope change');
   assert.ok([...box.querySelectorAll('button')].find(control => control.textContent === '重试未完成项').hidden, 'new scope retained a previous retry');
   box.close(); await waitFor(() => !box.isConnected, 'all-scope batch did not dispose');
-  await startTrafficTheme('#traffic', { role: 'user', user_id: 'traffic-reader', permissions: ['traffic.read', 'agents.read'], csrf_token: 'browser-test-csrf' });
+  const nodeReads = testAPI.calls.filter(call => call.path === '/agents' || /\/agents\/.+\/region/.test(call.path)).length;
+  testAPI.agents[0].region_code = 'HK';
+  await startTrafficTheme('#traffic', { role: 'user', user_id: 'traffic-reader', permissions: ['traffic.read'], csrf_token: 'browser-test-csrf' });
+  assert.equal(testAPI.calls.filter(call => call.path === '/agents' || /\/agents\/.+\/region/.test(call.path)).length,nodeReads,'traffic-only view read general node metadata');
+  assert.ok(document.querySelector('.a-traffic-page [data-region-code=HK]'),'traffic-only view lost minimal region metadata');
   assert.ok(!button('添加配额') && !button('批量操作') && !button('同步配置端口'), 'readonly traffic exposes management actions');
   assert.ok(!button('设置配额') && !button('编辑配额'), 'readonly port exposes a quota editor');
   button('统计详情').click();
@@ -312,11 +316,12 @@ export async function testDenseTrafficLayoutRuntime({ testAPI }) {
     assert.ok(item(6).textContent.includes('共享配额') && item(6).textContent.includes('共享已用75%'), 'shared pool usage confused with port usage');
   };
   inspectQuotas();
+  assert.equal(document.querySelector('.a-traffic-page .a-filter-fields .a-field select')?.name,'agent','traffic node filter must be first');
   [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '列表').click();
   inspectQuotas();
   const rows=()=>document.querySelectorAll('.a-traffic-list tbody tr');
-  assert.equal(rows().length,12,'dense traffic must page rather than create every row');
-  assert.ok(document.querySelector('.a-main').textContent.includes('第 1 / 2 页'),'dense count missing');
+  assert.equal(rows().length,30,'dense traffic must page rather than create every row');
+  assert.ok(document.querySelector('.a-main').textContent.includes('第 1 / 3 页'),'dense count missing');
   const all=[];
   const inspect=()=>{for(const row of rows()){
     const port=row.querySelector('[data-column="端口 / 协议"] strong');
@@ -332,15 +337,21 @@ export async function testDenseTrafficLayoutRuntime({ testAPI }) {
   assert.ok([...detail.querySelectorAll('button')].find(control=>control.textContent==='删除')?.classList.contains('danger'),'delete lost danger styling in details');
   detail.querySelector('[aria-label=关闭]').click();
   [...document.querySelectorAll('.a-main button')].find(control=>control.textContent==='下一页').click();
-  assert.equal(rows().length,5,'dense final page lost records');inspect();
-  assert.equal(new Set(all).size,17,'dense pagination repeats or drops records');
+  assert.equal(rows().length,30,'dense final page lost records');inspect();
+  assert.equal(new Set(all).size,60,'dense pagination repeats or drops records');
+  [...document.querySelectorAll('.a-main button')].find(control=>control.textContent==='下一页' && control.checkVisibility()).click();
+  assert.equal(rows().length,1,'61st traffic record missing');
+  assert.ok(!all.includes(rows()[0].dataset.trafficKey),'traffic final page repeats records');
+  [...document.querySelectorAll('.a-main button')].find(control=>control.textContent==='上一页' && control.checkVisibility()).click();
   const records = [...rows()].map(row => ({ key: row.dataset.trafficKey, total: row.querySelector('[data-column="累计流量"] strong').textContent, receive: row.querySelector('[data-column="累计接收"] .a-stack').firstChild.textContent, send: row.querySelector('[data-column="累计发送"] .a-stack').firstChild.textContent }));
   const view = name => [...document.querySelectorAll('.a-main button')].find(button => button.textContent === name);
   view('卡片').click();
   const cards = [...document.querySelectorAll('article[data-traffic-key]')];
-  assert.equal(cards.length,5,'card view lost current page');
-  cards.forEach((card,index) => {
-    assert.equal(card.dataset.trafficKey, records[index].key,'view switch changed port targets');
+  assert.equal(cards.length,61,'card view must display all records');
+  assert.ok(!document.querySelector('.a-main [name=page_size]').checkVisibility(),'cards expose list page size');
+  records.forEach((record,index) => {
+    const card = cards.find(card => card.dataset.trafficKey === record.key);
+    assert.ok(card,'view switch lost a port target');
     assert.equal(card.querySelector('.a-stat > .a-actions').textContent.replace(/\s/g,''), records[index].total.replace(/\s/g,''),'card total differs from list');
     const values = [...card.querySelectorAll('.a-probe-network b')].map(value=>value.textContent);
     assert.equal(values[0],records[index].receive,'card missing cumulative receive');
@@ -348,8 +359,8 @@ export async function testDenseTrafficLayoutRuntime({ testAPI }) {
     assert.ok(card.textContent.includes('累计流量') && card.textContent.includes('累计接收') && card.textContent.includes('累计发送'),'card cumulative labels missing');
   });
   view('列表').click();
-  assert.equal(rows().length,5,'switching views reset pagination');
-  assert.ok(document.querySelector('.a-main').textContent.includes('第 2 / 2 页'),'view switch lost page position');
+  assert.equal(rows().length,30,'switching views reset pagination');
+  assert.ok(document.querySelector('.a-main').textContent.includes('第 2 / 3 页'),'view switch lost page position');
 
   assert.ok(document.documentElement.scrollWidth<=innerWidth,'dense page overflows horizontally');
   [...document.querySelectorAll('.a-main button')].find(button => button.textContent === '上一页').click();
@@ -370,5 +381,40 @@ export async function testDenseTrafficLayoutRuntime({ testAPI }) {
   assert.equal(first.querySelector('[data-column="累计流量"] strong').textContent, '—', 'unknown usage became zero');
   Object.assign(testAPI.trafficPolicies[0], original);
   await waitFor(() => first.querySelector('[role=meter]')?.getAttribute('aria-valuenow') === '88.8', 'quota fixture did not restore');
+  await testTrafficPageSizes(testAPI);
   if(new URLSearchParams(location.search).has('preview')) { document.documentElement.dataset.trafficPreview = 'ready'; await new Promise(()=>{}); }
+}
+
+async function testTrafficPageSizes(testAPI) {
+  const original = testAPI.trafficPolicies;
+  const button = text => [...document.querySelectorAll('button')].find(control => control.textContent === text && control.checkVisibility());
+  const picker = () => document.querySelector('.a-main [name=page_size]');
+  const records = () => [...document.querySelectorAll('[data-traffic-key]')];
+  const refresh = async count => {
+    button('刷新').click();
+    await waitFor(() => !button('刷新').disabled && records().length === count, 'traffic page size did not settle');
+  };
+  await waitFor(() => !picker().disabled, 'traffic preference did not load');
+  for (const count of [0,1,29,30,31]) {
+    testAPI.trafficPolicies = original.slice(0,count);
+    await refresh(Math.min(30,count));
+    assert.ok(picker().checkVisibility(), 'single or empty traffic page hides page size');
+    if (count===31) { button('下一页').click(); assert.equal(records().length,1); }
+  }
+  testAPI.trafficPolicies=original.slice(0,29); await refresh(29);
+  const choose = async size => {
+    picker().value=String(size); picker().dispatchEvent(new Event('change',{bubbles:true}));
+    await waitFor(() => !picker().disabled, 'traffic preference save did not settle');
+  };
+  testAPI.trafficPolicies=original; await refresh(30);
+  for (const size of [50,100,200]) {
+    await choose(size); assert.equal(records().length,Math.min(size,61));
+    assert.equal(testAPI.pageSizes.traffic.page_size,size);
+  }
+  await startTrafficTheme();
+  await waitFor(() => picker().value==='200' && !picker().disabled, 'traffic preference did not survive reentry');
+  assert.equal(records().length,61);
+  await choose(30);
+  const before = records()[0];
+  assert.ok(before.querySelector('.a-probe-flag'), 'traffic node flag missing');
 }

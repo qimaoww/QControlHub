@@ -1,4 +1,5 @@
 import { bindPreferenceFields } from "./preferences.js";
+import { pageSizePreference, recordPages } from './page-size.js';
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
 import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
@@ -47,6 +48,12 @@ export async function nodesPage(ctx) {
     order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),
   });
   let view = 'cards';
+  const paging = recordPages(() => draw(true));
+  const pageSize = pageSizePreference(ctx, 'nodes', size => paging.setSize(size));
+  const pageCount = muted('');
+  const previousPage = button('上一页', () => paging.setPage(paging.page - 1));
+  const nextPage = button('下一页', () => paging.setPage(paging.page + 1));
+  const pages = node('div', { className: 'a-pagination', hidden: true }, pageCount, actions(previousPage, nextPage));
   let batchBox;
   const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')));
   const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')));
@@ -70,6 +77,7 @@ export async function nodesPage(ctx) {
       if (ctx.current()) cardToggle.disabled = listToggle.disabled = false;
     }
   }
+  search.addEventListener('input', () => paging.setPage(1));
   const shownAgents = () => {
     const query = search.querySelector('input').value.trim().toLowerCase();
     const ordered = orderNodesBySavedOrder(agents, ordering.ids());
@@ -177,12 +185,17 @@ export async function nodesPage(ctx) {
   function draw(live = false) {
     if (dragging.active()) return;
     if (!loaded) return;
-    const shown = shownAgents();
+    const all = shownAgents();
+    const shown = view === 'list' ? paging.slice(all) : all;
+    pageSize.element.hidden = view !== 'list';
+    pages.hidden = view !== 'list' || paging.last <= 1;
+    pageCount.textContent = paging.summary();
+    previousPage.disabled = paging.page <= 1; nextPage.disabled = paging.page >= paging.last;
     cardToggle.setAttribute('aria-pressed',String(view==='cards'));listToggle.setAttribute('aria-pressed',String(view==='list'));
     // Only retain the current projection, within this page/account lifetime.
     // Include permissions and formatted time (including relative
     // age), so unchanged payloads never suppress a visible state transition.
-    const signature = JSON.stringify([view, Boolean(agents.length), shown,
+    const signature = JSON.stringify([view, paging.page, paging.size, Boolean(agents.length), shown,
       ctx.can('agents.read'), ctx.can('agent-config.read'), shown.map(agent => [canManage(agent), date(agent.last_seen)])]);
     // Legacy responses without a resolved region still need their lookup's
     // normal retry/update path. Current API lists always include region_code.
@@ -223,10 +236,10 @@ export async function nodesPage(ctx) {
             node('div',{},muted('累计发送'),muted(traffic(agent,'network_tx_bytes')))),
           node('div',{className:'a-probe-row-actions'},controls(agent,true))];
       });
-      if (live && liveTable) liveTable.updateRows(rows);
+      if (liveTable && results.contains(liveTable)) liveTable.updateRows(rows);
       else {
         const widths = { '节点': 360, '状态': 90, 'CPU': 110, '内存': 180, '磁盘': 180, '网络收发': 230, '操作': 190 };
-        liveTable = table(columns, rows, {label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
+        liveTable = table(columns, rows, {paginate:false, label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
         results.replaceChildren(node('div',{className:'a-card a-probe-list'},liveTable));
       }
     }
@@ -632,9 +645,9 @@ export async function nodesPage(ctx) {
   void nodeRead.load(); void preferenceRead.load(); void orderRead.load();
   ctx.onRefresh(() => Promise.all([nodeRead.load(), !preference && preferenceRead.load(), orderRead.load()]));
   return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
-    cardToggle, listToggle,
+    cardToggle, listToggle, pageSize.element,
     ctx.can('enrollment.manage') && button('添加节点', enrollment, { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', directory),
     batchToggle,
-  )), nodeRead.element, preferenceRead.element, orderRead.element, refreshState, results);
+  )), nodeRead.element, preferenceRead.element, pageSize.status, orderRead.element, refreshState, results, pages);
 }

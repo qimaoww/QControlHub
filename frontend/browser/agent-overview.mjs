@@ -34,6 +34,7 @@ export async function testAgentOverview({ testAPI }) {
   await waitFor(() => document.querySelector('.a-probe-list'), '列表视图未切换');
   assert.ok(document.querySelector('.a-probe-list').textContent.includes('累计接收'), '列表缺少累计流量');
   await testNetworkLayout(testAPI);
+  await testNodePageSizes(testAPI);
   await waitFor(() => !document.querySelector('#app[aria-busy=true]'), '视图保存未结束');
   testAPI.nodeView.revision++;
   button('卡片').click();
@@ -150,4 +151,45 @@ async function testNetworkLayout(testAPI) {
   testAPI.agents[0] = original;
   await refresh();
   await waitFor(() => rates().children[2].lastChild.textContent !== '—', '收发测试未恢复数据');
+}
+
+async function testNodePageSizes(testAPI) {
+  const original = testAPI.agents;
+  const button = text => [...document.querySelectorAll('button')].find(control => control.textContent === text && control.checkVisibility());
+  const picker = () => document.querySelector('.a-main [name=page_size]');
+  const rows = () => [...document.querySelectorAll('.a-probe-list tbody tr')];
+  const refresh = async count => {
+    button('刷新').click();
+    await waitFor(() => !button('刷新').disabled && rows().length === count, 'node page size did not settle');
+  };
+  await waitFor(() => !picker().disabled, 'node preference did not load');
+  assert.equal([...picker().options].map(value => value.value).join(','), '30,50,100,200');
+  for (const count of [0,1,29,30,31,61]) {
+    testAPI.agents = Array.from({length:count}, (_,index) => ({...structuredClone(original[0]), id:`page-node-${index}`, name:`分页节点 ${index}`}));
+    await refresh(Math.min(30,count));
+    assert.ok(picker().checkVisibility(), 'single or empty node page hides page size');
+    if (count > 30) {
+      const first = rows().map(row => row.dataset.refreshKey);
+      button('下一页').click();
+      assert.equal(rows().length, Math.min(30,count-30));
+      assert.ok(rows().every(row => !first.includes(row.dataset.refreshKey)), 'node pages repeat records');
+      button('上一页').click();
+    }
+  }
+  button('下一页').click(); button('下一页').click();
+  assert.equal(rows().length, 1, 'node final page wrong');
+  testAPI.agents = testAPI.agents.slice(0,29); await refresh(29);
+  const choose = async size => {
+    picker().value=String(size); picker().dispatchEvent(new Event('change',{bubbles:true}));
+    await waitFor(() => !picker().disabled, 'node preference save did not settle');
+  };
+  await choose(50); assert.equal(testAPI.pageSizes.nodes.page_size,50);
+  testAPI.pageSizeFailure=true; await choose(100); assert.equal(picker().value,'50');
+  testAPI.pageSizeFailure=false; testAPI.pageSizes.nodes.revision++;
+  await choose(100); assert.equal(picker().value,'50','conflict overwrote newer preference');
+  await choose(100); assert.equal(testAPI.pageSizes.nodes.page_size,100);
+  testAPI.agents=original;
+  await startNativeNodes();
+  await waitFor(() => document.querySelector('.a-probe-list') && picker().value==='100', 'node preference did not survive reentry');
+  await choose(30);
 }

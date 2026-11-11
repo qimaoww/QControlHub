@@ -28,7 +28,7 @@ const agent = (id, name, region_code, status = "online") => ({
   last_seen: "2026-09-20T00:00:00Z", enrolled_at: "2026-08-24T00:00:00Z",
 });
 const entry = (node, engine, address, profiles, extra = {}) => ({
-  agent_id: node.id, agent_name: node.name, agent_status: node.status, engine, address, source: "公网 IPv4",
+  agent_id: node.id, agent_name: node.name, region_code: node.region_code, agent_status: node.status, engine, address, source: "公网 IPv4",
   address_mode: "auto", profiles, ...extra,
 });
 
@@ -115,6 +115,11 @@ export async function testClientLayoutRuntime({ testAPI }) {
   const select=(name,value)=>{const control=document.querySelector(`.a-main select[name="${name}"]`);control.value=value;control.dispatchEvent(new Event('change',{bubbles:true}));};
   const search=value=>{const control=document.querySelector('.a-main input[name=search]');control.value=value;control.dispatchEvent(new Event('input',{bubbles:true}));};
   assert.equal(nodeCount(),8,'client layout lost a node');
+  const nodePicker = document.querySelector('.a-main [name=agent]');
+  assert.equal(nodePicker.querySelectorAll('option .a-probe-flag').length, 8, 'client node filter missing flags');
+  assert.equal(nodePicker.querySelector('option[value=hk-01] [data-region-code]').dataset.regionCode, 'HK');
+  const filterFields = [...document.querySelector('.a-main input[name=search]').closest('.a-filterbar').querySelectorAll('.a-field')];
+  assert.equal(filterFields.at(-1).querySelector('input')?.name, 'search', 'client search must be last');
   assert.ok(document.documentElement.scrollWidth<=innerWidth,'client page overflows viewport');
   if(matchMedia('(max-width:96rem)').matches) for(const row of rows()) {
     for(const cell of [...row.cells].slice(0,-1)) assert.equal(getComputedStyle(cell).display,'grid','responsive labels must stack above content in every row');

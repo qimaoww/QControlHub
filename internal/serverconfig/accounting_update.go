@@ -14,9 +14,9 @@ import (
 // previously validated on-disk configuration. The editable originals can then
 // be recompiled. Edited or newly introduced reserved artifacts fail closed.
 func AccountingUpdateSource(engine core.Engine, content, previous string) (string, error) {
-	_, err := PrepareAccounting(engine, previous)
+	plan, err := PrepareAccounting(engine, previous)
 	if err != nil && engine == core.EngineSingBox {
-		_, err = PrepareMarkedSingBoxAccounting(previous)
+		plan, err = PrepareMarkedSingBoxAccounting(previous)
 	}
 	if err != nil {
 		// A full managed snapshot can repair a broken saved source. Rebuild
@@ -32,7 +32,14 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 		}
 		return "", fmt.Errorf("cannot verify submitted accounting configuration: %w", candidateErr)
 	}
-	return stripVerifiedAccounting(engine, content, previous)
+	// A verified historical runtime can precede a compiler migration (for
+	// example, socket marks added to protocol exits). Accept its exact original
+	// artifacts as well as the current reproducible plan. Editable revisions
+	// contain no artifacts, so runtime round trips use the compiled plan below.
+	if source, err := stripVerifiedAccounting(engine, content, previous); err == nil {
+		return source, nil
+	}
+	return stripVerifiedAccounting(engine, content, plan.Content)
 }
 
 // AccountingSourceFromRevision recovers stale generated references only when

@@ -131,14 +131,20 @@ export async function testSystemTCPRuntime({ mode, testAPI }, preview = false) {
   assert.equal(region().querySelectorAll('tbody tr').length, 0, '403 后继续保留受保护节点数据'); testAPI.agentsFailure = false; await refresh();
   // Pagination survives a real timer interval and a data refresh.
   const original = [...testAPI.agents];
-  testAPI.agents.push(...Array.from({ length: 15 }, (_, index) => ({ ...structuredClone(agent), id: `tcp-extra-${index}`, name: `扩展节点 ${index}` })));
-  await refresh(); tcpButton(document.querySelector('.a-main'), '下一页').click();
+  testAPI.agents.push(...Array.from({ length: 61 }, (_, index) => ({ ...structuredClone(agent), id: `tcp-extra-${index}`, name: `扩展节点 ${index}` })));
+  const pageSize = document.querySelector('.a-main [name=page_size]');
+  assert.equal([...pageSize.options].map(option => option.value).join(','), '30,50,100,200');
+  assert.equal(pageSize.value, '30');
+  await refresh(); tcpButton(document.querySelector('.a-main .a-pagination:not([hidden])'), '下一页').click();
   const pageRows = () => [...region().querySelectorAll('tbody tr')].map(row => row.dataset.refreshKey).join(',');
   const pageSnapshot = pageRows(); assert.ok(!card(), '未实际翻到第二页');
   const callsBeforePoll = testAPI.calls.filter(call => call.path === '/system-tcp/tasks').length;
   await delay(5300); assert.ok(testAPI.calls.filter(call => call.path === '/system-tcp/tasks').length > callsBeforePoll, '未观察到实际定时刷新');
   assert.equal(pageRows(), pageSnapshot, '连续刷新重置分页');
   await refresh(); assert.equal(pageRows(), pageSnapshot, '手动刷新重置分页');
+  pageSize.value = '50'; pageSize.dispatchEvent(new Event('change', { bubbles: true }));
+  await waitFor(() => region().querySelectorAll('tbody tr').length === 50, 'TCP 每页条数未更新');
+  assert.equal(testAPI.pageSizes.tcp.page_size, 50, 'TCP 条数未保存到 API');
   testAPI.agents = original; await refresh();
   location.hash = '#system-bbr-agent-bravo'; await waitFor(() => region()?.querySelectorAll('tbody tr').length === 1 && card('bravo'), '节点路由筛选失败');
   assert.equal(document.querySelector('dialog[open]'), null, '切换目标残留旧弹窗'); tcpButton(card('bravo'), '自定义参数').click();

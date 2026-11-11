@@ -71,6 +71,16 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	if stateOnly {
 		output = "''"
 	}
+	submissionID := ""
+	keyID, _ := apiKeyTaskIdentity(ctx)
+	var resolved string
+	err := s.pool.QueryRow(ctx, `SELECT task_id FROM config_binding_receipts WHERE submission_id=$1 AND owner_id=$2 AND api_key_id=$3`, id, scopeForConfig(ctx).OwnerID, keyID).Scan(&resolved)
+	if err == nil {
+		submissionID = id
+		id = resolved
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return core.Task{}, err
+	}
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	ownerWhere += taskAccessClause(ctx, &args)
@@ -81,6 +91,10 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Task{}, ErrNotFound
+	}
+	if submissionID != "" {
+		task.SubmissionID = submissionID
+		task.Reused = true
 	}
 	return task, err
 }

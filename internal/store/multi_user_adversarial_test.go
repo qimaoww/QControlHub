@@ -68,7 +68,7 @@ func TestRetryRequiresDurableConfigurationRevision(t *testing.T) {
 		t.Fatalf("same revision retry is not idempotent: %+v %v", duplicate, err)
 	}
 	claimed, err := db.ClaimTask(ctx, agent.ID)
-	if err != nil || claimed == nil || claimed.ConfigVersion != config.Version || claimed.ConfigContent != config.Content {
+	if err != nil || claimed == nil || claimed.ConfigVersion != config.Version || claimed.ConfigContent != accountingSnapshotContent(t, config.Engine, config.Content) {
 		t.Fatalf("retry lost the exact snapshot: %+v %v", claimed, err)
 	}
 }
@@ -237,7 +237,7 @@ func TestEditedRetryLocksConfigurationOwnerBeforeResources(t *testing.T) {
 		t.Fatalf("edited retry after releasing owner: version=%d task version=%d error=%v", result.config.Version, result.task.ConfigVersion, result.err)
 	}
 	claimed, err := db.ClaimTask(ctx, agent.ID)
-	if err != nil || claimed == nil || claimed.ID != result.task.ID || claimed.ConfigContent != result.config.Content {
+	if err != nil || claimed == nil || claimed.ID != result.task.ID || claimed.ConfigContent != accountingSnapshotContent(t, result.config.Engine, result.config.Content) {
 		t.Fatalf("edited retry snapshot after contention: %v", err)
 	}
 }

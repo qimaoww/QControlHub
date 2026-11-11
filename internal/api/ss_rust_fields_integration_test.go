@@ -98,7 +98,11 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	var root map[string]any
-	_ = json.Unmarshal([]byte(saved.Content), &root)
+	compiled, err := serverconfig.PrepareAccounting(core.EngineShadowsocksRust, saved.Content)
+	if err != nil || strings.Contains(saved.Content, "outbound_fwmark") {
+		t.Fatal("source/runtime boundary lost", err)
+	}
+	_ = json.Unmarshal([]byte(compiled.Content), &root)
 	entries := root["servers"].([]any)
 	first, second := entries[0].(map[string]any), entries[1].(map[string]any)
 	if first["outbound_fwmark"] != float64(uint32(0x51430000)|20003) || second["outbound_fwmark"] != float64(uint32(0x51430000)|20002) {

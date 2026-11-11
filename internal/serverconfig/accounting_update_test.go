@@ -220,3 +220,33 @@ func TestAccountingUpdateRetainsEditedSingBoxStatsAPI(t *testing.T) {
 		t.Fatalf("edited stats API was discarded or retained generated exits: %s %v", source, err)
 	}
 }
+
+func TestAccountingRuntimeRoundTripAgainstEditableSource(t *testing.T) {
+	for engine, source := range map[core.Engine]string{
+		core.EngineMihomo:  "listeners: [{name: a, type: socks, port: 1080}]\nproxies: [{name: edge, type: socks5, server: 127.0.0.1, port: 1081}]\nrules: ['MATCH,edge']\n",
+		core.EngineXray:    `{"inbounds":[{"tag":"a","port":1080,"protocol":"socks"}],"outbounds":[{"tag":"edge","protocol":"freedom"}]}`,
+		core.EngineSingBox: `{"inbounds":[{"tag":"a","listen_port":1080,"type":"socks"}],"outbounds":[{"tag":"edge","type":"direct"}]}`,
+	} {
+		t.Run(string(engine), func(t *testing.T) {
+			plan, err := PrepareAccounting(engine, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := AccountingUpdateSource(engine, plan.Content, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(recovered, accountingPrefix) {
+				t.Fatal("runtime copies entered source")
+			}
+			again, err := PrepareAccounting(engine, recovered)
+			if err != nil || again.Content != plan.Content {
+				t.Fatalf("runtime changed: %v", err)
+			}
+			edited := strings.Replace(plan.Content, accountingPrefix, accountingPrefix+"unknown-", 1)
+			if _, err := AccountingUpdateSource(engine, edited, source); err == nil {
+				t.Fatal("unverified artifact trusted")
+			}
+		})
+	}
+}

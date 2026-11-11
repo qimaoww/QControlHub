@@ -83,6 +83,7 @@ const (
 )
 
 type Task struct {
+	SubmissionID           string                  `json:"submission_id,omitempty"`
 	ExistingSourceID       string                  `json:"existing_source_id,omitempty"`
 	ImportSourceDigest     string                  `json:"import_source_digest,omitempty"`
 	CertificateSync        bool                    `json:"-"`

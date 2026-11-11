@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 98
+const currentSchemaVersion = 99
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS account_ui_preferences (
  account_id text PRIMARY KEY,
  choices jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(choices)='object' AND octet_length(choices::text)<=32768),
  revision bigint NOT NULL CHECK (revision > 0)
+);
+CREATE TABLE IF NOT EXISTS account_page_sizes (
+ account_id text NOT NULL,
+ page text NOT NULL CHECK (page IN ('nodes', 'traffic', 'tcp')),
+ page_size integer NOT NULL CHECK (page_size IN (30, 50, 100, 200)),
+ revision bigint NOT NULL CHECK (revision > 0),
+ PRIMARY KEY(account_id,page)
 );
 CREATE TABLE IF NOT EXISTS account_node_views (
  account_id text PRIMARY KEY,
@@ -1225,5 +1232,15 @@ CREATE TABLE IF NOT EXISTS task_imports (
  name varchar(100) NOT NULL, description varchar(300) NOT NULL DEFAULT '',
  snapshot text NOT NULL, target_config_id text NOT NULL, retry_of text REFERENCES tasks(id) ON DELETE SET NULL
 );
+
+-- An unchanged binding can reuse a task and still acknowledge its own request.
+CREATE TABLE IF NOT EXISTS config_binding_receipts (
+ submission_id text PRIMARY KEY,
+ task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ owner_id text NOT NULL,
+ api_key_id text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS config_binding_receipts_task_idx ON config_binding_receipts(task_id);
+CREATE INDEX IF NOT EXISTS config_binding_receipts_owner_idx ON config_binding_receipts(owner_id);
 
 `

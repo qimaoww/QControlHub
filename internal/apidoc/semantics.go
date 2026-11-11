@@ -1,8 +1,9 @@
 package apidoc
 
 import (
-	"github.com/qimaoww/qcontrolhub/internal/store"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 // These annotations describe validation and protocol semantics that cannot be
@@ -10,6 +11,9 @@ import (
 // exclusively from registrations and the capability registry.
 func (g *generator) annotateField(name string, field object) {
 	switch name {
+	case "page_size":
+		field["enum"] = []int{30, 50, 100, 200}
+		field["default"] = 30
 	case "expires_at":
 		field["description"] = "RFC3339 或 null；null/省略表示不过期。更新按完整设置替换。"
 	case "ip_allowlist":
@@ -55,6 +59,10 @@ func (g *generator) annotate(op object, handler, method, path string) {
 	}
 	switch path {
 	case "/api/v1/preferences/ui":
+		op["summary"] = "查询界面偏好"
+		if method == "patch" {
+			op["summary"] = "更新界面偏好"
+		}
 		op["description"] = "当前认证账号的界面偏好；不接受账号参数。只保存当前值，无历史。PATCH 按页面及字段合并，须提供读取的 revision（首次为 0），冲突返回 409 后重新读取并合并当前修改。资源 ID 仅作选择提示，使用时仍须重新鉴权；实时配置仅允许 agent。请求上限 16384 字节。"
 		if method == "patch" {
 			op["requestBody"] = object{"required": true, "content": object{"application/json": object{"schema": object{"type": "object", "additionalProperties": false, "required": []string{"values", "revision"}, "properties": object{"revision": object{"type": "integer", "minimum": 0}, "values": store.UIPreferenceSchema()}}}}}
@@ -94,6 +102,9 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		}
 		var required []string
 		switch handler {
+		case "putPageSize":
+			copySchema["properties"].(object)["revision"] = object{"type": "integer", "minimum": 0}
+			required = []string{"page_size", "revision"}
 		case "createAPIKey":
 			required = []string{"name", "permissions"}
 		case "updateAPIKey":
@@ -130,6 +141,9 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		}
 	}
 	switch handler {
+	case "getPageSize", "putPageSize":
+		op["description"] = "当前认证账号的每页条数；page 为 nodes、traffic 或 tcp。缺失值为 30，允许 30、50、100、200；保存须带当前 revision，首次为 0，并发冲突返回 409。"
+		g.resolve(g.named("store.PageSizePreference"))["properties"].(object)["revision"].(object)["minimum"] = 0
 	case "putNotifications":
 		op["description"] = "省略 secrets 字段保留已存凭据，显式空值清空。保留未读取凭据时，修改认证目标（SMTP 主机/端口/TLS/用户名或 Webhook 地址）须具备 secrets.read；也可显式替换相关凭据。"
 	case "importAgentConfig":
