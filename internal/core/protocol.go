@@ -3,14 +3,15 @@ package core
 import "time"
 
 type HeartbeatRequest struct {
-	Version         string                  `json:"version,omitempty"`
-	OS              string                  `json:"os,omitempty"`
-	Arch            string                  `json:"arch,omitempty"`
-	Runtime         map[Engine]RuntimeState `json:"runtime,omitempty"`
-	Metrics         *HostMetrics            `json:"metrics,omitempty"`
-	TrafficUsage    []PortTrafficUsage      `json:"traffic_usage,omitempty"`
-	SharedInstances []SharedInstanceStatus  `json:"shared_instances,omitempty"`
-	Features        []string                `json:"features,omitempty"`
+	ProxyIngressReports []ProxyIngressReport    `json:"proxy_ingress_reports,omitempty"`
+	Version             string                  `json:"version,omitempty"`
+	OS                  string                  `json:"os,omitempty"`
+	Arch                string                  `json:"arch,omitempty"`
+	Runtime             map[Engine]RuntimeState `json:"runtime,omitempty"`
+	Metrics             *HostMetrics            `json:"metrics,omitempty"`
+	TrafficUsage        []PortTrafficUsage      `json:"traffic_usage,omitempty"`
+	SharedInstances     []SharedInstanceStatus  `json:"shared_instances,omitempty"`
+	Features            []string                `json:"features,omitempty"`
 }
 
 // HostPortObservation contains socket metadata only; it never transfers configuration ownership.

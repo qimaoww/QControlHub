@@ -65,6 +65,28 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 		}
 		return "tls_public_port"
 	}
+	granted := map[int]bool{}
+	for i := range task.TLSFrontends {
+		f := &task.TLSFrontends[i]
+		generation, allowed, err := proxyIngressGrantTx(ctx, tx, task.AgentID, owner, *f)
+		if err != nil {
+			return err
+		}
+		if f.SharedIngressGeneration > 0 && (!allowed || generation != f.SharedIngressGeneration) {
+			return &PortConflictError{Port: f.PublicPort, Field: "tls_public_port", Reason: "ingress_unauthorized", Cause: fmt.Errorf("%w: 托管入口授权已撤销或变更，请重新部署", ErrConflict)}
+		}
+		if generation > 0 && allowed {
+			var supported bool
+			if err := tx.QueryRow(ctx, `SELECT features ? $2 FROM agents WHERE id=$1`, task.AgentID, core.AgentFeatureSharedProxyIngress).Scan(&supported); err != nil {
+				return err
+			}
+			if !supported {
+				return fmt.Errorf("%w: 请先升级 Agent（%s）再共用入口", ErrConflict, core.AgentFeatureSharedProxyIngress)
+			}
+			f.SharedIngressGeneration = generation
+			granted[f.PublicPort] = true
+		}
+	}
 	ports := []int{}
 	for _, f := range task.TLSFrontends {
 		ports = append(ports, f.PublicPort)
@@ -76,18 +98,41 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 		var conflict *PortConflictError
 		if errors.As(err, &conflict) {
 			field := fieldForPort(conflict.Port)
-			return &PortConflictError{Port: conflict.Port, Field: field, Cause: conflict.Cause, RecoveryEngine: conflict.RecoveryEngine}
+			return &PortConflictError{Port: conflict.Port, Field: field, Cause: conflict.Cause, RecoveryEngine: conflict.RecoveryEngine, Reason: conflict.Reason}
 		}
 		return err
 	}
 	if task.SharedTrafficID == "" {
 		return nil
 	}
+	for _, f := range task.TLSFrontends {
+		var reservedOwner string
+		err := tx.QueryRow(ctx, `SELECT s.user_id FROM agent_share_ports p JOIN agent_shares s ON s.id=p.share_id WHERE p.agent_id=$1 AND p.port=$2 AND p.share_id<>$3`, task.AgentID, f.PublicPort, task.SharedTrafficID).Scan(&reservedOwner)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if reservedOwner != "" {
+			_, otherAllowed, e := proxyIngressGrantTx(ctx, tx, task.AgentID, reservedOwner, f)
+			if e != nil {
+				return e
+			}
+			_, allowed, e := proxyIngressGrantTx(ctx, tx, task.AgentID, owner, f)
+			if e != nil {
+				return e
+			}
+			if !allowed || !otherAllowed {
+				return &PortConflictError{Port: f.PublicPort, Field: fieldForPort(f.PublicPort), Reason: "ingress_unauthorized", Cause: fmt.Errorf("%w: 该入口已有独占端口预留，请先取得共享入口授权", ErrConflict)}
+			}
+		}
+	}
 	var unrestricted bool
 	if err := tx.QueryRow(ctx, `SELECT ports_unrestricted FROM agent_shares WHERE id=$1`, task.SharedTrafficID).Scan(&unrestricted); err != nil {
 		return err
 	}
 	for _, port := range ports {
+		if granted[port] {
+			continue
+		}
 		var allocated bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports WHERE share_id=$1 AND port=$2)`, task.SharedTrafficID, port).Scan(&allocated); err != nil {
 			return err

@@ -146,16 +146,6 @@ func frontendKey(f core.TLSFrontend) string {
 
 func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) {
 	var result []core.TLSFrontend
-	owners := map[int]string{}
-	localPorts := map[int]bool{}
-	localBackends := map[int]bool{}
-	paths := map[string]bool{}
-	backends := map[int]bool{}
-	siteOwners := map[string]string{}
-	var routes []core.TLSFrontend
-	emails := map[string]string{}
-	certificateModes := map[string]bool{}
-	panelCertificates := map[string]string{}
 	services := make([]string, 0, len(deployments))
 	for service := range deployments {
 		services = append(services, service)
@@ -168,83 +158,11 @@ func activeTLSFrontends(deployments tlsDeployments) ([]core.TLSFrontend, error) 
 		}
 		for _, f := range d.Frontends {
 			f.StaticPageOwner = service
-			if err := f.Validate(); err != nil {
-				return nil, err
-			}
-			if owners[f.PublicPort] != "" && (f.LocalOnly || localPorts[f.PublicPort]) {
-				return nil, fmt.Errorf("本地 TLS 端口 %d 已被其他入口占用", f.PublicPort)
-			}
-			if backends[f.BackendPort] && (f.LocalOnly || localBackends[f.BackendPort]) {
-				return nil, fmt.Errorf("组合内部端口 %d 已被其他入站占用", f.BackendPort)
-			}
-			localPorts[f.PublicPort] = localPorts[f.PublicPort] || f.LocalOnly
-			localBackends[f.BackendPort] = localBackends[f.BackendPort] || f.LocalOnly
-			if f.UsesACME() && f.ACMEEmail != "" {
-				if email := emails[f.Domain]; email != "" && email != f.ACMEEmail {
-					return nil, fmt.Errorf("域名 %s 的 ACME 邮箱不一致，请使用同一证书账户", f.Domain)
-				}
-				emails[f.Domain] = f.ACMEEmail
-			}
-			if mode := owners[f.PublicPort]; mode != "" && mode != f.Mode {
-				return nil, fmt.Errorf("公网端口 %d 已用于 %s，不能同时用于 %s", f.PublicPort, mode, f.Mode)
-			}
-			if f.Mode == "nginx" {
-				identity := strconv.Itoa(f.PublicPort) + "/" + f.Domain
-				if automatic, exists := certificateModes[identity]; exists && automatic != f.AutomaticCertificate {
-					return nil, fmt.Errorf("域名 %s 在端口 %d 上的 Nginx 证书方式不一致，请统一为自动证书或使用不同域名", f.Domain, f.PublicPort)
-				}
-				certificateModes[identity] = f.AutomaticCertificate
-			}
-			// Caddy selects certificates by SNI across all its listeners. Nginx
-			// also needs one unambiguous pair per virtual host. Immutable copies
-			// in different instances may refer to the same certificate version.
-			identity := f.Mode + "/" + strings.ToLower(f.Domain)
-			if f.Mode == "nginx" {
-				identity += "/" + strconv.Itoa(f.PublicPort)
-			}
-			certificate := "automatic"
-			if f.UsesPanelCertificate() {
-				certificate = strings.Split(strings.SplitN(f.CertificatePath, "/panel-certificates/", 2)[1], "/")[0]
-			}
-			if previous, exists := panelCertificates[identity]; exists && previous != certificate {
-				return nil, fmt.Errorf("域名 %s 的反代证书不一致，请选择同一面板证书", f.Domain)
-			}
-			panelCertificates[identity] = certificate
-			siteKey := fmt.Sprintf("%d/%s", f.PublicPort, f.Domain)
-			if f.StaticHTML != "" {
-				if owner := siteOwners[siteKey]; owner != "" && owner != service+"/"+f.Tag {
-					return nil, fmt.Errorf("同域名静态页面已由其他入站维护")
-				}
-				siteOwners[siteKey] = service + "/" + f.Tag
-			}
-			for _, old := range routes {
-				if old.PublicPort == f.PublicPort && (old.Transport == "xhttp" || f.Transport == "xhttp") {
-					a, b := strings.TrimSuffix(old.Path, "/")+"/", strings.TrimSuffix(f.Path, "/")+"/"
-					if strings.HasPrefix(a, b) || strings.HasPrefix(b, a) {
-						return nil, fmt.Errorf("XHTTP 路径与其他入站重叠")
-					}
-				}
-			}
-			routes = append(routes, f)
-			route := strconv.Itoa(f.PublicPort) + f.Path
-			if paths[route] {
-				return nil, fmt.Errorf("公网端口 %d 上的路径 %s 已被其他入站使用", f.PublicPort, f.Path)
-			}
-			owners[f.PublicPort] = f.Mode
-			paths[route] = true
-			backends[f.BackendPort] = true
 			result = append(result, f)
 		}
 	}
-	for port := range owners {
-		if backends[port] {
-			return nil, fmt.Errorf("公网反代端口 %d 与内部端口冲突", port)
-		}
-	}
-	for _, f := range result {
-		if f.UsesACME() && owners[80] != "" {
-			return nil, errors.New("端口 80 已用于 TLS 反代，Caddy HTTP 证书验证无法使用")
-		}
+	if err := core.ValidateTLSFrontendRoutes(result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

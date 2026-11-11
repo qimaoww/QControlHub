@@ -123,6 +123,14 @@ func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID 
 		if !matched {
 			continue
 		}
+		for _, g := range share.ProxyIngresses {
+			if g.Port == 443 {
+				return 443, nil
+			}
+		}
+		if len(share.ProxyIngresses) > 0 {
+			return share.ProxyIngresses[0].Port, nil
+		}
 		if core.UnrestrictedSharedPorts(share.Ports) || containsPlanPort(share.Ports, 443) {
 			return 443, nil
 		}

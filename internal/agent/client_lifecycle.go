@@ -139,6 +139,18 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 			return stopLegacySharedBase(ctx, c.executor.serviceManager(), engine, spec, ports)
 		}
+		c.traffic.inspectProxyIngresses = func(ctx context.Context, engine core.Engine, shareID string, grants []core.ProxyIngress) (bool, error) {
+			frontends, stopped, err := sharedIngressFrontends(c.executor.serviceManager(), engine, shareID)
+			if err != nil || stopped {
+				return false, err
+			}
+			for _, f := range frontends {
+				if !core.ProxyIngressAuthorized(grants, f) {
+					return true, nil
+				}
+			}
+			return false, nil
+		}
 		c.traffic.haltShare = func(ctx context.Context, engine core.Engine, shareID string) error {
 			c.executor.specsMu.RLock()
 			base, exists := c.executor.Specs[engine]
@@ -433,6 +445,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			}
 			return context.Cause(sessionContext)
 		case <-heartbeatTicker.C:
+			if err := c.tryApplyTrafficPolicies(sessionContext); err != nil {
+				return err
+			}
 			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 				return err
 			}
@@ -481,7 +496,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				if message.TrafficPoliciesPending {
 					continue
 				}
-				if err := c.traffic.SetPolicies(sessionContext, message.TrafficPolicies, c.creds.AgentID); err != nil {
+				if err := c.receiveTrafficPolicies(sessionContext, message.TrafficPolicies); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
 				}
 				continue

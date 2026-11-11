@@ -1,3 +1,4 @@
+import { proxyIngressEditor, proxyIngressLabel } from "./proxy-ingresses.js";
 import { preparedDialog, readRegion } from "./loading.js";
 import { parseSharedPorts, formatSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB, agentShareStatus } from '../modules/user-model.js';
 import { node, button, actions, stack, grid, section, field, muted, notice, pathID, list } from './ui.js';
@@ -25,6 +26,7 @@ async function editAgentSharingLoaded(ctx, agent) {
     ports_text: row.querySelector('[name=ports]').value,
     limit_gib: row.querySelector('[name=limit_gib]').value,
     http_domains_text: row.querySelector('[name=http_domains]').value,
+    proxy_ingresses: row.ingressEditor.value(),
     reinvite: row.dataset.reinvite === 'true',
   }));
   function markChanged(event) {
@@ -55,6 +57,7 @@ async function editAgentSharingLoaded(ctx, agent) {
       ports: parseSharedPorts(row.ports_text), limit_bytes: sharedLimitBytes(row.limit_gib),
       engines: selectedSharedEngines(rows.children[index]),
       http_domains: row.http_domains_text.split(/[\n,，]+/).map(value => value.trim()).filter(Boolean),
+      proxy_ingresses: row.proxy_ingresses,
       reinvite: row.reinvite,
     }));
     saving = true;
@@ -70,19 +73,23 @@ async function editAgentSharingLoaded(ctx, agent) {
     const engines = node('div', { className: 'a-actions' }, choices.map(engine =>
       field(supportedEngines.includes(engine) ? engine : `${engine} · 不可用`, 'engines', list(share.engines).includes(engine), { type: 'checkbox', value: engine })));
     const shareState = muted(agentShareStatus(share));
+    const ingress = proxyIngressEditor(share.proxy_ingresses, agent.features?.includes('shared-proxy-ingress-v1'));
     const row = section(share.username || '新用户', node('div', { className: 'a-card-body a-stack' },
       grid(field('用户名', 'username', share.username || '', { required: true, maxlength: 64, readonly: Boolean(share.user_id) }),
         field('总额度 · GiB', 'limit_gib', share.limit_gib ?? sharedLimitGiB(share.limit_bytes), { type: 'number', min: 0, max: 8388607, step: 'any', required: true })),
       field('端口', 'ports', share.ports_text ?? formatSharedPorts(share.ports), { placeholder: '21000-21100, 22000', hint: '留空未分配，0 表示不限端口' }), engines,
       field('HTTP-01 允许域名', 'http_domains', share.http_domains_text ?? list(share.http_domains).join('\n'), { multiline: 2 }),
+      ingress.element,
       actions(field('启用共享', 'enabled', share.enabled !== false, { type: 'checkbox' }),
         share.status === 'rejected' && button('重新邀请', event => {
           row.dataset.reinvite = 'true'; event.currentTarget.disabled = true;
           row.querySelector('[name=enabled]').checked = true; shareState.textContent = '待发送'; markChanged();
         }, { disabled: Boolean(share.reinvite) }),
         !share.user_id && button('移除', () => { row.remove(); markChanged(); })),
+      muted(`托管入口 · ${proxyIngressLabel(share)}`),
       actions(shareState, share.user_id && muted(`已用 ${bytes(share.used_bytes)}`)),
     ));
+    row.ingressEditor = ingress;
     row.dataset.reinvite = String(Boolean(share.reinvite));
     rows.append(row);
   }

@@ -533,6 +533,11 @@ ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS invitation_revision bigint NOT
 ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS engines text[] NOT NULL DEFAULT '{}'
 	CHECK (engines <@ ARRAY['mihomo','xray','sing-box','ss-rust']::text[] AND cardinality(engines)<=4 AND array_position(engines,NULL) IS NULL);
 ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS ports_unrestricted boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS proxy_ingresses jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS proxy_ingress_revision bigint NOT NULL DEFAULT 1 CHECK(proxy_ingress_revision>0);
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS proxy_ingress_applied_revision bigint NOT NULL DEFAULT 0;
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS proxy_ingress_applied_revoked boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS proxy_ingress_error varchar(500) NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS agent_share_ports (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
@@ -605,6 +610,7 @@ ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS observed_at
 ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS sampled_at timestamptz;
 ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS last_task_id text NOT NULL DEFAULT '';
 ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS applied_task_id text NOT NULL DEFAULT '';
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS applied_proxy_ingresses jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS deployed_at timestamptz;
 CREATE INDEX IF NOT EXISTS shared_instances_owner_idx ON agent_shared_instance_ownership(owner_id,agent_id,engine);
 CREATE INDEX IF NOT EXISTS tasks_instance_recent_idx ON tasks(agent_id,engine,shared_traffic_id,created_at DESC) WHERE shared_instance;

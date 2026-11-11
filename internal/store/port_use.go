@@ -69,6 +69,13 @@ func (s *Store) checkTaskPortUseTx(ctx context.Context, tx pgx.Tx, task *core.Ta
 		return err
 	}
 	for _, port := range ports {
+		var ingress bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shares s,jsonb_array_elements(s.proxy_ingresses) g WHERE s.agent_id=$1 AND s.enabled AND (g->>'port')::int=$2)`, task.AgentID, port).Scan(&ingress); err != nil {
+			return err
+		}
+		if ingress {
+			return &PortConflictError{Port: port, Field: "port", Reason: "backend_port_conflict", Cause: fmt.Errorf("%w: 该端口已授权为托管公共入口，不能用作内核监听", ErrConflict)}
+		}
 		var shareID string
 		var engine core.Engine
 		err := tx.QueryRow(ctx, `SELECT COALESCE(share_id,''),engine FROM port_traffic_policies WHERE agent_id=$1 AND port=$2 FOR UPDATE`, task.AgentID, port).Scan(&shareID, &engine)
