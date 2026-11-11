@@ -83,7 +83,15 @@ try {
   assert.deepEqual(logins, [], "failed credentials remain in the existing login flow");
   await assert.rejects(accountRequest("/settings", { session: first, onUnauthorized: message => logins.push(message) }), { status: 401 });
   assert.equal(logins.length, 1);
-  assert.match(logins[0], /登录已失效/);
+  assert.equal(logins[0], '用户名、密码或管理员令牌不正确，请检查后重试。');
+  respond = () => Response.json({ error: '登录已过期，请重新登录。', detail: 'session expired' }, { status: 401 });
+  await assert.rejects(accountRequest('/settings', { session: first, method: 'PUT', body: {} }), error => {
+    assert.equal(error.message, '登录已过期，请重新登录。');
+    assert.equal(error.failureRetention, 'not_required');
+    return true;
+  });
+  await assert.rejects(accountRequest('/auth/logout', { session: first, method: 'POST', body: {}, onUnauthorized: message => logins.push(message) }), { status: 401 });
+  assert.equal(logins.length, 1, 'explicit logout must not display an expiration error');
   for (const status of [403, 404, 503]) {
     respond = () => Response.json({ error: "fixture failure" }, { status });
     await assert.rejects(accountRequest("/settings", { session: first }), { status });

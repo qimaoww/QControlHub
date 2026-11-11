@@ -8,9 +8,37 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestExpiredSessionResponseContract(t *testing.T) {
+	token := strings.Repeat("a", 32)
+	server := New(nil, Config{AdminTokenDigest: sha256.Sum256([]byte(token))})
+	login := httptest.NewRecorder()
+	server.Handler().ServeHTTP(login, httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"token":"`+token+`"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatal("fixture login failed")
+	}
+	server.sessionsMu.Lock()
+	for key, session := range server.sessions {
+		session.ExpiresAt = time.Now().Add(-time.Second)
+		server.sessions[key] = session
+	}
+	server.sessionsMu.Unlock()
+	request := httptest.NewRequest("GET", "/api/v1/auth/session", nil)
+	request.AddCookie(login.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	var body map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusUnauthorized || body["error"] != "登录已过期，请重新登录。" || body["detail"] != "session expired" {
+		t.Fatalf("unexpected expiration response: status=%d error=%q detail=%q", response.Code, body["error"], body["detail"])
+	}
+}
 
 func TestAPISessionLoginCSRFAndLogout(t *testing.T) {
 	token := strings.Repeat("a", 32)
