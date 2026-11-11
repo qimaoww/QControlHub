@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 98
+const currentSchemaVersion = 99
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -16,6 +16,11 @@ INSERT INTO site_branding(id) VALUES(1) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS account_traffic_orders (
  account_id text PRIMARY KEY,
  port_keys text[] NOT NULL DEFAULT '{}',
+ revision bigint NOT NULL CHECK (revision > 0)
+);
+CREATE TABLE IF NOT EXISTS account_ui_preferences (
+ account_id text PRIMARY KEY,
+ choices jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(choices)='object' AND octet_length(choices::text)<=32768),
  revision bigint NOT NULL CHECK (revision > 0)
 );
 CREATE TABLE IF NOT EXISTS account_page_sizes (

@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { createConnectionCache, connectionSessionStorage } from "../modules/client-connection-cache.js";
 import { requestCoreLogJSON as boundedRead } from "../modules/core-log-read.js";
 import { createPoller } from "../modules/poller.js";
@@ -39,13 +40,13 @@ export async function connectionsPage(ctx) {
     finally { if (scopePending === pending) scopePending = null; }
   }
   const today = defaultConnectionFilters().date;
-  const restored = null;
-  let filters = data.analyticsConnectionFilters ||= restored?.filters || defaultConnectionFilters();
-  let initialOrder = ctx.connectionNodeOrder;
+  let filters = data.analyticsConnectionFilters ||= defaultConnectionFilters();
+  let initializing = true, queryTouched = false;
+  let initialOrder = ctx.connectionNodeOrder, nodeOrderReady = false;
   // Filter changes can share the route's pending order read. Once settled,
   // later refreshes continue to read the current authenticated preference.
 
-  let sources = restored?.sources || [], result = null, loading = true, reading = false, failures = 0, forcePending = false, controller, serial = 0, cursor = restored?.cursor || "", cursors = restored?.cursors || [], nextCursor = "", nodeOrder = restored?.nodeOrder || savedNodeOrder();
+  let sources = [], result = null, loading = true, reading = false, failures = 0, forcePending = false, controller, serial = 0, cursor = "", cursors = [], nextCursor = "", nodeOrder = savedNodeOrder();
   const status = muted("正在读取…"), error = notice(""), summary = node("div", { className: "a-card-body a-actions" });
   const collection = sourceStatus(ctx, { marker: "data-connection-sources" });
   collection.trigger.dataset.connectionSourceStatus = "";
@@ -63,12 +64,12 @@ export async function connectionsPage(ctx) {
     field("包含非公网地址", "include_non_public", filters.include_non_public === "true", { type: "checkbox" }),
     actions(button("今日", () => {
       const recent = defaultConnectionFilters();
-      controls.elements.date.value = recent.date; controls.elements.period.value = "day"; controls.elements.include_non_public.checked = false; changed();
-    }), button("本月", () => { controls.elements.date.value = defaultConnectionFilters().date; controls.elements.period.value = "month"; changed(); }),
+      controls.elements.date.value = recent.date; controls.elements.period.value = "day"; controls.elements.include_non_public.checked = false; preferenceFields.save({ time_mode: "today", date: recent.date, period: "day", include_non_public: false }); changed();
+    }), button("本月", () => { controls.elements.date.value = defaultConnectionFilters().date; controls.elements.period.value = "month"; preferenceFields.save({ time_mode: "month", date: controls.elements.date.value, period: "month" }); changed(); }),
     button("清除筛选", () => {
       for (const name of ["agent_id", "engine", "client_ip", "country_code"]) controls.elements[name].value = "";
-      controls.elements.include_non_public.checked = false; changed();
-    }), button("刷新", () => void load({ target: cursor, history: cursors, force: true }))));
+      controls.elements.include_non_public.checked = false; preferenceFields.save({ agent_id: "", engine: "", client_ip: "", country_code: "", include_non_public: false }); changed();
+    }), button("刷新", () => { void ctx.preferences?.flush(); void ctx.preferences?.ready(); void load({ target: cursor, history: cursors, force: true }); })));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild, controls.querySelector(".a-check")));
   function updateRegions() {
     const select = controls.elements.country_code, value = filters.country_code || "";
@@ -139,12 +140,12 @@ export async function connectionsPage(ctx) {
       if (!current()) return;
       // Refresh the same account preference used by the node page; the API
       // controls ordering before applying its signed pagination cursor.
-      if (force || initialOrder || !sources.length) {
+      if (force || initialOrder || !nodeOrderReady) {
         const pendingOrder = !force && initialOrder; initialOrder = null;
         const order = await (pendingOrder || boundedRead(ctx.api, "/preferences/node-order", { signal }));
         if (!current()) return;
         if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; changedScope = true; }
-        nodeOrder = order.ids;
+        nodeOrder = order.ids; nodeOrderReady = true;
       }
       const params = connectionQuery(filters, target, nodeOrder), key = params.toString();
       const entry = cache.get(key), cached = Array.isArray(entry?.result?.country_codes) ? entry : null;
@@ -167,6 +168,12 @@ export async function connectionsPage(ctx) {
       const fresh = mergeConnectionUpdate(cached?.result, response);
       fresh.location_retry_at = cached?.result.location_retry_at || 0;
       if (!current()) return;
+      // A successful history response includes every accessible selected node,
+      // even when that node has no logs. Failed reads never enter this path.
+      if (filters.agent_id && Array.isArray(fresh.sources) && !fresh.sources.some(source => source.agent_id === filters.agent_id)) {
+        controls.elements.agent_id.value = ''; preferenceFields.save({ agent_id: '' });
+        queueMicrotask(changed); return;
+      }
       const fetchedAt = Date.now();
       cache.bind(fresh.cache_scope); cache.set(key, fresh, fetchedAt, cached?.locationsAttempted || false);
       failures = 0;
@@ -222,6 +229,7 @@ export async function connectionsPage(ctx) {
   let timer;
   controls.addEventListener("submit", event => { event.preventDefault(); clearTimeout(timer); changed(); });
   controls.addEventListener("change", () => { clearTimeout(timer); changed(); });
+  for (const event of ['input', 'change']) controls.addEventListener(event, () => { queryTouched = true; }, { capture: true });
   controls.elements.client_ip.addEventListener("input", event => { clearTimeout(timer); controller?.abort(); serial++; if (!event.isComposing) timer = setTimeout(changed, 250); });
   controls.elements.client_ip.addEventListener("compositionend", () => { clearTimeout(timer); timer = setTimeout(changed, 250); });
   // Recheck authority without repeating history aggregates. This also handles
@@ -257,32 +265,49 @@ export async function connectionsPage(ctx) {
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
   async function initialize() {
-    const before = JSON.stringify(formData(controls));
     if (cache.hasStored() || cache.scope) {
-      try {
-        await verifyScope();
+      try { await verifyScope(); }
+      catch (failure) {
         if (!ctx.current()) return;
-        const selection = cache.selection;
-        if (selection && before === JSON.stringify(formData(controls))) {
-          filters = data.analyticsConnectionFilters = selection.filters;
-          sources = selection.sources || []; nodeOrder = selection.nodeOrder || nodeOrder;
-          cursor = selection.cursor || ""; cursors = selection.cursors || [];
-          updateSources(); updateRegions();
-          for (const [name, value] of Object.entries(filters)) {
-            const control = controls.elements.namedItem(name);
-            if (control) { if (control.type === 'checkbox') control.checked = value === 'true'; else control.value = value; }
-          }
-        }
-      } catch (failure) {
-        if (!ctx.current()) return;
-        cache.clear(); loading = false; error.textContent = redactDiagnostic(failure.message); paint();
-        return;
+        cache.clear(); loading = false; error.textContent = redactDiagnostic(failure.message); paint(); return;
       }
     }
+    await preferenceFields.ready;
     if (!ctx.current()) return;
+    initializing = false;
+    filters = { ...formData(controls), include_non_public: controls.elements.include_non_public.checked ? 'true' : '' };
+    data.analyticsConnectionFilters = filters;
+    try {
+      const order = await (initialOrder || boundedRead(ctx.api, '/preferences/node-order', { signal: ctx.signal }));
+      if (!ctx.current()) return;
+      initialOrder = null; nodeOrder = order.ids; nodeOrderReady = true;
+    } catch (failure) {
+      if (ctx.current()) { loading = false; error.textContent = redactDiagnostic(failure.message); paint(); }
+      return;
+    }
+    const position = cache.selection;
+    // The server owns filters. A verified same-scope cache may retain only a
+    // reading position whose query still matches those restored controls.
+    if (!queryTouched && position?.day === today && JSON.stringify(position.nodeOrder) === JSON.stringify(nodeOrder) && ['date', 'period', 'agent_id', 'engine', 'client_ip', 'country_code', 'include_non_public'].every(name => (position.filters[name] || '') === (filters[name] || ''))) {
+      cursor = position.cursor; cursors = position.cursors; sources = position.sources;
+    }
     void load({ target: cursor, history: cursors, changedScope: true });
     scopeWatch.start();
   }
+  const preferenceFields = bindPreferenceFields(ctx, 'connections', [controls], {
+    valid: (name, value) => {
+      if (name !== 'client_ip' || !value) return true;
+      if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(value)) return value.split('.').every(part => Number(part) <= 255 && String(Number(part)) === part);
+      try { return !value.includes('%') && new URL(`http://[${value}]/`).hostname.startsWith('['); } catch { return false; }
+    },
+    normalize: saved => ({ ...saved, ...(saved.time_mode && saved.time_mode !== 'absolute' ? { date: defaultConnectionFilters().date, period: saved.time_mode === 'month' ? 'month' : 'day' } : {}) }),
+    restore: () => { if (!initializing) changed(); },
+  });
+  controls.elements.date.addEventListener('change', () => preferenceFields.save({ time_mode: 'absolute' }));
+  controls.elements.period.addEventListener('change', () => {
+    const mode = ctx.preferences?.get('connections').time_mode;
+    if (mode && mode !== 'absolute') preferenceFields.save({ time_mode: controls.elements.period.value === 'month' ? 'month' : 'today' });
+  });
   void initialize();
   return stack(filterbar(controls), error, section("客户端连接", stack(summary, node("div", { className: "a-card-body a-stack" }, muted("根据内核日志观测，不代表当前在线会话数"), status), view.root,
     node("div", { className: "a-card-body" }, actions(page, previous, next))), collection.trigger));

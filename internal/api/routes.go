@@ -26,6 +26,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/panel-metrics", s.requirePermission(core.PermissionPanelMetricsRead, http.HandlerFunc(s.getPanelMetrics)))
 	mux.Handle("GET /api/v1/preferences/traffic-order", s.requireAllPermissions(nil, http.HandlerFunc(s.getTrafficOrder)))
 	mux.Handle("PUT /api/v1/preferences/traffic-order", s.requireAllPermissions(nil, http.HandlerFunc(s.putTrafficOrder)))
+	mux.Handle("GET /api/v1/preferences/ui", s.requireAllPermissions(nil, http.HandlerFunc(s.getUIPreferences)))
+	mux.Handle("PATCH /api/v1/preferences/ui", s.requireAllPermissions(nil, http.HandlerFunc(s.patchUIPreferences)))
 	mux.Handle("GET /api/v1/preferences/node-order", s.requireAllPermissions(nil, http.HandlerFunc(s.getNodeOrder)))
 	mux.Handle("GET /api/v1/preferences/page-size/{page}", s.requireAllPermissions(nil, http.HandlerFunc(s.getPageSize)))
 	mux.Handle("PUT /api/v1/preferences/page-size/{page}", s.requireAllPermissions(nil, http.HandlerFunc(s.putPageSize)))

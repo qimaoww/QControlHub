@@ -179,22 +179,20 @@ if (mode === "shared-node" || mode === "shared-node-mobile") {
   ];
 }
 if (mode === "logs-restore") {
-  // Seed the browser store before the application boots so the log page has
-  // to restore the previous session's node scope, filters, and live switch.
+  // Seed the server response before boot; browser storage has no authority.
   testAPI.agents = populatedAgents.map((agent) => ({
     ...agent,
     features: [...(agent.features || []), "core-logs-v1", "core-log-status-v1"],
     runtime: { ...agent.runtime, xray: { installed: true, core_log_status: "active" } },
   }));
-  setStorageAccount({ role: "admin" });
-  accountStorage.setItem("qcontrolhub:core-log-preferences", JSON.stringify({
+  testAPI.uiPreferences = {revision:1,values:{logs:{
     agent_id: "bravo",
     engine: "xray",
     level: "warning",
     q: "pressure entry 1999",
-    limit: 2000,
-    auto_refresh: false,
-  }));
+    limit: '2000',
+    automatic: false,
+  }}};
 }
 if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
   location.hash = "#traffic";
@@ -335,6 +333,17 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (path === '/preferences/ui') {
+    testAPI.uiPreferences ||= {values:{},revision:0};
+    if (method === 'PATCH') {
+      const body=JSON.parse(options.body);
+      assert.equal(new Headers(options.headers).get('X-QControlHub-CSRF'), 'browser-test-csrf');
+      if (body.revision!==testAPI.uiPreferences.revision) return json({error:'preference revision conflict'},409);
+      for(const [page,fields] of Object.entries(body.values)) Object.assign(testAPI.uiPreferences.values[page] ||= {},fields);
+      testAPI.uiPreferences.revision++;
+    }
+    return json(testAPI.uiPreferences);
+  }
   if (path === '/tasks/failures' && method === 'POST') {
     testAPI.failureRecords ||= new Map();
     if (!testAPI.failureRecords.has(options.body)) testAPI.failureRecords.set(options.body,`tsk_${testAPI.failureRecords.size.toString(16).padStart(16,'0')}`);

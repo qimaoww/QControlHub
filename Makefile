@@ -92,7 +92,7 @@ multi-user-browser-check:
 
 .PHONY: core-log-browser-check
 core-log-browser-check:
-	QCH_CORE_LOG_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^Test(CoreLogsBrowserSessions|ClientConnectionsBrowserSessions)$$' -v
+	QCH_CORE_LOG_BROWSER=1 QCH_UI_BROWSER=1 go test -count=1 -timeout 5m ./internal/api -run '^Test(CoreLogsBrowserSessions|ClientConnectionsBrowserSessions|UIPreferencesBrowserSessions)$$' -v
 
 dock-navigation-browser-check:
 	node frontend/dock_navigation_browser.mjs

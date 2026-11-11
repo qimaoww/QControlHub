@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { patch } from "./live-dom.js";
 import { certificateOrderPresentation, certificateOrderDiagnostic } from "../modules/certificate-order.js";
@@ -371,6 +372,7 @@ export async function certificatesPage(ctx) {
   }
   const initialRead = readRegion(ctx, '证书', reload, () => {}, { view:results, clear() { resource = { items: [] }; loaded = true; draw(); syncCreate(); } });
   void initialRead.load(); ctx.onRefresh(initialRead.load);
+  bindPreferenceFields(ctx, "certificates", [search], { restore: draw });
   search.querySelector("input").addEventListener("input", draw);
   const content = stack(filterbar(search, actions(
       button("账号与认证授权", event => void readOnly(event.currentTarget, accounts), { "data-certificate-accounts-open": "" }),

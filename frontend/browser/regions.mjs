@@ -65,7 +65,9 @@ export async function testRegionRuntime({ testAPI }) {
   // Clear only this lifetime's cache, then hold the real automatic lookup.
   window.dispatchEvent(new Event('pagehide'));
   let releaseLookup; testAPI.regionLookupGate = new Promise(resolve => { releaseLookup = resolve; });
-  await startNativeNodes(); await open(); choice('SG').click(); form().requestSubmit();
+  await startNativeNodes(); await open();
+  assert.equal(form().elements.region_search.value, 'japan', 'reopened region search did not restore the account preference');
+  search(''); choice('SG').click(); form().requestSubmit();
   await waitFor(() => !modal() && flag(trigger(), 'sg'), '延迟查询阻止手动保存');
   releaseLookup(); testAPI.regionLookupGate = null; await delay(100);
   assert.ok(flag(trigger(), 'sg'), '迟到自动查询覆盖手动旗帜');
@@ -81,6 +83,7 @@ export async function testRegionRuntime({ testAPI }) {
   await waitFor(() => form()?.textContent.includes('服务暂不可用'), '目录失败缺少提示');
   assert.ok(form().querySelector('[type=submit]').disabled, '目录读取失败允许保存');
   testAPI.regionCatalogFailure = false; button('重试加载', modal()).click();
+  search('');
   await waitFor(() => choice('SG') && !form().querySelector('[type=submit]').disabled, '目录失败无法重试');
   assert.equal(choice('SG').getAttribute('aria-pressed'), 'true', '重试丢失选择');
   if (new URLSearchParams(location.search).has('preview')) {

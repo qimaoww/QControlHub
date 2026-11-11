@@ -58,7 +58,9 @@ export async function testNativeOrdering({ mode, testAPI }, preview=false, coord
       await waitFor(() => root.querySelector(type === 'nodes-list' ? '.a-probe-list' : '.a-probe-grid'), '节点视图未切换');
       await settled();
     } else {
-      button(type==='traffic'?'列表':'卡片').click();
+      const view = type === 'traffic' ? '列表' : '卡片';
+      await waitFor(() => button(view, root), '流量视图控件未加载');
+      button(view, root).click();
     }
     const grips=()=>[...root.querySelectorAll('[data-node-drag]')];
     const ids=()=>grips().map(g=>g.dataset.nodeDrag);

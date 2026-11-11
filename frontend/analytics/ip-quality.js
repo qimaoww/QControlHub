@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { patch } from "./live-dom.js";
 import { nodeName } from "./node-region.js";
 import { createIPQualityController } from "../modules/ip-quality-controller.js";
@@ -17,12 +18,13 @@ export function ipQualityPage(ctx) {
     grid(section('IPv4 报告', node('div', {className:'a-card-body'}, muted('正在读取检测记录…'))), section('IPv6 报告', node('div', {className:'a-card-body'}, muted('正在读取检测记录…'))))),
     actions(button('立即检测', () => {}, {disabled:true}), button('启用定时检测', () => {}, {disabled:true})));
   const results = node("div", { className: "a-ipq-detail a-stack" }, pendingReport());
+  let nodeTouched = false;
   const archiveStates = new Map();
   const loading = muted("正在读取检测记录…");
   loading.setAttribute("role", "status");
   const dateField = field("检测日期", "date", "", { options: [["", "最新检测"]] });
   const select = dateField.querySelector("select");
-  const reset = button("重置", () => { select.value = ""; void controller.load(ipQualityLatest); });
+  const reset = button("重置", () => { select.value = ""; preferenceFields.save({ date: "" }); void controller.load(ipQualityLatest); });
   const filter = node("form", { className: "a-stack a-filter-form a-auto-filter a-ipq-filter", onsubmit(event) {
     event.preventDefault(); void controller.load(select.value || ipQualityLatest);
   } }, node("fieldset", { className: "a-form-fields a-stack" }, dateField), actions(reset));
@@ -63,7 +65,7 @@ export function ipQualityPage(ctx) {
       history ? "" : readFailed ? "读取失败" : "正在读取记录", selectedDate === ipQualityLatest);
     if (nodes.selected) state.data.ipQualityAgent = nodes.selected.id;
     patch(navigation, node("nav", { className: "a-ipq-nodes", "aria-label": "检测节点" }, nodes.items.map(item =>
-      button(stack(nodeName(ctx, byID.get(item.id)), muted(item.note)), () => controller.select(item.id), {
+      button(stack(nodeName(ctx, byID.get(item.id)), muted(item.note)), () => { nodeTouched = true; ctx.preferences?.patch('ip-quality', { agent: item.id }); controller.select(item.id); }, {
         className: "a-ipq-node", "data-refresh-key": item.id, "aria-pressed": String(item.id === nodes.selected?.id),
       }))));
     const agent = nodes.selected;
@@ -133,6 +135,13 @@ export function ipQualityPage(ctx) {
   }
   ctx.signal.addEventListener("abort", () => { controller.dispose(); archiveStates.clear(); }, { once: true });
   ctx.onRefresh(() => controller.load());
+  const preferenceFields = bindPreferenceFields(ctx, 'ip-quality', [dateField], { restore: () => void controller.load(select.value || ipQualityLatest) });
+  void ctx.preferences?.ready().then(() => {
+    if (!ctx.current() || nodeTouched) return;
+    const saved = ctx.preferences.get('ip-quality');
+    if (Object.hasOwn(saved, 'agent')) state.data.ipQualityAgent = saved.agent;
+    if (lastSnapshot) draw(lastSnapshot);
+  });
   void controller.load();
   return stack(filter, loading, node("div", { className: "a-ipq-layout" }, navigation, results),
     node("p", { className: "a-muted" }, node("a", { href: "https://github.com/xykt/IPQuality", target: "_blank", rel: "noopener noreferrer" }, "xykt/IPQuality"), " · AGPL-3.0"));
