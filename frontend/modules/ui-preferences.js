@@ -93,4 +93,3 @@ export function createUIPreferences({ request, isCurrent = () => true, report = 
     dispose() { disposed = true; clearTimeout(timer); lifetime.abort(); dirty.clear(); listeners.clear(); values = {}; },
   };
 }
-
