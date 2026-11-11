@@ -108,7 +108,7 @@ async function editAgentSharingLoaded(ctx, agent) {
     rows.append(row);
   }
   function adopt(received) {
-    const unchanged = !changed && JSON.stringify(saved.shares) === JSON.stringify(received.shares);
+    const unchanged = rows.children.length === received.shares.length && !changed && JSON.stringify(saved.shares) === JSON.stringify(received.shares);
     saved = received; revision = saved.revision;
     if (!unchanged) { rows.replaceChildren(); saved.shares.forEach(add); }
     baseline = JSON.stringify(values()); changed = false;
