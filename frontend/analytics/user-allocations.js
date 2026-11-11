@@ -15,7 +15,10 @@ async function editUserAllocationsLoaded(ctx, user) {
   const pending = data.userAllocationPending ||= new Set();
   if (pending.has(user.id)) return;
   let directory = [], directoryReady = false, initialized = false;
-  const directoryRead = readRegion(ctx, '节点选项', signal => ctx.api('/agent-directory', { signal }), value => { directory = list(value); directoryReady = true; if (initialized && !editor) { draw(); const draft = drafts.get(user.id); if (draft) open(draft.original, draft.mode, draft); } }, { clear() { directory = []; directoryReady = false; if (initialized && !editor) draw(); } });
+  const directoryRead = readRegion(ctx, '节点选项', async signal => {
+    const [visible, other] = await Promise.all([ctx.api('/agents', { signal }), ctx.api('/agent-directory', { signal })]);
+    return [...new Map([...list(other), ...list(visible).map(agent => ({ ...agent, shared_proxy_ingress: agent.features?.includes('shared-proxy-ingress-v1') }))].map(agent => [agent.id, agent])).values()];
+  }, value => { directory = list(value); directoryReady = true; if (initialized && !editor) { draw(); const draft = drafts.get(user.id); if (draft) open(draft.original, draft.mode, draft); } }, { clear() { directory = []; directoryReady = false; if (initialized && !editor) draw(); } });
   void directoryRead.load();
   let saved = await ctx.api(path);
   if (!current()) return;
@@ -141,8 +144,8 @@ async function editUserAllocationsLoaded(ctx, user) {
     const allocations = table(['节点', '授权范围', '已用 / 总额度', '状态', '操作'], shares.map(share => [
       name(share), stack(muted(list(share.engines).join(' / ') || '未分配内核'), node('span', {}, `端口 · ${sharedPortsLabel(share.ports)}`), muted(`托管入口 · ${proxyIngressLabel(share)}`)),
       `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : '不限量'}`, badge(agentShareStatus(share)),
-      actions(button('编辑分配', () => open(share)),
-        (!share.enabled || share.status === 'rejected') && button('重新邀请', () => open(share, 'invite')),
+      actions(button('编辑分配', () => open(share), { disabled: !directoryReady }),
+        (!share.enabled || share.status === 'rejected') && button('重新邀请', () => open(share, 'invite'), { disabled: !directoryReady }),
         share.enabled && button('撤销共享', () => void lock(async () => {
           try {
             if (editor?.changed) { feedback.textContent = '请先保存或取消当前分配。'; return; }

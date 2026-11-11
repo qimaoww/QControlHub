@@ -151,7 +151,9 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return err
 		}
 		if task.Action == core.ActionDeploy || task.Action == core.ActionStart || task.Action == core.ActionRestart {
-			return prepareSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints, false)
+			// Returning listeners need enforcement before Agent execution, even
+			// when a prior empty deployment retired their monitor.
+			return prepareSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints, true)
 		}
 		return nil
 	}

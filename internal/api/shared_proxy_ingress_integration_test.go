@@ -162,6 +162,20 @@ func TestSharedProxyIngressAuthorizationAndRevocationAPI(t *testing.T) {
 			var deleted configMutationResult
 			alice.call("POST", base+"/server-inbounds", map[string]any{"operation": "delete", "original_tag": guest.Tag, "expected_version": retry.Config.Version, "intent": "deploy", "input": guest}, http.StatusOK, &deleted)
 			completeConfigScopeAPITask(t, ctx, db, deleted.Task)
+			var returned configMutationResult
+			alice.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": deleted.Config.Version, "intent": "deploy", "input": guest}, http.StatusOK, &returned)
+			policies, err = db.AgentPortTrafficPolicies(ctx, agent.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, p := range policies {
+				found = found || p.ShareID == share.ID && p.Port == guest.Port && p.MonitoringEnabled
+			}
+			if !found {
+				t.Fatal("returning backend has no enforcement before execution")
+			}
+			completeConfigScopeAPITask(t, ctx, db, returned.Task)
 			second.TransportPath = "/bob-next"
 			updated := mutate(bob, second, other.Config.Version, http.StatusOK)
 			completeConfigScopeAPITask(t, ctx, db, updated.Task)
