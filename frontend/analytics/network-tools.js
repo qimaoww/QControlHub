@@ -252,7 +252,9 @@ export function networkToolsPage(ctx) {
         ? 0
         : trace
           ? (value("address1").includes(":") ? 20 : 0) + (p === "tcp" ? 40 : 28)
-          : 1;
+          : p === "udp"
+            ? 16
+            : 1;
     controls.get("size").max =
       t === "ping" ? 1400 : trace ? 1500 : p === "udp" ? 1400 : 1048576;
     both.hidden = !trace || custom;

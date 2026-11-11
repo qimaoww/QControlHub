@@ -240,6 +240,55 @@ func TestNetworkDiagnosticsRealAgents(t *testing.T) {
 			})
 		}
 	}
+	// Exercise actual tool limits, including IPv6/protocol header sizes. API
+	// rejection alone cannot prove that the installed binary accepts a boundary.
+	for _, family := range []int{4, 6} {
+		for _, probe := range [][2]string{{"ping", "icmp"}, {"traceroute", "icmp"}, {"traceroute", "tcp"}, {"traceroute", "udp"}, {"mtr", "icmp"}, {"mtr", "tcp"}, {"mtr", "udp"}, {"iperf3", "tcp"}, {"iperf3", "udp"}} {
+			minimum, maximum := 0, 1400
+			switch probe[0] {
+			case "traceroute", "mtr":
+				minimum, maximum = 28, 1500
+				if probe[1] == "tcp" {
+					minimum = 40
+				}
+				if family == 6 {
+					minimum += 20
+				}
+			case "iperf3":
+				minimum = 16
+				if probe[1] == "tcp" {
+					minimum, maximum = 1, 1048576
+				}
+			}
+			for _, size := range []int{minimum, maximum} {
+				t.Run(fmt.Sprintf("size-IPv%d/%s/%s/%d", family, probe[0], probe[1], size), func(t *testing.T) {
+					r := makeRequest(probe[0], probe[1], family)
+					r.Bidirectional = false
+					r.Parameters.Count = 1
+					r.Parameters.Size = size
+					local := alice
+					local.t = t
+					for _, invalid := range []int{minimum - 1, maximum + 1} {
+						bad := r
+						bad.RequestID += fmt.Sprintf("-invalid-%d", invalid)
+						bad.Parameters.Size = invalid
+						local.call("POST", "/network-diagnostics", bad, 400, nil)
+					}
+					var d core.DiagnosticSession
+					local.call("POST", "/network-diagnostics", r, 201, &d)
+					d = wait(t, d.ID)
+					if d.State != "succeeded" {
+						t.Fatalf("tool rejected valid size %d: %+v", size, d)
+					}
+					for _, result := range d.Results {
+						if !result.Cleaned || len(result.Output) == 0 {
+							t.Fatalf("size result incomplete: %+v", result)
+						}
+					}
+				})
+			}
+		}
+	}
 	// Custom IP mode targets the existing service without acquiring receiver
 	// execution rights, starting a server or stopping the external listener.
 	for _, family := range []int{4, 6} {

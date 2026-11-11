@@ -64,8 +64,9 @@ func (p DiagnosticParameters) Validate(ipv6 bool) error {
 		}
 		max = 1500
 	case "iperf3":
-		min = 1
+		min = 16 // iperf3 UDP timestamps and sequence header
 		if p.Protocol == "tcp" {
+			min = 1
 			max = 1048576
 		}
 	}
