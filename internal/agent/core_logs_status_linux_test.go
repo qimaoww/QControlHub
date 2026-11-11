@@ -122,6 +122,15 @@ func staticCoreLogServiceState(status string) func(string) (string, error) {
 }
 
 func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.T) {
+	for _, firstKind := range []string{core.CoreLogSourceJournal, core.CoreLogSourceJournalHost} {
+		t.Run(firstKind+"-first", func(t *testing.T) {
+			testMissingManagedSingBoxConfigRecovery(t, firstKind)
+		})
+	}
+}
+
+func testMissingManagedSingBoxConfigRecovery(t *testing.T, firstKind string) {
+	t.Helper()
 	installCoreLogJournalFixture(t)
 	logRoot := t.TempDir()
 	previousLogRoot := importedSingBoxLogRoot
@@ -143,7 +152,22 @@ func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.
 	t.Setenv("QCH_TEST_JOURNAL_TRIGGER", trigger)
 	t.Setenv("QCH_TEST_JOURNAL_LINE",
 		`{"MESSAGE":"managed sing-box started","_SYSTEMD_UNIT":"qagent-sing-box.service","PRIORITY":"6","__CURSOR":"first-line-cursor"}`)
+	// Fix each startup order instead of relying on which parallel follower arms
+	// before the configuration refresh. Both are valid console transports.
+	var first, second coreLogJournalSource
+	for _, source := range collector.sources {
+		if source.kind == firstKind {
+			first = source
+		} else {
+			second = source
+		}
+	}
+	if first.kind == "" || second.kind == "" {
+		t.Fatal("missing namespace or host journal source")
+	}
+	collector.sources = []coreLogJournalSource{first}
 	runCoreLogCollector(t, collector)
+	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, firstKind, core.CoreLogStatusWaiting)
 	if err := os.WriteFile(configPath, []byte(`{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +176,25 @@ func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.
 	}
 	status = waitForCoreLogStatus(t, collector, core.EngineSingBox, "waiting after configuration appeared",
 		func(status CoreLogSourceStatus) bool {
-			// The host fallback can arm before the namespace follower. Wait
-			// for the exact source whose readiness is asserted below.
-			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog && status.Source == core.CoreLogSourceJournal
+			return status.Status == core.CoreLogStatusWaiting && status.Error == core.CoreLogErrorAwaitingFirstLog && status.Source == firstKind
 		})
-	if status.Source != core.CoreLogSourceJournal || status.LastAt != nil {
+	if status.Source != firstKind || status.LastAt != nil {
 		t.Fatalf("armed status after configuration appeared = %+v", status)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.runSource(ctx, second); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Error("second journal follower did not stop")
+		}
+	})
+	waitForCoreLogKindStatus(t, collector, core.EngineSingBox, second.kind, core.CoreLogStatusWaiting)
+	if after := collector.Status()[core.EngineSingBox]; after != status {
+		t.Fatalf("quiet second follower replaced the selected source: before=%+v after=%+v", status, after)
 	}
 	if err := os.WriteFile(trigger, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -169,6 +206,10 @@ func TestMissingManagedSingBoxConfigReportsNotConfiguredThenRecovers(t *testing.
 	}
 	if status.LastAt == nil || status.LastAt.Location() != time.UTC {
 		t.Fatalf("last delivery timestamp = %+v, want UTC", status.LastAt)
+	}
+	entry, ok := waitForLine(t, collector, "managed sing-box started")
+	if !ok || entry.InstanceID != "main" || entry.Service != "qagent-sing-box.service" {
+		t.Fatalf("missing main-instance journal delivery: %+v", entry)
 	}
 }
 
