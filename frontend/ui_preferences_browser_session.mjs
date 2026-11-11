@@ -16,7 +16,8 @@ export async function runUIPreferenceSessions({ createPage, login, api, evaluate
   const route = async (page, hash, selector) => {
     await evaluate(page, `location.hash=${JSON.stringify('#'+hash)}`);
     const titles = { traffic:'流量', tasks:'任务', 'core-logs':'日志', 'client-connections':'客户端连接', 'live-config':'实时配置', api:'API', 'node-settings':'节点', dashboard:'仪表盘', users:'用户管理', certificates:'证书', notifications:'通知', 'client-access':'客户端接入', 'substore-sync':'订阅同步', 'ip-quality':'IP 质量', 'system-bbr':'TCP 调优' };
-    await wait(page, `document.title.startsWith(${JSON.stringify(titles[hash.split('?')[0]])}+' ·') && !!document.querySelector(${JSON.stringify(selector)}) && !!document.querySelector('.a-main > .a-stack:not([aria-busy])') && !document.querySelector('#app[aria-busy]')`);
+    const title = hash.startsWith('system-bbr-agent-') ? 'TCP 调优' : titles[hash.split('?')[0]];
+    await wait(page, `document.title.startsWith(${JSON.stringify(title)}+' ·') && !!document.querySelector(${JSON.stringify(selector)}) && !!document.querySelector('.a-main > .a-stack:not([aria-busy])') && !document.querySelector('#app[aria-busy]')`);
   };
   const choose = (page, selector, value) => evaluate(page, `(() => {const input=document.querySelector(${JSON.stringify(selector)});input.type==='checkbox'?input.checked=${JSON.stringify(value)}:input.value=${JSON.stringify(value)};input.dispatchEvent(new Event(input.tagName==='SELECT'||input.type==='checkbox'?'change':'input',{bubbles:true}));})()`);
   await route(a, 'traffic', '[name=search]');
@@ -63,6 +64,7 @@ export async function runUIPreferenceSessions({ createPage, login, api, evaluate
   await choose(a, '.a-target-form [name=agent]', fixture.owned);
   await wait(a, "!!document.querySelector('dialog[open]')");
   await evaluate(a, "[...document.querySelectorAll('dialog[open] button')].find(x=>x.textContent==='取消').click()");
+  await wait(a, `!document.querySelector('dialog[open]') && new URLSearchParams(location.hash.split('?')[1]).get('agent')===${JSON.stringify(fixture.shared)}`);
   assert.equal((await read(a, alice)).values['live-config'].agent, fixture.shared);
   assert.equal(await evaluate(a, "document.querySelector('textarea[name=content]').value"), 'unsaved preference regression draft');
   await choose(a, '.a-target-form [name=agent]', fixture.owned);
@@ -115,9 +117,16 @@ export async function runUIPreferenceSessions({ createPage, login, api, evaluate
   await choose(a, '[name=search]', 'recovered');
   await saved(a, alice, 'traffic', {search:'recovered'});
   record(`${mode}: failed persistence reports truthfully, retains the current control and recovers on the next operation`);
+  if (!mode.endsWith('mobile')) {
+    await evaluate(a, "document.querySelector('[aria-label=切换导航]').click()");
+    await saved(a, alice, 'shell', {collapsed:true});
+    await reload(a); await wait(a, "!!document.querySelector('.a-layout.a-collapsed')");
+    await evaluate(a, "document.querySelector('[aria-label=切换导航]').click()");
+    await saved(a, alice, 'shell', {collapsed:false});
+  }
 
   // Delay the account read without delaying the visible page structure.
-  await evaluate(a, "window.fetch=async(...args)=>{const response=await window.__preferenceFetch(...args);if(String(args[0]).includes('/preferences/ui')&&(!args[1]?.method||args[1].method==='GET'))await new Promise(resolve=>setTimeout(resolve,700));return response;}");
+  await evaluate(a, "window.__preferenceFetch=window.fetch;window.fetch=async(...args)=>{const response=await window.__preferenceFetch(...args);if(String(args[0]).includes('/preferences/ui')&&(!args[1]?.method||args[1].method==='GET'))await new Promise(resolve=>setTimeout(resolve,700));return response;}");
   await route(a, 'node-settings', '[name=search]');
   await choose(a, '[name=search]', 'new input before restoration');
   await saved(a, alice, 'nodes', {search:'new input before restoration'});
@@ -139,6 +148,11 @@ export async function runUIPreferenceSessions({ createPage, login, api, evaluate
   await choose(manager, '[name=query]', 'alice');
   await saved(manager, admin, 'users', {query:'alice'});
   await reload(manager); await wait(manager, "document.querySelector('[name=query]')?.value==='alice'");
+  await route(a, `system-bbr-agent-${fixture.owned}`, '[aria-label="TCP 调优"]');
+  await saved(a, alice, 'tcp', {agent:fixture.owned});
+  await route(a, 'system-bbr', '[aria-label="TCP 调优"]');
+  await wait(a, `document.querySelectorAll('[aria-label="TCP 调优"] tbody tr').length===1`);
+  await route(a, 'traffic', '[name=search]');
   const sharing = await api(manager, admin, 'GET', `/agents/${fixture.shared}/sharing`);
   await api(manager, admin, 'PUT', `/agents/${fixture.shared}/sharing`, {revision:sharing.revision,shares:sharing.shares.map(share=>({username:share.username,engines:share.engines,ports:share.ports,limit_bytes:share.limit_bytes,enabled:share.user_id!==alice.user_id}))});
   await route(a, 'live-config', 'textarea[name=content]');

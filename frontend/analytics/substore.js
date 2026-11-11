@@ -18,7 +18,7 @@ export async function substorePage(ctx) {
   bindPreferenceFields(ctx, 'substore', [root]);
   let serial = 0, dirty = false, refreshView, viewTarget;
   const writable = ctx.can("settings.manage");
-  async function reload(targetID = resource?.target_id) {
+  async function reload(targetID = resource?.target_id, remember = true) {
     const request = ++serial;
     const value = await ctx.api(query("/substore-sync", { target_id: targetID }));
     if (!ctx.current() || serial !== request) return;
@@ -26,7 +26,7 @@ export async function substorePage(ctx) {
     dirty = false;
     ctx.setDirty(false);
     draw();
-    if (targetID !== undefined) ctx.preferences?.patch("substore", { target: value.target_id || "" });
+    if (remember && targetID !== undefined) ctx.preferences?.patch("substore", { target: value.target_id || "" });
   }
   let syncDraft = () => {};
   function markDirty() { syncDraft(); }
@@ -231,9 +231,9 @@ export async function substorePage(ctx) {
     if (!resource && target) {
       const available = await ctx.api('/substore-sync');
       if (!ctx.current()) return;
-      if (list(available.targets).some(item => item.id === target)) await reload(target);
+      if (list(available.targets).some(item => item.id === target)) await reload(target, false);
       else { resource = available; loaded = true; ctx.preferences?.patch('substore', { target: available.target_id || '' }); draw(); }
-    } else await reload(target);
+    } else await reload(target, false);
   }, () => {}, { clear() { resource = null; loaded = false; root.replaceChildren(notice('没有访问订阅同步的权限。')); } });
   const agentRead = readRegion(ctx, '节点信息', signal => ctx.api('/agents', { signal }), value => {
     agents = list(value); agents.forEach(agent => regions.set(agent.id, geoRegionDetails(agent.labels?.region_code || agent.region_code)));

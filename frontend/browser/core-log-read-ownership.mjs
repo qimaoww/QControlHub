@@ -10,12 +10,22 @@ export async function testLogReadOwnership() {
   let sources = ['alpha', 'beta', 'gamma'].map(source), directory = deferred(), order = deferred(), windows = new Map(), denied = false;
   let sourceFailure = 0, orderFailure = 0, windowFailure = 503;
   const calls = [], failedWindows = new Set();
+  let accountPreferences = {values:{}, revision:0};
   const entries = (agent, count) => Array.from({ length: count }, (_, index) => ({ id: index + 1, agent_id: agent, engine: 'xray', instance_id: 'main', level: 'info', message: `${agent} authorized log ${index}`, logged_at: '2026-09-07T00:00:00Z' }));
   const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   globalThis.fetch = async (input, options = {}) => {
     const url = new URL(input instanceof Request ? input.url : input, location.href), path = url.pathname;
     if (path === '/api/v1/auth/session') return reply(session);
     if (path === '/api/v1/settings') return reply({});
+    if (path === '/api/v1/preferences/ui') {
+      if (options.method === 'PATCH') {
+        const patch=JSON.parse(options.body);
+        if(patch.revision!==accountPreferences.revision)return reply({error:'conflict'},409);
+        for(const [page,fields] of Object.entries(patch.values))Object.assign(accountPreferences.values[page] ||= {},fields);
+        accountPreferences.revision++;
+      }
+      return reply(accountPreferences);
+    }
     if (path === '/api/v1/preferences/node-order') { if (order) await order.promise; return reply({ ids: ['gamma', 'beta', 'alpha'], revision: 1 }, orderFailure || 200); }
     if (path === '/api/v1/core-log-sources') {
       const item = { kind: 'directory', signal: options.signal }; calls.push(item);
@@ -39,7 +49,7 @@ export async function testLogReadOwnership() {
   const boot = (hash = '#core-logs', preferences = {}) => {
     window.dispatchEvent(new Event('pagehide'));
     setStorageAccount(session);
-    accountStorage.setItem('qcontrolhub:core-log-preferences', JSON.stringify({ agent_id: 'alpha', limit: 2000, auto_refresh: false, ...preferences }));
+    accountPreferences = {values:{logs:{agent_id:'alpha',automatic:false,...preferences,limit:String(preferences.limit || 2000)}}, revision:1};
     document.body.replaceChildren(Object.assign(document.createElement('div'), { id: 'native-log-read-test' }));
     history.replaceState(null, '', hash);
     startAnalytics({ app: document.querySelector('#native-log-read-test'), session });
@@ -88,13 +98,14 @@ export async function testLogReadOwnership() {
     assert.ok([...document.querySelectorAll('[data-log-filters] button')].some(button => button.textContent === '自动更新'), 'stored preferences resumed a paused session');
     const search = document.querySelector('[data-log-filters] [name=q]');
     search.value = 'alpha'; search.dispatchEvent(new Event('input', { bubbles: true }));
-    await waitFor(() => JSON.parse(accountStorage.getItem('qcontrolhub:core-log-preferences')).q === 'alpha', 'keyword edits were not remembered');
+    await waitFor(() => accountPreferences.values.logs.q === 'alpha', 'keyword edits were not remembered');
     const engine = document.querySelector('[data-log-filters] [name=engine]');
     engine.value = 'xray'; engine.dispatchEvent(new Event('change', { bubbles: true }));
-    assert.equal(JSON.parse(accountStorage.getItem('qcontrolhub:core-log-preferences')).engine, 'xray', 'engine edits were not remembered');
+    await waitFor(() => accountPreferences.values.logs.engine === 'xray', 'engine edits were not remembered');
     [...document.querySelectorAll('[data-log-filters] button')].find(button => button.textContent === '清除筛选').click();
-    const cleared = JSON.parse(accountStorage.getItem('qcontrolhub:core-log-preferences'));
-    assert.ok(cleared.agent_id === 'alpha' && cleared.limit === 2000 && cleared.auto_refresh === false && !cleared.engine && !cleared.q, 'clearing local filters lost the session scope/window/pause');
+    await waitFor(() => accountPreferences.values.logs.q === '' && accountPreferences.values.logs.engine === '', 'cleared filters were not saved');
+    const cleared = accountPreferences.values.logs;
+    assert.ok(cleared.agent_id === 'alpha' && cleared.limit === '2000' && cleared.automatic === false && !cleared.engine && !cleared.q, 'clearing local filters lost the session scope/window/pause');
     location.hash = '#themes'; await waitFor(() => document.querySelector('.a-preview'), 'grant-change route departure failed');
     sources = sources.map(source => ({ ...source, grant_revision: '2' }));
     windows.set('alpha:200', deferred()); windows.set('alpha:2000', deferred());

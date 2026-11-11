@@ -125,7 +125,7 @@ export async function liveConfigPage(ctx) {
   if (!ctx.current()) return page;
   // Reaching this route means unsaved-change navigation was accepted. A
   // cancelled switch never gets here and cannot update the account choice.
-  if (requested || remembered) ctx.preferences?.patch('live-config', { agent: target.id });
+  if (requested || remembered && remembered !== target.id) ctx.preferences?.patch('live-config', { agent: target.id });
   const agent = workspace.agent || target;
   const record = recordFailure;
   if (record) ctx = {...ctx,recordFailure:(error,operation,stage) => record(Object.assign(error,{agentID:agent.id,engine,resource:`/agents/${agent.id}/configs/${engine}`}),operation,stage)};

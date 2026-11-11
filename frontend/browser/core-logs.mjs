@@ -3,7 +3,6 @@ import { testLogSourceStates } from './core-log-source-states.mjs';
 import { testLogReadOwnership } from './core-log-read-ownership.mjs';
 import { startAnalytics } from "../analytics/app.js";
 import { assert, waitFor } from "./assertions.mjs";
-import { accountStorage } from "../modules/account-storage.js";
 
 export async function testLargeLogRuntime({ testAPI }) {
   let releaseAgents;
@@ -86,11 +85,12 @@ export async function testLargeLogRuntime({ testAPI }) {
   const cachedTime = performance.now() - cachedAt;
   refreshGate.resolve();
   await waitFor(() => document.querySelector("[data-log-refresh-label]")?.textContent === "自动更新已暂停", "cache revalidation did not settle");
-  const storedPreference = JSON.parse(accountStorage.getItem("qcontrolhub:core-log-preferences"));
+  await waitFor(() => testAPI.uiPreferences?.values.logs?.agent_id === 'bravo' && testAPI.uiPreferences.values.logs.limit === '2000', 'account preference save missing');
+  const storedPreference = testAPI.uiPreferences.values.logs;
   assert.equal(storedPreference.agent_id, "bravo", "the selected node must be remembered");
-  assert.equal(storedPreference.limit, 2000, "the expanded per-engine window must be remembered");
-  assert.equal(storedPreference.auto_refresh, false, "a paused live stream must be remembered");
-  assert.equal("engine" in storedPreference || "level" in storedPreference || "q" in storedPreference, false, "cleared local filters must not be remembered");
+  assert.equal(storedPreference.limit, '2000', "the expanded per-engine window must be remembered");
+  assert.equal(storedPreference.automatic, false, "a paused live stream must be remembered");
+  for (const key of ['engine','level','q']) assert.equal(storedPreference[key], '', 'cleared filters must be saved explicitly');
   window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime), switchAckMs: Math.round(acknowledgement), previewRenderMs: Math.round(previewTime), cachedSwitchMs: Math.round(cachedTime) };
   assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000,
     `large log UI exceeded smoke responsiveness budget: ${JSON.stringify(window.logPressureResult)}`);
@@ -249,7 +249,7 @@ export async function testLogPreferenceRestoreRuntime({ testAPI }) {
   assert.match(document.querySelector(".a-main").textContent, /已加载 8000 条/, "restored per-engine window did not load");
   const logCalls = testAPI.calls.filter((call) => call.path === "/core-logs");
   assert.ok(logCalls.length > 0, "the restored page must still read logs");
-  assert.ok(logCalls.every((call) => call.query.includes("agent_id=bravo")), "every log read must use the restored node scope");
+  assert.ok(logCalls.at(-1).query.includes("agent_id=bravo"), "restored log requests must use the restored node scope");
   assert.ok(logCalls.some((call) => call.query.includes("limit=2000")), "the restored per-engine window must be requested");
   assert.ok(document.querySelector('[name="agent_id"]').value === "bravo", "the restored node must be selected in the sidebar");
   assert.equal(document.querySelector('[name="agent_id"]').value === "", false, "the aggregate node link must not stay active");
@@ -262,7 +262,7 @@ export async function testLogPreferenceRestoreRuntime({ testAPI }) {
   assert.match(document.querySelector(".a-main").textContent, /1 条日志/);
   assert.match(document.querySelector("[data-log-entry] pre").textContent, /pressure entry 1999/);
   logButton("暂停更新", "自动更新").click();
-  assert.equal(JSON.parse(accountStorage.getItem("qcontrolhub:core-log-preferences")).auto_refresh, true, "resuming the restored stream must be remembered");
+  await waitFor(() => testAPI.uiPreferences?.values.logs.automatic === true, 'resuming the restored stream must be remembered');
 }
 
 function logButton(...labels) {

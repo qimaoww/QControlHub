@@ -75,6 +75,8 @@ func TestAccountUIPreferences(t *testing.T) {
 	}
 	alice.call("PATCH", "/preferences/ui", map[string]any{"values": map[string]any{"logs": map[string]any{"q": "x"}}, "revision": 3, "account_id": bob.userID}, 400, nil)
 	alice.call("PATCH", "/preferences/ui", map[string]any{"values": map[string]any{"logs": map[string]any{"q": "x"}}}, 400, nil)
+	alice.call("PATCH", "/preferences/ui", map[string]any{"values": map[string]any{"nodes": map[string]any{"search": strings.Repeat("x", 17000)}}, "revision": 3}, 400, nil)
+	patch(alice, map[string]any{"nodes": map[string]any{"search": "x"}}, -1, 400)
 	// Owner, shared user, named admin and environment admin have distinct records.
 	host := enrollConfigScopeAPIAgent(t, ctx, db)
 	grantConfigScopeAPIAgent(t, ctx, db, host, alice, 21901)
