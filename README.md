@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 管理 Mihomo、Xray、sing-box 和 Shadowsocks Rust 的安装、配置版本、校验、部署与服务状态。
+- 管理 Mihomo、Xray、sing-box 和 Shadowsocks Rust 的安装、配置档案、校验、部署与服务状态。
 - 通过出站 WSS 接入节点，集中查看运行指标、任务、审计、实时日志和 IPQuality 报告。
 - 生成客户端接入参数、分享链接和原生配置，支持按账号同步到 Sub-Store。
 - 提供多用户工作区、节点共享、独立内核实例、端口授权和流量配额。
@@ -13,10 +13,10 @@
 
 ## 安装
 
-在 Linux 控制面主机执行，按菜单选择内置或外部 PostgreSQL：
+在已具备 Bash、curl 和 CA 证书的 Linux 主机执行，按菜单选择内置或外部 PostgreSQL。安装缺失依赖及启动 Docker 需要 root 或免交互 sudo 权限：
 
 ```bash
-(script=$(mktemp) || exit; trap 'rm -f -- "$script"' EXIT; curl -q --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 60 https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh -o "$script" && QCH_BOOTSTRAP=1 bash "$script")
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
 默认安装到当前目录下的 `qcontrolhub`，可用 `QCH_INSTALL_DIR` 指定目录。安装器保存目录选择，后续运行会复用。管理员令牌只在创建或轮换时显示一次，请妥善保存。
@@ -31,7 +31,7 @@
 bash deploy/quick-start.sh -o update
 ```
 
-更新前备份数据库、`.env` 和 `.secrets/`。更新保留配置和数据；未变化的镜像跳过重建。数据库迁移后的恢复要求见[部署与维护](docs/deployment.md#更新与备份)。
+更新前备份数据库、`.env`、`.secrets/` 和自定义 Compose 文件。更新保留配置和数据；未变化的镜像跳过重建。数据库迁移后的恢复要求见[部署与维护](docs/deployment.md#更新与备份)。
 
 ## 节点接入
 

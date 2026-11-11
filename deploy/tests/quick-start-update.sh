@@ -60,6 +60,9 @@ YAML
     cp "$EXTERNAL_COMPOSE_FILE" "$test_root/expected-compose.yml"
 }
 
+# Command simulations keep probes on the same Docker fixture. The real
+# package/daemon tests exercise the native bounded probe separately.
+docker_probe() { docker "$@"; }
 docker() {
     printf '%s\n' "$*" >> "$QCH_UPDATE_DOCKER_LOG"
     case " $* " in

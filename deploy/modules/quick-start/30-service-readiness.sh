@@ -17,7 +17,7 @@ start_services() {
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
     resolve_bundled_image_refs
     if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
-        if [ "$ACTION" = install ] && ! docker buildx version >/dev/null 2>&1; then
+        if [ "$ACTION" = install ] && ! docker_probe buildx version >/dev/null 2>&1; then
             echo "-> 补齐本地构建所需的 Buildx"
             install_docker_buildx
         fi
@@ -49,7 +49,7 @@ start_external_services() {
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
     if ! start_application_services "${COMPOSE_ARGS[@]}"; then
         show_diagnostics
-        die "Docker Compose 启动失败；请确认已登录 ghcr.io 且镜像可用"
+        die "Docker Compose 启动失败，请检查上述服务日志和就绪检查结果"
     fi
 }
 

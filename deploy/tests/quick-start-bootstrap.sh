@@ -26,17 +26,27 @@ while [ "$#" -gt 0 ]; do
         *) shift ;;
     esac
 done
-if [ "$entry" = true ]; then
-    cat "$QCH_BOOTSTRAP_TEST_SOURCE" > "$output"
+if [ "$entry" = true ] || [ -z "$output" ]; then
+    if [ -n "$output" ]; then
+        cat "$QCH_BOOTSTRAP_TEST_SOURCE" > "$output"
+    else
+        case "${QCH_BOOTSTRAP_TEST_DOWNLOAD_MODE:-complete}" in
+            complete) cat "$QCH_BOOTSTRAP_TEST_SOURCE" ;;
+            empty) : ;;
+            truncated) head -c 20000 "$QCH_BOOTSTRAP_TEST_SOURCE" ;;
+        esac
+    fi
     exit "${QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS:-0}"
 fi
 case "$url" in
     */deploy/quick-start.sh)
         cat > "$output" <<'QUICK_START'
 #!/usr/bin/env bash
+{
 printf '%s\n' "$@" > "$QCH_BOOTSTRAP_TEST_ARGS"
 printf '%s\n' "${QCH_INSTALL_DIR:-}" > "$QCH_BOOTSTRAP_TEST_WORK_DIR"
 exit "${QCH_BOOTSTRAP_TEST_EXIT_STATUS:-0}"
+} # complete quick-start entry
 QUICK_START
         ;;
     */docker-compose.yml)
@@ -129,7 +139,7 @@ cat > "$fake_bin/git" <<'FAKE_GIT'
 set -euo pipefail
 printf '%s\n' "$*" >> "$QCH_BOOTSTRAP_GIT_LOG"
 if [ "${1:-}" = "-C" ] && [ "${3:-}" = "remote" ]; then
-    printf '%s\n' 'https://github.com/qimaoww/qcontrolhub.git'
+    printf '%s\n' "${QCH_BOOTSTRAP_TEST_GIT_ORIGIN:-https://github.com/qimaoww/qcontrolhub.git}"
     exit 0
 fi
 if [ "${1:-}" = "-C" ] && [ "${3:-}" = "symbolic-ref" ]; then
@@ -152,6 +162,24 @@ if grep -Eq -- 'clone|fetch|merge|pull' "$QCH_BOOTSTRAP_GIT_LOG"; then
     exit 1
 fi
 [ -f "$legacy_git_dir/.qcontrolhub-quick-start" ]
+
+# A Git worktree uses a .git file. It follows the same origin, branch and
+# dirty-runtime protections as a normal checkout, rather than nesting an install.
+worktree_git_dir="$test_root/worktree git install"
+mkdir -p "$worktree_git_dir/deploy"
+printf '%s\n' 'gitdir: fixture' > "$worktree_git_dir/.git"
+printf '%s\n' 'name: qcontrolhub' > "$worktree_git_dir/docker-compose.yml"
+printf '%s\n' '# fixture' > "$worktree_git_dir/deploy/quick-start.sh"
+: > "$QCH_BOOTSTRAP_GIT_LOG"
+(
+    cd "$worktree_git_dir"
+    PATH="$fake_bin:$PATH" QCH_BOOTSTRAP_TEST_GIT_ORIGIN=ssh://git@GitHub.com/qimaoww/QControlHub.git \
+        bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+)
+[ ! -e "$worktree_git_dir/qcontrolhub" ]
+[ -f "$worktree_git_dir/.qcontrolhub-quick-start" ]
+grep -Fq -- 'remote get-url origin' "$QCH_BOOTSTRAP_GIT_LOG"
+grep -Fxq -- "$worktree_git_dir" "$QCH_BOOTSTRAP_TEST_WORK_DIR"
 
 # The migration marker makes later runs independent of the now-dirty legacy
 # checkout; Git must not be consulted again.
@@ -184,9 +212,8 @@ producer=$!
 wait "$producer"
 [ ! -s "$test_root/producer.err" ]
 
-# Execute the exact documented download-first entry. A failed download may
-# leave partial source, but it must not be executed. Child exit status survives.
-entry="$(sed -n '/^(script=$(mktemp)/p' "$repo_root/README.md")"
+# Execute the exact README process-substitution entry using the candidate file.
+entry="$(sed -n '/^bash <(curl -fsSL /p' "$repo_root/README.md")"
 [ -n "$entry" ]
 for status in 0 37; do
     export QCH_BOOTSTRAP_TEST_EXIT_STATUS="$status"
@@ -195,11 +222,16 @@ for status in 0 37; do
     [ "$result" -eq "$status" ]
 done
 unset QCH_BOOTSTRAP_TEST_EXIT_STATUS
-rm -f "$QCH_BOOTSTRAP_TEST_ARGS"
-result=0
-PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS=23 \
-    bash -c "$entry" >"$test_root/entry-download-failed.out" 2>&1 || result=$?
-[ "$result" -eq 23 ]
-[ ! -e "$QCH_BOOTSTRAP_TEST_ARGS" ]
+for mode in empty truncated; do
+    rm -f "$QCH_BOOTSTRAP_TEST_ARGS"
+    result=0
+    PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" QCH_BOOTSTRAP_TEST_DOWNLOAD_MODE="$mode" \
+        QCH_BOOTSTRAP_TEST_DOWNLOAD_STATUS=23 bash -c "$entry" >"$test_root/entry-$mode.out" 2>&1 || result=$?
+    # Bash cannot propagate the producer status of <(...). An empty script
+    # returns zero but must never execute installation or print success.
+    [ "$mode" = empty ] || [ "$result" -ne 0 ]
+    [ ! -e "$QCH_BOOTSTRAP_TEST_ARGS" ]
+    ! grep -Eq '部署完成|安装成功|更新完成' "$test_root/entry-$mode.out"
+done
 
 printf '%s\n' 'streamed quick-start bootstrap regression passed'

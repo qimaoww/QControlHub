@@ -31,6 +31,13 @@ if [ "$ACTION" = "uninstall" ] && [ "$FORCE" = true ]; then
 fi
 configure_compose_args
 
+# Validate the path before opening a lock beside existing deployment state.
+[ ! -L "$WORK_DIR/.qcontrolhub-operation.lock" ] || die "部署锁不能是符号链接"
+command -v flock >/dev/null 2>&1 || { [ "$ACTION" = uninstall ] || ensure_install_tools; }
+command -v flock >/dev/null 2>&1 || die "缺少依赖：flock"
+exec 9>>"$WORK_DIR/.qcontrolhub-operation.lock"
+flock -n 9 || die "此安装目录已有部署操作，请等待其完成后重试"
+
 require_commands
 
 # ---- 执行管理操作 ----
@@ -137,3 +144,8 @@ case "$MODE" in
         show_result "部署完成" "$panel_url" "docker compose -p qcontrolhub --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE down"
         ;;
 esac
+
+# Do not resume reading the on-disk script after the parsed command finishes:
+# another bootstrap can have atomically replaced that file during deployment.
+exit 0
+} # complete quick-start entry

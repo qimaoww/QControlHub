@@ -10,4 +10,7 @@
 #   ./deploy/quick-start.sh -m bundled               # 全套部署（内置 PostgreSQL + 控制面和网页服务）
 #   ./deploy/quick-start.sh -m external -d 'postgresql://user:pass@db:5432/qcontrolhub?sslmode=verify-full'
 
+# Parse the complete streamed entry before executing it. Truncation must not
+# bootstrap a second copy or mutate an installation using a partial script.
+{
 set -euo pipefail

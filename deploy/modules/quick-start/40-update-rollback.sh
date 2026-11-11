@@ -83,7 +83,10 @@ show_target_image_version() {
 
 require_update_tools() {
     command -v jq >/dev/null 2>&1 || die "远程镜像检查需要 jq，请先安装 jq"
-    docker buildx version >/dev/null 2>&1 || die "远程镜像检查需要 Docker Buildx，请先安装 Buildx 插件"
+    if ! docker_probe buildx version >/dev/null 2>&1; then
+        echo "-> 补齐远程镜像检查所需的 Buildx"
+        install_docker_buildx
+    fi
 }
 
 normalize_update_platform() {

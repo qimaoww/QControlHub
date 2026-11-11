@@ -2,11 +2,15 @@
 
 ## 安装与 HTTPS
 
-控制面主机需要 Linux、Docker 和 Docker Compose。使用 [README 安装命令](../README.md#安装)，或在源码仓库运行 `bash deploy/quick-start.sh`。安装器支持：
+控制面使用 Linux 上的 Docker Engine 和 Compose v2。入口运行前需具备 Bash、curl、CA 证书和系统基础工具；首次 HTTPS 下载无法由尚未运行的脚本补齐依赖。使用 [README 安装命令](../README.md#安装)，或在源码仓库运行 `bash deploy/quick-start.sh`。安装器支持：
 
 - `bundled`：内置 PostgreSQL。
 - `external`：连接已有 PostgreSQL，可选择已有 Docker 网络。
 - `QCH_INSTALL_DIR`：指定持久安装目录；默认使用已保存的目录或当前目录下的 `qcontrolhub`。
+
+安装操作会复用可访问的 Docker，补齐缺失的 Compose v2。无 Docker 时，从发行版现有软件源安装引擎和 CLI，并通过 systemd 或 Alpine OpenRC 启动；支持 Debian、Ubuntu、Alpine、Fedora 和 openSUSE/SLES 的 x86_64、aarch64 主机，实际可用性取决于该版本的软件源。已有 Docker CE 或手工安装残缺时需修复原来源，不自动替换。远程端点或权限错误不会触发本地引擎安装。缺失基础工具（包括 OpenSSL、jq）由安装或更新操作补齐；包管理需要 root 或免交互 sudo。Buildx 用于本地源码构建和更新时的远程镜像检查。
+
+入口下载失败或没有出现菜单时不要视为安装成功；进程替换不会把 curl 的退出码传给 Bash。排查下载失败可使用本文末尾的临时文件方式，替换为直连 URL。
 
 完整选项通过 `bash deploy/quick-start.sh -h` 查看。远程安装只下载运行脚本和 Compose 文件，不克隆源码。
 
@@ -44,7 +48,7 @@ bash deploy/quick-start.sh -o update
 
 数据库迁移默认允许 5 分钟，安装器每阶段默认等待 360 秒。调高 `QCH_DATABASE_STARTUP_TIMEOUT` 时，同时提高安装器的 `-t SECONDS`。通过容器日志和 `/readyz` 检查迁移进度；健康检查失败时保留数据库卷并排查连接、迁移锁和启动预算。
 
-卸载命令 `bash deploy/quick-start.sh -o uninstall` 保留配置、密钥和数据库卷。
+卸载命令 `bash deploy/quick-start.sh -o uninstall` 停止并移除本项目容器和网络，保留配置、密钥、数据库卷及 Docker。删除数据库卷会永久丢失数据，不能用应用镜像回退恢复。
 
 ## Agent 与内核运行
 

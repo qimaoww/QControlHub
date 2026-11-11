@@ -10,6 +10,9 @@
 #   ./deploy/quick-start.sh -m bundled               # 全套部署（内置 PostgreSQL + 控制面和网页服务）
 #   ./deploy/quick-start.sh -m external -d 'postgresql://user:pass@db:5432/qcontrolhub?sslmode=verify-full'
 
+# Parse the complete streamed entry before executing it. Truncation must not
+# bootstrap a second copy or mutate an installation using a partial script.
+{
 set -euo pipefail
 
 # Public GitHub downloads only. Keep this contract in sync with internal/githubfetch
@@ -354,7 +357,7 @@ bootstrap_streamed_script() {
     if [ -n "${QCH_INSTALL_DIR:-}" ]; then
         install_dir="$QCH_INSTALL_DIR"
         install_dir_source="explicit"
-    elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -d "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
+    elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -e "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
         install_dir="$PWD"
         install_dir_source="current"
     elif persisted_install_dir="$(read_install_dir_preference)" && [ -n "$persisted_install_dir" ]; then
@@ -385,11 +388,11 @@ bootstrap_streamed_script() {
         [ -d "$install_dir" ] || die "安装路径已存在但不是目录：$install_dir"
         if [ -f "$marker_file" ]; then
             :
-        elif [ -d "$install_dir/.git" ]; then
+        elif [ -e "$install_dir/.git" ]; then
             command -v git >/dev/null 2>&1 || die "迁移旧版 Git 安装目录需要 git"
             origin_url="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
-            case "$origin_url" in
-                https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub.git) ;;
+            case "$(printf '%s' "$origin_url" | tr '[:upper:]' '[:lower:]')" in
+                https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub|git@github.com:qimaoww/qcontrolhub.git|ssh://git@github.com/qimaoww/qcontrolhub|ssh://git@github.com/qimaoww/qcontrolhub.git) ;;
                 *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
             esac
             branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -426,6 +429,7 @@ bootstrap_streamed_script() {
     qch_github_download "$base_url/deploy/quick-start.sh" "$script_temp" 2097152 20 || die "下载 quick-start.sh 失败"
     qch_github_download "$base_url/docker-compose.yml" "$compose_temp" 2097152 20 || die "下载 docker-compose.yml 失败"
     bash -n "$script_temp" || die "下载的 quick-start.sh 语法无效"
+    tail -n 1 "$script_temp" | grep -Fxq '} # complete quick-start entry' || die "下载的 quick-start.sh 内容不完整"
     grep -Fq 'name: qcontrolhub' "$compose_temp" || die "下载的 docker-compose.yml 内容无效"
     chmod 0755 "$script_temp"
     chmod 0644 "$compose_temp"
@@ -522,6 +526,42 @@ docker_service_manager() {
     fi
 }
 
+install_debian_docker() {
+    local cli_package packages=() install_options=(--no-upgrade)
+    command -v apt-get >/dev/null 2>&1 || die "系统缺少 apt-get"
+    "${DOCKER_INSTALL_SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
+        -o APT::Update::Error-Mode=any -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update || die "更新 Docker 软件包索引失败"
+    # Debian 13 split /usr/bin/docker out of docker.io. Older Debian
+    # and Ubuntu releases still ship both binaries in docker.io.
+    cli_package=docker.io
+    if apt-cache show docker-cli 2>/dev/null | grep '^Package: docker-cli$' >/dev/null; then
+        cli_package=docker-cli
+    fi
+    if dpkg-query -L docker.io 2>/dev/null | grep -x '/usr/bin/docker' >/dev/null; then
+        cli_package=docker.io
+    fi
+    packages=(docker.io)
+    [ "$cli_package" = docker.io ] || packages+=("$cli_package")
+    # Restore a missing executable even if dpkg considers its package
+    # installed; never reinstall the working daemon to add a split CLI.
+    if dpkg-query -W -f='${Status}' "$cli_package" 2>/dev/null | grep -qx 'install ok installed'; then
+        # apt ignores --reinstall together with --no-upgrade. Pin the
+        # installed version instead so repair cannot upgrade the CLI.
+        install_options=(--reinstall)
+        packages=("$cli_package=$(dpkg-query -W -f='${Version}' "$cli_package")")
+        if ! command -v dockerd >/dev/null 2>&1; then
+            if dpkg-query -W -f='${Status}' docker.io 2>/dev/null | grep -qx 'install ok installed'; then
+                packages+=("docker.io=$(dpkg-query -W -f='${Version}' docker.io)")
+            else
+                packages+=(docker.io)
+            fi
+        fi
+    fi
+    "${DOCKER_INSTALL_SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
+        -o DPkg::Lock::Timeout=30 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+        install -y --no-install-recommends --no-remove "${install_options[@]}" "${packages[@]}" || die "安装 Docker Engine 失败，请检查软件源和网络"
+}
+
 install_docker_engine() {
     local ID=''
     [ "$(uname -s)" = Linux ] || die "自动安装 Docker 仅支持 Linux"
@@ -535,11 +575,7 @@ install_docker_engine() {
     # configuration, or invoking a convenience installer that upgrades Docker.
     case "$ID" in
         debian|ubuntu)
-            command -v apt-get >/dev/null 2>&1 || die "系统缺少 apt-get"
-            "${DOCKER_INSTALL_SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
-                -o APT::Update::Error-Mode=any -o Acquire::Retries=2 update || die "更新 Docker 软件包索引失败"
-            "${DOCKER_INSTALL_SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
-                install -y --no-install-recommends --no-upgrade --no-remove docker.io || die "安装 Docker Engine 失败，请检查软件源和网络"
+            install_debian_docker
             ;;
         alpine)
             command -v apk >/dev/null 2>&1 || die "系统缺少 apk"
@@ -555,16 +591,17 @@ install_docker_engine() {
             ;;
         *) die "当前系统不支持自动安装 Docker，请先配置可用的 Docker Engine" ;;
     esac
-    command -v docker >/dev/null 2>&1 || die "安装后仍未找到 Docker 命令"
+    hash -r
+    command -v docker >/dev/null 2>&1 || die "Docker CLI 软件包安装后仍不可用，请检查包配置状态、/usr/bin/docker 和 PATH"
 }
 
 install_docker_plugin() {
-    local name="$1" url="$2" checksum="$3" temp_file target
+    local name="$1" url="$2" checksum="$3" temp_file target staged_file
     target="/usr/local/lib/docker/cli-plugins/docker-$name"
     [ ! -e "$target" ] && [ ! -L "$target" ] || die "已有 $name 插件不可用，请检查 $target 和 Docker 插件配置"
     docker_install_privileges
     temp_file="$(mktemp)" || die "无法创建 $name 下载临时文件"
-    if ! curl -fL --connect-timeout 20 --max-time 180 --retry 2 "$url" -o "$temp_file"; then
+    if ! qch_github_download "$url" "$temp_file" 134217728 180; then
         rm -f -- "$temp_file"
         die "下载 $name 失败，请检查 GitHub 网络连接"
     fi
@@ -572,13 +609,22 @@ install_docker_plugin() {
         rm -f -- "$temp_file"
         die "$name 下载校验失败"
     fi
-    if ! "${DOCKER_INSTALL_SUDO[@]}" install -d -m 0755 "${target%/*}" ||
-        ! "${DOCKER_INSTALL_SUDO[@]}" install -m 0755 "$temp_file" "$target"; then
+    "${DOCKER_INSTALL_SUDO[@]}" install -d -m 0755 "${target%/*}" || {
+        rm -f -- "$temp_file"; die "安装 $name 失败"
+    }
+    staged_file="$("${DOCKER_INSTALL_SUDO[@]}" mktemp "${target}.tmp.XXXXXX")" || {
+        rm -f -- "$temp_file"; die "安装 $name 失败"
+    }
+    if ! "${DOCKER_INSTALL_SUDO[@]}" install -m 0755 "$temp_file" "$staged_file"; then
+        "${DOCKER_INSTALL_SUDO[@]}" rm -f -- "$staged_file"
         rm -f -- "$temp_file"
         die "安装 $name 失败"
     fi
+    # A concurrent installer can win publication; never overwrite its plugin.
+    "${DOCKER_INSTALL_SUDO[@]}" ln "$staged_file" "$target" 2>/dev/null || true
+    "${DOCKER_INSTALL_SUDO[@]}" rm -f -- "$staged_file"
     rm -f -- "$temp_file"
-    docker "$name" version >/dev/null 2>&1 || die "$name 已安装但不可用，请检查 Docker 插件配置"
+    docker_probe "$name" version >/dev/null 2>&1 || die "$name 已安装但不可用，请检查 Docker 插件配置"
 }
 
 install_docker_compose() {
@@ -601,10 +647,18 @@ install_docker_buildx() {
     install_docker_plugin buildx "https://github.com/docker/buildx/releases/download/v0.29.1/buildx-v0.29.1.linux-$arch" "$checksum"
 }
 
+docker_probe() {
+    if [ "${DOCKER_INSTALL_ELEVATED:-false}" = true ]; then
+        sudo -n timeout 15 docker --host unix:///var/run/docker.sock "$@"
+    else
+        timeout 15 docker "$@"
+    fi
+}
+
 ensure_install_docker() {
     local endpoint manager new_engine=false attempt
-    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        if ! docker compose version >/dev/null 2>&1; then
+    if command -v docker >/dev/null 2>&1 && docker_probe info >/dev/null 2>&1; then
+        if ! docker_probe compose version >/dev/null 2>&1; then
             echo "-> 补齐 Compose v2"
             install_docker_compose
         fi
@@ -614,7 +668,7 @@ ensure_install_docker() {
     # endpoint. Context inspection failures also fail closed.
     if [ -n "${DOCKER_CONTEXT:-}" ] || [ -z "${DOCKER_HOST:-}" ]; then
         if command -v docker >/dev/null 2>&1; then
-            endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" ||
+            endpoint="$(docker_probe context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" ||
                 die "无法读取 Docker context，请检查 Docker 连接配置"
         else
             [ -z "${DOCKER_CONTEXT:-}" ] || die "指定了 Docker context，但未找到 Docker 命令"
@@ -627,8 +681,15 @@ ensure_install_docker() {
         [ "$endpoint" = unix:///var/run/docker.sock ] || die "指定了 Docker 连接地址，但未找到 Docker 命令"
         # An existing daemon without its CLI is an incomplete installation;
         # installing a different engine package could replace its runtime.
-        [ ! -S /var/run/docker.sock ] || die "已有 Docker socket，但缺少 Docker CLI，请修复原安装的软件包"
-        ! command -v dockerd >/dev/null 2>&1 || die "已有 dockerd，但缺少 Docker CLI，请修复原安装的软件包"
+        [ ! -x /usr/bin/docker ] || die "Docker CLI 已存在于 /usr/bin/docker，但当前 PATH 无法找到，请修正 PATH"
+        if [ -S /var/run/docker.sock ] || command -v dockerd >/dev/null 2>&1; then
+            # Only repair a daemon owned by the distribution package. Unknown,
+            # manually installed and Docker CE daemons retain their provenance.
+            command -v dpkg-query >/dev/null 2>&1 &&
+                dpkg-query -W -f='${Status}' docker.io 2>/dev/null | grep -qx 'install ok installed' &&
+                dpkg-query -S "$(command -v dockerd)" 2>/dev/null | grep -q '^docker.io:' ||
+                die "已有 Docker daemon 或 socket，但缺少 CLI；请修复原安装来源的 CLI 软件包"
+        fi
         manager="$(docker_service_manager)" || die "无法自动启动 Docker：需要 systemd 或 Alpine OpenRC"
         docker_install_privileges
         echo "-> 安装 Docker Engine"
@@ -640,6 +701,7 @@ ensure_install_docker() {
         fi
         new_engine=true
         if [ "${#DOCKER_INSTALL_SUDO[@]}" -gt 0 ]; then
+            DOCKER_INSTALL_ELEVATED=true
             # Keep the new root-owned daemon accessible in this process only.
             docker() {
                 local env_name preserved_names=QCH_SOURCE_DIR
@@ -654,7 +716,7 @@ ensure_install_docker() {
             }
         fi
     fi
-    if ! docker info >/dev/null 2>&1; then
+    if ! docker_probe info >/dev/null 2>&1; then
         [ "$endpoint" = unix:///var/run/docker.sock ] || die "Docker 连接失败，请检查连接地址、context 和访问权限"
         if [ "$new_engine" = false ] && [ -S /var/run/docker.sock ]; then
             [ -r /var/run/docker.sock ] && [ -w /var/run/docker.sock ] ||
@@ -668,37 +730,64 @@ ensure_install_docker() {
             if "${DOCKER_INSTALL_SUDO[@]}" systemctl is-active --quiet docker; then
                 [ "$new_engine" = true ] || die "Docker 服务已运行但连接失败，请检查 Docker 权限和连接配置"
             else
-                "${DOCKER_INSTALL_SUDO[@]}" systemctl start docker || die "启动 Docker 服务失败，请检查 systemctl status docker"
+                "${DOCKER_INSTALL_SUDO[@]}" timeout 60 systemctl start docker || die "启动 Docker 服务失败，请检查 systemctl status docker"
             fi
         else
             if "${DOCKER_INSTALL_SUDO[@]}" rc-service docker status >/dev/null 2>&1; then
-                die "Docker 服务已运行但连接失败，请检查 Docker 权限和连接配置"
+                [ "$new_engine" = true ] || die "Docker 服务已运行但连接失败，请检查 Docker 权限和连接配置"
+            else
+                "${DOCKER_INSTALL_SUDO[@]}" timeout 60 rc-service docker start || die "启动 Docker 服务失败，请检查 rc-service docker status"
             fi
-            "${DOCKER_INSTALL_SUDO[@]}" rc-service docker start || die "启动 Docker 服务失败，请检查 rc-service docker status"
         fi
         for attempt in {1..30}; do
-            docker info >/dev/null 2>&1 && break
+            docker_probe info >/dev/null 2>&1 && break
             sleep 1
         done
-        docker info >/dev/null 2>&1 || die "Docker Engine 启动后仍不可访问，请检查服务日志和访问权限"
+        docker_probe info >/dev/null 2>&1 || die "Docker Engine 启动后仍不可访问，请检查服务日志和访问权限"
     fi
-    if ! docker compose version >/dev/null 2>&1; then
+    if ! docker_probe compose version >/dev/null 2>&1; then
         echo "-> 补齐 Compose v2"
         install_docker_compose
     fi
 }
 
+ensure_install_tools() {
+    local ID='' missing=false tool tool_packages=(ca-certificates openssl jq coreutils util-linux)
+    for tool in openssl jq awk mktemp install timeout flock; do
+        command -v "$tool" >/dev/null 2>&1 || missing=true
+    done
+    [ "$missing" = true ] || return 0
+    docker_install_privileges
+    . /etc/os-release
+    case "$ID" in
+        debian|ubuntu)
+            command -v awk >/dev/null 2>&1 || tool_packages+=(mawk)
+            "${DOCKER_INSTALL_SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
+                -o APT::Update::Error-Mode=any -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update || die "更新基础工具索引失败"
+            "${DOCKER_INSTALL_SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get \
+                -o DPkg::Lock::Timeout=30 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+                install -y --no-install-recommends --no-upgrade --no-remove "${tool_packages[@]}" || die "安装基础工具失败"
+            ;;
+        alpine) "${DOCKER_INSTALL_SUDO[@]}" apk add --no-cache ca-certificates openssl jq coreutils util-linux || die "安装基础工具失败" ;;
+        fedora) "${DOCKER_INSTALL_SUDO[@]}" dnf install -y --setopt=install_weak_deps=False ca-certificates openssl jq gawk coreutils util-linux || die "安装基础工具失败" ;;
+        opensuse-leap|opensuse-tumbleweed|sles) "${DOCKER_INSTALL_SUDO[@]}" zypper --non-interactive install --no-recommends ca-certificates openssl jq gawk coreutils util-linux || die "安装基础工具失败" ;;
+        *) die "无法自动补齐基础工具：不支持的系统" ;;
+    esac
+}
+
 require_commands() {
     local command_name
-    for command_name in openssl curl awk mktemp; do
+    [ "$ACTION" = uninstall ] || ensure_install_tools
+    [ "$ACTION" = uninstall ] || command -v jq >/dev/null 2>&1 || die "缺少依赖：jq"
+    for command_name in openssl curl awk mktemp install timeout flock; do
         command -v "$command_name" >/dev/null 2>&1 || die "缺少依赖：$command_name"
     done
     if [ "$ACTION" = install ]; then
         ensure_install_docker
     fi
     command -v docker >/dev/null 2>&1 || die "缺少依赖：docker"
-    docker compose version >/dev/null 2>&1 || die "当前 Docker 未安装 Compose v2（docker compose）"
-    docker info >/dev/null 2>&1 || die "Docker Engine 未运行，请先启动 Docker Engine"
+    docker_probe compose version >/dev/null 2>&1 || die "当前 Docker 未安装 Compose v2（docker compose）"
+    docker_probe info >/dev/null 2>&1 || die "Docker Engine 未运行，请先启动 Docker Engine"
 }
 
 random_hex() {
@@ -1188,7 +1277,7 @@ start_services() {
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
     resolve_bundled_image_refs
     if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
-        if [ "$ACTION" = install ] && ! docker buildx version >/dev/null 2>&1; then
+        if [ "$ACTION" = install ] && ! docker_probe buildx version >/dev/null 2>&1; then
             echo "-> 补齐本地构建所需的 Buildx"
             install_docker_buildx
         fi
@@ -1220,7 +1309,7 @@ start_external_services() {
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
     if ! start_application_services "${COMPOSE_ARGS[@]}"; then
         show_diagnostics
-        die "Docker Compose 启动失败；请确认已登录 ghcr.io 且镜像可用"
+        die "Docker Compose 启动失败，请检查上述服务日志和就绪检查结果"
     fi
 }
 
@@ -1424,7 +1513,10 @@ show_target_image_version() {
 
 require_update_tools() {
     command -v jq >/dev/null 2>&1 || die "远程镜像检查需要 jq，请先安装 jq"
-    docker buildx version >/dev/null 2>&1 || die "远程镜像检查需要 Docker Buildx，请先安装 Buildx 插件"
+    if ! docker_probe buildx version >/dev/null 2>&1; then
+        echo "-> 补齐远程镜像检查所需的 Buildx"
+        install_docker_buildx
+    fi
 }
 
 normalize_update_platform() {
@@ -2330,6 +2422,13 @@ if [ "$ACTION" = "uninstall" ] && [ "$FORCE" = true ]; then
 fi
 configure_compose_args
 
+# Validate the path before opening a lock beside existing deployment state.
+[ ! -L "$WORK_DIR/.qcontrolhub-operation.lock" ] || die "部署锁不能是符号链接"
+command -v flock >/dev/null 2>&1 || { [ "$ACTION" = uninstall ] || ensure_install_tools; }
+command -v flock >/dev/null 2>&1 || die "缺少依赖：flock"
+exec 9>>"$WORK_DIR/.qcontrolhub-operation.lock"
+flock -n 9 || die "此安装目录已有部署操作，请等待其完成后重试"
+
 require_commands
 
 # ---- 执行管理操作 ----
@@ -2436,3 +2535,8 @@ case "$MODE" in
         show_result "部署完成" "$panel_url" "docker compose -p qcontrolhub --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE down"
         ;;
 esac
+
+# Do not resume reading the on-disk script after the parsed command finishes:
+# another bootstrap can have atomically replaced that file during deployment.
+exit 0
+} # complete quick-start entry

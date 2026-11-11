@@ -28,6 +28,10 @@ bundled_image_tag() {
     printf '%s' "$image_tag"
 }
 
+# These CLI regressions simulate Docker commands in this shell. Preserve that
+# boundary through the native probe's timeout wrapper; the bootstrap regression
+# separately verifies a real timeout against a deliberately stalled executable.
+timeout() { shift; "$@"; }
 docker() {
     local image="${*: -1}"
     printf '%s\n' "$*" >> "$QCH_MODES_TEST_LOG"
@@ -109,7 +113,7 @@ docker() {
     esac
 }
 curl() { return 0; }
-export -f docker curl bundled_image_tag
+export -f docker timeout curl bundled_image_tag
 
 export QCH_INSTALL_DIR="$test_root/bundled"
 export QCH_MODES_TEST_LOG="$test_root/bundled.log"
@@ -316,5 +320,18 @@ for network in default shared-edge; do
     grep -Fq '外部 PostgreSQL 数据未被修改' "$test_root/external-$network-uninstall.out"
     cmp "$test_root/external-$network-before.env" "$QCH_INSTALL_DIR/.env"
 done
+
+# A second operation must fail before any Docker call or state mutation.
+: > "$QCH_MODES_TEST_LOG"
+(
+    exec 9>>"$QCH_INSTALL_DIR/.qcontrolhub-operation.lock"
+    flock -n 9
+    if bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/concurrent.out" 2>&1; then
+        printf '%s\n' 'concurrent deployment ignored the operation lock' >&2
+        exit 1
+    fi
+    grep -Fq '此安装目录已有部署操作' "$test_root/concurrent.out"
+)
+[ ! -s "$QCH_MODES_TEST_LOG" ]
 
 printf '%s\n' 'quick-start bundled/external CLI regression passed'
