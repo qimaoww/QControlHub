@@ -594,7 +594,7 @@ export async function tasksPage(ctx) {
     const sequence = ++readSequence;
     try {
       const updateAgents = async () => {
-        if (!ctx.can('agents.read')) { agents = []; delete ctx.state.data.taskAgents; return; }
+        if (!ctx.can('agents.read')) { agents = []; agentsVerified = false; delete ctx.state.data.taskAgents; return; }
         if (Date.now() - agentsLoadedAt < 30000) return;
         if (agentsPending) return agentsPending;
         agentsPending = (async () => {
@@ -605,7 +605,7 @@ export async function tasksPage(ctx) {
         } catch (error) {
           if (error.name === 'AbortError') throw error;
           if (!ctx.current()) return;
-          if (error.status === 403) { agents = []; delete ctx.state.data.taskAgents; }
+          if (error.status === 403) { agents = []; agentsVerified = false; delete ctx.state.data.taskAgents; }
         }
         agentsLoadedAt = Date.now();
         })().finally(() => { agentsPending = null; });
