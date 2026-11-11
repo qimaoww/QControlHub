@@ -87,7 +87,7 @@ export function startAnalytics({ app, session }) {
       preferences?.dispose();
       const bound = preferenceSession = state.session;
       preferences = createUIPreferences({
-        request: (path, options) => accountRequest(path, { ...options, session: bound, isCurrent: () => state.session === bound, onUnauthorized: message => login(message) }),
+        request: (path, options) => accountRequest(path, { ...options, session: bound, isCurrent: () => state.session === bound && !lifetime.signal.aborted, onUnauthorized: message => login(message) }),
         isCurrent: () => state.session === bound && !lifetime.signal.aborted,
         report: message => announce(message, "error"),
       });

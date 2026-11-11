@@ -14,7 +14,7 @@ export async function testSessionErrors(preview = '') {
     if (path === '/auth/session') return session ? reply(session) : reply(expired, 401);
     if (path === '/tasks/failures') { failures++; return reply({ id: 'tsk_unexpected' }); }
     if (path === '/site-branding') return reply({});
-    if (failure && ['/tasks', '/settings', '/ui-preferences'].includes(path)) {
+    if (failure && ['/tasks', '/settings', '/preferences/ui'].includes(path)) {
       if (failure === 'hold') return new Promise(resolve => holds.push({ resolve, signal: options.signal }));
       return reply(failure.body, failure.status);
     }
@@ -90,4 +90,10 @@ export async function testSessionErrors(preview = '') {
   await waitFor(() => app.textContent.includes('权限不足'), 'permission failure was not visible');
   assert.ok(!login(), '403 expired a valid session');
   assert.ok(app.textContent.includes('仅节点所有者可以修改。') && app.textContent.includes('req_permission_fixture'), 'useful diagnostic information was removed');
+  failure = 'hold'; holds = []; start(identity('closing'));
+  await waitFor(() => holds.length >= 3, 'page-lifetime reads were not started');
+  window.dispatchEvent(new Event('pagehide'));
+  for (const request of holds) request.resolve(reply(expired, 401));
+  await delay(100);
+  assert.ok(!login() && !app.textContent.includes('登录已过期'), 'destroyed page accepted a late 401');
 }
