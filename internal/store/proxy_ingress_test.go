@@ -81,7 +81,7 @@ func TestProxyIngressConsentAndDisabledAccountDoNotReviveOldGrant(t *testing.T) 
 	}
 }
 
-func TestProxyIngressMigrationFrom98DefaultsToIsolation(t *testing.T) {
+func TestProxyIngressMigrationFrom99DefaultsToIsolation(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	_, owner := sharedTestUser(t, db, ctx, "migration-owner")
 	user, _ := sharedTestUser(t, db, ctx, "migration-guest")
@@ -99,8 +99,8 @@ func TestProxyIngressMigrationFrom98DefaultsToIsolation(t *testing.T) {
 	 DROP COLUMN proxy_ingress_revision,DROP COLUMN proxy_ingress_applied_revision,
 	 DROP COLUMN proxy_ingress_applied_revoked,DROP COLUMN proxy_ingress_error;
 	 ALTER TABLE agent_shared_instance_ownership DROP COLUMN applied_proxy_ingresses;
-	 DELETE FROM qcontrolhub_schema_migrations WHERE version>=98;
-	 INSERT INTO qcontrolhub_schema_migrations(version) VALUES(98)`); err != nil {
+	 DELETE FROM qcontrolhub_schema_migrations WHERE version>=99;
+	 INSERT INTO qcontrolhub_schema_migrations(version) VALUES(99)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.migrate(ctx); err != nil {
