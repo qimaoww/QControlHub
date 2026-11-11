@@ -123,7 +123,7 @@ type DiagnosticRequest struct {
 
 func DiagnosticAddress(s string) (netip.Addr, error) {
 	a, err := netip.ParseAddr(s)
-	if err != nil || a.Zone() != "" || a.IsLoopback() || a.IsUnspecified() || a.IsMulticast() || a.IsLinkLocalUnicast() || a.Is4In6() {
+	if err != nil || a.Zone() != "" || !a.IsGlobalUnicast() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.Is4In6() {
 		return netip.Addr{}, fmt.Errorf("目标必须是节点已分配的 IPv4/IPv6 单播地址")
 	}
 	return a, nil

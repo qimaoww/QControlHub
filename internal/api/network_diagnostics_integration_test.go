@@ -110,7 +110,7 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	custom.RequestID = "custom-target"
 	custom.Node2 = core.DiagnosticEndpoint{Address: "198.51.100.9"}
 	custom.Parameters.Tool = "ping"
-	for _, target := range []string{"--help", "8.8.8.8\n--tcp", "localhost", "127.0.0.1", "::1", "fe80::1%eth0"} {
+	for _, target := range []string{"--help", "8.8.8.8\n--tcp", "localhost", "127.0.0.1", "::1", "fe80::1%eth0", "255.255.255.255", "0.0.0.0", "224.0.0.1", "ff02::1"} {
 		bad := custom
 		bad.Node2.Address = target
 		alice.call("POST", "/network-diagnostics", bad, 400, nil)
