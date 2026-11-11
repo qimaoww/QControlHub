@@ -57,7 +57,7 @@ func (p DiagnosticParameters) Validate(ipv6 bool) error {
 	case "traceroute", "mtr":
 		min = 28
 		if p.Protocol == "tcp" {
-			min = 40
+			min = 44 // NextTrace v1.7.6 also requires its four-byte TCP probe tag
 		}
 		if ipv6 {
 			min += 20

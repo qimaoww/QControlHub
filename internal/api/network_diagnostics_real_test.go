@@ -249,7 +249,7 @@ func TestNetworkDiagnosticsRealAgents(t *testing.T) {
 			case "traceroute", "mtr":
 				minimum, maximum = 28, 1500
 				if probe[1] == "tcp" {
-					minimum = 40
+					minimum = 44
 				}
 				if family == 6 {
 					minimum += 20

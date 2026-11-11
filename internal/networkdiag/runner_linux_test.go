@@ -89,14 +89,14 @@ func TestBoundedServerAndDurableReplay(t *testing.T) {
 }
 
 func TestCommandValidation(t *testing.T) {
-	p := core.DiagnosticParameters{Tool: "mtr", Protocol: "tcp", Provider: "disable-geoip", Count: 2, IntervalMS: 200, TimeoutMS: 200, MaxHops: 3, Size: 60, Port: 443, Duration: 1, Streams: 1, Bandwidth: 1000}
+	p := core.DiagnosticParameters{Tool: "mtr", Protocol: "tcp", Provider: "disable-geoip", Count: 2, IntervalMS: 200, TimeoutMS: 200, MaxHops: 3, Size: 64, Port: 443, Duration: 1, Streams: 1, Bandwidth: 1000}
 	c := core.DiagnosticCommand{Role: "probe", Source: core.DiagnosticEndpoint{Address: "2001:db8::1"}, Target: core.DiagnosticEndpoint{Address: "2001:db8::2"}, Parameters: p}
 	_, args, e := Args(c)
 	if e != nil {
 		t.Fatal(e)
 	}
 	joined := strings.Join(args, " ")
-	for _, expected := range []string{"--mtr --report", "--tcp", "--port 443", "--psize 60", "--data-provider disable-geoip"} {
+	for _, expected := range []string{"--mtr --report", "--tcp", "--port 443", "--psize 64", "--data-provider disable-geoip"} {
 		if !strings.Contains(joined, expected) {
 			t.Errorf("missing %s: %s", expected, joined)
 		}
@@ -108,7 +108,7 @@ func TestCommandValidation(t *testing.T) {
 		}
 	}
 	c.Target.Address = "2001:db8::2"
-	c.Parameters.Size = 59
+	c.Parameters.Size = 63
 	if _, _, err := Args(c); err == nil {
 		t.Fatal("accepted undersized IPv6 TCP packet")
 	}
