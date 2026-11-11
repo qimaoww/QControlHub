@@ -139,7 +139,7 @@ cat > "$fake_bin/git" <<'FAKE_GIT'
 set -euo pipefail
 printf '%s\n' "$*" >> "$QCH_BOOTSTRAP_GIT_LOG"
 if [ "${1:-}" = "-C" ] && [ "${3:-}" = "remote" ]; then
-    printf '%s\n' 'https://github.com/qimaoww/qcontrolhub.git'
+    printf '%s\n' "${QCH_BOOTSTRAP_TEST_GIT_ORIGIN:-https://github.com/qimaoww/qcontrolhub.git}"
     exit 0
 fi
 if [ "${1:-}" = "-C" ] && [ "${3:-}" = "symbolic-ref" ]; then
@@ -173,7 +173,8 @@ printf '%s\n' '# fixture' > "$worktree_git_dir/deploy/quick-start.sh"
 : > "$QCH_BOOTSTRAP_GIT_LOG"
 (
     cd "$worktree_git_dir"
-    PATH="$fake_bin:$PATH" bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+    PATH="$fake_bin:$PATH" QCH_BOOTSTRAP_TEST_GIT_ORIGIN=ssh://git@GitHub.com/qimaoww/QControlHub.git \
+        bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
 )
 [ ! -e "$worktree_git_dir/qcontrolhub" ]
 [ -f "$worktree_git_dir/.qcontrolhub-quick-start" ]

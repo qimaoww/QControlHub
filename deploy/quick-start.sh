@@ -391,8 +391,8 @@ bootstrap_streamed_script() {
         elif [ -e "$install_dir/.git" ]; then
             command -v git >/dev/null 2>&1 || die "迁移旧版 Git 安装目录需要 git"
             origin_url="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
-            case "$origin_url" in
-                https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub.git) ;;
+            case "$(printf '%s' "$origin_url" | tr '[:upper:]' '[:lower:]')" in
+                https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub|git@github.com:qimaoww/qcontrolhub.git|ssh://git@github.com/qimaoww/qcontrolhub|ssh://git@github.com/qimaoww/qcontrolhub.git) ;;
                 *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
             esac
             branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -1277,7 +1277,7 @@ start_services() {
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
     resolve_bundled_image_refs
     if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
-        if [ "$ACTION" = install ] && ! docker buildx version >/dev/null 2>&1; then
+        if [ "$ACTION" = install ] && ! docker_probe buildx version >/dev/null 2>&1; then
             echo "-> 补齐本地构建所需的 Buildx"
             install_docker_buildx
         fi
