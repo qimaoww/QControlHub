@@ -19,6 +19,7 @@ import "./preset_drafts_smoke.mjs";
 import "./traffic_smoke.mjs";
 import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
+await import("./ui_preferences_smoke.mjs");
 import "./node_order_smoke.mjs";
 import "./panel_metrics_smoke.mjs";
 

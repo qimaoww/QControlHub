@@ -4,6 +4,7 @@ import { mountTheme } from "../modules/theme-lifecycle.js";
 import { createAnalyticsMotion } from "./motion.js";
 import { applyAppearance } from "./appearance.js";
 import { bindSiteLogo, refreshSiteBranding } from "./site-brand.js";
+import { createUIPreferences } from "../modules/ui-preferences.js";
 import { setStorageAccount } from "../modules/account-storage.js";
 import { clearConnectionStorage } from "../modules/client-connection-cache.js";
 import { accountRequest, accountFailureRecorder } from "../modules/account-request.js";
@@ -78,8 +79,21 @@ export function startAnalytics({ app, session }) {
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
   const notifications = createNotifications(presentation);
   const work = node("div", { className: "a-work" });
-  let activeContext;
+  let activeContext, preferences, preferenceSession;
+  function accountPreferences() {
+    if (!preferences || preferenceSession !== state.session) {
+      preferences?.dispose();
+      const bound = preferenceSession = state.session;
+      preferences = createUIPreferences({
+        request: (path, options) => accountRequest(path, { ...options, session: bound, isCurrent: () => state.session === bound, onUnauthorized: message => login(message) }),
+        isCurrent: () => state.session === bound && !lifetime.signal.aborted,
+        report: message => announce(message, "error"),
+      });
+    }
+    return preferences;
+  }
   const shownFailures = new Map();
+  let navigationTouched = false;
   let drawer, shellTitle, navigationToggle, pageActions, refreshButton, pageRefresh;
   document.body.className = "analytics";
   app.replaceChildren(layout);
@@ -120,6 +134,7 @@ export function startAnalytics({ app, session }) {
     return result;
   };
   const watch = createSessionWatch({ api, state, onAccessChanged: () => {
+    preferences?.dispose(); preferences = null;
     routeAbort?.abort();
     reads?.clear();
     state.data.analyticsConnectionCache?.clear();
@@ -303,6 +318,7 @@ export function startAnalytics({ app, session }) {
           navigationToggle.setAttribute("aria-expanded", "true");
         } else {
           layout.classList.toggle("a-collapsed");
+          navigationTouched = true; accountPreferences().patch("shell", { collapsed: layout.classList.contains("a-collapsed") });
           motion?.navigation(layout);
           navigationToggle.setAttribute("aria-expanded", String(!layout.classList.contains("a-collapsed")));
         }
@@ -333,6 +349,7 @@ export function startAnalytics({ app, session }) {
     return true;
   }
   async function refresh() {
+    void preferences?.flush(); void preferences?.ready();
     if (pageRefresh) {
       if (pending || refreshButton.disabled) return;
       const epoch = routeEpoch, read = pageRefresh;
@@ -345,12 +362,16 @@ export function startAnalytics({ app, session }) {
     if (!await leave()) return;
     await render();
   }
+  window.addEventListener("pagehide", () => void preferences?.flush(), { signal: lifetime.signal });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) void preferences?.flush(); }, { signal: lifetime.signal });
   async function logout() {
     if (!await leave()) return;
+    await preferences?.flush();
     await mutate(null, async () => { await api("/auth/logout", { method: "POST", body: {} }); login(); });
   }
   function login(message = "") {
     void refreshSiteBranding();
+    preferences?.dispose(); preferences = null;
     routeAbort?.abort();
     reads?.clear();
     state.data.analyticsConnectionCache?.clear();
@@ -364,7 +385,7 @@ export function startAnalytics({ app, session }) {
     setStorageAccount(null);
     state.data = {};
     shellTitle = navigationToggle = null;
-    layout.classList.remove("a-collapsed");
+    layout.classList.remove("a-collapsed"); navigationTouched = false;
     applyAppearance();
     dirty = false;
     document.querySelectorAll("dialog.a-dialog").forEach(box => box.close());
@@ -418,6 +439,7 @@ export function startAnalytics({ app, session }) {
           main.querySelector(`.a-target-form select[name="${targetControl}"]`)?.focus({preventScroll:true});
       },
       onRefresh(read, { local = false } = {}) { if (!signal.aborted && epoch === routeEpoch) { pageRefresh = read; refreshButton.hidden = local; } },
+      preferences: accountPreferences(),
       api: (path, options = {}) => api(path, { ...options, signal: options.signal || signal }),
       can, session: state.session, signal, state, dialog, confirm, mutate, form, announce, recordFailure,
       motion,
@@ -432,6 +454,11 @@ export function startAnalytics({ app, session }) {
       current: () => !signal.aborted && epoch === routeEpoch && Boolean(state.session),
     };
     activeContext=context;
+    void context.preferences.refresh().then(() => {
+      if (!context.current() || navigationTouched) return;
+      const value = context.preferences.get('shell').collapsed;
+      if (typeof value === 'boolean') { layout.classList.toggle('a-collapsed', value); navigationToggle?.setAttribute('aria-expanded', String(!matchMedia('(max-width: 56rem)').matches && !value)); }
+    });
     try {
       if (entry && route !== "themes" && !can(entry[3])) { stage.replaceChildren(notice("没有访问此页面的权限。")); return; }
       const descriptor = pageModules[route];

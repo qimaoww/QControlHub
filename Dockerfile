@@ -75,7 +75,7 @@ COPY frontend/favicon.svg /usr/share/nginx/html/assets/favicon.svg
 COPY frontend/analytics /usr/share/nginx/html/assets/analytics
 # Keep the shipped shared-module graph aligned with the active theme.
 # frontend/module_policy_test.mjs verifies this list transitively.
-COPY frontend/modules/read-coordinator.js frontend/modules/account-request.js \
+COPY frontend/modules/ui-preferences.js frontend/modules/read-coordinator.js frontend/modules/account-request.js \
     frontend/modules/account-storage.js \
     frontend/modules/agent-address-model.js \
     frontend/modules/agent-batch.js \

@@ -14,10 +14,13 @@ export function trafficTable(columns, { view = 'cards', onViewChange = () => {},
   const listButton = button('列表', () => setView('list'), { 'aria-pressed': String(view === 'list') });
   const tools = actions(cardButton, listButton);
   const switcher = node('div', { className: 'a-probe-toolbar' }, records, tools);
-  function setView(next) {
-    if (next === view || !canSwitch()) return;
+  let viewTouched = false;
+  function setView(next, restoring = false) {
+    if (!canSwitch()) return;
+    if (!restoring) viewTouched = true;
+    if (next === view) { if (!restoring) onViewChange(view, false); return; }
     view = next; cardButton.setAttribute('aria-pressed', String(view === 'cards')); listButton.setAttribute('aria-pressed', String(view === 'list'));
-    onViewChange(view); rows.clear(); body.replaceChildren(); cards.replaceChildren(); paint();
+    onViewChange(view, restoring); rows.clear(); body.replaceChildren(); cards.replaceChildren(); paint();
   }
   const empty = node('p', { className: 'a-empty' });
   const count = muted('');
@@ -64,5 +67,5 @@ export function trafficTable(columns, { view = 'cards', onViewChange = () => {},
     count.textContent = paging.summary();
     previous.disabled = paging.page <= 1; next.disabled = paging.page >= paging.last;
   }
-  return { root, tools, setPageSize: value => paging.setSize(value), update(values, reset, emptyText) { items = values; if (reset) paging.setPage(1); empty.textContent = emptyText; paint(); } };
+  return { root, tools, restoreView(value) { if (!viewTouched) setView(value, true); }, setPageSize: value => paging.setSize(value), update(values, reset, emptyText) { items = values; if (reset) paging.setPage(1); empty.textContent = emptyText; paint(); } };
 }

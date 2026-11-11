@@ -84,8 +84,8 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 		`'live-config': ['configs', 'liveConfigPage']`,
 		`selection.agentId`, `const selectedEngine = selection.engine || "";`,
 		`if (requested && !available.some(agent => agent.id === requested))`,
-		`此节点不可用，或当前账号无权访问。`, `available.find(agent => agent.id === requested)`,
-		`engines.includes(selectedEngine) ? selectedEngine`,
+		`此节点不可用，或当前账号无权访问。`, `available.find(agent => agent.id === preferred)`,
+		`engines.includes(workspaceEngine) ? workspaceEngine`,
 		`/agents/${pathID(target.id)}/configs/${pathID(engine)}`,
 		`const targetField = field('节点', 'agent', ''`,
 	} {

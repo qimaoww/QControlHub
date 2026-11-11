@@ -96,7 +96,7 @@ try {
     return sessionId;
   };
   const login = async (page, username) => {
-    await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value='core logs evidence password'; form.requestSubmit(); })()`);
+    await evaluate(page, `(() => { const form = document.querySelector('#login-form,.a-login form'); form.elements.username.value=${JSON.stringify(username)}; form.elements.token.value=${JSON.stringify(mode.startsWith('ui-preferences') ? 'config scope password fixture' : 'core logs evidence password')}; form.requestSubmit(); })()`);
     await wait(page, "!!document.querySelector('#logout,.a-user')");
     const identity = await evaluate(page, "fetch('/api/v1/auth/session').then(r => r.json())");
     // The shell mounts before the login submission finishes its initial route.
@@ -118,7 +118,10 @@ try {
   };
 
 
-  if (mode.startsWith("connections-")) {
+  if (mode.startsWith("ui-preferences-")) {
+    const { runUIPreferenceSessions } = await import('./ui_preferences_browser_session.mjs');
+    await runUIPreferenceSessions({ createPage, login, api, evaluate, wait, call, reload, fixture, record, screenshot, mode });
+  } else if (mode.startsWith("connections-")) {
     const {runConnectionSessions}=await import('./client_connection_browser_session.mjs');
     await runConnectionSessions({createPage,login,api,evaluate,wait,call,reload,fixture,record});
   } else {

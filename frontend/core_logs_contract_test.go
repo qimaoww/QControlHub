@@ -50,15 +50,15 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 	}
 }
 
-func TestCoreLogPageSelectionPersistsInBrowserStorage(t *testing.T) {
+func TestCoreLogPageSelectionUsesAccountPreferences(t *testing.T) {
 	content := frontendSources(t, "analytics/observability.js", "modules/core-log-selection.js")
 	for _, required := range []string{
 		`createCoreLogSelection({ state: ctx.state`, `selection.restoreSelection()`,
 		`...data.coreLogFilters`, `data.coreLogAutoRefresh !== false`,
-		`selection.rememberSelection()`, `data.coreLogFilters = { ...filters }`,
-		`if (state.data.coreLogFilters) return`, `savedCoreLogPreferences`, `saveCoreLogPreferences`,
-		`filters = normalizeCoreLogScope(filters, sources); remember()`,
-		`automatic = !automatic; remember()`, `page = 0; anchor = null; remember()`,
+		`data.coreLogFilters = { ...filters }`,
+		`if (state.data.coreLogFilters) return`, `storage ? savedCoreLogPreferences(storage, engines)`, `if (!storage) return;`, `bindPreferenceFields(ctx, 'logs'`,
+		`const normalized = normalizeCoreLogScope(filters, sources)`, `filters = normalized; remember()`, `ctx.preferences?.patch('logs', cleared)`,
+		`ctx.preferences?.patch('logs', { automatic })`, `page = 0; anchor = null; remember()`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("native log selection lifecycle missing %q", required)

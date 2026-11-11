@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { geoRegionDetails } from '../modules/region-model.js';
 import { node, button, actions, field, muted, notice, list, pathID } from './ui.js';
 
@@ -63,6 +64,7 @@ export function nodeRegion(ctx, agent, onSaved) {
   });
   const submit = form.querySelector('button[type=submit]');
   const box = ctx.dialog(`${agent.name} · 国家／地区`, form);
+  bindPreferenceFields(ctx, 'node-region', [search], { restore: () => { if (box.open && !loading) draw(); } });
   function select(code) {
     selected = code; changed = selected !== initial; ctx.setDirty(changed);
     automatic.setAttribute('aria-pressed', String(!selected));

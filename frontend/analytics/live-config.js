@@ -81,7 +81,12 @@ export async function liveConfigPage(ctx) {
   void initialRead.load();
   return page;
   async function initialize() {
+  const preferenceRead = ctx.preferences?.ready();
   let agents = ctx.can('agents.read') ? orderNodesBySavedOrder(list(await ctx.api('/agents')), savedNodeOrder()) : [];
+  await preferenceRead;
+  if (!ctx.current()) return page;
+  const remembered = ctx.preferences?.get('live-config').agent || '';
+  const preferred = requested || remembered;
   const orderRead = readRegion(ctx, '节点排序', signal => ctx.api('/preferences/node-order', { signal }), value => {
     if (!agents.length || !selectedAgentID) return;
     agents = orderNodesBySavedOrder(agents, value.ids);
@@ -91,17 +96,26 @@ export async function liveConfigPage(ctx) {
   });
   page.prepend(orderRead.element); void orderRead.load();
   let workspace;
-  if (!ctx.can("agents.read") && requested && engineIDs.includes(selectedEngine)) {
-    workspace = await ctx.api(`/agents/${pathID(requested)}/configs/${pathID(selectedEngine)}/workspace`);
-    agents = [workspace.agent].filter(Boolean);
+  let workspaceEngine = selectedEngine;
+  if (!ctx.can('agents.read') && preferred) {
+    for (const candidate of engineIDs.includes(selectedEngine) ? [selectedEngine] : engineIDs) {
+      try {
+        workspace = await ctx.api(`/agents/${pathID(preferred)}/configs/${candidate}/workspace`);
+        if (!ctx.current()) return page;
+        agents = [workspace.agent].filter(Boolean); workspaceEngine = candidate; break;
+      } catch (error) {
+        if (requested || ![403, 404].includes(error.status)) throw error;
+      }
+    }
   }
+  if (!ctx.can('agents.read') && !requested && preferred && !workspace) ctx.preferences?.patch('live-config', { agent: '' });
   const available = agents.filter(agent => agent.capabilities?.length);
   if (requested && !available.some(agent => agent.id === requested))
     { studioHost.replaceChildren(notice('此节点不可用，或当前账号无权访问。')); sourceBody.replaceChildren(); return page; }
-  const target = available.find(agent => agent.id === requested) || available.find(agent => agent.status === "online" && agent.capabilities.some(id => agent.runtime?.[id]?.installed)) || available.find(agent => agent.status === "online") || available[0];
-  if (!target) { studioHost.replaceChildren(section('节点配置', empty('没有可配置的节点'))); sourceBody.replaceChildren(); return page; }
+  const target = available.find(agent => agent.id === preferred) || available.find(agent => agent.status === "online" && agent.capabilities.some(id => agent.runtime?.[id]?.installed)) || available.find(agent => agent.status === "online") || available[0];
+  if (!target) { if (remembered && !requested && ctx.can('agents.read')) ctx.preferences?.patch('live-config', { agent: '' }); studioHost.replaceChildren(section('节点配置', empty('没有可配置的节点'))); sourceBody.replaceChildren(); return page; }
   const engines = target.capabilities;
-  const engine = engines.includes(selectedEngine) ? selectedEngine : engines.find(id => target.runtime?.[id]?.installed) || engines[0];
+  const engine = engines.includes(workspaceEngine) ? workspaceEngine : engines.find(id => target.runtime?.[id]?.installed) || engines[0];
   const base = `/agents/${pathID(target.id)}/configs/${pathID(engine)}`;
   if (ctx.can("tasks.read")) void mutations.recover(target.id, engine, target.shared_allocation?.id || "");
   selectedAgentID = target.id; selectedEngineID = engine;
@@ -109,6 +123,9 @@ export async function liveConfigPage(ctx) {
   setOptions(engineField, engines.map(id => [id, id]), engine);
   workspace ||= await ctx.api(`${base}/workspace`);
   if (!ctx.current()) return page;
+  // Reaching this route means unsaved-change navigation was accepted. A
+  // cancelled switch never gets here and cannot update the account choice.
+  if (requested || remembered && remembered !== target.id) ctx.preferences?.patch('live-config', { agent: target.id });
   const agent = workspace.agent || target;
   const record = recordFailure;
   if (record) ctx = {...ctx,recordFailure:(error,operation,stage) => record(Object.assign(error,{agentID:agent.id,engine,resource:`/agents/${agent.id}/configs/${engine}`}),operation,stage)};

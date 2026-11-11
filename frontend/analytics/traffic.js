@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable } from "./loading.js";
 import { trafficBatch } from './traffic-batch.js';
 import { trafficSync } from './traffic-sync.js';
@@ -25,10 +26,12 @@ export async function trafficPage(ctx) {
     migrationIDs: ids => { const visible = new Set(mergeTrafficPorts(policies, endpoints).map(trafficCardIdentity)); return ids.filter(id => visible.has(id)); },
   });
   const savedTrafficCardOrder = () => portOrdering.ids();
-  let savedView = 'cards';
-  try { savedView = accountStorage.getItem('qcontrolhub:traffic-view') === 'list' ? 'list' : 'cards'; } catch { /* The view remains usable without storage. */ }
+  const savedView = ctx.preferences?.get('traffic').view || 'cards';
   const policies = [], results = trafficTable(['节点 / 归属', '端口 / 协议', '状态', '累计流量', '累计接收', '累计发送', '操作'], {
-    view: savedView, canSwitch: () => !dragging.active(), onViewChange: view => { pageSize.element.hidden = view !== 'list'; try { accountStorage.setItem('qcontrolhub:traffic-view', view); } catch { /* In-memory view remains selected. */ } },
+    view: savedView, canSwitch: () => !dragging.active(), onViewChange: (view, restoring) => {
+      pageSize.element.hidden = view !== 'list';
+      if (!restoring) ctx.preferences?.patch('traffic', { view });
+    },
   });
   const pageSize = pageSizePreference(ctx, 'traffic', size => results.setPageSize(size));
   pageSize.element.hidden = savedView !== 'list';
@@ -72,6 +75,7 @@ export async function trafficPage(ctx) {
     }));
   }
   function updateAgentFilter() {
+      if (!agentsReady) return;
       const select = agentFilter.querySelector('select'), selected = firstAgent ?? select.value;
       firstAgent = null;
       const ordered = orderNodesBySavedOrder(agents, ordering.ids());
@@ -79,8 +83,11 @@ export async function trafficPage(ctx) {
       if (select.dataset.options !== fingerprint && !select.matches(':open')) {
         select.replaceChildren(select.querySelector('button'), node('option', { value: '' }, '全部节点'),
           ...ordered.map(agent => node('option', { value: agent.id }, nodeName(ctx, agent))));
-        select.value = ordered.some(agent => agent.id === selected) ? selected : '';
         select.dataset.options = fingerprint;
+      }
+      if (!select.matches(':open')) {
+        select.value = ordered.some(agent => agent.id === selected) ? selected : '';
+        if (selected && !select.value) ctx.preferences?.patch('traffic', { agent: '' });
       }
   }
   async function reload({ quiet = false, initial = false } = {}) {
@@ -289,9 +296,25 @@ export async function trafficPage(ctx) {
   reset?.replaceWith(button('重置', () => {
     const defaults = { search: '', scope: 'current', agent: '', engine: '', status: '' };
     for (const root of controls) { const input = root.querySelector('input,select'); input.value = defaults[input.name]; }
-    ctx.state.data.analyticsTrafficFilters = currentFilters(); draw(true);
+    ctx.state.data.analyticsTrafficFilters = currentFilters(); preferenceFields.save(currentFilters()); draw(true);
   }));
-  for (const root of controls) root.addEventListener(root === search ? 'input' : 'change', () => { ctx.state.data.analyticsTrafficFilters = currentFilters(); draw(true); });
+  for (const root of controls) root.addEventListener(root === search ? 'input' : 'change', () => { if (root === agentFilter) firstAgent = null; ctx.state.data.analyticsTrafficFilters = currentFilters(); draw(true); });
+  const preferenceFields = bindPreferenceFields(ctx, 'traffic', controls, {
+    explicit: route.has('agent') ? ['agent'] : [],
+    restore: () => { firstAgent = agentFilter.querySelector('select').value; data.analyticsTrafficFilters = currentFilters(); if (agentsReady) updateAgentFilter(); draw(true); },
+  });
+  const moreToggle = [...toolbar.querySelectorAll('button')].find(control => control.textContent === '更多筛选');
+  const manageToggle = [...toolbar.querySelectorAll('button')].find(control => control.textContent === '管理');
+  let moreTouched = false, manageTouched = false;
+  moreToggle.addEventListener('click', () => { moreTouched = true; ctx.preferences?.patch('traffic', { advanced: !advanced.hidden }); });
+  manageToggle.addEventListener('click', () => { manageTouched = true; ctx.preferences?.patch('traffic', { manage: !manage.hidden }); });
+  void ctx.preferences?.ready().then(() => {
+    if (!ctx.current()) return;
+    const saved = ctx.preferences.get('traffic');
+    if (!moreTouched && Object.hasOwn(saved, 'advanced')) { advanced.hidden = !saved.advanced; moreToggle.setAttribute('aria-expanded', String(saved.advanced)); }
+    if (!manageTouched && Object.hasOwn(saved, 'manage')) { manage.hidden = !saved.manage; manageToggle.setAttribute('aria-expanded', String(saved.manage)); }
+    if (saved.view) results.restoreView(saved.view);
+  });
   ctx.onRefresh(() => reload({ quiet: true }));
   const firstTable = loadingTable(['节点 / 归属', '端口 / 协议', '状态', '累计流量', '累计接收', '累计发送', '操作'], '端口流量');
   const firstRegion = section('端口流量', firstTable);

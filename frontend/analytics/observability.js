@@ -1,6 +1,6 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { sourceStatus } from "./source-status.js";
 import { redactDiagnostic } from "../modules/errors.js";
-import { accountStorage } from "../modules/account-storage.js";
 import { savedNodeOrder, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { coreLogFilterLimits } from "../modules/core-log-preferences.js";
 import { createCoreLogSelection } from '../modules/core-log-selection.js';
@@ -20,14 +20,16 @@ const instanceLabel = source => source?.username && source.instance_id !== "main
 
 export async function logsPage(ctx) {
   const data = ctx.state.data;
-  const selection = createCoreLogSelection({ state: ctx.state, engines, storage: accountStorage });
+  const selection = createCoreLogSelection({ state: ctx.state, engines });
   selection.restoreSelection();
+
   const target = new URLSearchParams(location.hash.split('?')[1] || '');
   if (/^agt_[0-9a-f]{16}$/.test(target.get('agent') || '') && /^shr_[0-9a-f]{16}$/.test(target.get('instance') || '')) {
     data.coreLogFilters = { ...data.coreLogFilters, agent_id: target.get('agent'), instance_id: target.get('instance'),
       engine: engines.includes(target.get('engine')) ? target.get('engine') : '' };
   }
   let filters = { limit: 1000, ...data.coreLogFilters }, automatic = data.coreLogAutoRefresh !== false;
+  let initializing = true;
   let entries = [], sources = [], page = 0, anchor = null, serial = 0, controller, pendingRead, failures = 0, incomplete = false, readState = "loading";
   let signature = data.analyticsLogAccessSignature || "", scope = "", queryFrame, cache = data.analyticsLogCache ||= createCoreLogCache();
   let nodeOrder = savedNodeOrder(), sourceUnavailable = false;
@@ -41,27 +43,28 @@ export async function logsPage(ctx) {
   const previous = button("上一页", () => { page--; anchor = null; draw(); });
   const next = button("下一页", () => { page++; anchor = null; draw(); });
   const pageTools = actions(previous, next);
+  let automaticTouched = false;
   const toggle = button(automatic ? "暂停更新" : "自动更新", () => {
-    automatic = !automatic; remember(); toggle.textContent = automatic ? "暂停更新" : "自动更新";
+    automaticTouched = true; automatic = !automatic; ctx.preferences?.patch('logs', { automatic }); remember(); toggle.textContent = automatic ? "暂停更新" : "自动更新";
     if (automatic) void poller.trigger(); else poller.stop();
     if (!status.hasAttribute("aria-busy") && !failures) status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
   });
   const controls = node("form", { className: "a-stack a-filter-form a-auto-filter", "data-log-filters": "" }, node("div", { className: "a-form-grid" },
-    field("节点", "agent_id", filters.agent_id, { options: [["", "全部获授权节点"]] }),
-    field("使用用户 / 实例", "instance_id", filters.instance_id, { options: [["", "全部授权实例"]] }),
+    field("节点", "agent_id", filters.agent_id, { options: [["", "全部获授权节点"], ...(filters.agent_id ? [[filters.agent_id, '所选节点']] : [])] }),
+    field("使用用户 / 实例", "instance_id", filters.instance_id, { options: [["", "全部授权实例"], ...(filters.instance_id ? [[filters.instance_id, '所选实例']] : [])] }),
     field("内核", "engine", filters.engine, { options: [["", "全部内核"], ...engines] }),
     field("级别", "level", filters.level, { options: [["", "全部级别"], ["info", "信息"], ["warning", "警告"], ["error", "错误"]] }),
     field("关键词", "q", filters.q, { type: "search", maxlength: 120 }),
     field("每内核上限", "limit", filters.limit, { options: coreLogFilterLimits.map(value => [String(value), `${value} 条`]) })),
     actions(button("清除筛选", () => {
       for (const name of ["engine", "level", "q"]) controls.elements[name].value = "";
-      changed();
-    }), toggle, button("刷新", () => { if (automatic) void poller.trigger(); else void load(); })));
+      preferenceFields.save({ engine: '', level: '', q: '' }); changed();
+    }), toggle, button("刷新", () => { void ctx.preferences?.flush(); void ctx.preferences?.ready(); if (automatic) void poller.trigger(); else void load(); })));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild));
   function remember() {
     if (!ctx.current()) return;
     data.coreLogFilters = { ...filters }; data.coreLogAutoRefresh = automatic;
-    selection.rememberSelection();
+
   }
   function options(name, values) {
     const select = controls.elements[name], value = filters[name] || "";
@@ -211,7 +214,10 @@ export async function logsPage(ctx) {
         data.analyticsLogAccessSignature = signature = access; sources = receivedSources;
         sourceUnavailable = false; grants = new Map(sources.map(source => [identity(source), source.owner_id])); directoryReady = true;
         if (fresh) entries = authorized(entries);
-        filters = normalizeCoreLogScope(filters, sources); remember(); sourceOptions();
+        const normalized = normalizeCoreLogScope(filters, sources);
+        const cleared = Object.fromEntries(['agent_id', 'instance_id', 'engine'].filter(name => normalized[name] !== filters[name]).map(name => [name, normalized[name]]));
+        filters = normalized; remember(); sourceOptions();
+        if (Object.keys(cleared).length) ctx.preferences?.patch('logs', cleared);
         if (coreLogScopeKey(filters) !== key) {
           entries = []; incomplete = false; readState = "loading"; abortWindow();
           if (windowComplete) void Promise.resolve(pendingRead).then(() => { if (current()) void load(); });
@@ -288,11 +294,12 @@ export async function logsPage(ctx) {
   }
   const poller = createPoller({ run: load, isActive: () => ctx.current() && automatic && !document.hidden, delay: () => Math.min(60000, 10000 * 2 ** failures) });
   ctx.onRefresh(() => automatic ? poller.trigger() : load(), { local: true });
-  function changed() {
+  function changed(restoring = false) {
+    if (restoring !== true) initializing = false;
     const before = coreLogScopeKey(filters);
     filters = { ...formData(controls), limit: Number(controls.elements.limit.value) };
     page = 0; anchor = null; remember();
-    if (before !== coreLogScopeKey(filters)) { controller?.abort(); serial++; pendingRead = null; scope = ""; entries = []; incomplete = false; readState = "loading"; draw(); void load(); }
+    if (before !== coreLogScopeKey(filters)) { controller?.abort(); serial++; pendingRead = null; scope = ""; entries = []; incomplete = false; readState = "loading"; draw(); if (!initializing) void load(); }
     else { sourceOptions(); draw(); }
   }
   controls.addEventListener("submit", event => { event.preventDefault(); changed(); });
@@ -305,7 +312,23 @@ export async function logsPage(ctx) {
   controls.elements.q.addEventListener("compositionend", () => { cancelAnimationFrame(queryFrame); changed(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) poller.stop(); else if (automatic) void poller.trigger(); }, { signal: ctx.signal });
   ctx.signal.addEventListener("abort", () => { cancelAnimationFrame(queryFrame); controller?.abort(); poller.stop(); }, { once: true });
-  void load().then(() => { if (ctx.current()) poller.start(); });
+  const preferenceFields = bindPreferenceFields(ctx, 'logs', [controls], {
+    explicit: target.has('agent') ? ['agent_id', 'instance_id', 'engine'] : [],
+    restore: () => changed(true),
+  });
+  const automaticReady = ctx.preferences?.ready().then(() => {
+    if (!ctx.current() || automaticTouched) return;
+    const saved = ctx.preferences.get('logs');
+    if (Object.hasOwn(saved, 'automatic')) {
+      automatic = saved.automatic; remember(); toggle.textContent = automatic ? '暂停更新' : '自动更新';
+      if (automatic && !initializing) poller.start(); else poller.stop();
+    }
+  });
+  void Promise.all([preferenceFields.ready, automaticReady]).then(() => {
+    if (!ctx.current()) return;
+    initializing = false;
+    return load().then(() => { if (ctx.current() && automatic) poller.start(); });
+  });
   return stack(filterbar(controls), error,
     section("日志记录", stack(node("div", { className: "a-card-body" }, actions(status, count)), view.root), actions(sourceHeading, pageTools)));
 }

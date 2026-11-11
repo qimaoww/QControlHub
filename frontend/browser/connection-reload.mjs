@@ -24,6 +24,15 @@ export async function bootConnectionReloadFixture() {
     if (path.endsWith('/auth/session')) { value = identity() || { error: '请登录' }; status = config.user ? 200 : 401; }
     else if (path.endsWith('/auth/logout')) { config.user = null; save(); }
     else if (path.endsWith('/auth/login')) { const body = JSON.parse(options.body); config.user = body.username; config.login++; save(); value = identity(); }
+    else if (path.endsWith('/preferences/ui')) {
+      const accounts = config.preferences ||= {};
+      value = accounts[config.user] ||= {values:{},revision:0};
+      if(options?.method==='PATCH') {
+        const patch=JSON.parse(options.body);
+        if(patch.revision!==value.revision) { status=409; value={error:'preference conflict'}; }
+        else { for(const [page,fields] of Object.entries(patch.values))Object.assign(value.values[page] ||= {},fields);value.revision++;save(); }
+      }
+    }
     else if (path.endsWith('/preferences/node-order')) value = { ids: config.order };
     else if (path.endsWith('/preferences/theme')) value = { theme_id: 'analytics' };
     else if (path.endsWith('/client-connections')) {
@@ -33,7 +42,7 @@ export async function bootConnectionReloadFixture() {
 
         const available = config.empty ? [] : records.filter(row => (config.user !== 'shared' || row.agent_id === 'bravo') && (!params.get('agent_id') || params.get('agent_id') === row.agent_id) && (!params.get('engine') || params.get('engine') === row.engine) && (!params.get('client_ip') || params.get('client_ip') === row.client_ip));
         const selected = available.filter(row => !params.get('country_code') || params.get('country_code') === row.location.country_code);
-        const snapshot = { country_codes: [...new Set(available.map(row => row.location.country_code))].sort(), records: params.has('cursor') ? selected.slice(3) : selected.slice(0, 3), ips: selected.length, flows: selected.length * 10001, sources: [...new Set(selected.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: records.find(row => row.agent_id === agent_id).agent_name, status: 'ok', updated_at: records[0].last_seen })), timeline: [], next_cursor: !params.has('cursor') && selected.length > 3 ? 'page-2' : '', cache_scope: scope() };
+        const snapshot = { country_codes: [...new Set(available.map(row => row.location.country_code))].sort(), records: params.has('cursor') ? selected.slice(3) : selected.slice(0, 3), ips: selected.length, flows: selected.length * 10001, sources: [...new Set(records.filter(row => (config.user !== 'shared' || row.agent_id === 'bravo') && (!params.get('agent_id') || params.get('agent_id') === row.agent_id)).map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: records.find(row => row.agent_id === agent_id).agent_name, status: 'ok', updated_at: records[0].last_seen })), timeline: [], next_cursor: !params.has('cursor') && selected.length > 3 ? 'page-2' : '', cache_scope: scope() };
         const token = `fixture:${config.empty}:${config.scope}`;
         snapshot.sync_token = token;
         if (params.get('sync_token') === token) {

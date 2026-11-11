@@ -1,5 +1,6 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable } from "./loading.js";
-import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessExport, clientAccessBatchExport, clientAccessRecordKey, filterClientAccessEntries, normalizeClientAccessFilters, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
+import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessExport, clientAccessBatchExport, clientAccessRecordKey, filterClientAccessEntries, normalizeClientAccessFilters } from '../modules/client-access-model.js';
 import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { accountStorage } from '../modules/account-storage.js';
 import { nodeRegionFlag, nodeName } from './node-region.js';
@@ -13,7 +14,7 @@ export async function clientAccessPage(ctx) {
   const groupAgent = group => agents.find(agent => agent.id === group.agent_id) || { id: group.agent_id, name: group.entries[0].agent_name || group.agent_id, region_code: group.entries[0].region_code || '' };
   const agentOptions = () => [['', '全部节点'], ...groupClientAccessEntries(entries, agents).map(group => [group.agent_id, nodeName(ctx, groupAgent(group))])];
   const agentFilter = field('节点', 'agent', '', { options: agentOptions() });
-  const format = field('导出格式', 'format', loadClientDisplayFormat(), { options: [['url', 'URL'], ['mihomo', 'Mihomo YAML']] });
+  const format = field('导出格式', 'format', 'url', { options: [['url', 'URL'], ['mihomo', 'Mihomo YAML']] });
   const result = node('div', { className: 'a-stack' }, section('接入配置', loadingTable(['入站', '协议', '客户端', '操作'], '客户端接入')));
   const scopes = new Map();
   let readSequence = 0;
@@ -203,7 +204,8 @@ export async function clientAccessPage(ctx) {
     patch(result, node('div', { className: 'a-stack' }, content));
   }
   search.querySelector('input').addEventListener('input', draw);
-  for (const control of [agentFilter, format]) control.querySelector('select').addEventListener('change', () => { saveClientDisplayFormat(format.querySelector('select').value); draw(); });
+  for (const control of [agentFilter, format]) control.querySelector('select').addEventListener('change', () => { draw(); });
+  bindPreferenceFields(ctx, 'client-access', [search, agentFilter, format], { restore: () => { if (loaded) draw(); } });
   const entryRead = readRegion(ctx, '接入配置', reload, () => {}, { view: result, clear() { loaded = true; entries = []; batchCopy.disabled = true; scopes.forEach((_, box) => box.close()); draw(); } });
   const nodeRead = readRegion(ctx, '节点名称', signal => ctx.api('/agents', { signal }), value => { agents = orderNodesBySavedOrder(list(value), ordering.ids()); draw(); }, { clear() { agents = []; draw(); } });
   const orderRead = readRegion(ctx, '节点排序', () => ordering.load(), () => { agents = orderNodesBySavedOrder(agents, ordering.ids()); draw(); });
