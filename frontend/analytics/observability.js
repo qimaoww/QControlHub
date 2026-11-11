@@ -1,6 +1,6 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { sourceStatus } from "./source-status.js";
 import { redactDiagnostic } from "../modules/errors.js";
-import { accountStorage } from "../modules/account-storage.js";
 import { savedNodeOrder, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { coreLogFilterLimits } from "../modules/core-log-preferences.js";
 import { createCoreLogSelection } from '../modules/core-log-selection.js';
@@ -20,8 +20,9 @@ const instanceLabel = source => source?.username && source.instance_id !== "main
 
 export async function logsPage(ctx) {
   const data = ctx.state.data;
-  const selection = createCoreLogSelection({ state: ctx.state, engines, storage: accountStorage });
+  const selection = createCoreLogSelection({ state: ctx.state, engines });
   selection.restoreSelection();
+
   const target = new URLSearchParams(location.hash.split('?')[1] || '');
   if (/^agt_[0-9a-f]{16}$/.test(target.get('agent') || '') && /^shr_[0-9a-f]{16}$/.test(target.get('instance') || '')) {
     data.coreLogFilters = { ...data.coreLogFilters, agent_id: target.get('agent'), instance_id: target.get('instance'),
@@ -41,8 +42,9 @@ export async function logsPage(ctx) {
   const previous = button("上一页", () => { page--; anchor = null; draw(); });
   const next = button("下一页", () => { page++; anchor = null; draw(); });
   const pageTools = actions(previous, next);
+  let automaticTouched = false;
   const toggle = button(automatic ? "暂停更新" : "自动更新", () => {
-    automatic = !automatic; remember(); toggle.textContent = automatic ? "暂停更新" : "自动更新";
+    automaticTouched = true; automatic = !automatic; ctx.preferences?.patch('logs', { automatic }); remember(); toggle.textContent = automatic ? "暂停更新" : "自动更新";
     if (automatic) void poller.trigger(); else poller.stop();
     if (!status.hasAttribute("aria-busy") && !failures) status.textContent = automatic ? "正在实时更新" : "自动更新已暂停";
   });
@@ -55,13 +57,13 @@ export async function logsPage(ctx) {
     field("每内核上限", "limit", filters.limit, { options: coreLogFilterLimits.map(value => [String(value), `${value} 条`]) })),
     actions(button("清除筛选", () => {
       for (const name of ["engine", "level", "q"]) controls.elements[name].value = "";
-      changed();
+      preferenceFields.save({ engine: '', level: '', q: '' }); changed();
     }), toggle, button("刷新", () => { if (automatic) void poller.trigger(); else void load(); })));
   controls.prepend(node("fieldset", { className: "a-form-fields a-stack" }, controls.firstElementChild));
   function remember() {
     if (!ctx.current()) return;
     data.coreLogFilters = { ...filters }; data.coreLogAutoRefresh = automatic;
-    selection.rememberSelection();
+
   }
   function options(name, values) {
     const select = controls.elements[name], value = filters[name] || "";
@@ -211,7 +213,10 @@ export async function logsPage(ctx) {
         data.analyticsLogAccessSignature = signature = access; sources = receivedSources;
         sourceUnavailable = false; grants = new Map(sources.map(source => [identity(source), source.owner_id])); directoryReady = true;
         if (fresh) entries = authorized(entries);
-        filters = normalizeCoreLogScope(filters, sources); remember(); sourceOptions();
+        const normalized = normalizeCoreLogScope(filters, sources);
+        const cleared = Object.fromEntries(['agent_id', 'instance_id', 'engine'].filter(name => normalized[name] !== filters[name]).map(name => [name, normalized[name]]));
+        filters = normalized; remember(); sourceOptions();
+        if (Object.keys(cleared).length) ctx.preferences?.patch('logs', cleared);
         if (coreLogScopeKey(filters) !== key) {
           entries = []; incomplete = false; readState = "loading"; abortWindow();
           if (windowComplete) void Promise.resolve(pendingRead).then(() => { if (current()) void load(); });
@@ -305,6 +310,18 @@ export async function logsPage(ctx) {
   controls.elements.q.addEventListener("compositionend", () => { cancelAnimationFrame(queryFrame); changed(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) poller.stop(); else if (automatic) void poller.trigger(); }, { signal: ctx.signal });
   ctx.signal.addEventListener("abort", () => { cancelAnimationFrame(queryFrame); controller?.abort(); poller.stop(); }, { once: true });
+  const preferenceFields = bindPreferenceFields(ctx, 'logs', [controls], {
+    explicit: target.has('agent') ? ['agent_id', 'instance_id', 'engine'] : [],
+    restore: () => changed(),
+  });
+  void ctx.preferences?.ready().then(() => {
+    if (!ctx.current() || automaticTouched) return;
+    const saved = ctx.preferences.get('logs');
+    if (Object.hasOwn(saved, 'automatic')) {
+      automatic = saved.automatic; remember(); toggle.textContent = automatic ? '暂停更新' : '自动更新';
+      if (automatic) poller.start(); else poller.stop();
+    }
+  });
   void load().then(() => { if (ctx.current()) poller.start(); });
   return stack(filterbar(controls), error,
     section("日志记录", stack(node("div", { className: "a-card-body" }, actions(status, count)), view.root), actions(sourceHeading, pageTools)));

@@ -1,6 +1,9 @@
 package apidoc
 
-import "strings"
+import (
+	"github.com/qimaoww/qcontrolhub/internal/store"
+	"strings"
+)
 
 // These annotations describe validation and protocol semantics that cannot be
 // inferred from a Go field type. Route existence and Key access remain derived
@@ -51,6 +54,11 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["x-resource-scope"] = "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
 	}
 	switch path {
+	case "/api/v1/preferences/ui":
+		op["description"] = "当前认证账号的界面偏好；不接受账号参数。只保存当前值，无历史。PATCH 按页面及字段合并，须提供读取的 revision（首次为 0），冲突返回 409 后重新读取并合并当前修改。资源 ID 仅作选择提示，使用时仍须重新鉴权；实时配置仅允许 agent。请求上限 16384 字节。"
+		if method == "patch" {
+			op["requestBody"] = object{"required": true, "content": object{"application/json": object{"schema": object{"type": "object", "additionalProperties": false, "required": []string{"values", "revision"}, "properties": object{"revision": object{"type": "integer", "minimum": 0}, "values": store.UIPreferenceSchema()}}}}}
+		}
 	case "/api/v1/auth/session", "/api/v1/auth/logout":
 		op["x-authentication"] = "session"
 		op["security"] = []any{object{"session": []string{}}}

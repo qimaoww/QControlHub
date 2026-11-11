@@ -133,7 +133,8 @@ export function apiPage(ctx) {
   let selected = !canManage || requestedDocs ? "docs" : "keys";
   const content = node("div", {}), panels = new Map(), refreshes = new Map();
   const choices = [canManage && ["keys", "密钥"], ["docs", "接口规范"]].filter(Boolean);
-  const controls = choices.map(([id, label]) => button(label, () => select(id), { "aria-pressed": selected === id }));
+  let tabTouched = false;
+  const controls = choices.map(([id, label]) => button(label, () => { tabTouched = true; ctx.preferences?.patch('api', { tab: id }); select(id); }, { "aria-pressed": selected === id }));
   function select(id) {
     selected = id;
     ctx.pageActions(id === "docs" ? link("下载规范", "/api/v1/openapi.json") : link("下载管理 Skill", "/api/v1/management-skill"));
@@ -150,7 +151,13 @@ export function apiPage(ctx) {
     for (const [name, panel] of panels) panel.hidden = name !== id;
     history.replaceState(null, "", id === "docs" ? "#api?tab=docs" : "#api");
   }
+  content.addEventListener('input', () => { tabTouched = true; }, { signal: ctx.signal });
   ctx.onRefresh(() => refreshes.get(selected)?.());
   select(selected);
+  void ctx.preferences?.ready().then(() => {
+    if (!ctx.current() || tabTouched || requestedDocs) return;
+    const saved = ctx.preferences.get('api').tab;
+    if (choices.some(([id]) => id === saved)) select(saved);
+  });
   return stack(actions(...controls), content);
 }

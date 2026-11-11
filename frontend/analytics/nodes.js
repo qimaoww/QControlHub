@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
 import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
@@ -40,6 +41,7 @@ export async function nodesPage(ctx) {
   const guard = createServiceActionGuard(ctx.can);
   const search = field('搜索节点', 'search', '', { type: 'search', placeholder: '名称、节点 ID 或地址' });
   const results = node('div');
+  bindPreferenceFields(ctx, 'nodes', [search], { restore: () => draw(true) });
   const dragging = bindNodeOrdering(ctx, results, {
     enabled: () => true,
     order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),

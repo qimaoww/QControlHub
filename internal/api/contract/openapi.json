@@ -5370,6 +5370,24 @@
           }
         },
         "type": "object"
+      },
+      "store_UIPreferences": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -18122,6 +18140,695 @@
           }
         ],
         "summary": "保存流量排序",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "preferences.write"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/preferences/ui": {
+      "get": {
+        "description": "当前认证账号的界面偏好；不接受账号参数。只保存当前值，无历史。PATCH 按页面及字段合并，须提供读取的 revision（首次为 0），冲突返回 409 后重新读取并合并当前修改。资源 ID 仅作选择提示，使用时仍须重新鉴权；实时配置仅允许 agent。请求上限 16384 字节。",
+        "operationId": "getUIPreferences_api_v1_preferences_ui",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "revision": 1,
+                  "values": {}
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_UIPreferences"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询UIPreferences",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "preferences.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      },
+      "patch": {
+        "description": "当前认证账号的界面偏好；不接受账号参数。只保存当前值，无历史。PATCH 按页面及字段合并，须提供读取的 revision（首次为 0），冲突返回 409 后重新读取并合并当前修改。资源 ID 仅作选择提示，使用时仍须重新鉴权；实时配置仅允许 agent。请求上限 16384 字节。",
+        "operationId": "patchUIPreferences_api_v1_preferences_ui",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "revision": 1,
+                "values": {
+                  "api": {
+                    "api-filter": "example",
+                    "api-group": "",
+                    "tab": "keys"
+                  },
+                  "certificates": {
+                    "search": "example"
+                  },
+                  "client-access": {
+                    "agent": "example",
+                    "format": "url",
+                    "search": "example"
+                  },
+                  "connections": {
+                    "agent_id": "example",
+                    "client_ip": "example",
+                    "country_code": "example",
+                    "date": "example",
+                    "engine": "",
+                    "include_non_public": false,
+                    "period": "day",
+                    "time_mode": "today"
+                  },
+                  "dashboard": {
+                    "traffic_month": "example"
+                  },
+                  "ip-quality": {
+                    "agent": "example",
+                    "date": "example"
+                  },
+                  "live-config": {
+                    "agent": "example"
+                  },
+                  "logs": {
+                    "agent_id": "example",
+                    "automatic": false,
+                    "engine": "",
+                    "instance_id": "example",
+                    "level": "",
+                    "limit": "100",
+                    "q": "example"
+                  },
+                  "node-region": {
+                    "region_search": "example"
+                  },
+                  "nodes": {
+                    "search": "example"
+                  },
+                  "notifications": {
+                    "template_event": "task.failed"
+                  },
+                  "shell": {
+                    "collapsed": false
+                  },
+                  "substore": {
+                    "agent": "example",
+                    "search": "example",
+                    "target": "example"
+                  },
+                  "tasks": {
+                    "action": "",
+                    "agent_id": "example",
+                    "limit": "example",
+                    "status": ""
+                  },
+                  "tcp": {
+                    "agent": "example"
+                  },
+                  "traffic": {
+                    "advanced": false,
+                    "agent": "example",
+                    "engine": "",
+                    "manage": false,
+                    "scope": "current",
+                    "search": "example",
+                    "status": "",
+                    "view": "cards"
+                  },
+                  "users": {
+                    "query": "example"
+                  }
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "values": {
+                    "additionalProperties": false,
+                    "maxProperties": 17,
+                    "minProperties": 1,
+                    "properties": {
+                      "api": {
+                        "additionalProperties": false,
+                        "maxProperties": 3,
+                        "minProperties": 1,
+                        "properties": {
+                          "api-filter": {
+                            "maxLength": 200,
+                            "type": "string"
+                          },
+                          "api-group": {
+                            "enum": [
+                              "",
+                              "配置",
+                              "节点与共享",
+                              "任务与部署",
+                              "证书",
+                              "流量与日志",
+                              "客户端与订阅",
+                              "设置与用户",
+                              "认证与接入"
+                            ],
+                            "type": "string"
+                          },
+                          "tab": {
+                            "enum": [
+                              "keys",
+                              "docs"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "certificates": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "search": {
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "client-access": {
+                        "additionalProperties": false,
+                        "maxProperties": 3,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "format": {
+                            "enum": [
+                              "url",
+                              "mihomo"
+                            ],
+                            "type": "string"
+                          },
+                          "search": {
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "connections": {
+                        "additionalProperties": false,
+                        "maxProperties": 8,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent_id": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "client_ip": {
+                            "description": "IPv4 or IPv6 address, or an empty filter",
+                            "maxLength": 45,
+                            "type": "string"
+                          },
+                          "country_code": {
+                            "description": "Supported country code, or an empty filter",
+                            "maxLength": 2,
+                            "type": "string"
+                          },
+                          "date": {
+                            "maxLength": 10,
+                            "pattern": "^(?:\\d{4}-\\d{2}-\\d{2}|)$",
+                            "type": "string"
+                          },
+                          "engine": {
+                            "enum": [
+                              "",
+                              "mihomo",
+                              "xray",
+                              "sing-box",
+                              "ss-rust"
+                            ],
+                            "type": "string"
+                          },
+                          "include_non_public": {
+                            "type": "boolean"
+                          },
+                          "period": {
+                            "enum": [
+                              "day",
+                              "month"
+                            ],
+                            "type": "string"
+                          },
+                          "time_mode": {
+                            "enum": [
+                              "today",
+                              "month",
+                              "absolute"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "dashboard": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "traffic_month": {
+                            "maxLength": 7,
+                            "pattern": "^\\d{4}-\\d{2}$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "ip-quality": {
+                        "additionalProperties": false,
+                        "maxProperties": 2,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "date": {
+                            "maxLength": 10,
+                            "pattern": "^(?:\\d{4}-\\d{2}-\\d{2}|)$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "live-config": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "logs": {
+                        "additionalProperties": false,
+                        "maxProperties": 7,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent_id": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "automatic": {
+                            "type": "boolean"
+                          },
+                          "engine": {
+                            "enum": [
+                              "",
+                              "mihomo",
+                              "xray",
+                              "sing-box",
+                              "ss-rust"
+                            ],
+                            "type": "string"
+                          },
+                          "instance_id": {
+                            "maxLength": 20,
+                            "pattern": "^(?:main|shr_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "level": {
+                            "enum": [
+                              "",
+                              "info",
+                              "warning",
+                              "error"
+                            ],
+                            "type": "string"
+                          },
+                          "limit": {
+                            "enum": [
+                              "100",
+                              "200",
+                              "500",
+                              "1000",
+                              "2000"
+                            ],
+                            "type": "string"
+                          },
+                          "q": {
+                            "maxLength": 120,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "node-region": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "region_search": {
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "nodes": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "search": {
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "notifications": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "template_event": {
+                            "enum": [
+                              "task.failed",
+                              "agent.offline",
+                              "agent.online",
+                              "traffic.quota",
+                              "traffic.warning",
+                              "speed.high",
+                              "speed.low",
+                              "speed.recovered",
+                              "panel.update"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "shell": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "collapsed": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "substore": {
+                        "additionalProperties": false,
+                        "maxProperties": 3,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "search": {
+                            "maxLength": 200,
+                            "type": "string"
+                          },
+                          "target": {
+                            "maxLength": 20,
+                            "pattern": "^(?:sst_[0-9a-f]{16}|sst_default|)$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "tasks": {
+                        "additionalProperties": false,
+                        "maxProperties": 4,
+                        "minProperties": 1,
+                        "properties": {
+                          "action": {
+                            "enum": [
+                              "",
+                              "validate",
+                              "deploy",
+                              "install",
+                              "uninstall",
+                              "start",
+                              "stop",
+                              "restart",
+                              "status",
+                              "upgrade-agent",
+                              "ip-quality",
+                              "enable-bbr",
+                              "disable-bbr",
+                              "configure-tcp",
+                              "panel-failure"
+                            ],
+                            "type": "string"
+                          },
+                          "agent_id": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "limit": {
+                            "maxLength": 3,
+                            "pattern": "^(?:[1-9][0-9]?|[1-4][0-9]{2}|500)$",
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "",
+                              "pending",
+                              "running",
+                              "succeeded",
+                              "failed",
+                              "canceled"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "tcp": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "agent": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "traffic": {
+                        "additionalProperties": false,
+                        "maxProperties": 8,
+                        "minProperties": 1,
+                        "properties": {
+                          "advanced": {
+                            "type": "boolean"
+                          },
+                          "agent": {
+                            "maxLength": 20,
+                            "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          },
+                          "engine": {
+                            "enum": [
+                              "",
+                              "mihomo",
+                              "xray",
+                              "sing-box",
+                              "ss-rust"
+                            ],
+                            "type": "string"
+                          },
+                          "manage": {
+                            "type": "boolean"
+                          },
+                          "scope": {
+                            "enum": [
+                              "current",
+                              "all"
+                            ],
+                            "type": "string"
+                          },
+                          "search": {
+                            "maxLength": 200,
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "",
+                              "active",
+                              "metering",
+                              "blocked",
+                              "waiting",
+                              "stopped",
+                              "offline",
+                              "error"
+                            ],
+                            "type": "string"
+                          },
+                          "view": {
+                            "enum": [
+                              "cards",
+                              "list"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "users": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "query": {
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "values",
+                  "revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "revision": 1,
+                  "values": {}
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_UIPreferences"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "patchUIPreferences",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",

@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable } from "./loading.js";
 import { editUserAllocations } from "./user-allocations.js";
 import { userPermissions, defaultPermissions, userActionRestriction } from "../modules/user-model.js";
@@ -123,6 +124,7 @@ export async function usersPage(ctx) {
   query.querySelector("input").addEventListener("input", draw);
   ctx.pageActions(button("创建用户", () => edit(), { tone: "primary" }));
   ctx.onRefresh(loading.load);
+  bindPreferenceFields(ctx, "users", [query], { restore: draw });
   return stack(filterbar(query), loading.element,
     section(null, results));
 }

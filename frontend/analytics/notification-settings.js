@@ -230,6 +230,7 @@ export function notificationsPage(ctx) {
     testChannel.disabled = !choices.length;
     testChannel.value = config.channels.some(ch => ch.enabled && ch.id === selected) ? selected : "";
   }
+  let templateTouched = false;
   const templateEvent = field("事件", "template_event", "agent.offline", { options: Object.entries(resource.events) });
   const selection = templateEvent.querySelector("select");
   const title = field("标题", "title", "", { maxlength: 400, required: true, disabled: !writable });
@@ -241,7 +242,7 @@ export function notificationsPage(ctx) {
   const testChannel = testChannelField.querySelector("select");
   let previewSequence = 0;
   function loadTemplate() { previewSequence++; const t = config.templates?.[selection.value] || resource.defaults[selection.value]; title.querySelector("input").value = t.title; body.querySelector("textarea").value = t.body; format.value = t.format || "text"; preview.textContent = ""; templateDirty = false; syncDirty(); }
-  selection.addEventListener("change", async () => { if (templateDirty && !await ctx.confirm("放弃当前模板草稿？", "切换模板")) { selection.value = templateForm.dataset.event; return; } templateForm.dataset.event = selection.value; loadTemplate(); });
+  selection.addEventListener("change", async () => { templateTouched = true; if (templateDirty && !await ctx.confirm("放弃当前模板草稿？", "切换模板")) { selection.value = templateForm.dataset.event; return; } templateForm.dataset.event = selection.value; loadTemplate(); ctx.preferences?.patch("notifications", { template_event: selection.value }); });
   function showPreview(result) {
     let offset = result.title.length + 2;
     const lines = result.body.split("\n").map(line => {
@@ -293,6 +294,11 @@ export function notificationsPage(ctx) {
   templateForm.addEventListener("change", changedTemplate);
   if (!writable) templateForm.querySelector('button[type="submit"]').remove();
   loadTemplate();
+  void ctx.preferences?.ready().then(() => {
+    if (!ctx.current() || templateDirty || templateTouched) return;
+    const saved = ctx.preferences.get('notifications').template_event;
+    if (saved && Object.hasOwn(resource.events, saved)) { selection.value = saved; templateForm.dataset.event = saved; loadTemplate(); }
+  });
   function renderRecords(result) {
       clearTimeout(pollTimer); pollFailures = 0;
       records.updateRows(result.map(d => [node("div", { "data-delivery-id": d.id }, node("div", {}, date(d.created_at)), muted(`更新：${date(d.updated_at)}`)), badge(d.event.test ? `测试${resource.events[d.event.type] ? ` · ${resource.events[d.event.type]}` : ""}` : resource.events[d.event.type] || d.event.type),

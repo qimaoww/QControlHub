@@ -63,6 +63,8 @@ var apiKeyPolicies = map[string]apiKeyPolicy{
 	"GET /api/v1/metrics/{id}":                                                {Write: false, Any: false, Permissions: []core.Permission{core.PermissionMetricsRead}},
 	"GET /api/v1/overview":                                                    {Write: false, Any: false, Permissions: []core.Permission{core.PermissionOverviewRead}},
 	"GET /api/v1/panel-metrics":                                               {Write: false, Any: false, Permissions: []core.Permission{core.PermissionPanelMetricsRead}},
+	"GET /api/v1/preferences/ui":                                              {Write: false, Permissions: []core.Permission{core.PermissionPreferencesRead}},
+	"PATCH /api/v1/preferences/ui":                                            {Write: true, Permissions: []core.Permission{core.PermissionPreferencesWrite}},
 	"GET /api/v1/preferences/node-order":                                      {Write: false, Any: false, Permissions: []core.Permission{core.PermissionPreferencesRead}},
 	"GET /api/v1/preferences/node-view":                                       {Write: false, Any: false, Permissions: []core.Permission{core.PermissionPreferencesRead}},
 	"GET /api/v1/preferences/theme":                                           {Write: false, Any: false, Permissions: []core.Permission{core.PermissionPreferencesRead}},

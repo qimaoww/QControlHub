@@ -13,10 +13,12 @@ export function trafficTable(columns, { view = 'cards', onViewChange = () => {},
   const listButton = button('列表', () => setView('list'), { 'aria-pressed': String(view === 'list') });
   const tools = actions(cardButton, listButton);
   const switcher = node('div', { className: 'a-probe-toolbar' }, records, tools);
-  function setView(next) {
+  let viewTouched = false;
+  function setView(next, restoring = false) {
     if (next === view || !canSwitch()) return;
+    if (!restoring) viewTouched = true;
     view = next; cardButton.setAttribute('aria-pressed', String(view === 'cards')); listButton.setAttribute('aria-pressed', String(view === 'list'));
-    onViewChange(view); rows.clear(); body.replaceChildren(); cards.replaceChildren(); paint();
+    if (!restoring) onViewChange(view); rows.clear(); body.replaceChildren(); cards.replaceChildren(); paint();
   }
   const empty = node('p', { className: 'a-empty' });
   const count = muted('');
@@ -63,5 +65,5 @@ export function trafficTable(columns, { view = 'cards', onViewChange = () => {},
     count.textContent = `第 ${page} / ${last} 页`;
     previous.disabled = page <= 1; next.disabled = page >= last;
   }
-  return { root, tools, update(values, reset, emptyText) { items = values; if (reset) page = 1; empty.textContent = emptyText; paint(); } };
+  return { root, tools, restoreView(value) { if (!viewTouched) setView(value, true); }, update(values, reset, emptyText) { items = values; if (reset) page = 1; empty.textContent = emptyText; paint(); } };
 }

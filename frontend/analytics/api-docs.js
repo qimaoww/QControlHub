@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion } from './loading.js';
 import { node, stack, section, table, field, code, muted, badge } from './ui.js';
 
@@ -73,6 +74,7 @@ export function apiDocsPage(ctx) {
     results.replaceChildren(...(sections.length ? sections : [muted('没有匹配的接口')]));
   }
   for (const control of [search, category]) control.addEventListener(control === search ? 'input' : 'change', draw);
+  bindPreferenceFields(ctx, 'api', [search, category], { restore: draw });
   const read = readRegion(ctx, '接口', signal => ctx.api('/openapi.json', { signal }), value => { specification = value; draw(); }, { clear() { specification = null; results.replaceChildren(); } });
   ctx.onRefresh(read.load); void read.load();
   return stack(node('div', { className: 'a-filterbar' }, node('div', { className: 'a-filter-fields' }, search, category)), read.element, results,

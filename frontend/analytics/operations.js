@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable, dialogContext, preparedDialog } from "./loading.js";
 import { quotaInvitations } from "./invitations.js";
 import { listen, patch, poll } from "./live-dom.js";
@@ -181,6 +182,11 @@ export async function dashboardPage(ctx) {
     ctx.state.data.dashboardMonth = month;
     void read("traffic", query("/traffic-usage", { month }), true);
   });
+  bindPreferenceFields(ctx, 'dashboard', [monthField], { restore: () => {
+    if (!monthInput.checkValidity()) return;
+    month = monthInput.value; ctx.state.data.dashboardMonth = month;
+    void read('traffic', query('/traffic-usage', { month }), true);
+  } });
   const detailTable = table(["日期", "接收", "发送", "合计", "接收峰值", "发送峰值"], [], { label: "每日流量明细", paginate: 10, rowKey: row => row[0] });
   const detailPeriod = muted("");
   let trafficDialog;
@@ -479,13 +485,17 @@ export async function tasksPage(ctx) {
     return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
   };
   let readSequence = 0, filtering = false, tasksLoaded = false;
-  let agents = [], agentsLoadedAt = -Infinity, lastTasks = [], agentsPending;
+  let agents = [], agentsLoadedAt = -Infinity, lastTasks = [], agentsPending, agentsVerified = false;
   const agentField = field('节点', 'agent_id', filters.agent_id || '', { options: [['', '全部节点'], ...(filters.agent_id ? [[filters.agent_id, filters.agent_id]] : [])] });
   const agentPicker = agentField.querySelector('select');
   let agentSignature;
   function syncAgents() {
-    const selected = agentPicker.value;
+    let selected = agentPicker.value;
     const choices = ctx.can('agents.read') ? agents : [...new Set(lastTasks.map(task => task.agent_id))].map(id => ({ id, name: id }));
+    if (selected && agentsVerified && !choices.some(agent => agent.id === selected)) {
+      selected = ''; agentPicker.value = ''; preferenceFields.save({ agent_id: '' });
+      queueMicrotask(() => { if (ctx.current()) filter.requestSubmit(); });
+    }
     const options = [['', '全部节点'], ...choices.map(agent => [agent.id, agent.name])];
     if (selected && !choices.some(agent => agent.id === selected)) options.push([selected, selected]);
     const signature = JSON.stringify(options);
@@ -508,6 +518,12 @@ export async function tasksPage(ctx) {
       ctx.state.data.taskFilters = values; draw(tasks);
     } finally { if (sequence === readSequence) filtering = false; }
   }, { status: "", agent_id: "", action: "", limit: "100" });
+  const preferenceFields = bindPreferenceFields(ctx, 'tasks', [filter], { restore: () => {
+    preferencesAdopted = true; queryTouched = true;
+    ctx.state.data.taskFilters = Object.fromEntries(new FormData(filter));
+    filter.requestSubmit();
+  } });
+  filter.addEventListener('reset', () => queueMicrotask(() => preferenceFields.save(Object.fromEntries(new FormData(filter)))));
   filter.addEventListener('input', () => { queryTouched = true; });
   filter.addEventListener('change', () => { queryTouched = true; });
   const results = node("div");
@@ -585,7 +601,7 @@ export async function tasksPage(ctx) {
         try {
           const latest = await readOrderedNodes(ctx.api);
           if (!ctx.current()) return;
-          agents = latest; ctx.state.data.taskAgents = agents; syncAgents(); if (lastTasks.length) draw(lastTasks);
+          agents = latest; agentsVerified = true; ctx.state.data.taskAgents = agents; syncAgents(); if (lastTasks.length) draw(lastTasks);
         } catch (error) {
           if (error.name === 'AbortError') throw error;
           if (!ctx.current()) return;

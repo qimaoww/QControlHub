@@ -1,3 +1,4 @@
+import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingForm, loadingTable, preparedDialog } from "./loading.js";
 import { patch, listen } from "./live-dom.js";
 import { subStoreSelectionPayload, subStoreAddressChoices, groupSubStoreProfiles, filterSubStoreProfiles } from "../modules/substore-model.js";
@@ -14,6 +15,7 @@ export async function substorePage(ctx) {
   let order = savedNodeOrder();
   const root = stack(section('Sub-Store', node('div', { className: 'a-card-body' }, loadingForm(['同步组', '连接设置'], '保存连接'))),
     section('同步节点', stack(node('div', { className: 'a-card-body' }, field('搜索节点', 'search', '', { type: 'search' }), field('节点', 'agent', '', { options: [['', '全部节点']], disabled: true })), loadingTable(['选择', '节点', '内核 / 入站', '同步名称', '地址', '状态'], '同步节点'))));
+  bindPreferenceFields(ctx, 'substore', [root]);
   let serial = 0, dirty = false, refreshView, viewTarget;
   const writable = ctx.can("settings.manage");
   async function reload(targetID = resource?.target_id) {
@@ -24,6 +26,7 @@ export async function substorePage(ctx) {
     dirty = false;
     ctx.setDirty(false);
     draw();
+    if (targetID !== undefined) ctx.preferences?.patch("substore", { target: value.target_id || "" });
   }
   let syncDraft = () => {};
   function markDirty() { syncDraft(); }
@@ -101,6 +104,7 @@ export async function substorePage(ctx) {
         sync.disabled = !target || !resource.settings?.configured || dirty || selected.some(unavailable) || !(selected.length || target?.last_synced_at);
       }
     };
+    bindPreferenceFields(ctx, 'substore', [search, agentFilter], { restore: () => drawRows() });
     function drawRows() {
       const q = search.querySelector("input").value.toLowerCase();
       const visible = filterSubStoreProfiles(profiles, agentFilter.querySelector("select").value, q);
@@ -220,7 +224,16 @@ export async function substorePage(ctx) {
   }
   const resourceRead = readRegion(ctx, '订阅同步', async () => {
     if (dirty) { ctx.announce('当前同步选择尚未保存。', 'error'); return; }
-    await reload();
+    await ctx.preferences?.ready();
+    if (!ctx.current()) return;
+    const target = resource?.target_id ?? ctx.preferences?.get('substore').target;
+    // First fetch validates membership; a missing saved target falls back once.
+    if (!resource && target) {
+      const available = await ctx.api('/substore-sync');
+      if (!ctx.current()) return;
+      if (list(available.targets).some(item => item.id === target)) await reload(target);
+      else { resource = available; loaded = true; ctx.preferences?.patch('substore', { target: available.target_id || '' }); draw(); }
+    } else await reload(target);
   }, () => {}, { clear() { resource = null; loaded = false; root.replaceChildren(notice('没有访问订阅同步的权限。')); } });
   const agentRead = readRegion(ctx, '节点信息', signal => ctx.api('/agents', { signal }), value => {
     agents = list(value); agents.forEach(agent => regions.set(agent.id, geoRegionDetails(agent.labels?.region_code || agent.region_code)));
