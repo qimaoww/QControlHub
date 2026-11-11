@@ -243,7 +243,8 @@ async function testTrafficScopeAndFormContracts(testAPI) {
   assert.equal(form.elements.agent_id.value, first, 'new quota inherited the previous dialog node');
   assert.equal([...form.elements.engine.options].map(option => option.value).join(','), testAPI.agents.find(value => value.id === first).capabilities.join(','), 'new quota inherited the previous node engines');
   box.close(); await waitFor(() => !box.isConnected, 'new quota dialog did not dispose');
-  assert.ok(!testAPI.calls.some(call => call.method !== 'GET'), 'rendering or cancelling quota wrote data');
+  assert.ok(testAPI.calls.filter(call => call.method !== 'GET').every(call => call.method === 'PATCH' && call.path === '/preferences/ui'), 'rendering or cancelling quota wrote business data');
+  await waitFor(() => testAPI.uiPreferences?.values.traffic?.scope === 'current', 'scope choices were not saved as account preferences');
   button('管理').click();
   button('批量操作').click();
   box = document.querySelector('dialog[open]');

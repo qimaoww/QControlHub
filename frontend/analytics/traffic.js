@@ -75,9 +75,11 @@ export async function trafficPage(ctx) {
       if (select.dataset.options !== fingerprint && !select.matches(':open')) {
         select.replaceChildren(select.querySelector('button'), node('option', { value: '' }, '全部节点'),
           ...ordered.map(agent => node('option', { value: agent.id }, nodeName(ctx, agent))));
+        select.dataset.options = fingerprint;
+      }
+      if (!select.matches(':open')) {
         select.value = ordered.some(agent => agent.id === selected) ? selected : '';
         if (selected && !select.value) ctx.preferences?.patch('traffic', { agent: '' });
-        select.dataset.options = fingerprint;
       }
   }
   async function reload({ quiet = false, initial = false } = {}) {

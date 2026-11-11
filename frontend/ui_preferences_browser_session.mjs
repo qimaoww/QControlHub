@@ -142,6 +142,12 @@ export async function runUIPreferenceSessions({ createPage, login, api, evaluate
   await wait(a, "document.querySelector('dialog[open] [name=region_search]')?.value==='United'");
   await evaluate(a, "document.querySelector('dialog[open] [aria-label=关闭]').click()");
   await route(a, 'traffic', '[name=search]');
+  const invalidPreference = await read(a, alice);
+  await api(a, alice, 'PATCH', '/preferences/ui', {revision:invalidPreference.revision,values:{traffic:{agent:'agt_0000000000000000'}}});
+  await route(a, 'tasks', '[name=action]');
+  await route(a, 'traffic', '[name=search]');
+  await saved(a, alice, 'traffic', {agent:''});
+  assert.equal(await evaluate(a, "document.querySelector('[name=agent]').value"), '', 'invalid late preference was not normalized against the successful node directory');
 
   const manager = await createPage(), admin = await login(manager, 'preferences-admin');
   await route(manager, 'users', '[name=query]');
