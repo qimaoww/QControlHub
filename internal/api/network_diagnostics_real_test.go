@@ -253,6 +253,9 @@ func TestNetworkDiagnosticsRealAgents(t *testing.T) {
 				}
 				if family == 6 {
 					minimum += 20
+					if probe[1] == "udp" {
+						minimum += 2
+					}
 				}
 			case "iperf3":
 				minimum = 16

@@ -61,6 +61,9 @@ func (p DiagnosticParameters) Validate(ipv6 bool) error {
 		}
 		if ipv6 {
 			min += 20
+			if p.Protocol == "udp" {
+				min += 2 // v1.7.6 IPv6 UDP probe tag
+			}
 		}
 		max = 1500
 	case "iperf3":

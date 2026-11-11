@@ -251,7 +251,8 @@ export function networkToolsPage(ctx) {
       t === "ping"
         ? 0
         : trace
-          ? (value("address1").includes(":") ? 20 : 0) + (p === "tcp" ? 44 : 28)
+          ? (value("address1").includes(":") ? (p === "udp" ? 22 : 20) : 0) +
+            (p === "tcp" ? 44 : 28)
           : p === "udp"
             ? 16
             : 1;
