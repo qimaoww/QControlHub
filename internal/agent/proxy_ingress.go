@@ -81,6 +81,12 @@ func sharedIngressFrontends(manager *ServiceManager, engine core.Engine, shareID
 }
 
 func (manager *TrafficManager) authorizeProxyIngresses(shareID string, frontends []core.TLSFrontend) error {
+	if !slices.ContainsFunc(frontends, func(f core.TLSFrontend) bool { return f.SharedIngressGeneration > 0 }) {
+		return nil
+	}
+	if manager == nil {
+		return errors.New("节点入口授权策略不可用")
+	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	for _, f := range frontends {
@@ -102,6 +108,12 @@ func (manager *TrafficManager) authorizeProxyIngresses(shareID string, frontends
 }
 
 func (c *Client) finishTrafficPolicyTransition() {
+	c.trafficPolicyMu.Lock()
+	pending := c.trafficPoliciesPending
+	c.trafficPolicyMu.Unlock()
+	if !pending {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := c.applyPendingTrafficPolicies(ctx); err != nil {
