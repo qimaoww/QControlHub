@@ -255,6 +255,28 @@ func mihomoInboundSelector(tag string) *regexp.Regexp {
 }
 
 func rewriteAccountingInboundReferences(engine core.Engine, root map[string]any, replacements map[string][]string) error {
+	if engine == core.EngineXray {
+		// DNS clients inject their own inbound tags. Renaming a proxy listener
+		// must retain selectors for DNS requests that share its original tag.
+		retainDNS := func(tag string) {
+			names := replacements[tag]
+			if len(names) == 0 {
+				return
+			}
+			for _, name := range names {
+				if name == tag {
+					return
+				}
+			}
+			replacements[tag] = append(names, tag)
+		}
+		dns := mapValue(root["dns"])
+		retainDNS(stringValue(dns["tag"]))
+		servers, _ := dns["servers"].([]any)
+		for _, server := range servers {
+			retainDNS(stringValue(mapValue(server)["tag"]))
+		}
+	}
 	if engine == core.EngineMihomo {
 		rules, _ := root["rules"].([]any)
 		for tag, names := range replacements {

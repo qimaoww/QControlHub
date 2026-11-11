@@ -139,6 +139,36 @@ func TestAccountingRejectsAmbiguousInboundReferences(t *testing.T) {
 	}
 }
 
+func TestAccountingPreservesXrayDNSInboundTags(t *testing.T) {
+	content := `{"dns":{"tag":"global DNS","servers":["192.0.2.53",{"address":"192.0.2.54","tag":"server DNS"}]},"inbounds":[{"tag":"global DNS","port":21001,"protocol":"http"},{"tag":"server DNS","port":21002,"protocol":"http"}],"outbounds":[{"tag":"default","protocol":"freedom"},{"tag":"policy","protocol":"freedom"}],"routing":{"rules":[{"type":"field","inboundTag":["global DNS","server DNS"],"outboundTag":"policy"}]}}`
+	plan, err := PrepareIndependentEgress(core.EngineXray, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := decodeAccountingRoot(core.EngineXray, plan.Content)
+	rules := mapValue(root["routing"])["rules"].([]any)
+	for _, tag := range []string{"global DNS", "server DNS"} {
+		matched := false
+		for _, raw := range rules {
+			rule := mapValue(raw)
+			if rule["outboundTag"] == "policy" && accountingRuleMatches(rule["inboundTag"], tag) {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Fatalf("DNS requests tagged %q lost their original exit", tag)
+		}
+	}
+	source, err := PresetAccountingSource(core.EngineXray, plan.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := PlanPresetAccounting(core.EngineXray, source)
+	if err != nil || !reflect.DeepEqual(plan, again) {
+		t.Fatalf("DNS routing changed after saving: %v", err)
+	}
+}
+
 func TestAccountingRejectsOversizedExpandedImport(t *testing.T) {
 	content := `{"inbounds":[{"port":"21001-21200","protocol":"http","settings":{"accounts":[{"user":"fixture","pass":"` + strings.Repeat("x", 12000) + `"}]}}],"outbounds":[{"protocol":"freedom"}]}`
 	if err := core.ValidateConfig(core.EngineXray, content); err != nil {
