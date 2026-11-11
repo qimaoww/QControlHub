@@ -60,8 +60,9 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// unavailable public-IP placeholders aligned with normal address rows, and
 	// readable connection country/node columns within their scroll container,
 	// and a complete source-service selector row on mobile import forms,
-	// and responsive notification records with wrapped dates and reachable actions.
-	const expected = "243533494b254560cecb5a597662fb9be0e99a2beb341db097f13229938ef382"
+	// and responsive notification records with wrapped dates and reachable actions,
+	// and a monospace fallback that preserves visible source indentation.
+	const expected = "db1172690164558f6cca3de16783e2dae66ba7ab6bb327468d535324dcfe29cc"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

@@ -89,10 +89,15 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     change(target().elements.engine, "ss-rust"); await waitFor(() => target()?.elements.engine.value === "ss-rust" && editor(), "无法打开 SS Rust"); await settled();
     const readable = () => {
       assert.match(editor().value, /\n  "/, "SS Rust 正文没有实际缩进换行");
+      const style = getComputedStyle(editor()), metrics = document.createElement("canvas").getContext("2d");
+      metrics.font = `${style.fontSize} ${style.fontFamily}`;
+      const widths = [...' iW0{}"'].map(char => metrics.measureText(char).width);
+      assert.ok(Math.max(...widths) - Math.min(...widths) < 0.01, "SS Rust 源码字体不等宽，缩进层级不清晰");
       assert.ok(editor().value.includes("9007199254740993"), "SS Rust 大整数精度丢失");
       assert.equal(editor().value, editor().defaultValue, "自动格式化未同步基线");
       assert.ok(button("重置修改").disabled, "自动格式化误报未保存");
     };
+    await document.fonts.ready;
     readable();
     assert.equal(testAPI.calls.filter(call => call.method === "POST" && /\/configs\//.test(call.path)).length, writesBeforeOpen, "首次展示自动保存了配置");
     const beforeReads = testAPI.calls.filter(call => call.method === "POST").length;
