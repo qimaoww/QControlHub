@@ -20,6 +20,7 @@ export async function testAgentSharingRuntime() {
     }
     reads.push({path,method});
     if (path === '/auth/session') return reply(session);
+    if (path === '/preferences/ui' && method === 'GET') return reply({ values: {}, revision: 0 });
     if (path === '/settings') return reply({});
     if (path === '/agents') return reply([agent]);
     if (path === '/agent-access') return reply({ isolated: false, shares: [] });

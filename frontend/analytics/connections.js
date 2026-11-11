@@ -42,7 +42,7 @@ export async function connectionsPage(ctx) {
   const today = defaultConnectionFilters().date;
   let filters = data.analyticsConnectionFilters ||= defaultConnectionFilters();
   let initializing = true, queryTouched = false;
-  let initialOrder = ctx.connectionNodeOrder;
+  let initialOrder = ctx.connectionNodeOrder, nodeOrderReady = false;
   // Filter changes can share the route's pending order read. Once settled,
   // later refreshes continue to read the current authenticated preference.
 
@@ -140,12 +140,12 @@ export async function connectionsPage(ctx) {
       if (!current()) return;
       // Refresh the same account preference used by the node page; the API
       // controls ordering before applying its signed pagination cursor.
-      if (force || initialOrder || !sources.length) {
+      if (force || initialOrder || !nodeOrderReady) {
         const pendingOrder = !force && initialOrder; initialOrder = null;
         const order = await (pendingOrder || boundedRead(ctx.api, "/preferences/node-order", { signal }));
         if (!current()) return;
         if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; changedScope = true; }
-        nodeOrder = order.ids;
+        nodeOrder = order.ids; nodeOrderReady = true;
       }
       const params = connectionQuery(filters, target, nodeOrder), key = params.toString();
       const entry = cache.get(key), cached = Array.isArray(entry?.result?.country_codes) ? entry : null;
@@ -280,7 +280,7 @@ export async function connectionsPage(ctx) {
     try {
       const order = await (initialOrder || boundedRead(ctx.api, '/preferences/node-order', { signal: ctx.signal }));
       if (!ctx.current()) return;
-      initialOrder = null; nodeOrder = order.ids;
+      initialOrder = null; nodeOrder = order.ids; nodeOrderReady = true;
     } catch (failure) {
       if (ctx.current()) { loading = false; error.textContent = redactDiagnostic(failure.message); paint(); }
       return;
