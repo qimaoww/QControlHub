@@ -49,7 +49,7 @@ func TestPresetAutoInstallTaskLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimed, err := db.ClaimTask(ctx, agent.ID)
-	if err != nil || claimed == nil || claimed.ID != task.ID || !claimed.InstallIfMissing || claimed.ConfigContent != saved.Content {
+	if err != nil || claimed == nil || claimed.ID != task.ID || !claimed.InstallIfMissing || claimed.ConfigContent != accountingSnapshotContent(t, saved.Engine, saved.Content) {
 		t.Fatalf("claim compound snapshot: %+v %v", claimed, err)
 	}
 	resumed, err := db.RunningTask(ctx, agent.ID)

@@ -46,7 +46,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     if (current.config !== previous || (fresh.config?.version || 0) !== (previous?.version || 0)) throw new Error('配置已变化，请重新读取后编辑');
     current = {...fresh,snapshot_task_id:fresh.config?.content===previous?.content?undefined:id}; draw();
   };
-  surface.acceptConfig = config => { current = { ...current, config, snapshot_task_id:undefined }; void deployment.refresh(); };
+  surface.acceptConfig = config => { current = { ...current, config, source_content:config.content, snapshot_task_id:undefined }; void deployment.refresh(); };
   surface.reload = async () => {
     const config = current.config;
     const fresh = await ctx.api(workspacePath());
@@ -66,7 +66,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     if (current.config !== previous || fresh.config?.id !== previous?.id || current.snapshot_task_id && fresh.config?.version !== previous?.version)
       throw new Error('配置已变化，请重新读取后再打开编辑工具');
     current = {...fresh,snapshot_task_id:current.snapshot_task_id};
-    if (fresh.config && !current.snapshot_task_id) accept(fresh.config);
+    if (fresh.config && !current.snapshot_task_id) accept(fresh.config, fresh.source_content);
     return true;
   }
   function track(form, box, requiresTask = true, isDirty) {
@@ -167,7 +167,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   }
   async function committed(result, box) {
     if (!ctx.current()) return;
-    current = { ...current, config: result.config, snapshot_task_id:undefined };
+    current = { ...current, config: result.config, source_content:result.config.content, snapshot_task_id:undefined };
     accept(result.config); ctx.setDirty(false); box?.close();
     ctx.announce(result.task?.id ? '配置已保存，任务已提交' : '配置已保存');
     if (result.task?.id && ctx.can('tasks.read')) await taskDetail(ctx,result.task.id);
@@ -398,7 +398,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   }
   async function filesLoaded(ctx) {
     if(!await latest(ctx)||!current.config)return;
-    const editor=field('完整配置','content',current.config.content,{multiline:24,spellcheck:false,readonly:!editable});
+    const editor=field('完整配置','content',current.source_content ?? current.config.content,{multiline:24,spellcheck:false,readonly:!editable});
     const form=ctx.form([node('div',{className:'a-editor'},editor)], '保存并部署',async()=>{
       if(!await preparing('deploy'))return;
       const result=await write(`${base}/source`,{name:current.config.name,description:current.config.description,version:current.config.version,content:form.elements.content.value,intent:'deploy'},box);

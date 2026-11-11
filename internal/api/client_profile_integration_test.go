@@ -412,6 +412,9 @@ func TestClientAccessNativeDeployedFormatsAndExportOnlyAccounts(t *testing.T) {
 		t.Run(test.protocol, func(t *testing.T) {
 			db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "native-shared", test.engine)
+			if err := db.SetAgentRegionCode(ctx, agent.ID, "JP"); err != nil {
+				t.Fatal(err)
+			}
 			if err := db.SetAgentClientAddress(ctx, agent.ID, "edge.example.test"); err != nil {
 				t.Fatal(err)
 			}
@@ -471,7 +474,7 @@ func TestClientAccessNativeDeployedFormatsAndExportOnlyAccounts(t *testing.T) {
 
 			exporter.call("GET", "/agents", nil, http.StatusForbidden, nil)
 			exporter.call("GET", "/client-access", nil, http.StatusOK, &entries)
-			if len(entries) != 1 || entries[0].Profiles[0].Profile.URI != item.Profile.URI {
+			if len(entries) != 1 || entries[0].RegionCode != "JP" || entries[0].Profiles[0].Profile.URI != item.Profile.URI {
 				t.Fatal("export-only key lost native authorized data")
 			}
 			exporter.call("PUT", "/agents/"+agent.ID+"/client-address", map[string]any{"profile": clientProfileSelector{Engine: test.engine, Tag: plan.Tag, Port: plan.Port, ConfigID: result.Config.ID, ConfigVersion: result.Config.Version}, "name": "forbidden"}, http.StatusForbidden, nil)

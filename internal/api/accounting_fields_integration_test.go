@@ -85,8 +85,8 @@ func TestAccountingFieldMutationsWithPostgreSQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			compiled, err := serverconfig.PrepareAccounting(engine, after.Content)
-			if err != nil || compiled.Content != after.Content {
-				t.Fatalf("saved stale compiled configuration: %v", err)
+			if err != nil || strings.Contains(after.Content, "qch-trf-") || strings.Contains(after.Content, "outbound_fwmark") {
+				t.Fatalf("saved generated configuration: %v", err)
 			}
 			if after.Version != saved.Version+1 {
 				t.Fatal("field mutation did not save exactly one revision")
@@ -118,7 +118,7 @@ func TestAccountingFieldMutationsWithPostgreSQL(t *testing.T) {
 						t.Fatal(err)
 					}
 					compiled, err = serverconfig.PrepareAccounting(engine, after.Content)
-					if err != nil || compiled.Content != after.Content {
+					if err != nil || strings.Contains(after.Content, "qch-trf-") || strings.Contains(after.Content, "outbound_fwmark") {
 						t.Fatalf("access update left stale outbound mapping: %v", err)
 					}
 					policies := serverconfig.DiscoverMainlandAccessPolicies(engine, after.Content)

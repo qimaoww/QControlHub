@@ -44,6 +44,7 @@ type clientAccessEntry struct {
 	AgentID         string                      `json:"agent_id"`
 	ConfigID        string                      `json:"config_id"`
 	AgentName       string                      `json:"agent_name"`
+	RegionCode      string                      `json:"region_code"`
 	AgentStatus     string                      `json:"agent_status"`
 	Engine          core.Engine                 `json:"engine"`
 	Address         string                      `json:"address"`
@@ -90,7 +91,15 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 		writeError(w, http.StatusBadRequest, "outbound_engine must be mihomo, xray or sing-box")
 		return
 	}
-	entries, err := s.clientAccessEntries(request.Context(), outboundEngine)
+	snapshot, err := loadClientAccessSnapshot(request.Context(), s.store)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	// Only attach display regions to the already authorized nodes. Export-only
+	// accounts continue to receive no general node or metrics access.
+	s.resolveAgentRegions(request, snapshot.agents)
+	entries, err := clientAccessEntriesFromSnapshot(snapshot, outboundEngine)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -104,6 +113,10 @@ func (s *Server) clientAccessEntries(ctx context.Context, outboundEngine ...core
 	if err != nil {
 		return nil, err
 	}
+	return clientAccessEntriesFromSnapshot(snapshot, outboundEngine...)
+}
+
+func clientAccessEntriesFromSnapshot(snapshot clientAccessSnapshot, outboundEngine ...core.Engine) ([]clientAccessEntry, error) {
 	agents := snapshot.agents
 
 	agentsByID := make(map[string]core.Agent, len(agents))
@@ -152,7 +165,7 @@ func (s *Server) clientAccessEntries(ctx context.Context, outboundEngine ...core
 			}
 		}
 		entry := clientAccessEntry{
-			AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+			AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, RegionCode: agent.RegionCode, AgentStatus: agent.Status, Engine: deployment.Engine,
 			Profiles: profiles, AddressOptions: addressOptions, AddressMode: clientAddressMode,
 			AddressRequired: len(addressOptions) == 0 && len(candidates) == 0,
 			ConfigVersion:   deployment.ConfigVersion, ServiceStatus: agent.Runtime[deployment.Engine].ServiceStatus,

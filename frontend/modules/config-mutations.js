@@ -48,8 +48,8 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal,
   }
   async function readReceipt(id, record) {
     const task = await api(`/tasks/${encodeURIComponent(id)}?view=status`, {method:"GET"});
-    if (task.id !== id || task.agent_id !== record.agentId || task.engine !== record.engine ||
-        task.action !== record.intent || task.config_version !== record.version || !task.config_id)
+    if ((task.id !== id && task.submission_id !== id) || task.agent_id !== record.agentId || task.engine !== record.engine ||
+        task.action !== record.intent || (task.config_version !== record.version && !(record.unchangedBinding && task.reused && task.config_version === record.version - 1)) || !task.config_id)
       throw new Error("保存任务与当前目标不一致，请查看执行记录。");
     if (record.instanceId !== undefined && ((task.shared_traffic_id || "") !== record.instanceId ||
         Boolean(task.shared_instance) !== Boolean(record.instanceId)))
@@ -77,7 +77,7 @@ export function createConfigMutations({ api, state }, { onTask, waitForTerminal,
     const owner = state.data, records = entries();
     const input = JSON.parse(options.body);
     const record = {agentId:decodeURIComponent(match[1]), engine:decodeURIComponent(match[2]),
-      intent:input.intent, version:Number(input.expected_version ?? input.version) + 1, instanceId:input.expected_instance_id};
+      intent:input.intent, unchangedBinding:input.operation === "bind", version:Number(input.expected_version ?? input.version) + 1, instanceId:input.expected_instance_id};
     const operation = {...input};
     delete operation.version; delete operation.expected_version; delete operation.install_if_missing;
     if (globalThis.crypto.subtle) {

@@ -12,6 +12,17 @@ export async function openOutbound(test, operation, wait = true) {
 }
 const alert = () => [...document.querySelectorAll('[role=alert],.a-notice')].filter(item=>item.checkVisibility()).map(item=>item.textContent).join(' ');
 export async function testConfigOutboundsRuntime() {
+  const separated = await fixture('xray');
+  const workspace = separated.workspace(), source = JSON.parse(workspace.config.content);
+  source.outbounds = source.outbounds.filter(item => !item.tag.startsWith('qch-trf-'));
+  workspace.source_content = JSON.stringify(source, null, 2);
+  separated.workspaceResponses = [workspace];
+  separated.clickButton('展开源码');
+  await waitFor(() => outboundDialog()?.querySelector('[name=content]'), 'source editor missing');
+  assert(!outboundDialog().querySelector('[name=content]').value.includes('qch-trf-'), 'compiled exits filled editable source');
+  assert(!document.querySelector('.a-main form [name=content]').value.includes('qch-trf-'), 'workspace reread filled main source with runtime exits');
+  assert(separated.saved().content.includes('qch-trf-'), 'source view obscured actual runtime fixture');
+  separated.dispose();
   for (const {engine,protocol} of [{engine:'xray'},{engine:'sing-box'},{engine:'xray',protocol:'wireguard'},{engine:'sing-box',protocol:'wireguard'}]) {
     const test=await fixture(engine,{drift:true,protocol}),section=engine==='sing-box'&&protocol==='wireguard'?'endpoints':'inbounds';
     const listeners=JSON.parse(test.saved().content)[section];

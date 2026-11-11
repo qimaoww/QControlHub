@@ -185,7 +185,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		}
 		config.Content = plan.Content
 	}
-	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{TaskID: r.Header.Get("X-Config-Task-ID"), InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &state})
+	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{ReuseUnchangedBinding: input.Operation == "bind", TaskID: r.Header.Get("X-Config-Task-ID"), InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &state})
 	if err != nil {
 		writeStoreError(w, err)
 		return

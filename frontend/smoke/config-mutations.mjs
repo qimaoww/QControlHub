@@ -159,6 +159,16 @@ export async function run() {
       assert.equal(attempts,1,`${endpoint} replayed a committed write`);
     }
     storage.clear(); // Independent operation scenario.
+    let aliasID, bindingWrites=0;
+    const binding=createConfigMutations({state:{data:{}},api:async (url,options={})=>{
+      if(options.method==='POST') {bindingWrites++;aliasID=options.headers['X-Config-Task-ID'];throw TypeError('reused response lost');}
+      if(url.startsWith('/tasks/'))return {id:'existing-task',submission_id:aliasID,reused:true,agent_id:'node',engine:'xray',action:'deploy',config_id:'cfg',config_version:3,status:'succeeded'};
+      return {id:'cfg',version:3};
+    }},{onTask:()=>{},waitForTerminal:()=>completion});
+    const unchanged=await binding.request('/agents/node/configs/xray/outbounds',{method:'POST',body:JSON.stringify({operation:'bind',intent:'deploy',version:3,tag:'edge',inbound_tag:'first',inbound_port:21001})});
+    assert.equal(unchanged.config.version,3,'unchanged binding recovery required a new revision');
+    assert.equal(bindingWrites,1,'reused binding recovery repeated the write');
+    storage.clear(); // Independent operation scenario.
     release({status:"succeeded"});
     // A response arriving after an account change cannot reach task callbacks
     // or the caller's subsequent save/deploy handlers.
