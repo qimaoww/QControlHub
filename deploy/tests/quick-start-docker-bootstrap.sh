@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/deploy/quick-start.sh"
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
+eval "$(declare -f docker_probe | sed '1s/docker_probe/native_docker_probe/')"
 eval "$(declare -f install_docker_engine | sed '1s/install_docker_engine/native_install_docker_engine/')"
 eval "$(declare -f docker_install_privileges | sed '1s/docker_install_privileges/native_docker_install_privileges/')"
 unset DOCKER_CONTEXT DOCKER_HOST
@@ -94,7 +95,7 @@ expect_failure() {
     fi
     grep -Fq "$message" "$test_root/output"
 }
-assert_absent() { if grep -Fq "$1" "$test_root/calls"; then cat "$test_root/calls" >&2; exit 1; fi; }
+assert_absent() { if grep -Fq -- "$1" "$test_root/calls"; then cat "$test_root/calls" >&2; exit 1; fi; }
 
 for MODE in bundled external; do
     reset_case
@@ -278,4 +279,18 @@ checksum="$(printf fixture | openssl dgst -sha256 | awk '{print $NF}')"
 if (install_docker_plugin qch-bootstrap-fixture https://invalid.example/plugin "$checksum") > "$test_root/output" 2>&1; then exit 1; fi
 grep -Fq '安装 qch-bootstrap-fixture 失败' "$test_root/output"
 [ ! -e "$(cat "$test_root/download-path")" ]
+# Probe a real stalled CLI in a clean Bash process, without the command
+# simulation's timeout function and without connecting to any real daemon.
+mkdir "$test_root/stalled-bin"
+cat > "$test_root/stalled-bin/docker" <<'STALLED_DOCKER'
+#!/bin/sh
+sleep 60
+STALLED_DOCKER
+chmod 0755 "$test_root/stalled-bin/docker"
+probe_started=$SECONDS
+probe_status=0
+PATH="$test_root/stalled-bin:$PATH" bash -c "$(declare -f native_docker_probe); native_docker_probe info" || probe_status=$?
+[ "$probe_status" -eq 124 ]
+[ "$((SECONDS - probe_started))" -lt 30 ]
+
 printf '%s\n' 'quick-start Docker bootstrap command simulations passed'

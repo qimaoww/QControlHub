@@ -28,6 +28,10 @@ bundled_image_tag() {
     printf '%s' "$image_tag"
 }
 
+# These CLI regressions simulate Docker commands in this shell. Preserve that
+# boundary through the native probe's timeout wrapper; the bootstrap regression
+# separately verifies a real timeout against a deliberately stalled executable.
+timeout() { shift; "$@"; }
 docker() {
     local image="${*: -1}"
     printf '%s\n' "$*" >> "$QCH_MODES_TEST_LOG"
@@ -109,7 +113,7 @@ docker() {
     esac
 }
 curl() { return 0; }
-export -f docker curl bundled_image_tag
+export -f docker timeout curl bundled_image_tag
 
 export QCH_INSTALL_DIR="$test_root/bundled"
 export QCH_MODES_TEST_LOG="$test_root/bundled.log"
