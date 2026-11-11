@@ -91,6 +91,15 @@ func ReconcilePresetInboundReferences(engine core.Engine, content, previous, nex
 		for _, raw := range rules {
 			if engine == core.EngineMihomo {
 				rule := stringValue(raw)
+				if udp443OwnedProvider(root) && rule == udp443Rule(previous) {
+					changed = true
+					if next == "" {
+						continue
+					}
+					raw = udp443Rule(next)
+					kept = append(kept, raw)
+					continue
+				}
 				parts := strings.Split(rule, ",")
 				if len(parts) >= 3 && strings.TrimSpace(parts[0]) == "IN-NAME" && strings.TrimSpace(parts[1]) == previous {
 					changed = true

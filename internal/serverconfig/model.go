@@ -32,6 +32,7 @@ const (
 )
 
 type Protocol struct {
+	SupportsUDP443Block  bool         `json:"supports_udp_443_block,omitempty"`
 	StaticPages          []StaticPage `json:"static_pages,omitempty"`
 	SupportsManagedTLS   bool         `json:"supports_managed_tls,omitempty"`
 	Key                  string       `json:"key"`
@@ -60,6 +61,7 @@ type Protocol struct {
 }
 
 type Input struct {
+	BlockUDP443                  *bool  `json:"block_udp_443,omitempty"`
 	PanelCertificateID           string `json:"panel_certificate_id,omitempty"`
 	XHTTPMode                    string `json:"xhttp_mode,omitempty"`
 	XHTTPExtra                   string `json:"xhttp_extra,omitempty"`
@@ -232,7 +234,7 @@ func Protocols(engine core.Engine) []Protocol {
 			Key: ProtocolVLESS, Name: "VLESS-Vision-uTLS-REALITY", Badge: "VLESS",
 			Description: "自动生成 UUID、X25519 密钥对与 Short ID 的 VLESS Vision + Reality 方案；客户端分享链接固定使用 uTLS chrome 指纹。",
 			Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
-			Transports: []string{"raw"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray,
+			Transports: []string{"raw"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray, SupportsUDP443Block: engine == core.EngineMihomo,
 		},
 		{
 			Key: ProtocolVMess, Name: "VMess", Badge: "VMESS",

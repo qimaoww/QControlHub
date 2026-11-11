@@ -261,7 +261,9 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const values = new Map(Object.entries(baseline || {}).filter(([key]) => !form.elements.namedItem(key)).map(([key,value]) =>
         [key, typeof value === 'boolean' ? value ? '1' : '0' : typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')]));
       for (const control of form.querySelectorAll('[name]')) if (!control.disabled && (control.type !== 'checkbox' || control.checked)) values.set(control.name, control.value);
-      return { ...baseline, ...readServerPlanInput(form, protocol, values) };
+      const result = { ...baseline, ...readServerPlanInput(form, protocol, values) };
+      if (!protocol.supports_udp_443_block) delete result.block_udp_443;
+      return result;
     }
     function render(plan) {
       baseline=plan;
@@ -277,7 +279,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       if(protocol.transport_config)sections.push(group('传输',node('div',{className:'a-form-grid'},['transport','transport_path','transport_host','transport_http_method','flow'].map(control)),true));
       if(protocol.supports_tls||protocol.requires_tls)sections.push(group('TLS',node('div',{className:'a-form-grid'},['tls_enabled','tls_server_name','tls_alpn','tls_client_alpn','certificate_path','private_key_path','panel_certificate_id','tls_client_certificate',...(protocol.supports_managed_tls?['tls_mode','tls_acme_email','tls_public_port',...(protocol.key==='vless-xhttp-tls'?['tls_static_page','tls_static_html']:[])]:[])].map(control)),Boolean(plan.tls_enabled||protocol.requires_tls)));
       if(isXHTTPGroup(protocol.key))sections.push(group('TLS/CDN 入口',grid(...['tls_server_name','tls_alpn','tls_client_alpn','certificate_path','private_key_path','panel_certificate_id'].map(control)),true));
-      if(protocol.uses_reality||protocol.key==='vless')sections.push(group('Reality',node('div',{className:'a-form-grid'},['reality_enabled','reality_private_key','reality_public_key','reality_short_id','reality_server_name','reality_target','reality_server_names',...(protocol.supports_reality_mldsa?['reality_min_client_ver','reality_mldsa65_seed','reality_mldsa65_verify']:[])].map(control)),protocol.uses_reality));
+      if(protocol.uses_reality||protocol.key==='vless') {
+        const reality = [node('div',{className:'a-form-grid'},['reality_enabled','reality_private_key','reality_public_key','reality_short_id','reality_server_name','reality_target','reality_server_names',...(protocol.supports_reality_mldsa?['reality_min_client_ver','reality_mldsa65_seed','reality_mldsa65_verify']:[])].map(control))];
+        if (protocol.supports_udp_443_block) reality.push(stack(control('block_udp_443'),muted('仅限此入站的 UDP 目标端口 443')));
+        sections.push(group('Reality',stack(...reality),protocol.uses_reality));
+      }
       if(protocol.uses_vless_encryption)sections.push(group('VLESS Encryption',grid(control('vless_decryption'),control('vless_encryption')),true));
       const prefixes=protocol.key.startsWith('vless-xhttp')||protocol.key.includes('xhttp')?['xhttp_']:protocol.key.startsWith('snell')?['snell_']:protocol.key.startsWith('sudoku')?['sudoku_']:protocol.key.startsWith('mieru')?['mieru_']:protocol.uses_wireguard?['wireguard_']:protocol.key==='tailscale'?['tailscale_']:protocol.key==='openvpn-server'?['openvpn_']:[];
       const special=Object.keys(labels).filter(key=>key!=='mieru_custom_pattern'&&(!['xhttp_backend_port','xhttp_tls_port','xhttp_tls_address','xhttp_tls_client_port','xhttp_tls_host'].includes(key)||isXHTTPGroup(protocol.key))&&!(key==='wireguard_server_address'&&engine!=='sing-box')&&prefixes.some(prefix=>key.startsWith(prefix)));
@@ -306,7 +312,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         const requested = (name === 'credential' && protocol.key === 'sudoku' ? 'credential,sudoku_client_key' : fields).split(',');
         const generate = button(requested.length > 1 ? '生成密钥对' : '生成', event => void ctx.mutate(event.currentTarget, async () => {
           const draft = JSON.stringify(read()), selected = protocol, requestedRevision = revision;
-          const generated = await ctx.api(`${base}/plans`, { method: 'POST', body: { protocol: selected.key, input: read() } });
+          const generated = await ctx.api(`${base}/plans`, { method: 'POST', body: { protocol: selected.key, input: read(), ...(name === 'port' ? {generate_port:true} : {}) } });
           if (!ctx.current() || !box.isConnected || selected !== protocol) return;
           if (requestedRevision !== revision || draft !== JSON.stringify(read())) throw new Error('参数已修改，未应用过期生成结果');
           for (const key of requested) {

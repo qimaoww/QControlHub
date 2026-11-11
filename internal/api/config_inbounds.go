@@ -16,8 +16,9 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Protocol string              `json:"protocol"`
-		Input    *serverconfig.Input `json:"input"`
+		Protocol     string              `json:"protocol"`
+		GeneratePort bool                `json:"generate_port"`
+		Input        *serverconfig.Input `json:"input"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -26,6 +27,10 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 	protocol, found := serverconfig.FindProtocol(engine, strings.TrimSpace(input.Protocol))
 	if !found {
 		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
+		return
+	}
+	if input.Input != nil && input.Input.BlockUDP443 != nil && !protocol.SupportsUDP443Block {
+		writeError(w, http.StatusBadRequest, "拦截 UDP 443 仅适用于 Mihomo VLESS-Vision-uTLS-REALITY 入站")
 		return
 	}
 	var (
@@ -54,6 +59,13 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		}
 		writeInternalError(w, err)
 		return
+	}
+	if input.GeneratePort && protocol.SupportsUDP443Block {
+		plan.Port, err = serverconfig.RandomListenPort()
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
 	}
 	if protocol.SupportsManagedTLS && !agent.CanManage && (plan.TLSMode == "caddy" || plan.TLSMode == "nginx") {
 		if input.Input == nil {
