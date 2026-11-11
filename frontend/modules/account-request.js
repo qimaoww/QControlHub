@@ -21,7 +21,7 @@ export async function accountRequest(path, { session, method = "GET", body, sign
     body: body === undefined ? undefined : JSON.stringify(body),
   }, { isLogin: path === "/auth/login", isCurrent, onUnauthorized, conditional, onResponse });
   } catch(error) {
-    if (path !== "/tasks/failures" && !path.startsWith("/auth/")) await accountFailureRecorder(session,isCurrent)(error,`${method} ${path.split("?")[0]}`,"api_request");
+    if (path !== "/tasks/failures" && !path.startsWith("/auth/")) error = await accountFailureRecorder(session,isCurrent)(error,`${method} ${path.split("?")[0]}`,"api_request");
     throw error;
   }
 }

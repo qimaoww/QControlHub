@@ -84,7 +84,6 @@ export async function logsPage(ctx) {
     if (sourceUnavailable) { collection.unavailable(); return; }
     collection.update(relevant.map(source => {
       const state = coreLogSourceState(source);
-      if (source.status === "failed" && state.detail) void ctx.recordFailure?.(Object.assign(new Error(state.detail), {agentID:source.agent_id,engine:source.engine,resource:`/core-log-sources/${source.agent_id}/${source.instance_id}/${source.engine}`}), `日志采集 · ${source.name || source.agent_id} · ${source.engine}`, "log_collection");
       const attention = ["failed", "offline", "unsupported", "not-installed", "status-unavailable"].includes(source.status);
       return { agentID: source.agent_id, agentName: source.name || source.agent_id,
         instanceID: source.instance_id, instance: instanceLabel(source), engine: engineName(source.engine),

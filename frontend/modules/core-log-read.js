@@ -1,5 +1,6 @@
 import { coreLogFilterCounts } from "./core-log-model.js";
 import { reuseCoreLogEntries } from "./core-log-projection.js";
+import { readCancellation } from "./errors.js";
 
 // Weak keys add no retained windows beyond the account's active view/LRU.
 // A related or partial snapshot is never a validator for a different URL.
@@ -12,13 +13,13 @@ export async function requestCoreLogJSON(api, path, { signal, timeout = 15000, .
   let timer, cancel;
   const stopped = new Promise((_, reject) => { cancel = reject; });
   const abort = () => {
-    const reason = signal?.reason || new DOMException("Read canceled", "AbortError");
+    const reason = readCancellation(signal);
     controller.abort(reason); cancel(reason);
   };
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   timer = setTimeout(() => {
-    const error = new Error("读取超时，请重试。");
+    const error = Object.assign(new Error("读取超时，请重试。"), { readOnly: true, failureRetention: "not_required" });
     controller.abort(new DOMException("Read timed out", "TimeoutError"));
     cancel(error);
   }, timeout);

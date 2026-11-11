@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -22,7 +24,7 @@ func (w *failureResponseWriter) Unwrap() http.ResponseWriter { return w.Response
 func (w *failureResponseWriter) Flush()                      { _ = http.NewResponseController(w.ResponseWriter).Flush() }
 
 func (w *failureResponseWriter) failure(status int, value any) any {
-	if status < 400 || w.request.URL.Path == "/api/v1/tasks/failures" {
+	if status < 400 {
 		return value
 	}
 	b, err := json.Marshal(value)
@@ -49,7 +51,23 @@ func (w *failureResponseWriter) failure(status int, value any) any {
 	stage, _ := body["stage"].(string)
 	if stage == "" {
 		stage = "api_request"
+		if readOnlyMethod(w.request.Method) {
+			stage = "data_read"
+		}
 	}
+	// Reading a page is not an execution attempt. Keep the HTTP failure and
+	// its diagnostic ID, but never turn polling or navigation into failed tasks.
+	// This policy applies equally to sessions and API Key responses.
+	if readOnlyMethod(w.request.Method) || w.request.URL.Path == "/api/v1/tasks/failures" {
+		body["failure_retention"] = "not_required"
+		// Internal errors already log the same request ID in writeInternalError.
+		// Preserve gateway/deadline diagnostics that writeError otherwise omits.
+		if readOnlyMethod(w.request.Method) && status > 500 && code != "read_timeout" {
+			slog.Error("HTTP read failed", "request_id", requestID, "method", w.request.Method, "route", w.request.Pattern, "resource", w.request.URL.EscapedPath(), "stage", stage, "status", status, "error", core.RedactDiagnostic(detail))
+		}
+		return body
+	}
+	body["failure_retention"] = "failed"
 	if w.server.store == nil {
 		body["failure_saved"] = false
 		body["retention_error"] = "未能保存到任务：任务存储不可用。"
@@ -77,16 +95,28 @@ func (w *failureResponseWriter) failure(status int, value any) any {
 		body["failure_saved"] = false
 		body["retention_error"] = "未能保存到任务：" + core.RedactDiagnostic(safeInternalDiagnostic(saveErr))
 	} else {
+		body["failure_retention"] = "saved"
 		body["failure_saved"] = true
 		body["failure_task_id"] = id
 	}
 	return body
 }
 
+func readOnlyMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
+}
+
 func (s *Server) recordPanelFailure(w http.ResponseWriter, r *http.Request) {
 	var input core.PanelFailure
 	if err := decodeJSON(w, r, &input, core.MaxEncodedTaskDiagnosticBytes); err != nil {
 		writeError(w, 400, err.Error())
+		return
+	}
+	// Older frontends may backfill a read failure despite the response policy.
+	// Decide at the API boundary too, before touching diagnostic storage.
+	method, _, _ := strings.Cut(strings.TrimSpace(input.Operation), " ")
+	if readOnlyMethod(strings.ToUpper(method)) {
+		writeJSON(w, http.StatusOK, map[string]string{"failure_retention": "not_required"})
 		return
 	}
 	id, err := s.store.RecordPanelFailure(r.Context(), input)

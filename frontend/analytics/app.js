@@ -122,11 +122,7 @@ export function startAnalytics({ app, session }) {
       isCurrent: () => state.session === bound && !lifetime.signal.aborted,
       onUnauthorized: message => login(message),
     }) : reader.read(path, { ...options, signal: options.signal || lifetime.signal }))
-      .finally(() => { if (writing) invalidate(); })
-      .catch(error => {
-        if (state.session === bound && !lifetime.signal.aborted && error.name !== 'AbortError') showFailure(error);
-        throw error;
-      });
+      .finally(() => { if (writing) invalidate(); });
     if (path === "/settings" && state.session === bound && !lifetime.signal.aborted) {
       state.data.settings = result;
       applyAppearance(result);
@@ -171,6 +167,7 @@ export function startAnalytics({ app, session }) {
     dialog("失败详情",stack(notice(failureSummary(error)),code(detail),actions(button("复制诊断",event=>void mutate(event.currentTarget,()=>copyText(detail))))),{wide:true});
   };
   const showFailure = error => {
+    if (error.intentionalCancellation) return;
     const key = error.failureTaskID || error.message;
     if (shownFailures.get(key)?.isConnected) return;
     shownFailures.set(key, notifications.show(failureSummary(error), "error", () => void openFailure(error).catch(cause => notifications.show(cause.message,"error"))));
@@ -179,7 +176,7 @@ export function startAnalytics({ app, session }) {
   const announce = (message,tone) => {
     if(tone!=="error") {notifications.show(message,tone);return;}
     const error=new Error(message);
-    void recordFailure(error,`页面 ${route}`,"panel_feedback").then(showFailure);
+    showFailure(error);
   };
   function dialog(title, content, { wide = false, closeWhilePending = false } = {}) {
     const active = document.activeElement;

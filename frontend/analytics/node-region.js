@@ -18,15 +18,26 @@ export function nodeRegionFlag(ctx, agent) {
   const cache = ctx.state.data.agentRegions ||= new Map();
   const key = JSON.stringify([agent.id, agent.metrics?.public_ipv4, agent.metrics?.public_ipv6, agent.metrics?.observed_public_ip, agent.metrics?.network_interfaces]);
   let entry = cache.get(key);
+  if (entry?.retryAt && Date.now() >= entry.retryAt) entry = null;
   if (!entry) {
     entry = {};
     entry.request = ctx.api(`/agents/${pathID(agent.id)}/region`).then(value => {
       entry.region = geoRegionDetails(value?.country_code); entry.ready = true;
       return entry.region;
-    }).catch(() => { if (cache.get(key) === entry) cache.delete(key); return null; });
+    }).catch(error => {
+      if (error.intentionalCancellation || !ctx.current()) { if (cache.get(key) === entry) cache.delete(key); }
+      else { entry.error = error; entry.ready = true; entry.retryAt = Date.now() + 60_000; }
+      return null;
+    });
     cache.set(key, entry);
   }
   const flag = regionFlag(entry.region);
+  const showReadError = () => {
+    if (!entry.error) return;
+    flag.setAttribute('aria-label', '国家／地区读取失败');
+    flag.title = `国家／地区读取失败：${entry.error.message}`;
+  };
+  showReadError();
   if (!entry.ready) void entry.request.then(region => {
     if (ctx.current() && flag.isConnected && !geoRegionDetails(agent.labels?.region_code) && !Object.hasOwn(agent, 'region_code')) {
       const fresh = regionFlag(region);
@@ -34,6 +45,7 @@ export function nodeRegionFlag(ctx, agent) {
       flag.setAttribute('aria-label', fresh.getAttribute('aria-label'));
       flag.title = fresh.title;
       if (region) flag.dataset.regionCode = region.code;
+      showReadError();
     }
   });
   return flag;

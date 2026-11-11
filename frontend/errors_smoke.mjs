@@ -206,3 +206,46 @@ try {
  assert.match(failed.message,/未能保存到任务/);
  assert.match(failed.message,/fixture retention transport unavailable/);
 } finally {globalThis.fetch=originalFetch}
+
+// Reads retain their real failure and diagnostic identity without acquiring a
+// failed operation record, even when several application layers see them.
+try {
+ let reports=0;
+ globalThis.fetch=async()=>{reports++;return Response.json({id:'tsk_should_not_exist'},{status:201})};
+ const recorder=createFailureRecorder({session:{csrf_token:'fixture'}});
+ for (const mode of ['server-policy','old-server','proxy','network','unexpected-abort','timeout','decode']) {
+  let failure;
+  try {await requestJSON('/api/v1/core-logs',{}, {fetchImpl:async()=>{
+   if(mode==='network')throw new TypeError('Failed to fetch');
+   if(mode==='unexpected-abort')throw new DOMException('unexpected interruption','AbortError');
+   if(mode==='timeout')throw new DOMException('deadline','TimeoutError');
+   if(mode==='decode')return new Response('broken');
+   if(mode==='proxy')return new Response('Gateway Timeout',{status:504,headers:{'X-Request-ID':'req_gateway'}});
+   return Response.json({error:'读取失败',request_id:'req_read',...(mode==='server-policy'?{failure_retention:'not_required'}:{})},{status:500});
+  }});}catch(error){failure=error;}
+  assert.ok(failure && !failure.intentionalCancellation,mode);
+  await recorder(failure,'读取日志','page_loading');
+  await recorder(new Error('读取区域失败',{cause:failure}),'区域','region_loading');
+  assert.equal(failure.failureRetention,'not_required');
+  assert.equal(failure.failureSaved,undefined);
+  assert.doesNotMatch(failure.message,/未能保存到任务/);
+ }
+ assert.equal(reports,0,'reads were backfilled by another error layer');
+ const stored=Object.assign(new Error('保存失败'),{failureSaved:true,failureTaskID:'tsk_existing'});
+ await recorder(stored,'保存','panel_action'); assert.equal(reports,0,'server failure was backfilled');
+ const denied=Object.assign(new Error('校验失败'),{failureRetention:'not_required'});
+ await recorder(denied); assert.equal(reports,0);
+ const write=await recorder(new Error('实际写入失败'),'保存','panel_action');
+ assert.equal(write.failureTaskID,'tsk_should_not_exist');assert.equal(reports,1);
+ // A policy response from an older caller's backfill is a successful skip.
+ globalThis.fetch=async()=>Response.json({failure_retention:'not_required'});
+ const skipped=await recorder(new Error('旧客户端读取失败'),'GET /core-logs');
+ assert.equal(skipped.failureRetention,'not_required');assert.equal(skipped.failureSaved,undefined);
+ assert.doesNotMatch(skipped.message,/未能保存到任务/);
+ // Explicit cancellation after headers and even an abort-ignoring body stays silent.
+ for(const status of [200,500]) {
+  const controller=new AbortController();
+  await assert.rejects(requestJSON('/test',{signal:controller.signal},{fetchImpl:async()=>({ok:status===200,status,json:async()=>{controller.abort();return {error:'late failure'};}})}),error=>error.intentionalCancellation===true);
+ }
+} finally {globalThis.fetch=originalFetch}
+console.log('Read retention policy, propagation, proxy errors and lifecycle cancellation passed');

@@ -248,9 +248,14 @@ export async function connectionsPage(ctx) {
         updateSources(); paint();
         void load({ changedScope: true });
       } catch (failure) {
-        if (ctx.current() && [401, 403].includes(failure.status)) {
+        if (!ctx.current() || failure.intentionalCancellation) return;
+        failures++;
+        if ([401, 403].includes(failure.status)) {
           controller?.abort(); serial++; cache.clear(); result = null; sources = []; nextCursor = "";
           reading = false; loading = false; error.textContent = redactDiagnostic(failure.message); updateSources(); paint();
+        } else {
+          error.textContent = redactDiagnostic(failure.message);
+          status.textContent = result ? "更新失败，保留上次结果" : "读取失败，请重试";
         }
       }
     },

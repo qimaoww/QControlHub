@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,5 +109,59 @@ func TestLeaseRecoveryPreservesEachDiagnosticAttempt(t *testing.T) {
 	}
 	if _, err := db.TaskDiagnostic(ctx, task.ID, 3); err == nil {
 		t.Fatal("invented attempt accepted")
+	}
+}
+
+func TestPanelFailureDeduplicationBoundaries(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	owner := WithConfigScope(ctx, "token_dedup-owner", false)
+	input := core.PanelFailure{Operation: "POST /configs", Resource: "/configs", Stage: "validation", HTTPStatus: 400, Code: "invalid_port", Field: "port", Summary: "校验失败", Detail: "invalid value"}
+	ids := make(chan string, 20)
+	errs := make(chan error, 20)
+	var group sync.WaitGroup
+	for range 20 {
+		group.Add(1)
+		go func() { defer group.Done(); id, err := db.RecordPanelFailure(owner, input); ids <- id; errs <- err }()
+	}
+	group.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var first string
+	for id := range ids {
+		if first == "" {
+			first = id
+		}
+		if id != first {
+			t.Fatal("same concurrent cause created multiple records")
+		}
+	}
+	diagnostic, err := db.TaskDiagnostic(owner, first)
+	if err != nil || diagnostic.Occurrences != 20 {
+		t.Fatalf("lost occurrence count: %+v %v", diagnostic, err)
+	}
+	for _, different := range []core.PanelFailure{
+		{Operation: input.Operation, Resource: input.Resource, Stage: input.Stage, HTTPStatus: 400, Code: "permission_denied", Field: input.Field, Summary: input.Summary, Detail: input.Detail},
+		{Operation: input.Operation, Resource: input.Resource, Stage: input.Stage, HTTPStatus: 400, Code: input.Code, Field: "tls_public_port", Summary: input.Summary, Detail: input.Detail},
+	} {
+		id, err := db.RecordPanelFailure(owner, different)
+		if err != nil || id == first {
+			t.Fatalf("different cause/field merged: %s %v", id, err)
+		}
+	}
+	other, err := db.RecordPanelFailure(WithConfigScope(ctx, "token_dedup-other", false), input)
+	if err != nil || other == first {
+		t.Fatalf("owners merged: %s %v", other, err)
+	}
+	if _, err = db.pool.Exec(ctx, "UPDATE tasks SET created_at=now()-interval '6 minutes' WHERE id=$1", first); err != nil {
+		t.Fatal(err)
+	}
+	next, err := db.RecordPanelFailure(owner, input)
+	if err != nil || next == first {
+		t.Fatalf("original five-minute window was widened: %s %v", next, err)
 	}
 }

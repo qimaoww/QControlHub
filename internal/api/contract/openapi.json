@@ -16,6 +16,14 @@
                 "error": {
                   "type": "string"
                 },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
                 "request_id": {
                   "type": "string"
                 },
@@ -45,6 +53,14 @@
                   "type": "string"
                 },
                 "error": {
+                  "type": "string"
+                },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
                   "type": "string"
                 },
                 "request_id": {
@@ -78,6 +94,14 @@
                 "error": {
                   "type": "string"
                 },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
                 "request_id": {
                   "type": "string"
                 },
@@ -107,6 +131,14 @@
                   "type": "string"
                 },
                 "error": {
+                  "type": "string"
+                },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
                   "type": "string"
                 },
                 "request_id": {
@@ -140,6 +172,14 @@
                 "error": {
                   "type": "string"
                 },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
                 "request_id": {
                   "type": "string"
                 },
@@ -171,6 +211,14 @@
                 "error": {
                   "type": "string"
                 },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
                 "request_id": {
                   "type": "string"
                 },
@@ -200,6 +248,14 @@
                   "type": "string"
                 },
                 "error": {
+                  "type": "string"
+                },
+                "failure_retention": {
+                  "enum": [
+                    "not_required",
+                    "saved",
+                    "failed"
+                  ],
                   "type": "string"
                 },
                 "request_id": {
@@ -5866,6 +5922,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -5952,6 +6011,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -6871,6 +6933,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -7547,6 +7612,34 @@
           },
           "500": {
             "$ref": "#/components/responses/error500"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           }
         },
         "security": [
@@ -11647,8 +11740,61 @@
           "429": {
             "$ref": "#/components/responses/error429"
           },
+          "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           }
         },
         "security": [
@@ -12738,6 +12884,34 @@
           },
           "500": {
             "$ref": "#/components/responses/error500"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           }
         },
         "security": [
@@ -13030,6 +13204,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -13286,6 +13463,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -13444,6 +13624,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -13701,6 +13884,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -14200,6 +14386,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -14520,6 +14709,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -14606,6 +14798,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -14690,6 +14885,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -14947,6 +15145,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -15746,8 +15947,61 @@
           "429": {
             "$ref": "#/components/responses/error429"
           },
+          "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           }
         },
         "security": [
@@ -17050,8 +17304,61 @@
           "429": {
             "$ref": "#/components/responses/error429"
           },
+          "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           }
         },
         "security": [
@@ -17180,6 +17487,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -17198,8 +17508,61 @@
           "429": {
             "$ref": "#/components/responses/error429"
           },
+          "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
           "500": {
             "$ref": "#/components/responses/error500"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           }
         },
         "security": [
@@ -17493,6 +17856,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -17756,6 +18122,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -17967,6 +18336,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -18194,6 +18566,9 @@
       "get": {
         "operationId": "getAPIContract_api_v1_openapi.json",
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -20007,6 +20382,31 @@
           },
           "429": {
             "$ref": "#/components/responses/error429"
+          },
+          "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "failure_retention": {
+                      "type": "string"
+                    },
+                    "request_id": {},
+                    "stage": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
           },
           "500": {
             "$ref": "#/components/responses/error500"
@@ -22836,6 +23236,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -24024,6 +24427,24 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "failure_retention": "example"
+                },
+                "schema": {
+                  "properties": {
+                    "failure_retention": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -26260,6 +26681,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -26534,6 +26958,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -27096,6 +27523,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },
@@ -27615,6 +28045,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
           "400": {
             "$ref": "#/components/responses/error400"
           },

@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,11 +27,30 @@ func coreLogReadDeadline(next http.Handler) http.Handler {
 }
 
 func writeCoreLogReadError(w http.ResponseWriter, r *http.Request, err error) {
+	if writeCanceledRead(w, r, err) {
+		return
+	}
 	if r.Context().Err() == context.DeadlineExceeded {
-		writeError(w, http.StatusGatewayTimeout, "读取超时，请重试。")
+		requestID, _ := core.NewID("req")
+		w.Header().Set("X-Request-ID", requestID)
+		detail := safeInternalDiagnostic(err)
+		slog.Error("HTTP read failed", "request_id", requestID, "method", r.Method, "route", r.Pattern, "resource", r.URL.EscapedPath(), "stage", "data_read", "status", 504, "error", detail)
+		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "读取超时，请重试。", "detail": detail, "stage": "data_read", "code": "read_timeout", "request_id": requestID, "failure_retention": "not_required"})
 		return
 	}
 	writeStoreError(w, err)
+}
+
+func writeCanceledRead(w http.ResponseWriter, r *http.Request, err error) bool {
+	// A canceled dependency alone is not proof that the caller left the view.
+	// A server deadline remains a timeout, and write outcomes remain uncertain.
+	if readOnlyMethod(r.Method) && errors.Is(r.Context().Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+		requestID, _ := core.NewID("req")
+		w.Header().Set("X-Request-ID", requestID)
+		writeJSON(w, 499, map[string]string{"error": "读取已取消。", "code": "request_canceled", "stage": "data_read", "request_id": requestID, "failure_retention": "not_required"})
+		return true
+	}
+	return false
 }
 
 func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {

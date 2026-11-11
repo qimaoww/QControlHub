@@ -23,10 +23,13 @@ export async function runConnectionSessions({createPage,login,api,evaluate,wait,
  const pageIPs=await evaluate(a,`${rows}.map(row=>row.querySelector('code').textContent)`);
  await reload(a);await wait(a,ready);
  assert.deepEqual(await evaluate(a,`${rows}.map(row=>row.querySelector('code').textContent)`),pageIPs,'real reload lost cached page');
- await call('Network.enable',{},a);await call('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:-1,uploadThroughput:-1},a);
+ await evaluate(a,"window.__readBackfills=0;window.__readFetch=window.fetch;window.fetch=(...args)=>{if(String(args[0]).endsWith('/tasks/failures'))window.__readBackfills++;return window.__readFetch(...args);};");
+ await call('Network.enable' ,{},a);await call('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:-1,uploadThroughput:-1},a);
  await evaluate(a,`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()`);
  await wait(a,"document.querySelector('.a-main').textContent.includes('更新失败，保留上次结果')");
  assert.deepEqual(await evaluate(a,`${rows}.map(row=>row.querySelector('code').textContent)`),pageIPs,'offline erased real history');
+ assert.equal(await evaluate(a,"document.querySelectorAll('.a-toast.error').length"),0,'offline read produced a global operation error');
+ assert.equal(await evaluate(a,"window.__readBackfills"),0,'offline read tried diagnostic backfill');
  await call('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1},a);
  await evaluate(a,`[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='刷新').click()`);await wait(a,ready);
  const host=fixture['logs-admin'];
