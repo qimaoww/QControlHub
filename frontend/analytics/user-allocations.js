@@ -5,7 +5,7 @@ import { parseSharedPorts, sharedLimitBytes, sharedLimitGiB, formatSharedPorts, 
 import { node, button, actions, stack, grid, field, muted, notice, pathID, list, table, badge } from './ui.js';
 
 export function editUserAllocations(ctx, user) {
-  return preparedDialog(ctx, `${user.username} · 共享资源`, ['节点', '授权范围', '已用 / 总额度', '状态', '操作'], local => editUserAllocationsLoaded(local, user), { submit: '分配节点' });
+  return preparedDialog(ctx, `${user.username} · 共享资源`, ['节点', '授权范围', '已用 / 总额度', '状态', '操作'], local => editUserAllocationsLoaded(local, user), { submit: '分配节点', closeWhilePending: true });
 }
 async function editUserAllocationsLoaded(ctx, user) {
   const data = ctx.state.data;
@@ -169,7 +169,6 @@ async function editUserAllocationsLoaded(ctx, user) {
   const box = ctx.dialog(`${user.username} · 共享资源`, content, { wide: true });
   box.dataset.userAllocation = user.id;
   box.onRequestClose = () => {
-    if (busy || editor?.form.getAttribute('aria-busy') === 'true') return;
     remember(); ctx.setDirty(false); box.close();
   };
   box.addEventListener('close', () => { closed = true; if (current()) ctx.setDirty(false); }, { once: true });

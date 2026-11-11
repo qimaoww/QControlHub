@@ -6,7 +6,7 @@ import { bytes } from './operations.js';
 
 export function editAgentSharing(ctx, agent) {
   if (agent.can_manage === false || !ctx.can('agents.manage', agent)) return;
-  return preparedDialog(ctx, `${agent.name} · 共享 Agent`, ['用户名', '可用内核', '端口', '总额度 · GiB', 'HTTP-01 允许域名'], local => editAgentSharingLoaded(local, agent), { submit: '保存共享设置' });
+  return preparedDialog(ctx, `${agent.name} · 共享 Agent`, ['用户名', '可用内核', '端口', '总额度 · GiB', 'HTTP-01 允许域名'], local => editAgentSharingLoaded(local, agent), { submit: '保存共享设置', closeWhilePending: true });
 }
 async function editAgentSharingLoaded(ctx, agent) {
   if (agent.can_manage === false || !ctx.can('agents.manage', agent)) return;
@@ -108,7 +108,6 @@ async function editAgentSharingLoaded(ctx, agent) {
   markChanged();
   const box = ctx.dialog(`${agent.name} · 共享 Agent`, stack(!supported && notice('请先升级 Agent，再启用共享'), form), { wide: true });
   box.onRequestClose = () => {
-    if (form.getAttribute('aria-busy') === 'true') return;
     markChanged(); ctx.setDirty(false); box.close();
   };
   box.addEventListener('close', () => { if (current()) ctx.setDirty(false); }, { once: true });

@@ -181,10 +181,10 @@ export function startAnalytics({ app, session }) {
     const error=new Error(message);
     void recordFailure(error,`页面 ${route}`,"panel_feedback").then(showFailure);
   };
-  function dialog(title, content, { wide = false } = {}) {
+  function dialog(title, content, { wide = false, closeWhilePending = false } = {}) {
     const active = document.activeElement;
     const closeButton = button("", () => {
-      if (pending) { announce("操作正在提交，请等待结果。", "warn"); return; }
+      if (pending && !closeWhilePending) { announce("操作正在提交，请等待结果。", "warn"); return; }
       if (box.onRequestClose) void box.onRequestClose();
       else box.close();
     }, { glyph: "close", title: "关闭", className: "a-icon-button" });
@@ -195,8 +195,8 @@ export function startAnalytics({ app, session }) {
       node("div", { className: "a-dialog-body" }, content));
     document.body.append(box);
     box.addEventListener("cancel", event => {
-      if (pending || box.onRequestClose) event.preventDefault();
-      if (!pending && box.onRequestClose) void box.onRequestClose();
+      if ((pending && !closeWhilePending) || box.onRequestClose) event.preventDefault();
+      if ((!pending || closeWhilePending) && box.onRequestClose) void box.onRequestClose();
     });
     box.addEventListener("close", () => {
       const restore = document.activeElement === document.body || box.contains(document.activeElement);

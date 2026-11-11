@@ -71,10 +71,10 @@ export function loadingForm(labels, submit = '保存') {
 // Keep a single business dialog alive while its required baseline is read.
 // The builder receives a dialog-bound context; its first dialog() fills this
 // box, so closing during a read cannot open a second, late dialog.
-export function preparedDialog(ctx, title, labels, build, { wide = true, submit = '保存并部署' } = {}) {
+export function preparedDialog(ctx, title, labels, build, { wide = true, submit = '保存并部署', closeWhilePending = false } = {}) {
   const content = stack(loadingForm(labels, submit));
   const body = stack(content);
-  const box = ctx.dialog(title, body, { wide });
+  const box = ctx.dialog(title, body, { wide, closeWhilePending });
   box.setContent = element => content.replaceChildren(element);
   const local = dialogContext(ctx, box);
   let filled = false;
