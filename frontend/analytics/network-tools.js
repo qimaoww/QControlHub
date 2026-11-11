@@ -524,7 +524,9 @@ export function networkToolsPage(ctx) {
                         : labels[server.state] || server.state,
                     ),
                   ),
-                server?.error && notice(server.error, "error"),
+                server?.error &&
+                  server.error !== "测量已停止" &&
+                  notice(server.error, "error"),
                 server?.stderr &&
                   node(
                     "details",
@@ -557,7 +559,9 @@ export function networkToolsPage(ctx) {
                           badge(labels[r.state] || r.state),
                         ),
                         muted(`${endpointLabel(from)} → ${endpointLabel(to)}`),
-                        r.error && notice(r.error, "error"),
+                        (r.error || r.output?.error) &&
+                          r.error !== "测量已停止" &&
+                          notice(r.error || r.output.error, "error"),
                         renderOutput(tool, r.output),
                         (tool === "traceroute" || tool === "mtr") &&
                           params.provider !== "disable-geoip" &&
@@ -839,7 +843,6 @@ function renderOutput(tool, out) {
         r.lost_percent == null ? "—" : `${number(r.lost_percent)}%`,
       ]);
   return stack(
-    out.error && notice(out.error, "error"),
     rows.length
       ? table(["统计端", "吞吐", "传输量", "重传", "抖动（ms）", "丢包"], rows)
       : muted("未产生有效吞吐统计"),

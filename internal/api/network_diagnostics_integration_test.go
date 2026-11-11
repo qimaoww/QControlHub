@@ -17,7 +17,7 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	b, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "diagnostic-b")
 	for i, agent := range []core.Agent{a, b} {
 		grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 5201)
-		caps := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}, "nexttrace": {Version: "v1.7.6"}, "iperf3": {Version: "3.18"}}, Providers: map[string]string{"disable-geoip": "", "IPInfo": "missing token"}, Addresses: []string{[]string{"192.0.2.2", "192.0.2.3"}[i]}}
+		caps := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}, "nexttrace": {Version: "v1.7.6"}, "iperf3": {Version: "3.18"}}, Providers: map[string]string{"disable-geoip": "", "ipdb.one": "missing credentials"}, Addresses: []string{[]string{"192.0.2.2", "192.0.2.3"}[i]}}
 		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: append(agent.Features, core.AgentFeatureNetworkDiagnostics)}); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +52,7 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	invalid.Node2.Address = "8.8.8.8"
 	alice.call("POST", "/network-diagnostics", invalid, 400, nil)
 	invalid = request
-	invalid.Parameters.Provider = "IPInfo"
+	invalid.Parameters.Provider = "ipdb.one"
 	alice.call("POST", "/network-diagnostics", invalid, 409, nil)
 	invalid = request
 	invalid.Node2 = invalid.Node1
