@@ -27,6 +27,7 @@ assert.throws(
   ConfigFormatError,
   "JSON with a trailing comma fails closed",
 );
+assert.throws(() => formatConfigContent('{"a":"raw\u0001control"}', 'JSON'), ConfigFormatError, 'raw control characters remain invalid');
 assert.throws(
   () => formatConfigContent('{"a":1} // sing-box comment', "JSON"),
   ConfigFormatError,

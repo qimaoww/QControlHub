@@ -1,3 +1,5 @@
+import { readableConfigSource } from '../modules/code-format.js';
+import { testJSONEditor } from './json-editor.mjs';
 import { assert, delay, waitFor } from "./assertions.mjs";
 
 export async function testConfigLayoutRuntime({ testAPI }) {
@@ -29,7 +31,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       const previousTarget = target();
       location.hash = hash;
       await waitFor(() => target() && target() !== previousTarget && target().elements.agent.value === agent && target().elements.engine.value === engine && editor(), `旧链接目标未保留：${hash}`); await settled();
-      assert.equal(editor().value, testAPI.layoutConfigs.get(`${agent}-${engine}`).content, "源码与链接目标不符");
+      assert.equal(editor().value, readableConfigSource(testAPI.layoutConfigs.get(`${agent}-${engine}`).content,engine), "源码与链接目标不符");
       if (testAPI.agents.find(item => item.id === agent).status === "offline") {
         assert.ok(root().textContent.includes("离线"), "离线节点无状态提示");
         assert.ok(configForm().querySelector("[type=submit]").disabled, "离线仍允许部署");
@@ -65,7 +67,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     const common = await confirm("通用配置项");
     change(common.querySelector('[name="mutation"]'), "modify");
     await waitFor(() => common.querySelector('[name="fragment"]').value.includes("1.1.1.1"), "通用配置未通过字段 API 读取");
-    assert.equal(editor().value, testAPI.layoutConfigs.get("alpha-xray").content);
+    assert.equal(editor().value, readableConfigSource(testAPI.layoutConfigs.get("alpha-xray").content,"xray"));
     common.dispatchEvent(new Event("cancel", { cancelable: true })); await waitFor(() => !common.open, "Escape 未关闭工具弹窗");
     assert.equal(document.activeElement, button("通用配置项"), "关闭工具未恢复焦点");
     button("保存历史").click(); const history = await confirm("节点配置历史");
@@ -81,7 +83,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     await close(await confirm("任务详情"));
     assert.ok(button("重置修改").disabled, "已保存仍显示待重置");
     input(form.elements.name, "丢弃此修改"); input(form.elements.description, "丢弃此说明"); input(editor(), "{}"); button("重置修改").click();
-    assert.equal(form.elements.name.value, "源码保存后的名称"); assert.equal(form.elements.description.value, "保存后重置基线"); assert.equal(editor().value, submitting, "重置回到旧保存内容");
+    assert.equal(form.elements.name.value, "源码保存后的名称"); assert.equal(form.elements.description.value, "保存后重置基线"); assert.equal(editor().value, readableConfigSource(submitting,"xray"), "重置回到旧保存内容");
     // A clean source must leave without an unnecessary discard prompt.
     change(target().elements.engine, "sing-box"); await waitFor(() => target()?.elements.engine.value === "sing-box" && editor(), "保存并重置后仍阻止导航"); await settled();
 
@@ -130,6 +132,7 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(button("重置修改").disabled, "无效正文自动产生修改");
     ssConfig.content = validContent;
     change(target().elements.engine, "sing-box"); await waitFor(() => target()?.elements.engine.value === "sing-box" && editor(), "无效正文阻止离开"); await settled();
+    await testJSONEditor({change,target,editor,settled,button});
   }
   const workspace = editor().closest(".a-card"), frame = editor().getBoundingClientRect(), panel = workspace.getBoundingClientRect();
   const inbound = root().querySelector('[aria-label="入站配置"]').getBoundingClientRect();

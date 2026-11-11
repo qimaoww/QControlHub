@@ -66,9 +66,9 @@ func decodeFormatFixture(t *testing.T, content string) string {
 	return string(canonical)
 }
 
-func TestFormatSSRustSourcePreservesTokens(t *testing.T) {
+func TestFormatJSONSourcePreservesTokens(t *testing.T) {
 	const source = `{"unknown":9007199254740993,"decimal":1.2300e+90,"escaped":"\u4e2d\/\\\"","list":[3,2,1]}`
-	formatted, err := FormatSSRustSource(source)
+	formatted, err := FormatJSONSource(source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestFormatSSRustSourcePreservesTokens(t *testing.T) {
 		t.Fatal("formatting changed JSON tokens", err)
 	}
 	for _, invalid := range []string{"", "{", `{"a":1} trailing`, `{"a":"unterminated}`} {
-		if _, err := FormatSSRustSource(invalid); err == nil {
+		if _, err := FormatJSONSource(invalid); err == nil {
 			t.Fatalf("accepted invalid JSON %q", invalid)
 		}
 	}

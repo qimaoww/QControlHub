@@ -9,9 +9,9 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// FormatSSRustSource changes whitespace only: number lexemes, escapes, unknown
+// FormatJSONSource changes whitespace only: number lexemes, escapes, unknown
 // fields and array order must survive display and save-only operations.
-func FormatSSRustSource(content string) (string, error) {
+func FormatJSONSource(content string) (string, error) {
 	var output bytes.Buffer
 	if err := json.Indent(&output, bytes.TrimSpace([]byte(content)), "", "  "); err != nil {
 		return "", err
@@ -23,6 +23,14 @@ func FormatSSRustSource(content string) (string, error) {
 	return output.String(), nil
 }
 
+// FormatConfigSource keeps YAML verbatim and formats supported JSON sources.
+func FormatConfigSource(engine core.Engine, content string) (string, error) {
+	if engine == core.EngineXray || engine == core.EngineSingBox || engine == core.EngineShadowsocksRust {
+		return FormatJSONSource(content)
+	}
+	return content, nil
+}
+
 // PresetAccountingSource verifies generated artifacts before removing them.
 // Preset mutations operate on originals, never stale per-port outbound copies.
 func PresetAccountingSource(engine core.Engine, content string) (string, error) {
@@ -30,7 +38,7 @@ func PresetAccountingSource(engine core.Engine, content string) (string, error) 
 		// A single-server config stores its mark at the root. Remove verified
 		// generated marks before converting to servers[] or changing a port.
 		if !strings.Contains(content, "outbound_fwmark") {
-			return FormatSSRustSource(content)
+			return FormatJSONSource(content)
 		}
 		if _, err := PrepareAccounting(engine, content); err != nil {
 			return "", err
@@ -50,7 +58,7 @@ func PresetAccountingSource(engine core.Engine, content string) (string, error) 
 		return string(data) + "\n", err
 	}
 	if !strings.Contains(content, accountingPrefix) {
-		return content, nil
+		return FormatConfigSource(engine, content)
 	}
 	return AccountingUpdateSource(engine, content, content)
 }

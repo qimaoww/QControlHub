@@ -11,6 +11,7 @@ import { diagnosticError } from "../modules/errors.js";
 import { configStudio } from "./config-studio.js";
 import { nodeName } from "./node-region.js";
 import { formatConfigContent } from "../modules/code-format.js";
+import { bindJSONEditor, sourcePreview } from './json-editor.js';
 import { formatSharedPorts } from "../modules/user-model.js";
 import { filterbar, node, button, actions, stack, section, table, badge, field, pathID, list, muted, notice, formData, empty, code, link } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
@@ -180,7 +181,7 @@ export async function liveConfigPage(ctx) {
   const formatNotice = notice("");
   formatNotice.hidden = true;
   const readableSource = (text, report = true) => {
-    if (engine !== "ss-rust") return text;
+    if (engine === "mihomo") return text;
     try {
       const formatted = formatConfigContent(text, "JSON");
       if (report) formatNotice.hidden = true;
@@ -271,6 +272,7 @@ export async function liveConfigPage(ctx) {
     }
     element.elements.content.defaultValue = element.elements.content.value;
   });
+  bindJSONEditor(form.elements.content, engine === 'mihomo' ? 'YAML' : 'JSON', ctx.signal);
   function blockSource(error, committed, hasTask = false) {
     if (!ctx.current()) return;
     sourceBlocked = true;
@@ -405,7 +407,7 @@ export async function liveConfigPage(ctx) {
         const previewRead = readRegion(dialogContext(ctx, historyBox), "配置预览", async () => {
         const revision = await ctx.api(`/configs/${pathID(saved.id)}/revisions/${record.version}`);
         if (!ctx.current() || !historyBox.isConnected) return;
-        preview.replaceChildren(stack(code(readableSource(revision.content, false)), ctx.can("configs.restore") && record.version !== saved.version && button("恢复此档案", async event => {
+        preview.replaceChildren(stack(sourcePreview(revision.content, engine), ctx.can("configs.restore") && record.version !== saved.version && button("恢复此档案", async event => {
           const control = event.currentTarget;
           if (!await ctx.confirm(`恢复 ${date(revision.updated_at)} 的配置？将按当前时间新增记录，原档案保留。`, "恢复配置") || !ctx.current()) return;
           await ctx.mutate(control, async () => {

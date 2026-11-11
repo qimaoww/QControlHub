@@ -5,6 +5,7 @@ import { listen, patch, poll } from "./live-dom.js";
 import { currentTheme } from '../modules/theme-lifecycle.js';
 import { formatDate } from "./appearance.js";
 import { bindSourceEditorTools } from "./source-editor.js";
+import { readableConfigSource } from '../modules/code-format.js';
 import { editAgentSharing } from "./sharing.js";
 import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, summarizeDashboardNodes, rankDashboardTraffic, utcMonth, panelMetricUsage } from "../modules/dashboard-model.js";
 import { metricTrack } from './metric-track.js';
@@ -537,6 +538,7 @@ export async function tasksPage(ctx) {
     const resource = await ctx.api(`/tasks/${pathID(task.id)}/retry-editor`);
     if (!ctx.current()) return;
     const { config } = resource;
+    config.content = readableConfigSource(config.content, config.engine);
     const form = ctx.form([
       muted(`${config.name} · ${date(config.updated_at)}`),
       task.error && notice(diagnosticError(task.error)),

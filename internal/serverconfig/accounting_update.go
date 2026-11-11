@@ -204,7 +204,8 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 	if engine == core.EngineMihomo {
 		data, err = yaml.Marshal(root)
 	} else {
-		data, err = json.Marshal(root)
+		data, err = json.MarshalIndent(root, "", "  ")
+		data = append(data, '\n')
 	}
 	return string(data), err
 }

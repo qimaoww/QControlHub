@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func (s *Store) CreateConfig(ctx context.Context, input core.Config) (core.Config, error) {
@@ -19,6 +20,11 @@ func (s *Store) CreateConfig(ctx context.Context, input core.Config) (core.Confi
 	if err := core.ValidateConfig(input.Engine, input.Content); err != nil {
 		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	formatted, formatErr := serverconfig.FormatConfigSource(input.Engine, input.Content)
+	if formatErr != nil {
+		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, formatErr)
+	}
+	input.Content = formatted
 	name, description, err := validateConfigMetadata(input.Name, input.Description)
 	if err != nil {
 		return core.Config{}, err
@@ -83,6 +89,11 @@ func (s *Store) updateConfigTx(ctx context.Context, tx pgx.Tx, id string, input 
 	if err := core.ValidateConfig(input.Engine, input.Content); err != nil {
 		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	formatted, formatErr := serverconfig.FormatConfigSource(input.Engine, input.Content)
+	if formatErr != nil {
+		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, formatErr)
+	}
+	input.Content = formatted
 	name, description, err := validateConfigMetadata(input.Name, input.Description)
 	if err != nil {
 		return core.Config{}, err

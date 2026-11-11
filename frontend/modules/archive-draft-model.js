@@ -1,8 +1,9 @@
 import { configDefaults } from "./config-defaults.js";
+import { readableConfigSource } from './code-format.js';
 
 export function createArchiveDraft(config = {}) {
   const engine = config.engine || "mihomo";
-  const content = config.content ?? configDefaults[engine];
+  const content = readableConfigSource(config.content ?? configDefaults[engine], engine);
   return {
     ...config, engine, name: config.name ?? "", description: config.description ?? "",
     originalName: config.name ?? "", originalDescription: config.description ?? "",

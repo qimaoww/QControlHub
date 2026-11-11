@@ -5,6 +5,11 @@ export class ConfigFormatError extends Error {
   }
 }
 
+export function readableConfigSource(text, engine) {
+  if (engine === 'mihomo') return text;
+  try { return formatConfigContent(text, 'JSON'); } catch { return text; }
+}
+
 const invalidJson = () =>
   new ConfigFormatError(
     "JSON 语法错误（或包含注释/扩展语法），无法安全格式化。",
@@ -60,7 +65,7 @@ function lexJson(text) {
           closed = true;
           break;
         }
-        if (current === "\n" || current === "\r") throw invalidJson();
+        if (current.charCodeAt(0) < 0x20) throw invalidJson();
         cursor += 1;
       }
       if (!closed) throw invalidJson();

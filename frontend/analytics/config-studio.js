@@ -1,4 +1,6 @@
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
+import { bindJSONEditor } from './json-editor.js';
+import { readableConfigSource } from '../modules/code-format.js';
 import { preparedDialog, loadingForm } from "./loading.js";
 import { recoverConfigInstance } from "./config-status-recovery.js";
 import { labels, numeric, booleans, multiline } from "./inbound-fields.js";
@@ -398,13 +400,14 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
   }
   async function filesLoaded(ctx) {
     if(!await latest(ctx)||!current.config)return;
-    const editor=field('完整配置','content',current.source_content ?? current.config.content,{multiline:24,spellcheck:false,readonly:!editable});
+    const editor=field('完整配置','content',readableConfigSource(current.source_content ?? current.config.content,engine),{multiline:24,spellcheck:false,readonly:!editable});
     const form=ctx.form([node('div',{className:'a-editor'},editor)], '保存并部署',async()=>{
       if(!await preparing('deploy'))return;
       const result=await write(`${base}/source`,{name:current.config.name,description:current.config.description,version:current.config.version,content:form.elements.content.value,intent:'deploy'},box);
       await committed(result,box);
     });
     const box=ctx.dialog('展开源码',form,{wide:true});
+    bindJSONEditor(form.elements.content, engine==='mihomo'?'YAML':'JSON', ctx.signal);
     track(form,box);
     if(!editable)form.querySelector('button[type=submit]').remove();
 
@@ -495,7 +498,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const form=ctx.form([
         inbound&&muted(`${agent.name} · ${engine} · ${agent.shared_allocation?'当前共享实例':'主实例'} · 入站 ${inbound.tag} · ${inbound.port}`),
         selecting?field('已有出站','tag',outboundBinding(inbound),{options:[['','请选择出站'],...entries.map(item=>[item.tag,item.tag])],required:true}):deleting?stack(muted(`删除 ${object.tag}？`),replacementField(object)):field('配置区域','section',sectionName,{options:sections,disabled:Boolean(object)}),
-        group('出站配置',field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',content,{multiline:12,spellcheck:false,readonly:selecting||deleting}), selecting||deleting||sectionName==='proxy-groups'),
+        group('出站配置',field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',readableConfigSource(content,engine),{multiline:12,spellcheck:false,readonly:selecting||deleting}), selecting||deleting||sectionName==='proxy-groups'),
         object&&operation==='modify'&&muted('保存会更新所有引用此出站的入站。'),intents(),
       ],'保存并部署',async values=>{
         const raw=!selecting&&!deleting&&activePreset()?await preset.verifiedContent():values.fragment||'';
@@ -507,6 +510,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         await committed(result,box);
       });
       form.elements.fragment.setAttribute('aria-label',engine==='mihomo'?'出站配置 YAML':'出站配置 JSON');
+      bindJSONEditor(form.elements.fragment, engine==='mihomo'?'YAML':'JSON', ctx.signal);
       if(deleting)form.querySelector('button[type=submit]').classList.add('danger');
       const activePreset=()=>preset&&(form.elements.section?.value||sectionName)!=='proxy-groups';
       box.setContent(form);track(form,box);

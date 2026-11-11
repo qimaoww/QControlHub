@@ -5,6 +5,8 @@ import { readOrderedNodes } from "../modules/node-order.js";
 import { configDefaults } from "../modules/config-defaults.js";
 import { createArchiveDraft, archiveDraftDirty } from "../modules/archive-draft-model.js";
 import { bindSourceEditorTools } from "./source-editor.js";
+import { readableConfigSource } from '../modules/code-format.js';
+import { sourcePreview } from './json-editor.js';
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, pathID, list, notice } from "./ui.js";
 import { date, taskDetail } from "./operations.js";
 
@@ -39,6 +41,7 @@ export async function archivePage(ctx) {
   }
   function edit(config = null) {
     let baseline = config || { name: "", description: "", engine: "mihomo", content: initial("mihomo"), version: 0 };
+    baseline = { ...baseline, content: readableConfigSource(baseline.content, baseline.engine) };
     const draftKey = config?.id || "new";
     let draft = drafts.get(draftKey);
     if (!draft || !archiveDraftDirty(draft)) draft = createArchiveDraft(baseline);
@@ -63,6 +66,9 @@ export async function archivePage(ctx) {
       });
       if (!ctx.current()) return;
       // Queued input events can still arrive while the form is disabled.
+      capture();
+      saved.content = readableConfigSource(saved.content, saved.engine);
+      if (form.elements.content.value === values.content) form.elements.content.value = saved.content;
       capture();
       if (config) Object.assign(config, saved);
       else { config = saved; items.unshift(saved); }
@@ -150,7 +156,7 @@ export async function archivePage(ctx) {
                 Object.assign(config, saved); ctx.announce('配置已恢复'); box.close(); draw();
               });
             }, { tone: 'primary' });
-            preview.replaceChildren(stack(node('h3', {}, `${selected.name} · ${date(selected.updated_at)}`), code(selected.content), restore && actions(restore)));
+            preview.replaceChildren(stack(node('h3', {}, `${selected.name} · ${date(selected.updated_at)}`), sourcePreview(selected.content, selected.engine || config.engine), restore && actions(restore)));
           }, { clear: () => preview.replaceChildren() });
           preview.prepend(previewRead.element); void previewRead.load();
         }),

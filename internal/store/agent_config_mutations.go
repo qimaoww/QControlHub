@@ -84,13 +84,11 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 	if err := core.ValidateConfig(input.Engine, input.Content); err != nil {
 		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	if input.Engine == core.EngineShadowsocksRust {
-		var err error
-		input.Content, err = serverconfig.FormatSSRustSource(input.Content)
-		if err != nil {
-			return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
-		}
+	formatted, err := serverconfig.FormatConfigSource(input.Engine, input.Content)
+	if err != nil {
+		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	input.Content = formatted
 	if expectedVersion < 0 {
 		return core.Config{}, fmt.Errorf("%w: invalid configuration version", ErrInvalid)
 	}

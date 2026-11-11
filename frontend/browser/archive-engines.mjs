@@ -1,5 +1,6 @@
 import { startAnalytics } from "../analytics/app.js";
 import { configDefaults } from "../modules/config-defaults.js";
+import { readableConfigSource } from '../modules/code-format.js';
 import { assert, delay, waitFor } from "./assertions.mjs";
 
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
@@ -156,7 +157,7 @@ export async function testArchiveEnginesRuntime(preview = false) {
       // Reopen from the saved API record with its engine locked.
       retainedClose(box); box = reopen(`Archive ${engine}`); form = formOf(box); check(form, engine, content); assert.ok(form.elements.engine.disabled, "existing engine is mutable");
       fill(form, "content", content + "\n"); retainedClose(box); box = reopen(`Archive ${engine}`); form = formOf(box); check(form, engine, content + "\n", true);
-      form.requestSubmit(); await waitFor(() => configs.find(item => item.name === `Archive ${engine}`).version === 2, "second save did not advance internal version"); await settled(); check(form, engine, content + "\n"); retainedClose(box);
+      form.requestSubmit(); await waitFor(() => configs.find(item => item.name === `Archive ${engine}`).version === 2, "second save did not advance internal version"); await settled(); check(form, engine, readableConfigSource(content + "\n",engine)); retainedClose(box);
       const current = configs.find(item => item.name === `Archive ${engine}`), historyBefore = revisions.get(current.id).length;
       button("历史", rowFor(current.name)).click(); const historyBox = await waitFor(() => openDialog(`${current.name} · 保存历史`), "archive history missing"); await settled();
       const rows = [...historyBox.querySelectorAll("tbody tr")]; button("预览", rows[0]).click(); await waitFor(() => historyBox.querySelector("pre"), "history preview missing"); await settled(); assert.equal(historyBox.querySelector("pre").textContent, content);

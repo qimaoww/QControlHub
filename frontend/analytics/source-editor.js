@@ -1,8 +1,10 @@
 import { formatConfigContent } from "../modules/code-format.js";
 import { actions, badge, button, muted } from "./ui.js";
+import { bindJSONEditor } from './json-editor.js';
 
 export function bindSourceEditorTools(ctx, form, engine, original, changed, writable) {
   const input = form.elements.content;
+  const editor = bindJSONEditor(input, engine() === 'mihomo' ? 'YAML' : 'JSON', ctx.signal);
   const feedback = muted("");
   feedback.id = `${input.id}-feedback`;
   feedback.setAttribute("role", "status");
@@ -20,6 +22,7 @@ export function bindSourceEditorTools(ctx, form, engine, original, changed, writ
   });
   function update() {
     const json = engine() !== "mihomo";
+    editor.update(json ? 'JSON' : 'YAML');
     language.textContent = `${engine()} · ${json ? "JSON" : "YAML"}`;
     input.setAttribute("aria-label", `${engine()} 配置源码`);
     let error = !input.value.trim() ? "配置源码不能为空。" : new Blob([input.value]).size > 2 * 1024 * 1024 ? "配置源码超过 2 MiB 上限。" : "";
@@ -33,7 +36,7 @@ export function bindSourceEditorTools(ctx, form, engine, original, changed, writ
     if (format) format.disabled = busy();
   }
   input.closest(".a-editor").prepend(actions(language, reset, format));
-  input.parentElement.append(feedback);
+  input.closest('.a-field').append(feedback);
   form.addEventListener("input", update);
   form.addEventListener("change", update);
   form.addEventListener("submit", update);

@@ -1,3 +1,4 @@
+import { readableConfigSource } from './modules/code-format.js';
 import { assert, pause, waitFor, createConfigFixture } from './browser/config-fixture.mjs';
 import { testNativeConfigReadCacheRuntime } from './browser/config-snapshots.mjs';
 import { testSourceReceipts } from './browser/preset-recovery.mjs';
@@ -119,17 +120,17 @@ async function testRuntimeAndSourceSelection(){
     assert(!sourceForm().querySelector('[type=submit]').disabled,'upgraded runtime did not restore deployment');
     assert(['personal','managed','import'].every(value=>[...target().elements.source.options].some(option=>option.value===value)),'upgraded runtime lost available source choices');
     await selectSource('personal');
-    assert(!sourceForm().elements.content.readOnly&&sourceForm().elements.content.value===test.saved().content,'saved source is not editable or shows system snapshot');
+    assert(!sourceForm().elements.content.readOnly&&sourceForm().elements.content.value===readableConfigSource(test.saved().content,'xray'),'saved source is not editable or shows system snapshot');
     await selectSource('managed');
     assert(!sourceForm().elements.content.readOnly&&sourceForm().querySelector('[type=submit]').textContent==='保存并部署','managed source lost atomic deployment');
     await selectSource('import');
     const snapshot='{"inbounds":[{"tag":"complete-existing-snapshot"}],"large":9007199254740993}';
     test.setAgentContent(snapshot);test.clickButton('读取系统配置');
-    await waitFor(()=>idle()&&sourceForm().elements.content.value===snapshot,'newly available system source did not read exact snapshot');
+    await waitFor(()=>idle()&&sourceForm().elements.content.value===readableConfigSource(snapshot,'xray'),'newly available system source did not read exact snapshot');
     assert(sourceForm().elements.content.readOnly,'system migration snapshot became editable');
     assert(sourceForm().querySelectorAll('[type=submit]').length===1&&sourceForm().querySelector('[type=submit]').textContent==='导入并迁移','system migration has duplicate or incorrect submit action');
     await selectSource('personal');
-    assert(sourceForm().elements.content.value===test.saved().content,'system snapshot polluted saved source');
+    assert(sourceForm().elements.content.value===readableConfigSource(test.saved().content,'xray'),'system snapshot polluted saved source');
     for(const ignoreAbort of [false,true]){
       test.ignoreAgentAbort=ignoreAbort;
       const nextSource=ignoreAbort?'personal':'managed';

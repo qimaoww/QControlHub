@@ -1,3 +1,4 @@
+import { readableConfigSource } from '../modules/code-format.js';
 import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mjs";
 
 const deferred = () => {
@@ -93,10 +94,10 @@ export async function testSourceReceipts() {
       form.requestSubmit();
       if(outcome==='recovered') {
         await test.settle(1);
-        assert(test.saved().version===2&&input.value===draft&&!form.querySelector('[type=submit]').disabled,'lost response did not recover accepted source');
+        assert(test.saved().version===2&&input.value===readableConfigSource(draft,'xray')&&!form.querySelector('[type=submit]').disabled,'lost response did not recover accepted source');
       } else {
         await waitFor(()=>notices().includes(outcome==='readback'?'配置已保存且任务已提交':'保存结果需重新核对')&&!form.hasAttribute('aria-busy'),'uncertain source did not freeze safely');
-        assert(form.querySelector('[type=submit]').disabled&&input.value===draft,'uncertain source permits duplicate save or lost draft');
+        assert(form.querySelector('[type=submit]').disabled&&input.value===(outcome==='readback'?readableConfigSource(draft,'xray'):draft),'uncertain source permits duplicate save or lost draft');
         const writes=test.writes.length;
         form.requestSubmit();await pause();assert(test.writes.length===writes,'uncertain source replayed mutation');
         assert(test.saved().version===(outcome==='superseded'?3:outcome==='rejected'?1:2),'source receipt associated wrong revision');
@@ -118,7 +119,7 @@ export async function testSourceReceipts() {
             test.clickButton('核对保存结果');
           }
           await waitFor(()=>!form.querySelector('[type=submit]').disabled,'same-page source recovery did not unlock confirmed state');
-          assert(test.writes.length===writes&&input.value===test.saved().content,'source recovery replayed write or retained wrong baseline');
+          assert(test.writes.length===writes&&input.value===readableConfigSource(test.saved().content,'xray'),'source recovery replayed write or retained wrong baseline');
           assert(!form.querySelector(':scope > .a-notice').textContent,'confirmed source recovery retained stale error feedback');
         }
       }

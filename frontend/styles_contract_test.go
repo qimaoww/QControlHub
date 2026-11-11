@@ -61,8 +61,8 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// readable connection country/node columns within their scroll container,
 	// and a complete source-service selector row on mobile import forms,
 	// and responsive notification records with wrapped dates and reachable actions,
-	// and a monospace fallback that preserves visible source indentation.
-	const expected = "db1172690164558f6cca3de16783e2dae66ba7ab6bb327468d535324dcfe29cc"
+	// and source indentation, line numbers and JSON syntax highlighting.
+	const expected = "882e9925e6e8f3470cc5056c6249abe46869cb24b1ef340c5adb351829f4963e"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}
