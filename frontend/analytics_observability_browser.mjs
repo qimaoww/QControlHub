@@ -34,6 +34,8 @@ export async function checkAnalyticsObservability({ page, mode, evaluate, wait, 
   await wait(page, '!document.hidden');
   // Earlier workflows can persist a paused log view for this account.
   await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='自动更新')?.click()");
+  await wait(page, "!!document.querySelector('[data-log-refresh-label]') && !document.querySelector('[data-log-refresh-label][aria-busy]')");
+  await evaluate(page, 'new Promise(resolve=>requestAnimationFrame(()=>resolve(true)))');
   await evaluate(page, `window.__obsFetch=window.fetch;window.__obsRequests=0;window.__obsPending=0;window.fetch=async (...args)=>{const tracked=['core-log','client-connections','preferences/node-order'].some(part=>String(args[0]).includes(part));if(tracked){window.__obsRequests++;window.__obsPending++;}try{return await window.__obsFetch(...args);}finally{if(tracked)window.__obsPending--;}}`);
   assert.ok(await evaluate(page, "['agent_id','instance_id','engine','level','q','limit'].every(name=>document.querySelector('.a-main [name='+name+']'))"));
   await evaluate(page, `(() => {
