@@ -71,9 +71,11 @@ export function startAnalytics({ app, session }) {
   setStorageAccount(session);
   const can = createPermissionChecker(state);
   const lifetime = new AbortController();
+  let sessionAbort = new AbortController();
+  const stopSessionRequests = () => { sessionAbort.abort(); sessionAbort = new AbortController(); };
   const warmup = createRouteWarmup(routeModules, { moduleName: pageModuleName, signal: lifetime.signal });
   warmup.bindNavigationPreload();
-  let routeAbort = null, routeEpoch = 0, dirty = false, pending = 0;
+  let routeAbort = null, routeEpoch = 0, dirty = false, pending = 0, loggingOut = false;
   let currentHash = location.hash, route = "", dialogSequence = 0, navigation = 0;
   const layout = node("div", { className: "a-layout" });
   const main = node("main", { className: "a-main", id: "content", tabindex: "-1" });
@@ -85,7 +87,7 @@ export function startAnalytics({ app, session }) {
       preferences?.dispose();
       const bound = preferenceSession = state.session;
       preferences = createUIPreferences({
-        request: (path, options) => accountRequest(path, { ...options, session: bound, isCurrent: () => state.session === bound, onUnauthorized: message => login(message) }),
+        request: (path, options) => accountRequest(path, { ...options, session: bound, isCurrent: () => state.session === bound && !lifetime.signal.aborted, onUnauthorized: message => login(message) }),
         isCurrent: () => state.session === bound && !lifetime.signal.aborted,
         report: message => announce(message, "error"),
       });
@@ -115,6 +117,7 @@ export function startAnalytics({ app, session }) {
   const api = async (path, options = {}) => {
     const bound = state.session, data = state.data, reader = sessionReads(bound);
     const writing = !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method || 'GET').toUpperCase());
+    options = { ...options, signal: AbortSignal.any([lifetime.signal, sessionAbort.signal, ...(options.signal ? [options.signal] : [])]) };
     const invalidate = () => { reader.invalidate(readsAffectedByWrite(path)); delete data.analyticsTrafficSnapshot; };
     if (writing) invalidate();
     const result = await (writing ? accountRequest(path, {
@@ -130,6 +133,7 @@ export function startAnalytics({ app, session }) {
     return result;
   };
   const watch = createSessionWatch({ api, state, onAccessChanged: () => {
+    stopSessionRequests();
     preferences?.dispose(); preferences = null;
     routeAbort?.abort();
     reads?.clear();
@@ -263,7 +267,8 @@ export function startAnalytics({ app, session }) {
         catch (error) {
           if (error.intentionalCancellation || state.session !== formSession || routeEpoch !== formEpoch) return;
           error = await recordFailure(error,label,"form_submission");
-          feedback.replaceChildren(node("span",{},failureSummary(error)),node("br"),button("查看详情",()=>void openFailure(error).catch(showFailure)));
+          if (!formSession) feedback.textContent = error.message;
+          else feedback.replaceChildren(node("span",{},failureSummary(error)),node("br"),button("查看详情",()=>void openFailure(error).catch(showFailure)));
           invalid = error.field && element.elements.namedItem(error.field);
         } finally {
           controls.disabled = false;
@@ -362,11 +367,21 @@ export function startAnalytics({ app, session }) {
   window.addEventListener("pagehide", () => void preferences?.flush(), { signal: lifetime.signal });
   document.addEventListener("visibilitychange", () => { if (document.hidden) void preferences?.flush(); }, { signal: lifetime.signal });
   async function logout() {
-    if (!await leave()) return;
-    await preferences?.flush();
-    await mutate(null, async () => { await api("/auth/logout", { method: "POST", body: {} }); login(); });
+    if (!await leave() || loggingOut) return;
+    loggingOut = true;
+    try {
+      await preferences?.flush();
+      await mutate(null, async () => {
+        try { await api("/auth/logout", { method: "POST", body: {}, signal: AbortSignal.timeout(15000) }); }
+        catch (error) { if (error.status !== 401) throw error; }
+        login();
+      });
+    } finally { loggingOut = false; }
   }
   function login(message = "") {
+    if (!state.session && app.querySelector('.a-login')) return;
+    if (loggingOut) message = "";
+    stopSessionRequests();
     void refreshSiteBranding();
     preferences?.dispose(); preferences = null;
     routeAbort?.abort();
@@ -390,7 +405,8 @@ export function startAnalytics({ app, session }) {
       field("用户名", "username", "", { autocomplete: "username", required: true, maxlength: 64, pattern: "(?:[A-Za-z0-9._]|-)+", autocapitalize: "none", spellcheck: false }),
       field("密码 / 管理令牌", "token", "", { type: "password", autocomplete: "current-password", required: true }),
     ], "登录", async values => {
-      const authenticated = await api("/auth/login", { method: "POST", body: values });
+      const authenticated = await api("/auth/login", { method: "POST", body: values, signal: AbortSignal.timeout(15000) });
+      stopSessionRequests();
       state.session = authenticated;
       setStorageAccount(state.session);
       dirty = false;

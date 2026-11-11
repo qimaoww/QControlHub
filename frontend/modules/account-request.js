@@ -19,8 +19,10 @@ export async function accountRequest(path, { session, method = "GET", body, sign
   try { return await requestJSON(`/api/v1${path}`, {
     method, headers, signal, conditional, onResponse, keepalive, credentials: "same-origin", cache: "no-store",
     body: body === undefined ? undefined : JSON.stringify(body),
-  }, { isLogin: path === "/auth/login", isCurrent, onUnauthorized, conditional, onResponse });
+  }, { isLogin: path === "/auth/login", isCurrent, onUnauthorized: path === "/auth/logout" ? undefined : onUnauthorized, conditional, onResponse });
   } catch(error) {
+    // Authentication failures are handled by the login flow, not failed tasks.
+    if (path.startsWith("/auth/") || error.status === 401) error.failureRetention = "not_required";
     if (path !== "/tasks/failures" && !path.startsWith("/auth/")) error = await accountFailureRecorder(session,isCurrent)(error,`${method} ${path.split("?")[0]}`,"api_request");
     throw error;
   }

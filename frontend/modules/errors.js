@@ -1,6 +1,6 @@
 const statusMessages = {
   400: "提交的参数无效，请检查输入后重试。",
-  401: "登录已失效，请重新登录。",
+  401: "登录已过期，请重新登录。",
   403: "请求被拒绝，请检查账号权限和面板访问地址。",
   404: "请求的资源不存在或已删除，请刷新页面后重试。",
   405: "服务不支持此操作，请刷新页面；若仍失败，请检查前后端版本是否一致。",
@@ -18,9 +18,12 @@ const statusMessages = {
 // Also tolerate older backends and native browser errors during rolling updates.
 const legacyMessages = {
   "cross-site login request rejected": "登录请求被安全校验拒绝，请使用配置的 HTTPS 地址，或联系管理员检查反向代理及 QCH_CORS_ORIGINS 中的协议、域名和端口。",
-  "origin is not allowed": "当前访问地址未获允许，请联系管理员检查 QCH_CORS_ORIGINS 配置。",
+  "origin is not allowed": "当前访问地址未获允许，请使用面板配置的地址，或联系管理员检查 QCH_CORS_ORIGINS 中的协议、域名和端口。",
+  "token role does not permit this operation": "当前账号没有执行此操作的权限，请联系管理员。",
   "invalid admin token": "用户名、密码或管理员令牌不正确，请检查后重试。",
   "session expired": statusMessages[401],
+  "登录已失效，请重新登录。": statusMessages[401],
+  "account authorization changed; sign in again": "账号权限或登录凭据已变更，本次操作未提交，请重新登录。",
   "authentication required": "请先登录后再操作。",
   "missing or invalid CSRF token": "页面安全凭据已失效，请刷新页面或重新登录后重试。",
   "too many authentication failures": "登录失败次数过多，请稍后再试。",
@@ -31,10 +34,10 @@ const legacyMessages = {
 
 export function errorMessage(value, status = 0) {
   const message = typeof value === "string" ? redactDiagnostic(value.trim()) : "";
-  if (Object.hasOwn(legacyMessages, message)) return `${legacyMessages[message]}\n原始错误：${message}`;
+  if (Object.hasOwn(legacyMessages, message)) return legacyMessages[message];
   if (/\p{Script=Han}/u.test(message)) return message;
   const summary = statusMessages[status] || "操作未完成，请查看诊断详情。";
-  return message ? `${summary}\n原始错误：${message}` : `${summary}\n来源未返回具体原因。`;
+  return message ? `${summary}\n原始错误：${message}` : summary;
 }
 
 export function errorDiagnostic(error, seen = new Set()) {
@@ -201,9 +204,12 @@ async function performJSON(url, options, {
       parseError=cause;
     }
     assertCurrent();
-    let message = response.status === 401 && !isLogin ? `${statusMessages[401]}\n${errorMessage(body?.error,response.status)}` : errorMessage(body?.error, response.status);
+    let message = isLogin && response.status === 401 && !body?.error
+      ? legacyMessages["invalid admin token"] : errorMessage(body?.error, response.status);
     const detail = body?.detail || (!body ? raw : "");
-    if (detail && !message.includes(detail)) message += `\n诊断详情：\n${redactDiagnostic(detail)}`;
+    const safeDetail = typeof detail === "string" ? redactDiagnostic(detail.trim()) : "";
+    const translatedDetail = Object.hasOwn(legacyMessages, safeDetail) ? legacyMessages[safeDetail] : safeDetail;
+    if (translatedDetail && !message.includes(translatedDetail)) message += `\n诊断详情：\n${translatedDetail}`;
     if (parseError) message += `\n响应格式：${response.headers?.get?.("Content-Type") || "未提供 Content-Type"}\n${errorDiagnostic(parseError)}`;
     if (readOnly && response.status===504) message = message.replace(statusMessages[504],"读取超时，请重试。");
     const requestID = body?.request_id || response.headers?.get?.("X-Request-ID");

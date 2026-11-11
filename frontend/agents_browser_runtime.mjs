@@ -25,7 +25,10 @@ const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode.startsWith('node-address')) {
+  if (mode.startsWith('session-errors')) {
+    const { testSessionErrors } = await import('./browser/session-errors.mjs');
+    await testSessionErrors(new URLSearchParams(location.search).get('preview') || '');
+  } else if (mode.startsWith('node-address')) {
     const { testNodeAddressRuntime } = await import('./browser/node-address.mjs');
     await testNodeAddressRuntime(scenario);
   } else if (mode.startsWith("task-retry")) {

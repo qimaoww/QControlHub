@@ -67,11 +67,36 @@ const send = (response, extra = {}) => requestJSON("/api/v1/test", {}, {
 for (const isLogin of [true, false]) {
   await assert.rejects(send(new Response('{"error":"invalid admin token"}', { status: 401 }), { isLogin }), (error) => {
     assert.equal(error.status, 401);
-    assert.match(error.message, isLogin ? /用户名、密码或管理员令牌不正确/ : /登录已失效/);
+    assert.equal(error.message, "用户名、密码或管理员令牌不正确，请检查后重试。");
     return true;
   });
 }
 assert.equal(unauthorized, 1, "invalid login must not trigger session-expired handling");
+const unauthorizedBeforeNormalization = unauthorized;
+for (const body of [
+  {error: '登录已过期，请重新登录。', detail: 'session expired'},
+  {error: 'session expired', detail: 'session expired'},
+  {error: '登录已失效，请重新登录。', detail: 'session expired'},
+]) await assert.rejects(send(Response.json(body, {status:401})), error => error.message === '登录已过期，请重新登录。');
+for (const [status, raw, summary] of [
+  [403, 'missing or invalid CSRF token', '页面安全凭据已失效，请刷新页面或重新登录后重试。'],
+  [429, 'too many authentication failures', '登录失败次数过多，请稍后再试。'],
+  [401, 'authentication required', '请先登录后再操作。'],
+  [401, 'account authorization changed; sign in again', '账号权限或登录凭据已变更，本次操作未提交，请重新登录。'],
+  [403, 'token role does not permit this operation', '当前账号没有执行此操作的权限，请联系管理员。'],
+  [403, 'origin is not allowed', '当前访问地址未获允许，请使用面板配置的地址，或联系管理员检查 QCH_CORS_ORIGINS 中的协议、域名和端口。'],
+]) await assert.rejects(send(Response.json({error:summary,detail:raw}, {status})), error => error.message === summary);
+for (const status of [401,403,404,408,429,500,502,503,504]) {
+  await assert.rejects(send(Response.json({error:'具体错误', detail:'执行阶段失败 password=fixture-secret', request_id:'req_fixture', code:'fixture_code', stage:'fixture_stage'}, {status})), error => {
+    assert.ok(error.message.includes('具体错误') && error.message.includes('执行阶段失败') && error.message.includes('req_fixture'));
+    assert.ok(!error.message.includes('fixture-secret'));
+    assert.equal(error.code,'fixture_code'); assert.equal(error.stage,'fixture_stage');
+    return true;
+  });
+  await assert.rejects(send(new Response(null,{status})), error => error.status === status && /\p{Script=Han}/u.test(error.message));
+}
+const unauthorizedAfterNormalization = unauthorized;
+assert.ok(unauthorizedAfterNormalization > unauthorizedBeforeNormalization);
 const expiredRoute = new AbortController();
 await assert.rejects(requestJSON("/api/v1/agents", { signal: expiredRoute.signal }, {
   fetchImpl: async () => ({
@@ -79,10 +104,10 @@ await assert.rejects(requestJSON("/api/v1/agents", { signal: expiredRoute.signal
     json: async () => { assert.fail("401 must not read a body after login cancels the route"); },
   }),
   onUnauthorized: (message) => {
-    assert.match(message, /登录已失效/);
+    assert.equal(message, "登录已过期，请重新登录。");
     expiredRoute.abort();
   },
-}), (error) => error.status === 401 && error.name === "Error" && /登录已失效/.test(error.message));
+}), (error) => error.status === 401 && error.name === "Error" && error.message === "登录已过期，请重新登录。");
 await assert.rejects(send(new Response("<html>Bad Gateway</html>", { status: 502 })), (error) => {
   assert.equal(error.status, 502);
   assert.match(error.message, /后端服务/);
@@ -148,7 +173,7 @@ for (const status of [200, 401, 403, 500]) {
     },
   }), error => error.name === "AbortError");
 }
-assert.equal(unauthorized, 1, "a previous account's 401 must not expire the new session");
+assert.equal(unauthorized, unauthorizedAfterNormalization, "a previous account's 401 must not expire the new session");
 for (const ok of [true, false]) {
   let current = true;
   await assert.rejects(send({
