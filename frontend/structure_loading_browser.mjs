@@ -177,8 +177,10 @@ export async function runStructureLoadingBrowser({ base, mode, fixture, createPa
   await evaluate(page, `${ruleRow}.querySelector('button').click()`);
   await wait(page, `!!document.querySelector('dialog[open] select[name=agent_id]')`);
   assert.ok(await evaluate(page, `document.querySelector('dialog[open] select[name=agent_id]').matches(':disabled')`), 'dependent target controls wait inside the immediately available rule dialog');
+  assert.ok(await evaluate(page, `document.querySelector('dialog[open] button[type=submit]').disabled`), 'pending target options cannot be submitted as blank rule targets');
   await evaluate(page, `(()=>{const event=document.querySelector('dialog[open] select[name=event]');event.value='panel.update';event.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   assert.ok(await evaluate(page, `!document.querySelector('dialog[open] input[name=interval_seconds]').matches(':disabled')`), 'panel event is independent of the pending node list');
+  assert.ok(await evaluate(page, `!document.querySelector('dialog[open] button[type=submit]').disabled`), 'panel rules can save without unrelated node options');
   await evaluate(page, `document.querySelector('dialog[open] [aria-label="关闭"]').click()`);
   await wait(page, `document.querySelectorAll('dialog[open]').length===2`);
   await evaluate(page, `[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='关闭编辑').click()`);

@@ -142,9 +142,11 @@ export function notificationsPage(ctx) {
     const eventField = field("事件", "event", rule?.event || (events.some(([key]) => key === "agent.offline") ? "agent.offline" : events[0]?.[0]), { options: events });
     const event = eventField.querySelector("select");
     const specific = node("fieldset", { className: "a-form-fields a-grid" });
+    let submit;
     function drawSpecific(refresh = false) {
       const speed = event.value.startsWith("speed.");
       specific.disabled = event.value !== "panel.update" && (!agentsReady || event.value.startsWith("traffic.") && !policiesReady);
+      if (submit) submit.disabled = specific.disabled;
       const content = [
         event.value !== "panel.update" ? field("节点", "agent_id", rule?.agent_id || "", { required: speed, options: [["", speed ? "选择节点" : "所有有权接收的节点"], ...(rule?.agent_id && !agents.some(a => a.id === rule.agent_id && (!speed || a.can_manage)) ? [[rule.agent_id, "原节点已不可用"]] : []), ...agents.filter(a => !speed || a.can_manage).map(a => [a.id, a.name])], hint: speed ? "主机网卡速率，需 QAgent 支持有效速率采样" : "" }) : null,
         ["traffic.warning", "traffic.quota"].includes(event.value) ? field("端口统计对象", "policy_id", rule?.policy_id || "", { required: event.value === "traffic.warning", options: [["", "选择统计对象"], ...(rule?.policy_id && !policies.some(p => p.id === rule.policy_id && p.monitoring_enabled) ? [[rule.policy_id, "原统计对象已不可用"]] : []), ...policies.filter(p => p.monitoring_enabled).map(p => [p.id, `${agents.find(a => a.id === p.agent_id)?.name || p.agent_id} · ${p.engine} · ${p.port} · ${p.name}`])], hint: "按端口计费口径；共享端口使用所属分配的用量和限额" }) : null,
@@ -179,11 +181,13 @@ export function notificationsPage(ctx) {
       muted("新规则以当前状态为基线，不补发历史事件；速度异常与恢复均需满足持续时间。"), specific,
       section("接收渠道", node("div", { className: "a-card-body a-stack" }, config.channels.length ? config.channels.map(c => field(c.enabled ? c.name : `${c.name}（停用）`, `channel:${c.id}`, rule?.channels?.includes(c.id), { type: "checkbox" })) : muted("尚无渠道，请先添加通知渠道。"))),
     ], "保存规则", async (values, element) => {
+      if (specific.disabled) throw new Error("通知目标选项尚未就绪，请等待加载或重新读取。");
       const next = { id: rule?.id || id(), name: values.name, event: event.value, enabled: element.elements.enabled.checked,
         agent_id: values.agent_id || "", policy_id: values.policy_id || "", direction: values.direction || "", channels: config.channels.filter(c => element.elements.namedItem(`channel:${c.id}`).checked).map(c => c.id),
         threshold: Number(values.threshold || 0), recovery: Number(values.recovery || 0), duration_seconds: Number(values.duration_seconds || 30), cooldown_seconds: Number(values.cooldown_seconds || 300), interval_seconds: Number(values.interval_seconds || 86400) };
       if (await change(c => { c.rules = [...c.rules.filter(v => v.id !== next.id), next]; })) { box.close(); ctx.announce("规则已保存"); }
     });
+    submit = form.querySelector('button[type="submit"]'); submit.disabled = specific.disabled;
     const box = ctx.dialog(rule ? "编辑通知规则" : "添加通知规则", form); protectDraft(box, form);
     // The read/recovery control follows the active dialog; there is one target
     // read, and closing remains available while its options are pending.
