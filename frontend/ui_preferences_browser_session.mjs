@@ -55,6 +55,24 @@ export async function runUIPreferenceSessions({ createPage, login, api, evaluate
   await saved(a, alice, 'connections', {client_ip:'',include_non_public:false});
   record(`${mode}: task and log combinations, automatic=false, connection IP and cleared switches restore through real APIs`);
 
+  // Seed an older saved date: relative choices must resolve at entry time,
+  // while an absolute date must retain its original query interval.
+  for (const timeMode of ['today', 'month', 'absolute']) {
+    const preference = await read(a, alice);
+    await api(a, alice, 'PATCH', '/preferences/ui', {revision:preference.revision,values:{connections:{date:'2026-01-02',period:'day',time_mode:timeMode}}});
+    await reload(a);
+    await wait(a, `(() => {
+      const mode=${JSON.stringify(timeMode)}, now=new Date();
+      const date=mode==='absolute'?'2026-01-02':new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+      const since=new Date(date+'T00:00:00');if(mode==='month')since.setDate(1);
+      const until=new Date(since);if(mode==='month')until.setMonth(until.getMonth()+1);else until.setDate(until.getDate()+1);
+      const requests=performance.getEntriesByType('resource').map(entry=>new URL(entry.name)).filter(url=>url.pathname==='/api/v1/client-connections'&&url.searchParams.get('locations')==='cached');
+      const query=requests.at(-1)?.searchParams;
+      return document.querySelector('[name=date]')?.value===date&&document.querySelector('[name=period]')?.value===(mode==='month'?'month':'day')&&query?.get('since')===since.toISOString()&&query?.get('until')===until.toISOString();
+    })()`);
+  }
+  record(`${mode}: today/month recompute an old saved date; absolute dates retain their interval; actual history query parameters match the restored controls`);
+
   await route(a, `live-config?agent=${fixture.shared}&engine=mihomo`, 'textarea[name=content]');
   await saved(a, alice, 'live-config', {agent:fixture.shared});
   await route(device, 'live-config', 'textarea[name=content]');
