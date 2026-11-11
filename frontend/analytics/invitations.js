@@ -1,3 +1,4 @@
+import { proxyIngressLabel } from "./proxy-ingresses.js";
 import { agentShareStatus, sharedPortsLabel } from '../modules/user-model.js';
 import { node, button, actions, stack, grid, section, badge, muted, notice, pathID, list } from './ui.js';
 import { bytes } from './operations.js';
@@ -30,7 +31,7 @@ export function quotaInvitations(ctx) {
       share = latest;
       const facts = [
         ['所有者', share.owner_username || '管理员'], ['状态', badge(agentShareStatus(share))],
-        ['可用内核', list(share.engines).join(' / ') || '未分配'], ['授权端口', sharedPortsLabel(share.ports)],
+        ['可用内核', list(share.engines).join(' / ') || '未分配'], ['授权端口', sharedPortsLabel(share.ports)], ['托管入口', proxyIngressLabel(share)],
         ['总额度', share.limit_bytes ? bytes(share.limit_bytes) : '不限量'], ['已用流量', bytes(share.used_bytes)],
       ];
       const terms = stack(node('dl', { className: 'a-traffic-facts' }, facts.map(([label, value]) =>
@@ -59,7 +60,9 @@ export function quotaInvitations(ctx) {
           ['已用 / 总额度', node('strong', {}, `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : '不限量'}`)],
           ['可用内核', list(share.engines).join(' / ') || '未分配'],
           ['授权端口', sharedPortsLabel(share.ports)],
-        ].map(([label, value]) => node('div', {}, node('dt', {}, label), node('dd', {}, value))))),
+        ].map(([label, value]) => node('div', {}, node('dt', {}, label), node('dd', {}, value)))),
+        node('div', { className: 'a-field' }, node('span', { className: 'a-field-label' }, '托管入口'),
+          node('span', {}, proxyIngressLabel(share)))),
       badge(agentShareStatus(share)), `所有者 · ${share.owner_username || '管理员'}`);
       if (actionable(share)) card.append(node('footer', { className: 'a-probe-footer' },
         actions(button(share.status === 'pending' ? '查看邀请' : '共享详情', () => open(share), { disabled: model.pending || loading }))));

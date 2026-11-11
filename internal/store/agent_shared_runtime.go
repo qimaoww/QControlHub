@@ -34,7 +34,7 @@ func (s *Store) overlaySharedInstanceRuntime(ctx context.Context, agents []core.
 	}
 	rows, err := s.pool.Query(ctx, `SELECT sh.agent_id,sh.id,sh.user_id,sh.enabled,sh.status,sh.invitation_revision,
 		sh.engines,CASE WHEN sh.ports_unrestricted THEN ARRAY[0] ELSE ARRAY(SELECT port FROM agent_share_ports WHERE share_id=sh.id ORDER BY port) END,
-		sh.limit_bytes,sh.used_bytes,sh.created_at,sh.updated_at,selected.engine,
+		sh.limit_bytes,sh.used_bytes,sh.created_at,sh.updated_at,`+proxyIngressShareColumns("sh")+`,selected.engine,
 		COALESCE(c.id,''),COALESCE(c.version,0),COALESCE(state.config_id,''),COALESCE(state.config_version,0),
 		state.deployed_at,state.observed_at,COALESCE(state.config_uncertain,false),
 		COALESCE(state.service_status,'unknown'),COALESCE(state.status_reason,''),
@@ -63,7 +63,7 @@ func (s *Store) overlaySharedInstanceRuntime(ctx context.Context, agents []core.
 		var operation []byte
 		if err := rows.Scan(&allocation.AgentID, &allocation.ID, &allocation.UserID, &allocation.Enabled, &allocation.Status,
 			&allocation.InvitationRevision, &allocation.Engines, &allocation.Ports, &allocation.LimitBytes, &allocation.UsedBytes,
-			&allocation.CreatedAt, &allocation.UpdatedAt, &engine, &instance.SavedConfigID, &instance.SavedVersion,
+			&allocation.CreatedAt, &allocation.UpdatedAt, &allocation.ProxyIngresses, &allocation.ProxyIngressStatus, &allocation.ProxyIngressError, &engine, &instance.SavedConfigID, &instance.SavedVersion,
 			&instance.DeployedConfigID, &instance.DeployedVersion, &instance.DeployedAt, &instance.ObservedAt,
 			&instance.ConfigUncertain, &service, &instance.Reason, &instance.Created, &operation); err != nil {
 			return err

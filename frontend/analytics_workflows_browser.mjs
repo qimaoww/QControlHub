@@ -91,6 +91,8 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await navigate('#traffic');await navigate('#node-settings');
   assert.ok(await evaluate(page, `!!document.querySelector('.a-probe[data-agent-id="${agentID}"] .a-probe-flag[data-region-code=DE]')`),'manual region survives remount');
   await evaluate(page, `document.querySelector(${JSON.stringify(regionTrigger)}).click()`);
+  await wait(page, "!!document.querySelector('dialog[open] [name=region_search]')");
+  await evaluate(page, "(() => {const input=document.querySelector('dialog[open] [name=region_search]');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await wait(page, "!!document.querySelector('dialog[open] [data-region-choice=JP]') && !document.querySelector('dialog[open] button[type=submit]').disabled");
   await click('自动识别');
   await evaluate(page, "document.querySelector('dialog[open] [name=region_search]').form.requestSubmit()");

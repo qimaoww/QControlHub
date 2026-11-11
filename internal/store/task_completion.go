@@ -311,6 +311,26 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if status == core.TaskSucceeded && (action == core.ActionDeploy || action == core.ActionImportExisting) {
+		if shared && action == core.ActionDeploy {
+			plain, err := s.decryptContent(runtimeSnapshot)
+			if err != nil {
+				return err
+			}
+			_, frontends, err := core.DecodeExecutionSnapshot(plain)
+			if err != nil {
+				return err
+			}
+			grants := []core.ProxyIngress{}
+			for _, f := range frontends {
+				if f.SharedIngressGeneration > 0 {
+					grants = append(grants, core.ProxyIngress{Mode: f.Mode, Port: f.PublicPort, Generation: f.SharedIngressGeneration})
+				}
+			}
+			if _, err := tx.Exec(ctx, `UPDATE agent_shared_instance_ownership SET applied_proxy_ingresses=$4
+				WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND config_id=$5 AND config_version=$6`, agentID, engine, shareID, grants, configID, configVersion); err != nil {
+				return err
+			}
+		}
 		if err := s.finishDeployedTrafficTx(ctx, tx, agentID, engine, shareID, configID, configVersion, result.TrafficSettled); err != nil {
 			return err
 		}

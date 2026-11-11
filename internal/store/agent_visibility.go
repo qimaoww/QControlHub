@@ -65,13 +65,13 @@ func (s *Store) ListAgentDirectory(ctx context.Context) ([]core.AgentDirectoryEn
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT agents.id,agents.name,agents.owner_id,COALESCE(owner.username,''),agents.last_seen,
-			`+agentOfflineThresholdSQL+`,agents.capabilities,agents.admin_hidden,agents.enrolled_at,
+			`+agentOfflineThresholdSQL+`,agents.capabilities,agents.admin_hidden,agents.enrolled_at,agents.features ? $2,
 			COALESCE((SELECT array_agg(DISTINCT policy.port ORDER BY policy.port)
 				FROM port_traffic_policies policy WHERE policy.agent_id=agents.id),'{}'::int[])
 		FROM agents LEFT JOIN panel_users owner ON owner.id=agents.owner_id
 		WHERE agents.revoked_at IS NULL AND agents.owner_id <> '' AND agents.owner_id <> $1
 		ORDER BY agents.enrolled_at DESC
-		LIMIT 1000`, scope.OwnerID)
+		LIMIT 1000`, scope.OwnerID, core.AgentFeatureSharedProxyIngress)
 	if err != nil {
 		return nil, fmt.Errorf("list agent directory: %w", err)
 	}
@@ -83,7 +83,7 @@ func (s *Store) ListAgentDirectory(ctx context.Context) ([]core.AgentDirectoryEn
 		var capabilitiesJSON []byte
 		var offlineThresholdSeconds int
 		if err := rows.Scan(&entry.ID, &entry.Name, &entry.OwnerID, &entry.OwnerUsername, &entry.LastSeen,
-			&offlineThresholdSeconds, &capabilitiesJSON, &entry.AdminHidden, &entry.EnrolledAt, &entry.Ports); err != nil {
+			&offlineThresholdSeconds, &capabilitiesJSON, &entry.AdminHidden, &entry.EnrolledAt, &entry.SharedProxyIngress, &entry.Ports); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilitiesJSON, &entry.Capabilities); err != nil {

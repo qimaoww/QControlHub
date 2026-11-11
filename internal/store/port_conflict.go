@@ -3,6 +3,7 @@ package store
 // PortConflictError identifies a correctable port/allocation constraint. It
 // must not be presented as a stale configuration revision requiring reload.
 type PortConflictError struct {
+	Reason         string
 	RecoveryEngine string
 	Port           int
 	Field          string

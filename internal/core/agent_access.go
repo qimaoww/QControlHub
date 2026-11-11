@@ -17,6 +17,9 @@ const (
 // AgentShare is a durable per-user allocation. Access requires both Enabled
 // and recipient acceptance. Revocation or reinvitation never resets usage.
 type AgentShare struct {
+	ProxyIngresses     []ProxyIngress   `json:"proxy_ingresses"`
+	ProxyIngressStatus string           `json:"proxy_ingress_status,omitempty"`
+	ProxyIngressError  string           `json:"proxy_ingress_error,omitempty"`
 	HTTPDomains        []string         `json:"http_domains"`
 	ID                 string           `json:"id"`
 	UserID             string           `json:"user_id"`
@@ -54,23 +57,25 @@ type AgentSharingRequest struct {
 }
 
 type AgentSharingRecipient struct {
-	HTTPDomains *[]string `json:"http_domains,omitempty"`
-	Username    string    `json:"username"`
-	Engines     []Engine  `json:"engines"`
-	LimitBytes  uint64    `json:"limit_bytes"`
-	Ports       []int     `json:"ports"` // Empty is unallocated; [0] permits any available port.
-	Enabled     *bool     `json:"enabled,omitempty"`
-	Reinvite    bool      `json:"reinvite,omitempty"`
+	ProxyIngresses *[]ProxyIngress `json:"proxy_ingresses,omitempty"`
+	HTTPDomains    *[]string       `json:"http_domains,omitempty"`
+	Username       string          `json:"username"`
+	Engines        []Engine        `json:"engines"`
+	LimitBytes     uint64          `json:"limit_bytes"`
+	Ports          []int           `json:"ports"` // Empty is unallocated; [0] permits any available port.
+	Enabled        *bool           `json:"enabled,omitempty"`
+	Reinvite       bool            `json:"reinvite,omitempty"`
 }
 
 type AgentShareRequest struct {
-	HTTPDomains *[]string `json:"http_domains,omitempty"`
-	AgentID     string    `json:"agent_id"`
-	Engines     []Engine  `json:"engines"`
-	LimitBytes  uint64    `json:"limit_bytes"`
-	Ports       []int     `json:"ports"` // Empty is unallocated; [0] permits any available port.
-	Enabled     *bool     `json:"enabled,omitempty"`
-	Reinvite    bool      `json:"reinvite,omitempty"`
+	ProxyIngresses *[]ProxyIngress `json:"proxy_ingresses,omitempty"`
+	HTTPDomains    *[]string       `json:"http_domains,omitempty"`
+	AgentID        string          `json:"agent_id"`
+	Engines        []Engine        `json:"engines"`
+	LimitBytes     uint64          `json:"limit_bytes"`
+	Ports          []int           `json:"ports"` // Empty is unallocated; [0] permits any available port.
+	Enabled        *bool           `json:"enabled,omitempty"`
+	Reinvite       bool            `json:"reinvite,omitempty"`
 }
 
 type AgentShareResponseRequest struct {
@@ -95,6 +100,8 @@ func UnrestrictedSharedPorts(ports []int) bool {
 // this port's contribution. The Agent adds unreported local increments to the
 // total, so the combined allowance is enforced even during a disconnection.
 type SharedTrafficQuota struct {
+	ProxyIngresses       []ProxyIngress `json:"proxy_ingresses,omitempty"`
+	ProxyIngressRevision int64          `json:"proxy_ingress_revision,omitempty"`
 	// Acknowledged lifetime counters let a restored checkpoint reconcile its
 	// pending contribution without treating already settled bytes as new debt.
 	CounterEpoch          string `json:"counter_epoch,omitempty"`
@@ -125,7 +132,7 @@ func ValidAgentShareID(id string) bool {
 }
 
 func (quota *SharedTrafficQuota) Valid() bool {
-	return quota == nil || (ValidAgentShareID(quota.ID) &&
+	return quota == nil || (proxyIngressPolicyValid(quota.ProxyIngresses, quota.ProxyIngressRevision) && ValidAgentShareID(quota.ID) &&
 		quota.LimitBytes <= math.MaxInt64 && quota.UsedBytes <= math.MaxInt64 &&
 		quota.PortUsedBytes <= quota.UsedBytes && quota.LifetimeReceivedBytes <= math.MaxInt64 && quota.LifetimeSentBytes <= math.MaxInt64 &&
 		(quota.CounterEpoch == "" || ValidTrafficCounterEpoch(quota.CounterEpoch)) && ValidateEngineCapabilities(quota.Engines) == nil &&

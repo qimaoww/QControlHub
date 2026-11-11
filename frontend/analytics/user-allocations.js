@@ -1,10 +1,11 @@
+import { proxyIngressEditor, proxyIngressLabel } from "./proxy-ingresses.js";
 import { preparedDialog, readRegion, loadingTable } from "./loading.js";
 import { bytes } from "./operations.js";
 import { parseSharedPorts, sharedLimitBytes, sharedLimitGiB, formatSharedPorts, sharedPortsLabel, agentShareStatus, mergeUserAllocation } from '../modules/user-model.js';
 import { node, button, actions, stack, grid, field, muted, notice, pathID, list, table, badge } from './ui.js';
 
 export function editUserAllocations(ctx, user) {
-  return preparedDialog(ctx, `${user.username} · 共享资源`, ['节点', '授权范围', '已用 / 总额度', '状态', '操作'], local => editUserAllocationsLoaded(local, user), { submit: '分配节点' });
+  return preparedDialog(ctx, `${user.username} · 共享资源`, ['节点', '授权范围', '已用 / 总额度', '状态', '操作'], local => editUserAllocationsLoaded(local, user), { submit: '分配节点', closeWhilePending: true });
 }
 async function editUserAllocationsLoaded(ctx, user) {
   const data = ctx.state.data;
@@ -14,7 +15,10 @@ async function editUserAllocationsLoaded(ctx, user) {
   const pending = data.userAllocationPending ||= new Set();
   if (pending.has(user.id)) return;
   let directory = [], directoryReady = false, initialized = false;
-  const directoryRead = readRegion(ctx, '节点选项', signal => ctx.api('/agent-directory', { signal }), value => { directory = list(value); directoryReady = true; if (initialized && !editor) { draw(); const draft = drafts.get(user.id); if (draft) open(draft.original, draft.mode, draft); } }, { clear() { directory = []; directoryReady = false; if (initialized && !editor) draw(); } });
+  const directoryRead = readRegion(ctx, '节点选项', async signal => {
+    const [visible, other] = await Promise.all([ctx.api('/agents', { signal }), ctx.api('/agent-directory', { signal })]);
+    return [...new Map([...list(other), ...list(visible).map(agent => ({ ...agent, shared_proxy_ingress: agent.features?.includes('shared-proxy-ingress-v1') }))].map(agent => [agent.id, agent])).values()];
+  }, value => { directory = list(value); directoryReady = true; if (initialized && !editor) { draw(); const draft = drafts.get(user.id); if (draft) open(draft.original, draft.mode, draft); } }, { clear() { directory = []; directoryReady = false; if (initialized && !editor) draw(); } });
   void directoryRead.load();
   let saved = await ctx.api(path);
   if (!current()) return;
@@ -66,7 +70,7 @@ async function editUserAllocationsLoaded(ctx, user) {
     const value = draft?.value || {
       agent_id: share?.agent_id || '', engines: list(share?.engines),
       ports: formatSharedPorts(share?.ports), limit: sharedLimitGiB(share?.limit_bytes),
-      domains: list(share?.http_domains).join('\n'),
+      domains: list(share?.http_domains).join('\n'), proxy_ingresses: list(share?.proxy_ingresses),
       enabled: mode === 'invite' ? true : share?.enabled !== false,
       reinvite: mode === 'invite' && share?.status === 'rejected',
     };
@@ -75,11 +79,12 @@ async function editUserAllocationsLoaded(ctx, user) {
     const ports = field('授权端口', 'ports', value.ports, { placeholder: '21000-21100, 22000', hint: '留空未分配，0 表示不限端口' });
     const limit = field('总额度 · GiB', 'limit', value.limit, { type: 'number', min: 0, max: 8388607, step: 'any', required: true, hint: `已用 ${bytes(original?.used_bytes)}，0 表示不限量` });
     const domains = field('HTTP-01 允许域名', 'domains', value.domains, { multiline: 2 });
+    const ingress = proxyIngressEditor(value.proxy_ingresses, directory.find(item => item.id === value.agent_id)?.shared_proxy_ingress === true);
     const consent = muted('');
     const selected = () => share?.agent_id || target.querySelector('select').value;
     const values = () => ({ agent_id: selected(), engines: [...engines.querySelectorAll('input:checked')].map(input => input.value),
       ports: ports.querySelector('input').value, limit: limit.querySelector('input').value, domains: domains.querySelector('textarea').value,
-      enabled: value.enabled, reinvite: value.reinvite });
+      proxy_ingresses: ingress.value(), enabled: value.enabled, reinvite: value.reinvite });
     function drawEngines(selectedEngines) {
       const agent = directory.find(item => item.id === selected());
       const supported = list(agent?.supported_capabilities || agent?.capabilities);
@@ -93,7 +98,7 @@ async function editUserAllocationsLoaded(ctx, user) {
         : original.status === 'accepted' && values().engines.some(engine => !list(original.engines).includes(engine)) ? '增加内核后，用户需重新接受。' : '';
     }
     drawEngines(value.engines);
-    const allocationFields = stack(node('div', { className: 'a-stack' }, node('span', { className: 'a-field-label' }, '可用内核'), engines), grid(ports, limit), domains, consent);
+    const allocationFields = stack(node('div', { className: 'a-stack' }, node('span', { className: 'a-field-label' }, '可用内核'), engines), grid(ports, limit), domains, ingress.element, consent);
     const form = ctx.form([!share && target, allocationFields], mode === 'edit' && share ? '保存分配' : '发送邀请', async () => {
       if (!active() || editor?.form !== form || busy) return;
       remember();
@@ -101,14 +106,14 @@ async function editUserAllocationsLoaded(ctx, user) {
       if (!row.agent_id) throw new Error('请选择节点。');
       if (row.enabled && !row.engines.length) throw new Error('请至少分配一个内核。');
       const allocation = { agent_id: row.agent_id, engines: row.engines, ports: parseSharedPorts(row.ports),
-        limit_bytes: sharedLimitBytes(row.limit), http_domains: row.domains.split(/[\s,，]+/).filter(Boolean), enabled: row.enabled, reinvite: row.reinvite };
+        limit_bytes: sharedLimitBytes(row.limit), http_domains: row.domains.split(/[\s,，]+/).filter(Boolean), proxy_ingresses: row.proxy_ingresses, enabled: row.enabled, reinvite: row.reinvite };
       await lock(() => save(access, allocation));
     });
     const baselineValue = values();
     if (mode === 'invite') { baselineValue.enabled = original.enabled; baselineValue.reinvite = false; }
     const instance = { form, values, baseline: draft?.baseline || JSON.stringify(baselineValue), changed: false, snapshot: { access, original, mode } };
     editor = instance;
-    const selectTarget = () => { allocationFields.hidden = !selected(); form.querySelector('[type=submit]').disabled = !selected(); };
+    const selectTarget = () => { allocationFields.hidden = !selected(); form.querySelector('[type=submit]').disabled = !selected(); ingress.setSupported(directory.find(item => item.id === selected())?.shared_proxy_ingress); };
     selectTarget();
     target.querySelector('select').addEventListener('change', () => { drawEngines([]); selectTarget(); updateConsent(); remember(); });
     form.addEventListener('input', () => { remember(); updateConsent(); });
@@ -137,10 +142,10 @@ async function editUserAllocationsLoaded(ctx, user) {
     const owned = directory.filter(agent => list(saved.owned_agent_ids).includes(agent.id));
     const tools = actions(button('分配节点', () => open(null, 'add'), { disabled: !directoryReady || !available().length }), button('重新读取', () => void reloadSaved()));
     const allocations = table(['节点', '授权范围', '已用 / 总额度', '状态', '操作'], shares.map(share => [
-      name(share), stack(muted(list(share.engines).join(' / ') || '未分配内核'), node('span', {}, `端口 · ${sharedPortsLabel(share.ports)}`)),
+      name(share), stack(muted(list(share.engines).join(' / ') || '未分配内核'), node('span', {}, `端口 · ${sharedPortsLabel(share.ports)}`), muted(`托管入口 · ${proxyIngressLabel(share)}`)),
       `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : '不限量'}`, badge(agentShareStatus(share)),
-      actions(button('编辑分配', () => open(share)),
-        (!share.enabled || share.status === 'rejected') && button('重新邀请', () => open(share, 'invite')),
+      actions(button('编辑分配', () => open(share), { disabled: !directoryReady }),
+        (!share.enabled || share.status === 'rejected') && button('重新邀请', () => open(share, 'invite'), { disabled: !directoryReady }),
         share.enabled && button('撤销共享', () => void lock(async () => {
           try {
             if (editor?.changed) { feedback.textContent = '请先保存或取消当前分配。'; return; }
@@ -164,7 +169,6 @@ async function editUserAllocationsLoaded(ctx, user) {
   const box = ctx.dialog(`${user.username} · 共享资源`, content, { wide: true });
   box.dataset.userAllocation = user.id;
   box.onRequestClose = () => {
-    if (busy || editor?.form.getAttribute('aria-busy') === 'true') return;
     remember(); ctx.setDirty(false); box.close();
   };
   box.addEventListener('close', () => { closed = true; if (current()) ctx.setDirty(false); }, { once: true });

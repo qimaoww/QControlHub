@@ -106,17 +106,18 @@ type AgentTimeZoneState struct {
 // logs, metrics and tasks, and remains readable for hidden nodes so an
 // operator can still confirm that a node exists without managing it.
 type AgentDirectoryEntry struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	OwnerID       string    `json:"owner_id"`
-	OwnerUsername string    `json:"owner_username"`
-	Status        string    `json:"status"`
-	Capabilities  []Engine  `json:"capabilities"`
-	Ports         []int     `json:"ports"`
-	AdminHidden   bool      `json:"admin_hidden"`
-	CanManage     bool      `json:"can_manage"`
-	EnrolledAt    time.Time `json:"enrolled_at"`
-	LastSeen      time.Time `json:"last_seen"`
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	OwnerID            string    `json:"owner_id"`
+	OwnerUsername      string    `json:"owner_username"`
+	Status             string    `json:"status"`
+	Capabilities       []Engine  `json:"capabilities"`
+	Ports              []int     `json:"ports"`
+	AdminHidden        bool      `json:"admin_hidden"`
+	CanManage          bool      `json:"can_manage"`
+	SharedProxyIngress bool      `json:"shared_proxy_ingress,omitempty"`
+	EnrolledAt         time.Time `json:"enrolled_at"`
+	LastSeen           time.Time `json:"last_seen"`
 }
 
 // ManagedBlockReason keeps older Agents fail closed when the scope of a

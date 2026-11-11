@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const AgentFeatureSharedProxyIngress = "shared-proxy-ingress-v1"
+
 const AgentFeatureManagedTLS = "managed-tls-v1"
 const AgentFeatureXHTTPTLS = "managed-xhttp-tls-v1"
 const AgentFeatureXHTTP = "xhttp-presets-v1"
@@ -27,26 +29,27 @@ const ManagedTLSLeaseTimeout = 12 * time.Minute
 // must never be returned by panel task APIs or included in client exports.
 type TLSFrontend struct {
 	// Assigned from the local deployment manifest, never accepted from a task.
-	StaticPageOwner      string   `json:"-"`
-	StaticHTML           string   `json:"static_html,omitempty"`
-	AutomaticCertificate bool     `json:"automatic_certificate,omitempty"`
-	LocalOnly            bool     `json:"local_only,omitempty"`
-	RealityNames         []string `json:"reality_names,omitempty"`
-	RealityName          string   `json:"reality_name,omitempty"`
-	CertificatePath      string   `json:"certificate_path,omitempty"`
-	PrivateKeyPath       string   `json:"private_key_path,omitempty"`
-	Tag                  string   `json:"tag"`
-	Mode                 string   `json:"mode"`
-	Domain               string   `json:"domain"`
-	PublicPort           int      `json:"public_port"`
-	BackendPort          int      `json:"backend_port"`
-	Transport            string   `json:"transport"`
-	Path                 string   `json:"path"`
-	Host                 string   `json:"host,omitempty"`
-	Method               string   `json:"method,omitempty"`
-	Certificate          string   `json:"certificate,omitempty"`
-	PrivateKey           string   `json:"private_key,omitempty"`
-	ACMEEmail            string   `json:"acme_email,omitempty"`
+	SharedIngressGeneration int64    `json:"shared_ingress_generation,omitempty"`
+	StaticPageOwner         string   `json:"-"`
+	StaticHTML              string   `json:"static_html,omitempty"`
+	AutomaticCertificate    bool     `json:"automatic_certificate,omitempty"`
+	LocalOnly               bool     `json:"local_only,omitempty"`
+	RealityNames            []string `json:"reality_names,omitempty"`
+	RealityName             string   `json:"reality_name,omitempty"`
+	CertificatePath         string   `json:"certificate_path,omitempty"`
+	PrivateKeyPath          string   `json:"private_key_path,omitempty"`
+	Tag                     string   `json:"tag"`
+	Mode                    string   `json:"mode"`
+	Domain                  string   `json:"domain"`
+	PublicPort              int      `json:"public_port"`
+	BackendPort             int      `json:"backend_port"`
+	Transport               string   `json:"transport"`
+	Path                    string   `json:"path"`
+	Host                    string   `json:"host,omitempty"`
+	Method                  string   `json:"method,omitempty"`
+	Certificate             string   `json:"certificate,omitempty"`
+	PrivateKey              string   `json:"private_key,omitempty"`
+	ACMEEmail               string   `json:"acme_email,omitempty"`
 }
 
 // UsesACME includes independently managed automatic Nginx certificates.
@@ -60,6 +63,9 @@ func (f TLSFrontend) UsesPanelCertificate() bool { return !f.LocalOnly && f.Cert
 var managedPanelCertificate = regexp.MustCompile(`^(/etc/qcontrolhub/panel-certificates/crt_[0-9a-f]{16}|/etc/qagent/(xray|mihomo|sing-box)/(shares/shr_[0-9a-f]{16}/)?panel-certificates/crt_[0-9a-f]{16}/v[1-9][0-9]*)/cert\.pem$`)
 
 func (f TLSFrontend) Validate() error {
+	if f.SharedIngressGeneration < 0 || f.LocalOnly && f.SharedIngressGeneration != 0 {
+		return fmt.Errorf("无效的托管入口授权")
+	}
 	if len(f.StaticHTML) > 64<<10 || f.StaticHTML != "" && (f.Transport != "xhttp" || f.LocalOnly) {
 		return fmt.Errorf("静态页面仅支持独立 XHTTP 反代，最大 64 KiB")
 	}

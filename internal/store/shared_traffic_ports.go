@@ -135,14 +135,14 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
 				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,
-			(NOT $4::boolean AND (state.owner_id=$2 OR $6::boolean OR EXISTS(SELECT 1 FROM agents a WHERE a.id=$1 AND a.owner_id=$2)))
+			(NOT $4::boolean AND (state.owner_id=$2 OR $6::boolean OR EXISTS(SELECT 1 FROM agents a WHERE a.id=$1 AND a.owner_id=$2))),'[]'::jsonb
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR $4::boolean)))
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),state.config_id,state.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
+				OR (revision.config_id IS NULL AND config.version<>state.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5),state.applied_proxy_ingresses
 		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain)
@@ -150,39 +150,40 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 		UNION ALL
 		SELECT state.engine,COALESCE(revision.content,config.content,''),attempt.config_id,attempt.config_version,
 			config.id IS NULL OR config.deleted_at IS NOT NULL
-				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
+				OR (revision.config_id IS NULL AND config.version<>attempt.config_version),false,state.owner_id=$2,($4::boolean AND state.share_id=$5),'[]'::jsonb
 		FROM agent_shared_instance_ownership state LEFT JOIN tasks attempt ON attempt.id=state.last_task_id
 		LEFT JOIN configs config ON config.id=attempt.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=attempt.config_id AND revision.version=attempt.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain) AND attempt.action='deploy'
 			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
-		SELECT state.engine,'','',0,true,false,state.owner_id=$2,($4::boolean AND state.share_id=$5)
+		SELECT state.engine,'','',0,true,false,state.owner_id=$2,($4::boolean AND state.share_id=$5),'[]'::jsonb
 		FROM agent_shared_instance_ownership state
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND (state.uncertain OR state.config_uncertain)
 			AND (state.config_id='' OR state.config_uncertain)
 			AND NOT EXISTS(SELECT 1 FROM tasks attempt WHERE attempt.id=state.last_task_id AND attempt.action='deploy')
 			AND (state.owner_id<>$2 OR ($3<>'' AND (state.engine<>$3 OR NOT $4::boolean OR state.share_id<>$5)))
 		UNION ALL
-		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2,false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		SELECT task.engine,COALESCE(task.config_content,''),COALESCE(task.config_id,''),COALESCE(task.config_version,0),COALESCE(task.config_content,'')='',true,COALESCE(config.owner_id,task.owner_id)=$2,false,'[]'::jsonb FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
 		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing','start','restart')
 			AND (COALESCE(config.owner_id,task.owner_id)<>$2 OR ($3<>'' AND (task.engine<>$3 OR task.shared_instance<>$4::boolean OR task.shared_instance AND task.shared_traffic_id<>$5)))`, agentID, userID, engine, sharedInstance, instanceID, scopeForConfig(ctx).Admin)
 	if err != nil {
 		return err
 	}
 	type deployment struct {
-		engine      core.Engine
-		content, id string
-		version     int
-		uncertain   bool
-		pending     bool
-		sameOwner   bool
-		recoverable bool
+		engine           core.Engine
+		content, id      string
+		version          int
+		uncertain        bool
+		pending          bool
+		sameOwner        bool
+		recoverable      bool
+		appliedIngresses []core.ProxyIngress
 	}
 	var deployments []deployment
 	for rows.Next() {
 		var d deployment
-		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner, &d.recoverable); err != nil {
+		if err := rows.Scan(&d.engine, &d.content, &d.id, &d.version, &d.uncertain, &d.pending, &d.sameOwner, &d.recoverable, &d.appliedIngresses); err != nil {
 			rows.Close()
 			return err
 		}
@@ -226,7 +227,7 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 				}
 				continue
 			}
-			conflict := &PortConflictError{Port: ports[0], Field: "port", Cause: fmt.Errorf("%w: 无法确认实例的端口状态，请核对实例状态后重试", ErrConflict)}
+			conflict := &PortConflictError{Port: ports[0], Field: "port", Reason: "state_unverified", Cause: fmt.Errorf("%w: 无法确认实例的端口状态，请核对实例状态后重试", ErrConflict)}
 			if !observationSupported && (d.id == "" || !d.sameOwner) {
 				conflict.Cause = fmt.Errorf("%w: 无法确认实例的端口状态，请升级 Agent 后核对节点监听端口", ErrConflict)
 			}
@@ -268,9 +269,38 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 			for _, port := range ports {
 				if wanted[port] {
 					compatible := false
-					if d.sameOwner && candidate != nil && port == f.PublicPort && !f.LocalOnly {
+					if candidate != nil && port == f.PublicPort && !f.LocalOnly {
+						authorized := d.sameOwner
+						if !authorized {
+							for _, next := range candidate.TLSFrontends {
+								if next.PublicPort == port && !next.LocalOnly {
+									if next.Mode != f.Mode {
+										return &PortConflictError{Port: port, Field: taskPortConflictField(candidate, port), Reason: "proxy_type_conflict", Cause: fmt.Errorf("%w: 该公共端口的反代类型不兼容", ErrConflict)}
+									}
+									generation, allowed, e := proxyIngressGrantTx(ctx, tx, agentID, userID, next)
+									if e != nil {
+										return e
+									}
+									var otherOwner string
+									if e = tx.QueryRow(ctx, `SELECT owner_id FROM configs WHERE id=$1`, d.id).Scan(&otherOwner); e != nil {
+										return e
+									}
+									otherGeneration, otherAllowed, e := proxyIngressGrantTx(ctx, tx, agentID, otherOwner, f)
+									if e != nil {
+										return e
+									}
+									authorized = allowed && otherAllowed && (generation > 0 || otherGeneration > 0)
+									if authorized && otherGeneration > 0 && f.SharedIngressGeneration != otherGeneration && !slices.Contains(d.appliedIngresses, core.ProxyIngress{Mode: f.Mode, Port: f.PublicPort, Generation: otherGeneration}) {
+										return &PortConflictError{Port: port, Field: taskPortConflictField(candidate, port), Reason: "state_unverified", Cause: fmt.Errorf("%w: 入口已有部署需同步授权，请联系节点所有者核对部署状态", ErrConflict)}
+									}
+								}
+							}
+							if !authorized {
+								return &PortConflictError{Port: port, Field: taskPortConflictField(candidate, port), Reason: "ingress_unauthorized", Cause: fmt.Errorf("%w: 未获授权共用该托管入口", ErrConflict)}
+							}
+						}
 						for _, next := range candidate.TLSFrontends {
-							compatible = compatible || (!next.LocalOnly && next.PublicPort == port && next.Mode == f.Mode && next.Path != f.Path)
+							compatible = compatible || (authorized && !next.LocalOnly && next.PublicPort == port && next.Mode == f.Mode)
 						}
 						for _, endpoint := range serverconfig.DiscoverTrafficPorts(candidate.Engine, candidate.ConfigContent) {
 							if endpoint.Port == port {
@@ -279,9 +309,31 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 						}
 					}
 					if !compatible {
+						for _, next := range candidateFrontends(candidate) {
+							if next.PublicPort == port && !next.LocalOnly && next.Mode != f.Mode {
+								return &PortConflictError{Port: port, Field: taskPortConflictField(candidate, port), Reason: "proxy_type_conflict", Cause: fmt.Errorf("%w: 该公共端口的反代类型不兼容", ErrConflict)}
+							}
+						}
 						return conflict(port)
 					}
 				}
+			}
+		}
+		if candidate != nil && len(candidate.TLSFrontends) > 0 {
+			combined := append([]core.TLSFrontend{}, candidate.TLSFrontends...)
+			for i := range combined {
+				combined[i].StaticPageOwner = "candidate"
+			}
+			for _, f := range frontends {
+				f.StaticPageOwner = "existing"
+				combined = append(combined, f)
+			}
+			if e := core.ValidateTLSFrontendRoutes(combined); e != nil {
+				var routeConflict *core.TLSFrontendConflict
+				if errors.As(e, &routeConflict) {
+					return &PortConflictError{Port: routeConflict.Port, Field: taskPortConflictField(candidate, routeConflict.Port), Reason: routeConflict.Reason, Cause: fmt.Errorf("%w: %s", ErrConflict, proxyIngressConflictMessage(routeConflict.Reason))}
+				}
+				return fmt.Errorf("%w: 现有托管入口配置无法核实", ErrConflict)
 			}
 		}
 		for _, endpoint := range serverconfig.DiscoverTrafficPorts(d.engine, content) {

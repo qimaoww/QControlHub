@@ -1110,6 +1110,9 @@
             },
             "type": "array"
           },
+          "shared_proxy_ingress": {
+            "type": "boolean"
+          },
           "status": {
             "type": "string"
           }
@@ -1162,6 +1165,18 @@
           "ports": {
             "items": {
               "type": "integer"
+            },
+            "type": "array"
+          },
+          "proxy_ingress_error": {
+            "type": "string"
+          },
+          "proxy_ingress_status": {
+            "type": "string"
+          },
+          "proxy_ingresses": {
+            "items": {
+              "$ref": "#/components/schemas/core_ProxyIngress"
             },
             "type": "array"
           },
@@ -1227,6 +1242,19 @@
               "type": "integer"
             },
             "type": "array"
+          },
+          "proxy_ingresses": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/core_ProxyIngress"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reinvite": {
             "type": "boolean"
@@ -1308,6 +1336,19 @@
               "type": "integer"
             },
             "type": "array"
+          },
+          "proxy_ingresses": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/core_ProxyIngress"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reinvite": {
             "type": "boolean"
@@ -3341,6 +3382,23 @@
         },
         "type": "object"
       },
+      "core_ProxyIngress": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "type": "integer"
+          },
+          "mode": {
+            "default": "read_only",
+            "description": "省略为 read_only；读写模式不自动增加业务权限。",
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "core_Role": {
         "enum": [
           "admin",
@@ -3510,6 +3568,15 @@
           },
           "port_used_bytes": {
             "type": "integer"
+          },
+          "proxy_ingress_revision": {
+            "type": "integer"
+          },
+          "proxy_ingresses": {
+            "items": {
+              "$ref": "#/components/schemas/core_ProxyIngress"
+            },
+            "type": "array"
           },
           "revoked": {
             "type": "boolean"
@@ -3792,6 +3859,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "shared_ingress_generation": {
+            "type": "integer"
           },
           "static_html": {
             "type": "string"
@@ -6122,6 +6192,7 @@
                         "public_port": null,
                         "reality_name": null,
                         "reality_names": null,
+                        "shared_ingress_generation": null,
                         "static_html": null,
                         "tag": null,
                         "transport": null
@@ -6223,6 +6294,11 @@
                       "owner_username": "example",
                       "ports": [
                         1
+                      ],
+                      "proxy_ingress_error": "example",
+                      "proxy_ingress_status": "example",
+                      "proxy_ingresses": [
+                        null
                       ],
                       "status": "example",
                       "updated_at": "2026-11-10T12:00:00Z",
@@ -6360,6 +6436,11 @@
                       "ports": [
                         1
                       ],
+                      "proxy_ingress_error": "example",
+                      "proxy_ingress_status": "example",
+                      "proxy_ingresses": [
+                        null
+                      ],
                       "status": "example",
                       "updated_at": "2026-11-10T12:00:00Z",
                       "used_bytes": 1,
@@ -6491,6 +6572,7 @@
                     "ports": [
                       1
                     ],
+                    "shared_proxy_ingress": false,
                     "status": "example"
                   }
                 ],
@@ -7811,6 +7893,7 @@
                         "public_port": null,
                         "reality_name": null,
                         "reality_names": null,
+                        "shared_ingress_generation": null,
                         "static_html": null,
                         "tag": null,
                         "transport": null
@@ -8277,6 +8360,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -8636,6 +8720,7 @@
                         "reality_names": [
                           null
                         ],
+                        "shared_ingress_generation": 1,
                         "static_html": "example",
                         "tag": "example",
                         "transport": "example"
@@ -8906,6 +8991,7 @@
                         "public_port": null,
                         "reality_name": null,
                         "reality_names": null,
+                        "shared_ingress_generation": null,
                         "static_html": null,
                         "tag": null,
                         "transport": null
@@ -9793,6 +9879,7 @@
                         "public_port": null,
                         "reality_name": null,
                         "reality_names": null,
+                        "shared_ingress_generation": null,
                         "static_html": null,
                         "tag": null,
                         "transport": null
@@ -10174,6 +10261,7 @@
                         "public_port": null,
                         "reality_name": null,
                         "reality_names": null,
+                        "shared_ingress_generation": null,
                         "static_html": null,
                         "tag": null,
                         "transport": null
@@ -10362,6 +10450,11 @@
                     "ports": [
                       1
                     ],
+                    "proxy_ingress_error": "example",
+                    "proxy_ingress_status": "example",
+                    "proxy_ingresses": [
+                      null
+                    ],
                     "status": "example",
                     "updated_at": "2026-11-10T12:00:00Z",
                     "used_bytes": 1,
@@ -10545,6 +10638,9 @@
                       "limit_bytes": null,
                       "owner_username": null,
                       "ports": null,
+                      "proxy_ingress_error": null,
+                      "proxy_ingress_status": null,
+                      "proxy_ingresses": null,
                       "status": null,
                       "updated_at": null,
                       "used_bytes": null,
@@ -10936,6 +11032,9 @@
                       "limit_bytes": null,
                       "owner_username": null,
                       "ports": null,
+                      "proxy_ingress_error": null,
+                      "proxy_ingress_status": null,
+                      "proxy_ingresses": null,
                       "status": null,
                       "updated_at": null,
                       "used_bytes": null,
@@ -11733,6 +11832,11 @@
                       "ports": [
                         1
                       ],
+                      "proxy_ingress_error": "example",
+                      "proxy_ingress_status": "example",
+                      "proxy_ingresses": [
+                        null
+                      ],
                       "status": "example",
                       "updated_at": "2026-11-10T12:00:00Z",
                       "used_bytes": 1,
@@ -11833,6 +11937,9 @@
                     "ports": [
                       1
                     ],
+                    "proxy_ingresses": [
+                      null
+                    ],
                     "reinvite": false,
                     "username": "example"
                   }
@@ -11884,6 +11991,11 @@
                       "owner_username": "example",
                       "ports": [
                         1
+                      ],
+                      "proxy_ingress_error": "example",
+                      "proxy_ingress_status": "example",
+                      "proxy_ingresses": [
+                        null
                       ],
                       "status": "example",
                       "updated_at": "2026-11-10T12:00:00Z",
@@ -16725,6 +16837,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -16815,6 +16928,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -23253,6 +23367,7 @@
                         "reality_names": [
                           null
                         ],
+                        "shared_ingress_generation": 1,
                         "static_html": "example",
                         "tag": "example",
                         "transport": "example"
@@ -23453,6 +23568,7 @@
                         "reality_names": [
                           null
                         ],
+                        "shared_ingress_generation": 1,
                         "static_html": "example",
                         "tag": "example",
                         "transport": "example"
@@ -23678,6 +23794,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -23768,6 +23885,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -24147,6 +24265,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -24558,6 +24677,7 @@
                         "reality_names": [
                           null
                         ],
+                        "shared_ingress_generation": 1,
                         "static_html": "example",
                         "tag": "example",
                         "transport": "example"
@@ -24726,6 +24846,7 @@
                       "reality_names": [
                         "example"
                       ],
+                      "shared_ingress_generation": 1,
                       "static_html": "example",
                       "tag": "example",
                       "transport": "example"
@@ -24899,6 +25020,7 @@
                         "reality_names": [
                           null
                         ],
+                        "shared_ingress_generation": 1,
                         "static_html": "example",
                         "tag": "example",
                         "transport": "example"
@@ -25723,6 +25845,10 @@
                       "lifetime_sent_bytes": 1,
                       "limit_bytes": 1,
                       "port_used_bytes": 1,
+                      "proxy_ingress_revision": 1,
+                      "proxy_ingresses": [
+                        null
+                      ],
                       "revoked": false,
                       "used_bytes": 1
                     },
@@ -25916,6 +26042,10 @@
                     "lifetime_sent_bytes": 1,
                     "limit_bytes": 1,
                     "port_used_bytes": 1,
+                    "proxy_ingress_revision": 1,
+                    "proxy_ingresses": [
+                      null
+                    ],
                     "revoked": false,
                     "used_bytes": 1
                   },
@@ -26318,6 +26448,10 @@
                     "lifetime_sent_bytes": 1,
                     "limit_bytes": 1,
                     "port_used_bytes": 1,
+                    "proxy_ingress_revision": 1,
+                    "proxy_ingresses": [
+                      null
+                    ],
                     "revoked": false,
                     "used_bytes": 1
                   },
@@ -26531,6 +26665,10 @@
                     "lifetime_sent_bytes": 1,
                     "limit_bytes": 1,
                     "port_used_bytes": 1,
+                    "proxy_ingress_revision": 1,
+                    "proxy_ingresses": [
+                      null
+                    ],
                     "revoked": false,
                     "used_bytes": 1
                   },
@@ -27219,6 +27357,11 @@
                       "ports": [
                         1
                       ],
+                      "proxy_ingress_error": "example",
+                      "proxy_ingress_status": "example",
+                      "proxy_ingresses": [
+                        null
+                      ],
                       "status": "example",
                       "updated_at": "2026-11-10T12:00:00Z",
                       "used_bytes": 1,
@@ -27321,6 +27464,9 @@
                     "ports": [
                       1
                     ],
+                    "proxy_ingresses": [
+                      null
+                    ],
                     "reinvite": false
                   }
                 ]
@@ -27378,6 +27524,11 @@
                       "owner_username": "example",
                       "ports": [
                         1
+                      ],
+                      "proxy_ingress_error": "example",
+                      "proxy_ingress_status": "example",
+                      "proxy_ingresses": [
+                        null
                       ],
                       "status": "example",
                       "updated_at": "2026-11-10T12:00:00Z",

@@ -116,7 +116,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
       await chooseScale(100);
     }
   }
-  await checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record });
+  await checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record, call });
   await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call });
   await checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity });
   await checkAnalyticsNodeBatch({ page, mode, fixture, evaluate, wait, screenshot, record });

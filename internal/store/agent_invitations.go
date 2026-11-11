@@ -68,6 +68,11 @@ func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID 
 			previous.ID, enabled, limit, status, engines, unrestricted); err != nil {
 			return err
 		}
+		if !previous.Enabled && enabled || previous.Status == core.AgentShareAccepted && previous.Enabled && (!enabled || status != core.AgentShareAccepted) {
+			if err := rotateProxyIngressesTx(ctx, tx, previous.ID); err != nil {
+				return err
+			}
+		}
 	}
 	narrowed := previousUnrestricted && !unrestricted
 	if !unrestricted {
@@ -154,6 +159,11 @@ func (s *Store) RespondAgentShare(ctx context.Context, shareID string, request c
 	if _, err := tx.Exec(ctx, `UPDATE agent_shares SET status=$2,invitation_revision=invitation_revision+1,updated_at=now() WHERE id=$1`,
 		shareID, next); err != nil {
 		return core.AgentAccess{}, err
+	}
+	if next == core.AgentShareRejected {
+		if err := rotateProxyIngressesTx(ctx, tx, shareID); err != nil {
+			return core.AgentAccess{}, err
+		}
 	}
 	if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agentID, features); err != nil {
 		return core.AgentAccess{}, err

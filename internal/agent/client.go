@@ -58,35 +58,39 @@ type completedTask struct {
 }
 
 type Client struct {
-	config            ClientConfig
-	executor          *Executor
-	http              *http.Client
-	creds             credentials
-	websocketURL      string
-	metrics           *MetricsCollector
-	traffic           *TrafficManager
-	mainland          *MainlandAccessManager
-	logs              *CoreLogCollector
-	publicIP          *PublicIPProber
-	bbr               *SystemBBRManager
-	serverHost        string
-	reenrollAttempted bool
-	lastReenrollAt    time.Time
-	credentialsMu     sync.Mutex
-	executionsMu      sync.Mutex
-	executions        map[string]*taskExecution
-	restartAfterTask  string
-	timeZoneRevision  int64
-	timeZone          string
-	clockSyncMu       sync.Mutex
-	clockSync         *core.ClockSyncStatus
-	taskLifecycleMu   sync.Mutex
-	upgradePending    bool
-	upgradeCommitted  *agentUpgradeTransaction
-	runtimeRefresh    chan struct{}
-	reexecFunc        func(string, []string, []string) error
-	executeFunc       func(context.Context, core.Task) (string, error)
-	ipQualityFunc     func(context.Context) (core.IPQualityResult, error)
+	config                 ClientConfig
+	executor               *Executor
+	http                   *http.Client
+	creds                  credentials
+	websocketURL           string
+	metrics                *MetricsCollector
+	traffic                *TrafficManager
+	mainland               *MainlandAccessManager
+	logs                   *CoreLogCollector
+	publicIP               *PublicIPProber
+	bbr                    *SystemBBRManager
+	serverHost             string
+	reenrollAttempted      bool
+	lastReenrollAt         time.Time
+	credentialsMu          sync.Mutex
+	executionsMu           sync.Mutex
+	executions             map[string]*taskExecution
+	restartAfterTask       string
+	timeZoneRevision       int64
+	timeZone               string
+	clockSyncMu            sync.Mutex
+	clockSync              *core.ClockSyncStatus
+	trafficPolicyMu        sync.Mutex
+	pendingTrafficPolicies []core.PortTrafficPolicy
+	trafficPoliciesPending bool
+	proxyIngressReports    []core.ProxyIngressReport
+	taskLifecycleMu        sync.Mutex
+	upgradePending         bool
+	upgradeCommitted       *agentUpgradeTransaction
+	runtimeRefresh         chan struct{}
+	reexecFunc             func(string, []string, []string) error
+	executeFunc            func(context.Context, core.Task) (string, error)
+	ipQualityFunc          func(context.Context) (core.IPQualityResult, error)
 }
 
 type taskExecution struct {

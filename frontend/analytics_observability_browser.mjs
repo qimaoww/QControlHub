@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 // Runs against the production theme and real authenticated fixture APIs.
-export async function checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record }) {
+export async function checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record, call }) {
   const visit = async (route, title) => {
     await evaluate(page, `location.hash=${JSON.stringify(route)}`);
     await wait(page, `document.querySelector('.a-top h1')?.textContent===${JSON.stringify(title)} && !document.querySelector('[aria-busy=true]')`);
@@ -30,6 +30,12 @@ export async function checkAnalyticsObservability({ page, mode, evaluate, wait, 
     assert.ok(await evaluate(page, "document.activeElement.matches('[data-source-status]')"), "closing status restores focus to its entry button");
   };
   await visit("#core-logs", "日志");
+  await call('Page.bringToFront', {}, page);
+  await wait(page, '!document.hidden');
+  // Earlier workflows can persist a paused log view for this account.
+  await evaluate(page, "[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='自动更新')?.click()");
+  await wait(page, "!!document.querySelector('[data-log-refresh-label]') && !document.querySelector('[data-log-refresh-label][aria-busy]')");
+  await evaluate(page, 'new Promise(resolve=>requestAnimationFrame(()=>resolve(true)))');
   await evaluate(page, `window.__obsFetch=window.fetch;window.__obsRequests=0;window.__obsPending=0;window.fetch=async (...args)=>{const tracked=['core-log','client-connections','preferences/node-order'].some(part=>String(args[0]).includes(part));if(tracked){window.__obsRequests++;window.__obsPending++;}try{return await window.__obsFetch(...args);}finally{if(tracked)window.__obsPending--;}}`);
   assert.ok(await evaluate(page, "['agent_id','instance_id','engine','level','q','limit'].every(name=>document.querySelector('.a-main [name='+name+']'))"));
   await evaluate(page, `(() => {

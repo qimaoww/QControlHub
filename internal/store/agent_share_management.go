@@ -31,7 +31,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 		share.limit_bytes,share.used_bytes,share.created_at,share.updated_at,share.engines,
  ARRAY(SELECT domain FROM certificate_http_grants g WHERE g.agent_id=share.agent_id AND g.user_id=share.user_id ORDER BY domain),
 		CASE WHEN share.ports_unrestricted THEN ARRAY[0]
-			ELSE ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port) END
+			ELSE ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port) END ,`+proxyIngressShareColumns("share")+`
 		FROM agent_shares share JOIN agents agent ON agent.id=share.agent_id
 		LEFT JOIN panel_users agent_owner ON agent_owner.id=agent.owner_id
 		WHERE share.user_id=$1 AND agent.revoked_at IS NULL ORDER BY agent.name,share.agent_id`, userID)
@@ -43,7 +43,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.AgentID, &share.AgentName, &share.Enabled,
 			&share.Status, &share.InvitationRevision, &share.OwnerUsername,
-			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.HTTPDomains, &share.Ports); err != nil {
+			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.HTTPDomains, &share.Ports, &share.ProxyIngresses, &share.ProxyIngressStatus, &share.ProxyIngressError); err != nil {
 			return result, err
 		}
 		result.Shares = append(result.Shares, share)
@@ -192,11 +192,17 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 		}
 	}
 	for _, share := range shares {
+		if err := setProxyIngressesTx(ctx, tx, share.AgentID, userID, share.ProxyIngresses); err != nil {
+			return core.AgentAccess{}, err
+		}
 		if err := setShareHTTPDomainsTx(ctx, tx, share.AgentID, userID, share.HTTPDomains); err != nil {
 			return core.AgentAccess{}, err
 		}
 	}
 	for _, agent := range affected {
+		if err := s.cancelUnauthorizedProxyIngressTasksTx(ctx, tx, agent.ID); err != nil {
+			return core.AgentAccess{}, err
+		}
 		if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agent.ID, agent.Features); err != nil {
 			return core.AgentAccess{}, err
 		}

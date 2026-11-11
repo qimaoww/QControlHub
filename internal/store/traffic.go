@@ -12,10 +12,13 @@ const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_
 	   config_id,config_version,inbound_tag,COALESCE(share_id,''),share_used_bytes,
 	   (SELECT jsonb_build_object('id',share.id,'limit_bytes',share.limit_bytes,
 			'used_bytes',share.used_bytes,'port_used_bytes',port_traffic_policies.share_used_bytes,'engines',share.engines,
-            'counter_epoch',port_traffic_policies.counter_epoch,
+            'proxy_ingresses',share.proxy_ingresses,
+ 'proxy_ingress_revision',share.proxy_ingress_revision+share.invitation_revision,
+ 'counter_epoch',port_traffic_policies.counter_epoch,
             'lifetime_received_bytes',port_traffic_policies.reported_lifetime_received_bytes,
             'lifetime_sent_bytes',port_traffic_policies.reported_lifetime_sent_bytes,
 			'revoked',shared_user.disabled OR NOT share.enabled OR share.status<>'accepted'
+				OR (jsonb_array_length(share.proxy_ingresses)>0 AND NOT EXISTS(SELECT 1 FROM agents a WHERE a.id=share.agent_id AND a.features ? 'shared-proxy-ingress-v1'))
 				OR NOT EXISTS(SELECT 1 FROM agents shared_agent WHERE shared_agent.id=share.agent_id
 					AND shared_agent.features ? 'shared-engines-v1' AND shared_agent.features ? 'shared-traffic-v1'
 					AND shared_agent.features ? 'independent-egress-v1'))

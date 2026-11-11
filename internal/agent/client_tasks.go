@@ -90,6 +90,8 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	// An upgrade must not replace/re-exec the process during a core migration.
 	c.taskLifecycleMu.Lock()
 	defer c.taskLifecycleMu.Unlock()
+	defer c.finishTrafficPolicyTransition()
+	policyErr := c.applyPendingTrafficPolicies(ctx)
 
 	slog.Info("executing task", "task_id", task.ID, "action", task.Action, "engine", task.Engine)
 	execute := c.executeFunc
@@ -98,7 +100,9 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	var executionErr error
 	var ipQuality *core.IPQualityResult
 	preparedLogTransition := false
-	if c.upgradePending {
+	if policyErr != nil {
+		executionErr = fmt.Errorf("节点入口授权同步失败: %w", policyErr)
+	} else if c.upgradePending {
 		executionErr = errors.New("Agent upgrade is waiting for restart; retry after the new Agent reconnects")
 	} else if task.Action == core.ActionIPQuality {
 		check := c.ipQualityFunc
@@ -166,6 +170,20 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints)
 			} else if task.Action != core.ActionValidate && task.Action != core.ActionDeploy {
 				executionErr = errors.New("unsupported shared task action")
+			}
+		}
+		if executionErr == nil && task.SharedTrafficID != "" && (task.Action == core.ActionDeploy || task.Action == core.ActionValidate || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
+			frontends := task.TLSFrontends
+			if task.Action == core.ActionStart || task.Action == core.ActionRestart {
+				retained, _, err := sharedIngressFrontends(c.executor.serviceManager(), task.Engine, task.SharedTrafficID)
+				if err != nil {
+					executionErr = err
+				} else {
+					frontends = append(append([]core.TLSFrontend{}, frontends...), retained...)
+				}
+			}
+			if executionErr == nil {
+				executionErr = c.traffic.authorizeProxyIngresses(task.SharedTrafficID, frontends)
 			}
 		}
 		if executionErr == nil {

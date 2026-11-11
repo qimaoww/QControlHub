@@ -142,6 +142,7 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	role := current.User.Role
 	disabled := current.User.Disabled
+	wasDisabled := disabled
 	displayName := current.User.DisplayName
 	permissions := append([]core.Permission(nil), current.User.Permissions...)
 	if permissions == nil {
@@ -206,7 +207,8 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	rows, err := tx.Query(ctx, `SELECT id,features FROM agents WHERE id IN (
 		SELECT t.agent_id FROM tasks t LEFT JOIN configs c ON c.id=t.config_id
 		WHERE (t.owner_id=$1 OR c.owner_id=$1) AND t.status IN ('pending','running')
-	) ORDER BY id FOR UPDATE`, id)
+		UNION SELECT agent_id FROM agent_shares WHERE user_id=$1 AND $2 AND proxy_ingresses<>'[]'::jsonb
+	) ORDER BY id FOR UPDATE`, id, disabled && !wasDisabled)
 	if err != nil {
 		return core.User{}, err
 	}
@@ -224,6 +226,18 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 		return core.User{}, err
 	}
 	for _, agent := range affected {
+		if disabled && !wasDisabled {
+			var shareID string
+			err := tx.QueryRow(ctx, `SELECT id FROM agent_shares WHERE agent_id=$1 AND user_id=$2`, agent.ID, id).Scan(&shareID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return core.User{}, err
+			}
+			if shareID != "" {
+				if err := rotateProxyIngressesTx(ctx, tx, shareID); err != nil {
+					return core.User{}, err
+				}
+			}
+		}
 		if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agent.ID, agent.Features); err != nil {
 			return core.User{}, err
 		}

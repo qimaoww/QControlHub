@@ -55,24 +55,25 @@ type trafficState struct {
 }
 
 type TrafficManager struct {
-	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
-	sharedSource     func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
-	haltShared       func(context.Context, core.Engine) error
-	haltReason       string // Set under mu before invoking the stop callbacks.
-	haltLegacyShared func(context.Context, core.Engine, []int) error
-	haltShare        func(context.Context, core.Engine, string) error
-	mu               sync.Mutex
-	statePath        string
-	backend          trafficCounterBackend
-	records          map[string]*trafficRecord
-	snapshot         []core.PortTrafficUsage
-	dirty            bool
-	rulesDirty       bool
-	bootID           string
-	now              func() time.Time
-	awaitingPolicies bool
-	recoveryEngines  []core.Engine
-	recoveryPorts    map[core.Engine][]int
+	nativeSource          func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
+	sharedSource          func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
+	haltShared            func(context.Context, core.Engine) error
+	haltReason            string // Set under mu before invoking the stop callbacks.
+	haltLegacyShared      func(context.Context, core.Engine, []int) error
+	inspectProxyIngresses func(context.Context, core.Engine, string, []core.ProxyIngress) (bool, error)
+	haltShare             func(context.Context, core.Engine, string) error
+	mu                    sync.Mutex
+	statePath             string
+	backend               trafficCounterBackend
+	records               map[string]*trafficRecord
+	snapshot              []core.PortTrafficUsage
+	dirty                 bool
+	rulesDirty            bool
+	bootID                string
+	now                   func() time.Time
+	awaitingPolicies      bool
+	recoveryEngines       []core.Engine
+	recoveryPorts         map[core.Engine][]int
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
@@ -189,6 +190,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		if policy.SharedQuota != nil {
 			quota := *policy.SharedQuota
 			quota.Engines = append([]core.Engine(nil), quota.Engines...)
+			quota.ProxyIngresses = slices.Clone(quota.ProxyIngresses)
 			policy.SharedQuota = &quota
 			if policy.Protocol != core.TrafficProtocolBoth {
 				return errors.New("shared traffic requires both listener transports")
@@ -316,6 +318,18 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 					toStop[key] = "共享额度已耗尽，实例已停止；请联系节点所有者调整额度"
 				}
 				addLegacyPort(record.Policy.Engine, record.Policy.Port)
+			}
+		}
+	}
+	if manager.inspectProxyIngresses != nil {
+		for key := range authorized {
+			q := groups[key.shareID]
+			revoked, err := manager.inspectProxyIngresses(ctx, key.engine, key.shareID, q.ProxyIngresses)
+			if err != nil {
+				return err
+			}
+			if revoked {
+				toStop[key] = proxyIngressRevocationReason()
 			}
 		}
 	}

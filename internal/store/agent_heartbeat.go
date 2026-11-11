@@ -189,7 +189,7 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 			return err
 		}
 	}
-	return nil
+	return s.recordProxyIngressReports(ctx, id, heartbeat.ProxyIngressReports)
 }
 
 // UpdateAgentMetrics refreshes only the live metrics snapshot from the
