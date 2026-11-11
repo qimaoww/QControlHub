@@ -94,6 +94,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 		var encoded []byte
 		var err error
 		if engine == core.EngineMihomo {
+			single["rules"], single["rule-providers"] = root["rules"], root["rule-providers"]
 			encoded, err = yaml.Marshal(single)
 		} else {
 			encoded, err = json.Marshal(single)

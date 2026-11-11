@@ -14,9 +14,9 @@ import (
 
 var ErrInvalidPlanInput = errors.New("invalid server plan input")
 
-// NewPlan creates a complete randomized server plan. Ports are selected from
-// the dynamic/private range; the remote core remains the authority that checks
-// whether the chosen port is actually free before deployment.
+// NewPlan creates a complete server plan. Ports use the dynamic/private
+// range except the Mihomo Vision preset, which starts at 443. The remote core
+// checks whether the chosen port is actually free before deployment.
 func NewPlan(protocol Protocol) (Input, error) {
 	if protocol.Key == "" || len(protocol.Transports) == 0 {
 		return Input{}, fmt.Errorf("%w: unsupported server protocol", ErrInvalidPlanInput)
@@ -179,6 +179,11 @@ func NewPlan(protocol Protocol) (Input, error) {
 	if err := initializeXHTTPPlan(protocol, &input); err != nil {
 		return Input{}, err
 	}
+	if protocol.SupportsUDP443Block {
+		input.Port = 443
+		enabled := true
+		input.BlockUDP443 = &enabled
+	}
 	return input, nil
 }
 
@@ -205,6 +210,10 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		}
 	}
 
+	if protocol.SupportsUDP443Block {
+		plan.Port = current.Port
+		plan.BlockUDP443 = current.BlockUDP443
+	}
 	copyXHTTPOptions(&plan, current)
 	plan.Listen = current.Listen
 	plan.SSRustDNS = current.SSRustDNS
@@ -312,4 +321,13 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		return Input{}, err
 	}
 	return plan, nil
+}
+
+// RandomListenPort is used only for an explicit port generation request.
+func RandomListenPort() (int, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(49151-20000+1))
+	if err != nil {
+		return 0, err
+	}
+	return 20000 + int(n.Int64()), nil
 }

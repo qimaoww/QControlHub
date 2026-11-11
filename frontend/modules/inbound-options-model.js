@@ -110,6 +110,7 @@ export function readServerPlanInput(form, protocol, values = new FormData(form))
   const customPattern = readMieruPattern(form, protocol);
   return {
     ...readXHTTPOptions(form, protocol, values),
+    ...(protocol.supports_udp_443_block ? {block_udp_443: values.get("block_udp_443") === "1"} : {}),
     protocol: protocol.key,
     tag: values.get("tag"),
     listen: values.get("listen"),

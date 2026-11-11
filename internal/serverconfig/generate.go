@@ -28,6 +28,9 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if !ok {
 		return "", errors.New("不支持的服务端入站协议")
 	}
+	if input.BlockUDP443 != nil && !protocol.SupportsUDP443Block {
+		return "", errors.New("拦截 UDP 443 仅适用于 Mihomo VLESS-Vision-uTLS-REALITY 入站")
+	}
 	if err := validateClientConnection(input); err != nil {
 		return "", err
 	}
