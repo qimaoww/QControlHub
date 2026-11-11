@@ -60,6 +60,7 @@ func (w *failureResponseWriter) failure(status int, value any) any {
 	// This policy applies equally to sessions and API Key responses.
 	if readOnlyMethod(w.request.Method) || w.request.URL.Path == "/api/v1/tasks/failures" {
 		body["failure_retention"] = "not_required"
+		body["stage"] = stage
 		// Internal errors already log the same request ID in writeInternalError.
 		// Preserve gateway/deadline diagnostics that writeError otherwise omits.
 		if readOnlyMethod(w.request.Method) && status > 500 && code != "read_timeout" {

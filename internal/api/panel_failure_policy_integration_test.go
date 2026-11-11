@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +15,35 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestReadInternalErrorKeepsScopedDiagnosticWithoutTask(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+	request := httptest.NewRequest("GET", "/api/v1/client-connections?agent_id=private-query", nil)
+	request.Pattern = "GET /api/v1/client-connections"
+	response := httptest.NewRecorder()
+	writer := &failureResponseWriter{ResponseWriter: response, request: request}
+	writeInternalError(writer, errors.New("read connection rows: password=private-fixture"))
+	var body, diagnostic map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(logs.Bytes(), &diagnostic); err != nil {
+		t.Fatal(err)
+	}
+	requestID, _ := body["request_id"].(string)
+	if response.Code != 500 || body["failure_retention"] != "not_required" || body["stage"] != "data_read" || requestID == "" {
+		t.Fatalf("lost real read failure: %d %v", response.Code, body)
+	}
+	if diagnostic["request_id"] != body["request_id"] || diagnostic["stage"] != "data_read" || diagnostic["resource"] != "/api/v1/client-connections" || diagnostic["route"] != request.Pattern || diagnostic["time"] == nil || diagnostic["status"] != float64(500) {
+		t.Fatalf("lost scoped diagnostic: %v", diagnostic)
+	}
+	if strings.Contains(response.Body.String()+logs.String(), "private-fixture") || strings.Contains(logs.String(), "private-query") || strings.Count(logs.String(), "\n") != 1 {
+		t.Fatal("read diagnostic leaked secrets, query data or duplicate logs")
+	}
+}
 
 // Exercise real authentication and PostgreSQL readers with lifecycle cancellation
 // after authorization. The same failure wrapper also serves direct API clients.

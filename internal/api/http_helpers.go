@@ -128,6 +128,14 @@ func writeInternalError(w http.ResponseWriter, err error) {
 		body["stage"] = "task_creation"
 		body["error"] = "任务创建失败，尚未进入 Agent 执行。请联系管理员检查控制面升级及数据库迁移状态。"
 	}
+	if failure, ok := w.(*failureResponseWriter); ok && readOnlyMethod(failure.request.Method) {
+		stage := body["stage"]
+		if stage == "" {
+			stage = "data_read"
+		}
+		fields = append(fields, "method", failure.request.Method, "route", failure.request.Pattern,
+			"resource", failure.request.URL.EscapedPath(), "stage", stage, "status", http.StatusInternalServerError)
+	}
 	slog.Error("HTTP request failed", fields...)
 	writeJSON(w, http.StatusInternalServerError, body)
 }
