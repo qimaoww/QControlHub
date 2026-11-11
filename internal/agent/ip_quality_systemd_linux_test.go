@@ -32,9 +32,9 @@ func TestIPQualityDependencyHelperSystemdSandbox(t *testing.T) {
 	for _, line := range strings.Split(string(status), "\n") {
 		if strings.HasPrefix(line, "CapBnd:") {
 			caps, err := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "CapBnd:")), 16, 64)
-			// The main Agent needs CHOWN, NET_ADMIN and NET_BIND_SERVICE for
-			// HTTP-01. Identity capabilities remain exclusive to the fixed helper.
-			if err != nil || caps != (1<<0)|(1<<10)|(1<<12) {
+			// The main Agent needs CHOWN, NET_ADMIN, NET_BIND_SERVICE and
+			// NET_RAW for ICMP diagnostics. Identity capabilities remain helper-only.
+			if err != nil || caps != (1<<0)|(1<<10)|(1<<12)|(1<<13) {
 				t.Fatalf("main Agent capabilities changed: %s %v", line, err)
 			}
 		}
