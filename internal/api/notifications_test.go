@@ -155,3 +155,109 @@ func TestNotificationAPISavedTemplateTest(t *testing.T) {
 		t.Fatal("template test record missing", records)
 	}
 }
+
+func TestNotificationAPIReadOnlyAndDeniedSessions(t *testing.T) {
+	db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
+	var own struct {
+		Configuration notify.Configuration `json:"configuration"`
+	}
+	alice.call("GET", "/settings/notifications", nil, 200, &own)
+	own.Configuration.Channels = []notify.Channel{{ID: "same-id", Name: "Alice private", Type: "webhook", Enabled: false, Secrets: map[string]string{"url": "https://example.invalid/alice"}}}
+	alice.call("PUT", "/settings/notifications", own.Configuration, 200, nil)
+	for _, readable := range []bool{true, false} {
+		name := "notification-denied"
+		permissions := []core.Permission{}
+		if readable {
+			name = "notification-reader"
+			permissions = append(permissions, core.PermissionSettingsRead)
+		}
+		var user core.User
+		admin.call("POST", "/users", core.UserRequest{Username: name, Password: configScopeFixturePassword, Role: core.RoleUser, Permissions: permissions}, 201, &user)
+		client := loginCoreInstallUser(t, configScopeAPIClient{t: t, handler: alice.handler}, name)
+		if !readable {
+			client.call("GET", "/settings/notifications", nil, 403, nil)
+			client.call("GET", "/settings/notifications/deliveries", nil, 403, nil)
+			client.call("POST", "/settings/notifications/preview", map[string]any{"event": "panel.update", "template": notify.DefaultTemplate("panel.update")}, 403, nil)
+		} else {
+			scope := store.WithConfigScope(ctx, user.ID, false)
+			c, err := db.NotificationConfiguration(scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.Channels = []notify.Channel{{ID: "same-id", Name: "Reader own", Type: "webhook", Enabled: false, Secrets: map[string]string{"url": "https://example.invalid/reader"}}}
+			if _, err = db.SaveNotificationConfiguration(scope, c); err != nil {
+				t.Fatal(err)
+			}
+			raw := client.call("GET", "/settings/notifications", nil, 200, &own)
+			if len(own.Configuration.Channels) != 1 || own.Configuration.Channels[0].Name != "Reader own" || strings.Contains(string(raw), "example.invalid") || strings.Contains(string(raw), "Alice private") {
+				t.Fatal("reader scope or redaction lost", string(raw))
+			}
+			client.call("GET", "/settings/notifications/deliveries", nil, 200, nil)
+			client.call("POST", "/settings/notifications/preview", map[string]any{"event": "panel.update", "template": notify.DefaultTemplate("panel.update")}, 200, nil)
+		}
+		client.call("PUT", "/settings/notifications", own.Configuration, 403, nil)
+		client.call("POST", "/settings/notifications/test", map[string]any{"channel_id": "same-id", "revision": own.Configuration.Revision}, 403, nil)
+	}
+	var root struct {
+		Configuration notify.Configuration `json:"configuration"`
+	}
+	admin.call("GET", "/settings/notifications", nil, 200, &root)
+	if len(root.Configuration.Channels) != 0 {
+		t.Fatal("administrator inherited another account's notification channels")
+	}
+}
+
+func TestNotificationAPISameNamesAndPortsKeepInstanceIdentity(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	clients := []configScopeAPIClient{alice, alice, bob}
+	expected := map[string]map[string]string{alice.userID: {}, bob.userID: {}}
+	for _, client := range []configScopeAPIClient{admin, alice, bob} {
+		var loaded struct {
+			Configuration notify.Configuration `json:"configuration"`
+		}
+		client.call("GET", "/settings/notifications", nil, 200, &loaded)
+		c := loaded.Configuration
+		c.Channels = []notify.Channel{{ID: "same-id", Name: "same-name", Type: "webhook", Enabled: true, Secrets: map[string]string{"url": "https://example.invalid/isolated"}}}
+		c.Rules = []notify.Rule{{ID: "same-rule", Name: "same-name", Event: notify.TypeTaskFailed, Enabled: true, Channels: []string{"same-id"}, Duration: 30, Cooldown: 60}}
+		client.call("PUT", "/settings/notifications", c, 200, nil)
+	}
+	for index, client := range clients {
+		a, _ := ownedConfigScopeAPIAgent(t, ctx, db, client, []string{"first-instance", "second-instance", "other-account"}[index])
+		client.call("PUT", "/agents/"+a.ID+"/name", map[string]string{"name": "same-name"}, 200, nil)
+		scope := store.WithConfigScope(ctx, client.userID, false)
+		config := configScopeAPIConfig(t, 23475)
+		config.AgentID = a.ID
+		config.Name = "same-name"
+		saved, err := db.SaveAgentConfig(scope, config, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task, err := db.CreateTask(scope, core.TaskRequest{AgentID: a.ID, Engine: saved.Engine, ConfigID: saved.ID, Action: core.ActionDeploy})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := db.ClaimTask(ctx, a.ID)
+		if err != nil || claimed == nil {
+			t.Fatalf("claim %v %v", claimed, err)
+		}
+		if err = db.CompleteTask(ctx, a.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: false, Error: "isolated task failure"}); err != nil {
+			t.Fatal(err)
+		}
+		expected[client.userID][task.ID] = saved.ID
+	}
+	if err := db.ScanNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, client := range []configScopeAPIClient{admin, alice, bob} {
+		var rows []store.NotificationDelivery
+		client.call("GET", "/settings/notifications/deliveries", nil, 200, &rows)
+		if len(rows) != len(expected[client.userID]) {
+			t.Fatalf("account received %d deliveries, want %d", len(rows), len(expected[client.userID]))
+		}
+		for _, row := range rows {
+			if expected[client.userID][row.Event.TaskID] != row.Event.ConfigID || row.Event.ConfigVersion != 1 {
+				t.Fatalf("instance identity crossed account/config boundary: %+v", row.Event)
+			}
+		}
+	}
+}
