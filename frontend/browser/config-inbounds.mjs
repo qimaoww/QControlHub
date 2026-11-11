@@ -17,6 +17,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     if (params.has('modify')) { window.inboundFixture.select('second'); window.inboundFixture.click('modify'); }
     return;
   }
+  await testUDP443Options();
   await testCopyInboundConnections();
   await testSourceCorrection();
   await testWireGuardConfigRuntime(); await testPresetFieldLayoutRuntime(); await testNodeConfigHistory();
@@ -266,4 +267,33 @@ async function testCopyInboundConnections() {
     await waitFor(()=>document.body.textContent.includes('配置已变化，请重新读取'),'copy failure not shown');
     assert(!copied.length&&!failed.writes.length,'failed export copied or wrote configuration');failed.dispose();
   } finally {if(original)Object.defineProperty(navigator,'clipboard',original);else delete navigator.clipboard;}
+}
+
+async function testUDP443Options() {
+  const test = await fixture('mihomo', {protocol:'vless'});
+  test.click('add'); await ready();
+  let form = editor();
+  form.elements.protocol.value = 'vless'; form.elements.protocol.dispatchEvent(new Event('change',{bubbles:true}));
+  await waitFor(()=>editor()?.elements.block_udp_443, 'UDP 443 option missing'); form = editor();
+  assert(form.elements.port.value === '443' && form.elements.block_udp_443.checked, 'new Mihomo VLESS defaults disagree');
+  form.elements.port.value = '8443'; form.elements.block_udp_443.checked = false;
+  form.elements.port.dispatchEvent(new Event('input',{bubbles:true}));
+  form.elements.protocol.value = 'ss2022'; form.elements.protocol.dispatchEvent(new Event('change',{bubbles:true}));
+  await waitFor(()=>!editor()?.elements.block_udp_443 && editor()?.elements.method, 'protocol switch retained hidden policy');
+  form.elements.protocol.value = 'vless'; form.elements.protocol.dispatchEvent(new Event('change',{bubbles:true}));
+  await waitFor(()=>editor()?.elements.block_udp_443, 'VLESS draft missing'); form = editor();
+  assert(form.elements.port.value === '8443' && !form.elements.block_udp_443.checked, 'protocol switch reset draft');
+  test.confirm = true;
+  test.clickButton('重新生成凭据', form);
+  await waitFor(()=>test.planRequests.length >= 3 && !document.querySelector('[aria-busy=true]'), 'credential regeneration did not settle');
+  assert(form.elements.port.value === '8443' && !form.elements.block_udp_443.checked, 'regeneration changed policy or port');
+  form.querySelector('[aria-label="生成监听端口"]').click();
+  await waitFor(()=>form.elements.port.value !== '8443', 'explicit port generation ignored');
+  assert(test.planRequests.at(-1).input.generate_port === true && !form.elements.block_udp_443.checked, 'explicit generation lost action or policy');
+  form.elements.reality_server_name.value = 'tls.example.test';
+  test.submit('deploy'); await test.settle(1);
+  assert(test.writes[0].input.block_udp_443 === false, 'unchecked policy failed to serialize explicit false');
+  const tag = test.writes[0].input.tag; test.select(tag); test.click('modify'); await ready();
+  assert(!editor().elements.block_udp_443.checked, 'saved false reopened as true');
+  test.dispose();
 }

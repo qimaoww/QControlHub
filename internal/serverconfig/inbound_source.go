@@ -153,5 +153,9 @@ func ReplaceInboundSource(engine core.Engine, source, tag, fragment string) (str
 	if err != nil {
 		return "", err
 	}
-	return configschema.MergeFragment(engine, source, section, string(updated), false)
+	content, err := configschema.MergeFragment(engine, source, section, string(updated), false)
+	if err == nil && engine == core.EngineMihomo && udp443MihomoEnabled(root, tag) && !mihomoUDP443Applicable(next) {
+		return mergeUDP443Mihomo(content, "", tag, "delete")
+	}
+	return content, err
 }

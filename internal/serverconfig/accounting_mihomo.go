@@ -9,6 +9,9 @@ import (
 
 func prepareMihomoAccounting(root map[string]any) (AccountingPlan, error) {
 	plan := AccountingPlan{Source: "nft-dual"}
+	if err := validateUDP443Mihomo(root); err != nil {
+		return plan, err
+	}
 	if tun := mapValue(root["tun"]); tun != nil && tun["enable"] != false {
 		return plan, fmt.Errorf("TUN and tunnel listeners require explicit independent exit mapping")
 	}

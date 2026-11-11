@@ -4934,6 +4934,16 @@
           "block_mainland_source": {
             "type": "boolean"
           },
+          "block_udp_443": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "certificate_path": {
             "type": "string"
           },
@@ -5419,6 +5429,9 @@
             "type": "boolean"
           },
           "supports_tls": {
+            "type": "boolean"
+          },
+          "supports_udp_443_block": {
             "type": "boolean"
           },
           "transport_config": {
@@ -9320,9 +9333,11 @@
           "content": {
             "application/json": {
               "example": {
+                "generate_port": false,
                 "input": {
                   "block_mainland_destination": false,
                   "block_mainland_source": false,
+                  "block_udp_443": false,
                   "certificate_path": "example",
                   "client_address": "example",
                   "client_host": "example",
@@ -9447,6 +9462,9 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "generate_port": {
+                    "type": "boolean"
+                  },
                   "input": {
                     "anyOf": [
                       {
@@ -9474,6 +9492,7 @@
                 "example": {
                   "block_mainland_destination": false,
                   "block_mainland_source": false,
+                  "block_udp_443": false,
                   "certificate_path": "example",
                   "client_address": "example",
                   "client_host": "example",
@@ -9691,6 +9710,7 @@
                 "input": {
                   "block_mainland_destination": false,
                   "block_mainland_source": false,
+                  "block_udp_443": false,
                   "certificate_path": "example",
                   "client_address": "example",
                   "client_host": "example",
@@ -10788,6 +10808,7 @@
                     {
                       "block_mainland_destination": false,
                       "block_mainland_source": false,
+                      "block_udp_443": false,
                       "certificate_path": "example",
                       "client_address": "example",
                       "client_host": "example",
@@ -10943,6 +10964,7 @@
                       "supports_managed_tls": false,
                       "supports_reality_mldsa": false,
                       "supports_tls": false,
+                      "supports_udp_443_block": false,
                       "transport_config": false,
                       "transports": [
                         "example"
@@ -11182,6 +11204,7 @@
                     {
                       "block_mainland_destination": false,
                       "block_mainland_source": false,
+                      "block_udp_443": false,
                       "certificate_path": "example",
                       "client_address": "example",
                       "client_host": "example",
@@ -11337,6 +11360,7 @@
                       "supports_managed_tls": false,
                       "supports_reality_mldsa": false,
                       "supports_tls": false,
+                      "supports_udp_443_block": false,
                       "transport_config": false,
                       "transports": [
                         "example"
@@ -16081,6 +16105,7 @@
                       "supports_managed_tls": false,
                       "supports_reality_mldsa": false,
                       "supports_tls": false,
+                      "supports_udp_443_block": false,
                       "transport_config": false,
                       "transports": [
                         "example"

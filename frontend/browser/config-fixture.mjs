@@ -212,7 +212,7 @@ export async function createConfigFixture(engine, options = {}) {
       const generated = body.input && entry.regenerated_plan || entry.plan;
       return {...structuredClone(entry.plan), ...body.input,
         ...Object.fromEntries(generatedPlanFields.filter(key=>Object.hasOwn(generated,key)).map(key=>[key,generated[key]])),
-        tag:`new-${++test.serial}`, port:22000+test.serial,
+        tag:`new-${++test.serial}`, port:entry.protocol.supports_udp_443_block && !body.generate_port ? body.input?.port ?? entry.plan.port : 22000+test.serial,
         ...(body.input && ['vmess','vless-ws-tls'].includes(body.protocol) ? {credential:crypto.randomUUID()} : {})};
     }
     if (path.endsWith("/restore")) {

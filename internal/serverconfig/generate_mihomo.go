@@ -142,6 +142,9 @@ func generateMihomo(input Input) (string, error) {
 	if err := applyMainlandMihomo(root, input.Tag, input.BlockMainlandDestination, input.BlockMainlandSource); err != nil {
 		return "", err
 	}
+	if err := applyUDP443Mihomo(root, input.Tag, input.BlockUDP443 != nil && *input.BlockUDP443); err != nil {
+		return "", err
+	}
 	value, err := yaml.Marshal(root)
 	return string(value), err
 }
@@ -335,6 +338,10 @@ func parseMihomo(content string) (Input, bool) {
 	}
 	if input.Protocol == ProtocolMieru && !parseMieruListener(listener, &input) {
 		return Input{}, false
+	}
+	if input.Protocol == ProtocolVLESS {
+		enabled := udp443MihomoEnabled(root, input.Tag)
+		input.BlockUDP443 = &enabled
 	}
 	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandMihomoFlags(root, input.Tag)
 	return input, parsedInputValid(input)
