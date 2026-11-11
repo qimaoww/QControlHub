@@ -159,8 +159,8 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 			if engine == core.EngineSingBox {
 				expectedPath = "endpoints/wg.json"
 			}
-			if bundle.Files[2].Path != expectedPath || !strings.Contains(bundle.Files[2].Content, "qch-trf-21002") {
-				t.Fatal("WireGuard source file lost its dedicated exit")
+			if bundle.Files[2].Path != expectedPath || strings.Contains(bundle.Files[2].Content, "qch-trf-21002") {
+				t.Fatal("WireGuard source file contains a compiled exit")
 			}
 			duplicate := legacy
 			duplicate.Tag, duplicate.Port = "other", input.Port

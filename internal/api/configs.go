@@ -71,7 +71,9 @@ func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Re
 		if err == nil {
 			var plan serverconfig.AccountingPlan
 			plan, err = serverconfig.PlanPresetAccounting(input.Engine, input.Content)
-			input.Content = plan.Content
+			if err == nil {
+				input.Content, err = serverconfig.PresetAccountingSource(input.Engine, plan.Content)
+			}
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())

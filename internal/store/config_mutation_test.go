@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
 
@@ -51,7 +52,7 @@ func TestPresetMutationCommitsOrRollsBackTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved, task, err := db.SaveAgentConfigAndTask(ctx, input, 0, options)
-	if err != nil || task.ID != options.TaskID || saved.Version != 1 || task.ConfigVersion != saved.Version || task.ConfigContent != saved.Content {
+	if err != nil || task.ID != options.TaskID || saved.Version != 1 || task.ConfigVersion != saved.Version || task.ConfigContent != accountingSnapshotContent(t, saved.Engine, saved.Content) {
 		t.Fatalf("atomic save: %+v %+v %v", saved, task, err)
 	}
 	// Frequent preset status polls must not read or return the execution log.
@@ -205,4 +206,15 @@ func TestSaveOnlyPolicyFailureDoesNotLeaveRevision(t *testing.T) {
 	if err != nil || len(tasks) != 0 {
 		t.Fatalf("save-only created tasks: %+v %v", tasks, err)
 	}
+}
+
+// Saved revisions are editable source; execution snapshots contain the exact
+// attributable runtime compiled from that revision, including per-port exits.
+func accountingSnapshotContent(t *testing.T, engine core.Engine, source string) string {
+	t.Helper()
+	plan, err := serverconfig.PrepareIndependentEgress(engine, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan.Content
 }

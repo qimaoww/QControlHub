@@ -220,6 +220,87 @@
       }
     },
     "schemas": {
+      "api_agentConfigWorkspaceResource": {
+        "additionalProperties": false,
+        "properties": {
+          "accounting_error": {
+            "type": "string"
+          },
+          "accounting_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/serverconfig_AccountingPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent": {
+            "$ref": "#/components/schemas/core_Agent"
+          },
+          "catalog": {},
+          "client_source": {
+            "type": "string"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_Config"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deployment": {
+            "$ref": "#/components/schemas/store_ConfigManagementDeployment"
+          },
+          "inbound_targets": {
+            "items": {
+              "$ref": "#/components/schemas/api_configInboundTargetResource"
+            },
+            "type": "array"
+          },
+          "inbounds": {
+            "items": {
+              "$ref": "#/components/schemas/serverconfig_Input"
+            },
+            "type": "array"
+          },
+          "managed_objects": {
+            "items": {
+              "$ref": "#/components/schemas/serverconfig_ManagedObject"
+            },
+            "type": "array"
+          },
+          "management": {
+            "$ref": "#/components/schemas/serverconfig_ManagedState"
+          },
+          "outbound_bindings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "present_fields": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object"
+          },
+          "protocols": {
+            "items": {
+              "$ref": "#/components/schemas/serverconfig_Protocol"
+            },
+            "type": "array"
+          },
+          "source_content": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "api_clientAccessAddressOption": {
         "additionalProperties": false,
         "properties": {
@@ -285,6 +366,9 @@
               "$ref": "#/components/schemas/api_clientAccessProfile"
             },
             "type": "array"
+          },
+          "region_code": {
+            "type": "string"
           },
           "service_status": {
             "type": "string"
@@ -420,6 +504,21 @@
             "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
             "minimum": 1,
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "api_configInboundTargetResource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "tag": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -3819,6 +3918,9 @@
           "status": {
             "$ref": "#/components/schemas/core_TaskStatus"
           },
+          "submission_id": {
+            "type": "string"
+          },
           "tcp_settings": {
             "$ref": "#/components/schemas/core_TCPSettings"
           },
@@ -4569,6 +4671,52 @@
         },
         "type": "object"
       },
+      "serverconfig_AccountingPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "api": {
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "$ref": "#/components/schemas/serverconfig_AccountingPort"
+            },
+            "type": "array"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "serverconfig_AccountingPort": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "inbound": {
+            "type": "string"
+          },
+          "mark": {},
+          "outbounds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "serverconfig_ClientField": {
         "additionalProperties": false,
         "properties": {
@@ -4988,6 +5136,36 @@
         },
         "type": "object"
       },
+      "serverconfig_ManagedObject": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "section": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "serverconfig_ManagedResource": {
         "additionalProperties": false,
         "properties": {
@@ -5179,6 +5357,24 @@
         },
         "type": "object"
       },
+      "store_ConfigManagementDeployment": {
+        "additionalProperties": false,
+        "properties": {
+          "service_status": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "task_status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "store_CoreLogSource": {
         "additionalProperties": false,
         "properties": {
@@ -5332,6 +5528,27 @@
             "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
             "minimum": 1,
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "store_PageSizePreference": {
+        "additionalProperties": false,
+        "properties": {
+          "page_size": {
+            "default": 30,
+            "enum": [
+              30,
+              50,
+              100,
+              200
+            ],
+            "type": "integer"
+          },
+          "revision": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "type": "object"
@@ -5867,6 +6084,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -7555,6 +7773,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -8018,6 +8237,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -8376,6 +8596,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -8647,6 +8868,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -9533,6 +9755,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -9913,6 +10136,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -10232,8 +10456,301 @@
           "200": {
             "content": {
               "application/json": {
-                "example": null,
-                "schema": {}
+                "example": {
+                  "accounting_error": "example",
+                  "accounting_plan": {
+                    "api": "example",
+                    "ports": [
+                      null
+                    ],
+                    "source": "example"
+                  },
+                  "agent": {
+                    "admin_hidden": false,
+                    "arch": "example",
+                    "can_hide": false,
+                    "can_manage": false,
+                    "capabilities": [
+                      "mihomo"
+                    ],
+                    "capability_transitions": {},
+                    "enrolled_at": "2026-11-10T12:00:00Z",
+                    "enrollment_command_available": false,
+                    "features": [
+                      "example"
+                    ],
+                    "id": "resource_example",
+                    "labels": {},
+                    "last_seen": "2026-11-10T12:00:00Z",
+                    "metrics": {
+                      "bbr": null,
+                      "clock_sync": null,
+                      "collected_at": "2026-11-10T12:00:00Z",
+                      "cpu_available": false,
+                      "cpu_percent": 1,
+                      "disk_available": false,
+                      "disk_total_bytes": 1,
+                      "disk_used_bytes": 1,
+                      "memory_available": false,
+                      "memory_total_bytes": 1,
+                      "memory_used_bytes": 1,
+                      "network_available": false,
+                      "network_interfaces": [
+                        null
+                      ],
+                      "network_rate_available": null,
+                      "network_rx_bps": 1,
+                      "network_rx_bytes": 1,
+                      "network_sampled_at": "2026-11-10T12:00:00Z",
+                      "network_tx_bps": 1,
+                      "network_tx_bytes": 1,
+                      "observed_public_ip": "example",
+                      "public_ipv4": "example",
+                      "public_ipv4_source": "example",
+                      "public_ipv6": "example",
+                      "public_ipv6_source": "example"
+                    },
+                    "name": "example",
+                    "os": "example",
+                    "region_code": "example",
+                    "runtime": {},
+                    "shared_allocation": {
+                      "agent_id": null,
+                      "agent_name": null,
+                      "created_at": null,
+                      "display_name": null,
+                      "enabled": null,
+                      "engines": null,
+                      "http_domains": null,
+                      "id": "resource_example",
+                      "invitation_revision": null,
+                      "limit_bytes": null,
+                      "owner_username": null,
+                      "ports": null,
+                      "status": null,
+                      "updated_at": null,
+                      "used_bytes": null,
+                      "user_id": null,
+                      "username": null
+                    },
+                    "shared_engines": [
+                      "mihomo"
+                    ],
+                    "status": "example",
+                    "supported_capabilities": [
+                      "mihomo"
+                    ],
+                    "time_zone": {
+                      "applied_time_zone": "example",
+                      "error": "example",
+                      "mode": "example",
+                      "revision": 1,
+                      "status": "example",
+                      "time_zone": "example"
+                    },
+                    "version": "example"
+                  },
+                  "catalog": null,
+                  "client_source": "example",
+                  "config": {
+                    "agent_id": "example",
+                    "content": "mixed-port: 21001",
+                    "created_at": "2026-11-10T12:00:00Z",
+                    "description": "example",
+                    "engine": "mihomo",
+                    "id": "resource_example",
+                    "name": "example",
+                    "owner_id": "example",
+                    "updated_at": "2026-11-10T12:00:00Z",
+                    "version": 1
+                  },
+                  "deployment": {
+                    "service_status": "example",
+                    "state": "example",
+                    "task_id": "example",
+                    "task_status": "example"
+                  },
+                  "inbound_targets": [
+                    {
+                      "kind": "example",
+                      "port": 1,
+                      "tag": "example"
+                    }
+                  ],
+                  "inbounds": [
+                    {
+                      "block_mainland_destination": false,
+                      "block_mainland_source": false,
+                      "certificate_path": "example",
+                      "client_address": "example",
+                      "client_host": "example",
+                      "client_port": 1,
+                      "credential": "example",
+                      "flow": "example",
+                      "listen": "example",
+                      "listener_proxy": "example",
+                      "listener_routing_mark": 1,
+                      "listener_rule": "example",
+                      "method": "example",
+                      "mieru_custom_pattern": null,
+                      "mieru_traffic_pattern": "example",
+                      "mieru_transport": "example",
+                      "network": "example",
+                      "openvpn_address": "example",
+                      "openvpn_client_ca_path": "example",
+                      "openvpn_password": "example",
+                      "openvpn_server_certificate_path": "example",
+                      "openvpn_server_key_path": "example",
+                      "openvpn_username": "example",
+                      "panel_certificate_id": "example",
+                      "port": 1,
+                      "private_key_path": "example",
+                      "protocol": "example",
+                      "reality_enabled": false,
+                      "reality_min_client_ver": "example",
+                      "reality_mldsa65_seed": "example",
+                      "reality_mldsa65_verify": "example",
+                      "reality_private_key": "example",
+                      "reality_public_key": "example",
+                      "reality_server_name": "example",
+                      "reality_server_names": "example",
+                      "reality_short_id": "example",
+                      "reality_target": "example",
+                      "secondary_credential": "example",
+                      "snell_client_fingerprint": "example",
+                      "snell_obfs_host": "example",
+                      "snell_obfs_mode": "example",
+                      "snell_reuse": false,
+                      "snell_shadow_tls_alpn": "example",
+                      "snell_shadow_tls_handshake": "example",
+                      "snell_shadow_tls_password": "example",
+                      "snell_shadow_tls_proxy": "example",
+                      "snell_shadow_tls_user": "example",
+                      "snell_shadow_tls_version": 1,
+                      "snell_udp": false,
+                      "snell_version": 1,
+                      "ss_rust_dns": "example",
+                      "ss_rust_ipv6_first": false,
+                      "ss_rust_outbound_bind_addr": "example",
+                      "sudoku_client_key": "example",
+                      "sudoku_enable_pure_downlink": false,
+                      "sudoku_fallback": "example",
+                      "sudoku_handshake_timeout": 1,
+                      "sudoku_httpmask_enabled": false,
+                      "sudoku_httpmask_host": "example",
+                      "sudoku_httpmask_mode": "example",
+                      "sudoku_httpmask_path_root": "example",
+                      "sudoku_httpmask_tls": false,
+                      "sudoku_multiplex": "example",
+                      "sudoku_padding_max": 1,
+                      "sudoku_padding_min": 1,
+                      "sudoku_table_type": "example",
+                      "tag": "example",
+                      "tailscale_auth_key": "example",
+                      "tailscale_control_url": "example",
+                      "tailscale_hostname": "example",
+                      "tailscale_state_directory": "example",
+                      "target_address": "example",
+                      "target_port": 1,
+                      "tls_acme_email": "example",
+                      "tls_alpn": "example",
+                      "tls_client_alpn": "example",
+                      "tls_client_certificate": "example",
+                      "tls_enabled": false,
+                      "tls_mode": "example",
+                      "tls_public_port": 1,
+                      "tls_server_name": "example",
+                      "tls_static_html": "example",
+                      "transport": "example",
+                      "transport_host": "example",
+                      "transport_http_method": "example",
+                      "transport_path": "example",
+                      "username": "example",
+                      "vless_decryption": "example",
+                      "vless_encryption": "example",
+                      "wireguard_allowed_ips": "example",
+                      "wireguard_client_address": "example",
+                      "wireguard_client_private_key": "example",
+                      "wireguard_client_public_key": "example",
+                      "wireguard_keepalive": 1,
+                      "wireguard_mtu": 1,
+                      "wireguard_preshared_key": "example",
+                      "wireguard_server_address": "example",
+                      "wireguard_server_private_key": "example",
+                      "wireguard_server_public_key": "example",
+                      "xhttp_backend_port": 1,
+                      "xhttp_cdn": "example",
+                      "xhttp_extra": "example",
+                      "xhttp_mode": "example",
+                      "xhttp_server_extra": "example",
+                      "xhttp_tls_address": "example",
+                      "xhttp_tls_client_port": 1,
+                      "xhttp_tls_host": "example",
+                      "xhttp_tls_port": 1
+                    }
+                  ],
+                  "managed_objects": [
+                    {
+                      "enabled": false,
+                      "inbound": false,
+                      "kind": "example",
+                      "listen": "example",
+                      "network": "example",
+                      "port": 1,
+                      "section": "example",
+                      "tag": "example"
+                    }
+                  ],
+                  "management": {
+                    "disabled": [
+                      {
+                        "section": null,
+                        "tag": null
+                      }
+                    ]
+                  },
+                  "outbound_bindings": {},
+                  "present_fields": {},
+                  "protocols": [
+                    {
+                      "badge": "example",
+                      "credential_label": "example",
+                      "default_listen": "example",
+                      "default_port": 1,
+                      "default_tls": false,
+                      "description": "example",
+                      "docs": "example",
+                      "group": "example",
+                      "ignores_username": false,
+                      "key": "example",
+                      "methods": [
+                        "example"
+                      ],
+                      "name": "example",
+                      "port_forward": false,
+                      "requires_tls": false,
+                      "secondary_credential_label": "example",
+                      "static_pages": [
+                        null
+                      ],
+                      "supports_managed_tls": false,
+                      "supports_reality_mldsa": false,
+                      "supports_tls": false,
+                      "transport_config": false,
+                      "transports": [
+                        "example"
+                      ],
+                      "uses_endpoint": false,
+                      "uses_reality": false,
+                      "uses_vless_encryption": false,
+                      "uses_wireguard": false
+                    }
+                  ],
+                  "source_content": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/api_agentConfigWorkspaceResource"
+                }
               }
             },
             "description": "业务结果；异步受理须继续查询任务或资源状态。"
@@ -10330,8 +10847,301 @@
           "200": {
             "content": {
               "application/json": {
-                "example": null,
-                "schema": {}
+                "example": {
+                  "accounting_error": "example",
+                  "accounting_plan": {
+                    "api": "example",
+                    "ports": [
+                      null
+                    ],
+                    "source": "example"
+                  },
+                  "agent": {
+                    "admin_hidden": false,
+                    "arch": "example",
+                    "can_hide": false,
+                    "can_manage": false,
+                    "capabilities": [
+                      "mihomo"
+                    ],
+                    "capability_transitions": {},
+                    "enrolled_at": "2026-11-10T12:00:00Z",
+                    "enrollment_command_available": false,
+                    "features": [
+                      "example"
+                    ],
+                    "id": "resource_example",
+                    "labels": {},
+                    "last_seen": "2026-11-10T12:00:00Z",
+                    "metrics": {
+                      "bbr": null,
+                      "clock_sync": null,
+                      "collected_at": "2026-11-10T12:00:00Z",
+                      "cpu_available": false,
+                      "cpu_percent": 1,
+                      "disk_available": false,
+                      "disk_total_bytes": 1,
+                      "disk_used_bytes": 1,
+                      "memory_available": false,
+                      "memory_total_bytes": 1,
+                      "memory_used_bytes": 1,
+                      "network_available": false,
+                      "network_interfaces": [
+                        null
+                      ],
+                      "network_rate_available": null,
+                      "network_rx_bps": 1,
+                      "network_rx_bytes": 1,
+                      "network_sampled_at": "2026-11-10T12:00:00Z",
+                      "network_tx_bps": 1,
+                      "network_tx_bytes": 1,
+                      "observed_public_ip": "example",
+                      "public_ipv4": "example",
+                      "public_ipv4_source": "example",
+                      "public_ipv6": "example",
+                      "public_ipv6_source": "example"
+                    },
+                    "name": "example",
+                    "os": "example",
+                    "region_code": "example",
+                    "runtime": {},
+                    "shared_allocation": {
+                      "agent_id": null,
+                      "agent_name": null,
+                      "created_at": null,
+                      "display_name": null,
+                      "enabled": null,
+                      "engines": null,
+                      "http_domains": null,
+                      "id": "resource_example",
+                      "invitation_revision": null,
+                      "limit_bytes": null,
+                      "owner_username": null,
+                      "ports": null,
+                      "status": null,
+                      "updated_at": null,
+                      "used_bytes": null,
+                      "user_id": null,
+                      "username": null
+                    },
+                    "shared_engines": [
+                      "mihomo"
+                    ],
+                    "status": "example",
+                    "supported_capabilities": [
+                      "mihomo"
+                    ],
+                    "time_zone": {
+                      "applied_time_zone": "example",
+                      "error": "example",
+                      "mode": "example",
+                      "revision": 1,
+                      "status": "example",
+                      "time_zone": "example"
+                    },
+                    "version": "example"
+                  },
+                  "catalog": null,
+                  "client_source": "example",
+                  "config": {
+                    "agent_id": "example",
+                    "content": "mixed-port: 21001",
+                    "created_at": "2026-11-10T12:00:00Z",
+                    "description": "example",
+                    "engine": "mihomo",
+                    "id": "resource_example",
+                    "name": "example",
+                    "owner_id": "example",
+                    "updated_at": "2026-11-10T12:00:00Z",
+                    "version": 1
+                  },
+                  "deployment": {
+                    "service_status": "example",
+                    "state": "example",
+                    "task_id": "example",
+                    "task_status": "example"
+                  },
+                  "inbound_targets": [
+                    {
+                      "kind": "example",
+                      "port": 1,
+                      "tag": "example"
+                    }
+                  ],
+                  "inbounds": [
+                    {
+                      "block_mainland_destination": false,
+                      "block_mainland_source": false,
+                      "certificate_path": "example",
+                      "client_address": "example",
+                      "client_host": "example",
+                      "client_port": 1,
+                      "credential": "example",
+                      "flow": "example",
+                      "listen": "example",
+                      "listener_proxy": "example",
+                      "listener_routing_mark": 1,
+                      "listener_rule": "example",
+                      "method": "example",
+                      "mieru_custom_pattern": null,
+                      "mieru_traffic_pattern": "example",
+                      "mieru_transport": "example",
+                      "network": "example",
+                      "openvpn_address": "example",
+                      "openvpn_client_ca_path": "example",
+                      "openvpn_password": "example",
+                      "openvpn_server_certificate_path": "example",
+                      "openvpn_server_key_path": "example",
+                      "openvpn_username": "example",
+                      "panel_certificate_id": "example",
+                      "port": 1,
+                      "private_key_path": "example",
+                      "protocol": "example",
+                      "reality_enabled": false,
+                      "reality_min_client_ver": "example",
+                      "reality_mldsa65_seed": "example",
+                      "reality_mldsa65_verify": "example",
+                      "reality_private_key": "example",
+                      "reality_public_key": "example",
+                      "reality_server_name": "example",
+                      "reality_server_names": "example",
+                      "reality_short_id": "example",
+                      "reality_target": "example",
+                      "secondary_credential": "example",
+                      "snell_client_fingerprint": "example",
+                      "snell_obfs_host": "example",
+                      "snell_obfs_mode": "example",
+                      "snell_reuse": false,
+                      "snell_shadow_tls_alpn": "example",
+                      "snell_shadow_tls_handshake": "example",
+                      "snell_shadow_tls_password": "example",
+                      "snell_shadow_tls_proxy": "example",
+                      "snell_shadow_tls_user": "example",
+                      "snell_shadow_tls_version": 1,
+                      "snell_udp": false,
+                      "snell_version": 1,
+                      "ss_rust_dns": "example",
+                      "ss_rust_ipv6_first": false,
+                      "ss_rust_outbound_bind_addr": "example",
+                      "sudoku_client_key": "example",
+                      "sudoku_enable_pure_downlink": false,
+                      "sudoku_fallback": "example",
+                      "sudoku_handshake_timeout": 1,
+                      "sudoku_httpmask_enabled": false,
+                      "sudoku_httpmask_host": "example",
+                      "sudoku_httpmask_mode": "example",
+                      "sudoku_httpmask_path_root": "example",
+                      "sudoku_httpmask_tls": false,
+                      "sudoku_multiplex": "example",
+                      "sudoku_padding_max": 1,
+                      "sudoku_padding_min": 1,
+                      "sudoku_table_type": "example",
+                      "tag": "example",
+                      "tailscale_auth_key": "example",
+                      "tailscale_control_url": "example",
+                      "tailscale_hostname": "example",
+                      "tailscale_state_directory": "example",
+                      "target_address": "example",
+                      "target_port": 1,
+                      "tls_acme_email": "example",
+                      "tls_alpn": "example",
+                      "tls_client_alpn": "example",
+                      "tls_client_certificate": "example",
+                      "tls_enabled": false,
+                      "tls_mode": "example",
+                      "tls_public_port": 1,
+                      "tls_server_name": "example",
+                      "tls_static_html": "example",
+                      "transport": "example",
+                      "transport_host": "example",
+                      "transport_http_method": "example",
+                      "transport_path": "example",
+                      "username": "example",
+                      "vless_decryption": "example",
+                      "vless_encryption": "example",
+                      "wireguard_allowed_ips": "example",
+                      "wireguard_client_address": "example",
+                      "wireguard_client_private_key": "example",
+                      "wireguard_client_public_key": "example",
+                      "wireguard_keepalive": 1,
+                      "wireguard_mtu": 1,
+                      "wireguard_preshared_key": "example",
+                      "wireguard_server_address": "example",
+                      "wireguard_server_private_key": "example",
+                      "wireguard_server_public_key": "example",
+                      "xhttp_backend_port": 1,
+                      "xhttp_cdn": "example",
+                      "xhttp_extra": "example",
+                      "xhttp_mode": "example",
+                      "xhttp_server_extra": "example",
+                      "xhttp_tls_address": "example",
+                      "xhttp_tls_client_port": 1,
+                      "xhttp_tls_host": "example",
+                      "xhttp_tls_port": 1
+                    }
+                  ],
+                  "managed_objects": [
+                    {
+                      "enabled": false,
+                      "inbound": false,
+                      "kind": "example",
+                      "listen": "example",
+                      "network": "example",
+                      "port": 1,
+                      "section": "example",
+                      "tag": "example"
+                    }
+                  ],
+                  "management": {
+                    "disabled": [
+                      {
+                        "section": null,
+                        "tag": null
+                      }
+                    ]
+                  },
+                  "outbound_bindings": {},
+                  "present_fields": {},
+                  "protocols": [
+                    {
+                      "badge": "example",
+                      "credential_label": "example",
+                      "default_listen": "example",
+                      "default_port": 1,
+                      "default_tls": false,
+                      "description": "example",
+                      "docs": "example",
+                      "group": "example",
+                      "ignores_username": false,
+                      "key": "example",
+                      "methods": [
+                        "example"
+                      ],
+                      "name": "example",
+                      "port_forward": false,
+                      "requires_tls": false,
+                      "secondary_credential_label": "example",
+                      "static_pages": [
+                        null
+                      ],
+                      "supports_managed_tls": false,
+                      "supports_reality_mldsa": false,
+                      "supports_tls": false,
+                      "transport_config": false,
+                      "transports": [
+                        "example"
+                      ],
+                      "uses_endpoint": false,
+                      "uses_reality": false,
+                      "uses_vless_encryption": false,
+                      "uses_wireguard": false
+                    }
+                  ],
+                  "source_content": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/api_agentConfigWorkspaceResource"
+                }
               }
             },
             "description": "业务结果；异步受理须继续查询任务或资源状态。"
@@ -14339,6 +15149,7 @@
                         "tag": "example"
                       }
                     ],
+                    "region_code": "example",
                     "service_status": "example",
                     "source": "example"
                   }
@@ -15874,6 +16685,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -15963,6 +16775,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -17773,6 +18586,203 @@
           }
         ],
         "summary": "保存节点视图",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "preferences.write"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/preferences/page-size/{page}": {
+      "get": {
+        "description": "当前认证账号的每页条数；page 为 nodes、traffic 或 tcp。缺失值为 30，允许 30、50、100、200；保存须带当前 revision，首次为 0，并发冲突返回 409。",
+        "operationId": "getPageSize_api_v1_preferences_page-size_{page}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "page_size": 1,
+                  "revision": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_PageSizePreference"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询PageSize",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "preferences.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      },
+      "put": {
+        "description": "当前认证账号的每页条数；page 为 nodes、traffic 或 tcp。缺失值为 30，允许 30、50、100、200；保存须带当前 revision，首次为 0，并发冲突返回 409。",
+        "operationId": "putPageSize_api_v1_preferences_page-size_{page}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "page_size": 1,
+                "revision": 1
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "page_size": {
+                    "default": 30,
+                    "enum": [
+                      30,
+                      50,
+                      100,
+                      200
+                    ],
+                    "type": "integer"
+                  },
+                  "revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "page_size",
+                  "revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "page_size": 1,
+                  "revision": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_PageSizePreference"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "保存PageSize",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -21513,6 +22523,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -21712,6 +22723,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -21936,6 +22948,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -22025,6 +23038,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -22403,6 +23417,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -22813,6 +23828,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {
@@ -22980,6 +23996,7 @@
                   "shared_traffic_id": "example",
                   "started_at": "2026-11-10T12:00:00Z",
                   "status": "pending",
+                  "submission_id": "example",
                   "tcp_settings": {},
                   "tls_frontends": [
                     {
@@ -23152,6 +24169,7 @@
                     "shared_traffic_id": "example",
                     "started_at": "2026-11-10T12:00:00Z",
                     "status": "pending",
+                    "submission_id": "example",
                     "tcp_settings": {},
                     "tls_frontends": [
                       {

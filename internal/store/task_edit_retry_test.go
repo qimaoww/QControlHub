@@ -146,7 +146,7 @@ func TestManagedTLSExecutionSnapshotAndDowngrade(t *testing.T) {
 				if err != nil || claimed == nil {
 					t.Fatalf("claim: %+v %v", claimed, err)
 				}
-				if claimed.ConfigContent != saved.Content || len(claimed.TLSFrontends) != 1 || claimed.TLSFrontends[0].PublicPort != 8443 || claimed.TLSFrontends[0].ACMEEmail != input.TLSACMEEmail {
+				if claimed.ConfigContent != accountingSnapshotContent(t, saved.Engine, saved.Content) || len(claimed.TLSFrontends) != 1 || claimed.TLSFrontends[0].PublicPort != 8443 || claimed.TLSFrontends[0].ACMEEmail != input.TLSACMEEmail {
 					t.Fatalf("lost execution snapshot: %+v", claimed)
 				}
 				frontend := claimed.TLSFrontends[0]

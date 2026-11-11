@@ -2,7 +2,7 @@ import { readRegion, loadingTable } from "./loading.js";
 import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessExport, clientAccessBatchExport, clientAccessRecordKey, filterClientAccessEntries, normalizeClientAccessFilters, loadClientDisplayFormat, saveClientDisplayFormat } from '../modules/client-access-model.js';
 import { createNodeOrderSync, orderNodesBySavedOrder } from '../modules/node-order.js';
 import { accountStorage } from '../modules/account-storage.js';
-import { nodeRegionFlag } from './node-region.js';
+import { nodeRegionFlag, nodeName } from './node-region.js';
 import { patch } from './live-dom.js';
 import { filterbar, copyText, node, button, actions, stack, section, table, field, muted, list, notice, link, pathID } from './ui.js';
 
@@ -10,7 +10,8 @@ export async function clientAccessPage(ctx) {
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
   let entries = [], agents = [], loaded = false;
   const search = field('搜索接入配置', 'search', '', { type: 'search', placeholder: '节点、协议、入站或地址' });
-  const agentOptions = () => [['', '全部节点'], ...groupClientAccessEntries(entries, agents).map(group => [group.agent_id, group.entries[0].agent_name || group.agent_id])];
+  const groupAgent = group => agents.find(agent => agent.id === group.agent_id) || { id: group.agent_id, name: group.entries[0].agent_name || group.agent_id, region_code: group.entries[0].region_code || '' };
+  const agentOptions = () => [['', '全部节点'], ...groupClientAccessEntries(entries, agents).map(group => [group.agent_id, nodeName(ctx, groupAgent(group))])];
   const agentFilter = field('节点', 'agent', '', { options: agentOptions() });
   const format = field('导出格式', 'format', loadClientDisplayFormat(), { options: [['url', 'URL'], ['mihomo', 'Mihomo YAML']] });
   const result = node('div', { className: 'a-stack' }, section('接入配置', loadingTable(['入站', '协议', '客户端', '操作'], '客户端接入')));
@@ -18,8 +19,12 @@ export async function clientAccessPage(ctx) {
   let readSequence = 0;
   function updateOptions(control, options) {
     const picker = control.querySelector('select'), selected = picker.value;
-    if (JSON.stringify([...picker.options].map(option => [option.value, option.textContent])) !== JSON.stringify(options))
+    const identity = value => typeof value === 'string' ? [value, ''] : [value.textContent, value.querySelector('[data-region-code]')?.dataset.regionCode || ''];
+    const signature = JSON.stringify(options.map(([value, label]) => [value, ...identity(label)]));
+    if (picker.dataset.options !== signature && !picker.matches(':open')) {
       picker.replaceChildren(picker.querySelector('button'), ...options.map(([value, label]) => node('option', { value }, label)));
+      picker.dataset.options = signature;
+    }
     picker.value = options.some(([value]) => value === selected) ? selected : '';
   }
   const urls = new Set(), timers = new Set();
@@ -169,7 +174,7 @@ export async function clientAccessPage(ctx) {
     const groups = groupClientAccessEntries(filterClientAccessEntries(entries, filters), agents);
     const cards = groups.map(group => {
       const first = group.entries[0];
-      const agent = agents.find(agent => agent.id === group.agent_id);
+      const agent = groupAgent(group);
       const rows = group.entries.flatMap(entry => list(entry.profiles).map(item => {
         const exported = clientAccessExport(item, selectedFormat());
         const row = [stack(item.tag || '—', muted(`端口 ${item.port}`)), stack(item.protocol || '—',
@@ -205,5 +210,5 @@ export async function clientAccessPage(ctx) {
   const batchCopy = button('复制全部节点', event => void copyBatch('', event.currentTarget), { disabled: true });
   void entryRead.load(); if (ctx.can('agents.read')) void nodeRead.load(); void orderRead.load();
   ctx.onRefresh(() => Promise.all([entryRead.load(), ctx.can('agents.read') && nodeRead.load(), orderRead.load()]));
-  return stack(entryRead.element, ctx.can('agents.read') && nodeRead.element, orderRead.element, filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, search, agentFilter, format), batchCopy), result);
+  return stack(entryRead.element, ctx.can('agents.read') && nodeRead.element, orderRead.element, filterbar(node('div', { className: 'a-filter-fields a-traffic-filters' }, agentFilter, format, search), batchCopy), result);
 }

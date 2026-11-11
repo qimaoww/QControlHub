@@ -257,6 +257,8 @@ if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
         last_reported_at: new Date().toISOString(), last_collected_at: new Date().toISOString(),
       };
     });
+    testAPI.trafficPolicies.push(...Array.from({length:44}, (_, index) => ({...testAPI.trafficPolicies[16], id:`trf_dense_extra_${index}`, port:40000+index})));
+    testAPI.agents.forEach((agent,index) => { agent.region_code = ['HK','US','SG',''][index]; });
   }
 }
 if (mode.startsWith("motion-cards")) {
@@ -338,6 +340,19 @@ window.fetch = async (input, options = {}) => {
     if (!testAPI.failureRecords.has(options.body)) testAPI.failureRecords.set(options.body,`tsk_${testAPI.failureRecords.size.toString(16).padStart(16,'0')}`);
     return json({id:testAPI.failureRecords.get(options.body)},201);
   }
+  if (path.startsWith('/preferences/page-size/')) {
+    const page = path.split('/').at(-1);
+    const preferences = testAPI.pageSizes ||= {};
+    preferences[page] ||= { page_size: 30, revision: 0 };
+    if (method === 'PUT') {
+      if (testAPI.pageSizeFailure) return json({error:'每页条数保存失败'},503);
+      const body = JSON.parse(options.body);
+      if (body.revision !== preferences[page].revision) return json({error:'每页条数已更新'},409);
+      assert.ok([30,50,100,200].includes(body.page_size));
+      preferences[page] = { page_size: body.page_size, revision: body.revision + 1 };
+    }
+    return json(preferences[page]);
+  }
   if (path === '/preferences/node-view') {
     testAPI.nodeView ||= { view: 'cards', revision: 1 };
     if (method === 'PUT') {
@@ -385,7 +400,10 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
     if (path === "/traffic-usage") return json({days:[]});
-    if (path === "/traffic-policies") return json((testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy })));
+    if (path === "/traffic-policies") {
+      const policies = (testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy }));
+      return json(url.searchParams.get('view') === 'page' ? { policies, agents: testAPI.agents.map(agent => ({id:agent.id,name:agent.name,region_code:agent.labels?.region_code || agent.region_code || '',status:agent.status,can_manage:agent.can_manage,capabilities:agent.capabilities})) } : policies);
+    }
     if (path === "/traffic-endpoints") return json([...(testAPI.trafficPolicies || []).filter(p => p.deployment_confirmed !== false), ...(testAPI.trafficEndpoints || [])].map(endpoint => ({ is_current_user: true, ...endpoint })));
     if (path === "/traffic-endpoints/sync") {
       if (method === "GET") {

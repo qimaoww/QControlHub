@@ -65,8 +65,8 @@ func TestDeleteAndManualEditRecoverVerifiedAccounting(t *testing.T) {
 				if operation == "manual" {
 					var updated core.Config
 					owner.call("PUT", base, core.Config{AgentID: agent.ID, Engine: engine, Version: 2, Name: saved.Name, Content: saved.Content}, http.StatusOK, &updated)
-					if strings.Contains(updated.Content, "qch-trf-21002-") || !strings.Contains(updated.Content, "qch-trf-21003-") {
-						t.Fatal("manual save retained old generated port")
+					if strings.Contains(updated.Content, "qch-trf-") || !strings.Contains(updated.Content, "21003") {
+						t.Fatal("manual save retained generated copies or lost edited port")
 					}
 				} else if operation == "source" {
 					var result configMutationResult

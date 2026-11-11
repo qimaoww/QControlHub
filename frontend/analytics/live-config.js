@@ -161,7 +161,7 @@ export async function liveConfigPage(ctx) {
   };
   let canDeploy = !configDeployBlockReason(agent, engine, ctx.can);
   const intent = node("input", {type:"hidden", name:"intent", value:importSource ? "import" : "deploy"});
-  const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : saved?.content || defaultSource(engine), {
+  const content = field(importSource ? "系统配置快照" : "配置正文", "content", importSource ? "" : workspace.source_content ?? saved?.content ?? defaultSource(engine), {
     multiline: 20, required: true, readonly: importSource || !editable, spellcheck: false,
   });
   const dependencyPreview = node("details", {}, node("summary", {}, "依赖资源"));
@@ -278,11 +278,11 @@ export async function liveConfigPage(ctx) {
     if (reset) reset.disabled = !changed;
     liveNotice.textContent = changed ? "有未保存的修改" : source ? `已读取 · ${date(source.readAt)}` : saved ? `已保存 · ${date(saved.updated_at)}` : "尚未保存";
   };
-  function acceptSavedSource(config) {
-    saved = config; workspace.config = config; source = null;
+  function acceptSavedSource(config, sourceContent = config.content) {
+    saved = config; workspace.config = config; workspace.source_content = sourceContent; source = null;
     form.elements.name.value = config.name;
     form.elements.description.value = config.description || "";
-    form.elements.content.value = form.elements.content.defaultValue = config.content;
+    form.elements.content.value = form.elements.content.defaultValue = sourceContent;
     sourceBlocked = false; recovery.replaceChildren();
     const feedback = form.querySelector(':scope > .a-notice');
     if (feedback) feedback.textContent = "";
@@ -379,7 +379,11 @@ export async function liveConfigPage(ctx) {
             if (!ctx.current()) return;
             acceptSavedSource(restored);
             inbounds.acceptConfig(restored);
-            try { await inbounds.reload(); }
+            try {
+              const fresh = await inbounds.reload();
+              if (fresh?.config?.id === restored.id && fresh.config.version === restored.version)
+                acceptSavedSource(fresh.config, fresh.source_content);
+            }
             catch (error) { blockSource(error, restored); throw error; }
             historyBox.close();
             ctx.announce("配置已恢复，节点部署保持原状");
@@ -403,8 +407,8 @@ export async function liveConfigPage(ctx) {
     sourceTools, readOnly: importSource,
     agent, engine, base, workspace, getDraft: () => JSON.stringify([form.elements.name.value,form.elements.description.value,form.elements.content.value]),
     dirty,
-    accept(config) {
-      acceptSavedSource(config);
+    accept(config, sourceContent) {
+      acceptSavedSource(config, sourceContent);
     },
     beforeDeploy,
   });

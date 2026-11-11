@@ -132,11 +132,34 @@ func TestNativeTrafficCores(t *testing.T) {
 				plan, err = serverconfig.PrepareMarkedSingBoxAccounting(plan.Content)
 			}
 			if engine == core.EngineMihomo {
-				source := "listeners: [{name: a, type: socks, listen: 127.0.0.1, port: 1080, udp: true}, {name: b, type: socks, listen: 127.0.0.1, port: 1081, udp: true}]\nrules: ['MATCH,DIRECT']\n"
-				if os.Getenv("QCH_TEST_IMPORTED_INBOUNDS") == "1" {
-					source = strings.NewReplacer("name: a, ", "", "name: b, ", "").Replace(source)
+				content = "listeners: [{name: a, type: socks, listen: 127.0.0.1, port: 1080, udp: true}, {name: b, type: socks, listen: 127.0.0.1, port: 1081, udp: true}]\nrules: ['MATCH,DIRECT']\n"
+				if os.Getenv("QCH_TEST_MIHOMO_BINDING") == "1" {
+					nativeTestSocksRelay(t)
+					content += "proxies: [{name: edge, type: socks5, server: 93.184.216.34, port: 20100, udp: true}, {name: twin, type: socks5, server: 93.184.216.34, port: 20100, udp: true}]\nproxy-groups: [{name: selection, type: select, proxies: [edge, twin]}]\n"
+					for _, inbound := range []string{"a", "b", "a"} {
+						port := 1080
+						if inbound == "b" {
+							port++
+						}
+						content, err = serverconfig.BindManagedOutbound(engine, content, inbound, port, "selection", serverconfig.ManagedState{})
+						if err != nil {
+							t.Fatal(err)
+						}
+						compiled, compileErr := serverconfig.PlanPresetAccounting(engine, content)
+						if compileErr != nil {
+							t.Fatal(compileErr)
+						}
+						content, err = serverconfig.AccountingUpdateSource(engine, compiled.Content, content)
+						if err != nil || strings.Contains(content, "qch-trf-") {
+							t.Fatalf("runtime round trip: %v", err)
+						}
+					}
+					t.Log("testing repeated bindings of two ports to one SOCKS5 proxy group with distinct equal-parameter exits")
 				}
-				plan, err = serverconfig.PrepareAccounting(engine, source)
+				if os.Getenv("QCH_TEST_IMPORTED_INBOUNDS") == "1" && os.Getenv("QCH_TEST_MIHOMO_BINDING") != "1" {
+					content = strings.NewReplacer("name: a, ", "", "name: b, ", "").Replace(content)
+				}
+				plan, err = serverconfig.PrepareAccounting(engine, content)
 			}
 			if engine == core.EngineShadowsocksRust {
 				plan, err = serverconfig.PrepareAccounting(engine, `{"mode":"tcp_and_udp","servers":[{"server":"127.0.0.1","server_port":1080,"method":"aes-256-gcm","password":"qch-test-password"},{"server":"127.0.0.1","server_port":1081,"method":"aes-256-gcm","password":"qch-test-password"}]}`)
@@ -356,6 +379,46 @@ func TestImportedRoutedNativeTrafficCores(t *testing.T) {
 	t.Setenv("QCH_TEST_IMPORTED_INBOUNDS", "routed")
 	t.Setenv("QCH_TEST_PROTOCOL_OUTBOUNDS", "0")
 	TestNativeTrafficCores(t)
+}
+
+func nativeTestSocksRelay(t *testing.T) {
+	t.Helper()
+	if output, err := exec.Command("ip", "addr", "add", "93.184.216.34/32", "dev", "lo").CombinedOutput(); err != nil {
+		t.Fatalf("isolated relay address: %v %s", err, output)
+	}
+	path := filepath.Join(t.TempDir(), "relay.json")
+	content := `{"inbounds":[{"listen":"93.184.216.34","port":20100,"protocol":"socks","settings":{"auth":"noauth","udp":true}}],"outbounds":[{"protocol":"freedom"}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Getenv("QCH_TEST_XRAY_BIN"), "run", "-c", path)
+	log, err := os.CreateTemp(t.TempDir(), "socks-relay-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.Stdout, command.Stderr = log, log
+	if err := command.Start(); err != nil {
+		_ = log.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		_ = log.Close()
+		if t.Failed() {
+			data, _ := os.ReadFile(log.Name())
+			t.Log(string(data))
+		}
+	})
+	for attempt := 0; attempt < 80; attempt++ {
+		connection, err := net.DialTimeout("tcp", "93.184.216.34:20100", 100*time.Millisecond)
+		if err == nil {
+			_ = connection.Close()
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("SOCKS5 relay did not start")
 }
 
 // A real second-hop VLESS server in the same isolated network verifies that

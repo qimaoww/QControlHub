@@ -108,7 +108,7 @@ func TestSharedCorePreparationSerializesUsersAndKeepsSnapshots(t *testing.T) {
 		t.Fatalf("cross-user task visible: %v", err)
 	}
 	first, err := db.ClaimTask(ctx, agent.ID)
-	if err != nil || first == nil || first.ID != at.ID || first.ConfigContent != a.Content {
+	if err != nil || first == nil || first.ID != at.ID || first.ConfigContent != accountingSnapshotContent(t, a.Engine, a.Content) {
 		t.Fatalf("first immutable task: %+v %v", first, err)
 	}
 	if next, err := db.ClaimTask(ctx, agent.ID); err != nil || next != nil {
@@ -118,7 +118,7 @@ func TestSharedCorePreparationSerializesUsersAndKeepsSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := db.ClaimTask(ctx, agent.ID)
-	if err != nil || second == nil || second.ID != bt.ID || second.ConfigContent != b.Content {
+	if err != nil || second == nil || second.ID != bt.ID || second.ConfigContent != accountingSnapshotContent(t, b.Engine, b.Content) {
 		t.Fatalf("second immutable task: %+v %v", second, err)
 	}
 	var base int

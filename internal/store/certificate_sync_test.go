@@ -74,7 +74,7 @@ func TestCertificateSyncUsesAppliedSharedSnapshotAndRespectsLifecycle(t *testing
 		t.Fatal(err)
 	}
 	task, err = db.ClaimTask(ctx, agent.ID)
-	if err != nil || task == nil || !task.CertificateSync || task.ConfigVersion != config.Version || task.ConfigContent != content || len(task.Certificates) != 1 || task.Certificates[0].Version != 2 {
+	if err != nil || task == nil || !task.CertificateSync || task.ConfigVersion != config.Version || task.ConfigContent != accountingSnapshotContent(t, config.Engine, content) || len(task.Certificates) != 1 || task.Certificates[0].Version != 2 {
 		t.Fatalf("sync did not retain deployed snapshot: task=%v err=%v", task != nil, err)
 	}
 	// An update while the older immutable task is running needs another pass.
