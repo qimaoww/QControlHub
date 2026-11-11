@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -100,6 +102,14 @@ func TestMihomoUDP443RealityLive(t *testing.T) {
 					}
 					encodedServer, _ := yaml.Marshal(root)
 					source = string(encodedServer)
+					checkDir := t.TempDir()
+					checkPath := filepath.Join(checkDir, "generated.yaml")
+					if err := os.WriteFile(checkPath, encodedServer, 0600); err != nil {
+						t.Fatal(err)
+					}
+					if output, err := exec.Command(binary, "-t", "-d", checkDir, "-f", checkPath).CombinedOutput(); err != nil {
+						t.Fatalf("generated configuration rejected: %v\n%s", err, output)
+					}
 					plan, err := PlanPresetAccounting(core.EngineMihomo, source)
 					if err != nil {
 						t.Fatal(err)
@@ -134,9 +144,14 @@ func TestMihomoUDP443RealityLive(t *testing.T) {
 							config := map[string]any{"log-level": "debug", "listeners": []any{map[string]any{"type": "tunnel", "name": "payload", "listen": "127.0.0.1", "port": port, "network": []string{"tcp", "udp"}, "target": net.JoinHostPort(host, strconv.Itoa(test.target))}}, "proxies": []any{out}, "rules": []string{"MATCH,peer"}}
 							encoded, _ := yaml.Marshal(config)
 							clientLog := nativeWSOriginRun(t, core.EngineMihomo, binary, string(encoded), port, cert)
+							if test.target == 443 && test.network == "udp" {
+								if err := catalogEchoRoundTrip("tcp", port); err != nil {
+									t.Fatalf("REALITY link readiness failed: %v", err)
+								}
+							}
 							count := received.Load()
 							if test.blocked {
-								if err := singBoxEchoRoundTripTimeout("udp", port, 600*time.Millisecond); err == nil {
+								if err := singBoxEchoRoundTripTimeout("udp", port, 2*time.Second); err == nil {
 									t.Fatal("blocked UDP reached receiver")
 								}
 								if received.Load() != count || !strings.Contains(log(), "REJECT") {
