@@ -48,9 +48,14 @@ func reconnectBackoffLimit(rejected bool) time.Duration {
 	return maxReconnectBackoff
 }
 
+func (c *Client) initializeNetworkDiagnostics(ctx context.Context) error {
+	var err error
+	c.diagnostics, err = networkdiag.New(ctx, filepath.Join(c.config.StatePath+".network-diagnostics", "journal.json"), &c.taskLifecycleMu)
+	return err
+}
+
 func (c *Client) Run(ctx context.Context) error {
-	var diagnosticErr error
-	c.diagnostics, diagnosticErr = networkdiag.New(ctx, c.config.StatePath+".diagnostics", &c.taskLifecycleMu)
+	diagnosticErr := c.initializeNetworkDiagnostics(ctx)
 	if diagnosticErr != nil {
 		slog.Warn("network diagnostics unavailable", "error", diagnosticErr)
 		c.diagnosticCapabilities = core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{}, Providers: map[string]string{}, Addresses: []string{}}
