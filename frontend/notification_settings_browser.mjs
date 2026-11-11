@@ -44,6 +44,7 @@ export async function checkNotificationSettings({page, mode, evaluate, wait, scr
   const change = (name,value) => evaluate(page, `(()=>{const input=document.querySelector('dialog[open] [name="${name}"]');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   for (const type of ['telegram','smtp','bark','ntfy','gotify','webhook']) {
     await change('type',type); await measure(`channel ${type}`);
+    if (type==='smtp') assert.equal(await evaluate(page, `document.querySelector('dialog[open] [name=tls]').value`),'starttls','SMTP starts with a valid security mode');
   }
   await change('url','https://example.invalid/draft');
   await change('type','smtp'); await change('type','webhook');

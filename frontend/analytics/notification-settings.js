@@ -109,7 +109,7 @@ export function notificationsPage(ctx) {
     const type = typeField.querySelector("select");
     function drawFields() {
       dynamic.replaceChildren(...fields[type.value].map(([name, label, secret]) => stack(
-        field(label, name, secret ? "" : channel?.values?.[name] || (name === "port" ? "587" : ""), {
+        field(label, name, secret ? "" : channel?.values?.[name] || (name === "port" ? "587" : name === "tls" ? "starttls" : ""), {
           ...(name === "tls" ? { options: [["starttls", "STARTTLS"], ["tls", "TLS"]] } : { type: secret ? "password" : "text", maxlength: secret ? 2000 : 500, autocomplete: "off" }),
           hint: secret && channel?.configured?.includes(name) ? "已配置，留空保留" : "",
         }), secret && channel?.configured?.includes(name) ? field(`清除${label}`, `clear:${name}`, false, { type: "checkbox" }) : null)));
