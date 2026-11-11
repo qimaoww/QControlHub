@@ -73,6 +73,9 @@ func recordHostInstanceObservationTx(ctx context.Context, tx pgx.Tx, taskID stri
 		running=$3 IN ('active','activating','reloading'),uncertain=$3='unknown',
 		config_uncertain=CASE WHEN $4<>'' AND state.config_id=$4 AND state.config_version=$5
 			AND EXISTS(SELECT 1 FROM configs c WHERE c.id=$4 AND c.owner_id=state.owner_id)
+			THEN false
+			WHEN state.config_id='' AND $4='' AND $3 IN ('inactive','failed')
+				AND task.action='import-existing' AND task.status='failed' AND state.owner_id=task.owner_id
 			THEN false WHEN state.config_id<>'' THEN true ELSE state.config_uncertain END,
 		traffic_config_confirmed=state.traffic_config_confirmed OR ($4<>'' AND state.config_id=$4 AND state.config_version=$5
 			AND EXISTS(SELECT 1 FROM configs c WHERE c.id=$4 AND c.owner_id=state.owner_id)),

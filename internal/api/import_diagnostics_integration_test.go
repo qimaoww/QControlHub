@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
@@ -44,6 +45,10 @@ func TestImportPreparationKeepsManualConfigurationAndHistory(t *testing.T) {
 	admin.call("GET", "/tasks/"+mutation.Task.ID, nil, http.StatusOK, nil)
 	heartbeat(true, "")
 	source := `{"inbounds":[{"tag":"imported","listen":"127.0.0.1","port":21002,"protocol":"socks","settings":{"auth":"noauth"}}],"outbounds":[{"protocol":"freedom","tag":"direct"}],"opaque":{"large":9007199254740995}}`
+	plan, err := serverconfig.PrepareIndependentEgress(core.EngineXray, source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var read core.Task
 	owner.call("POST", "/tasks", core.TaskRequest{AgentID: node.ID, Engine: core.EngineXray, Action: core.ActionReadConfig}, 201, &read)
 	claim, err := db.ClaimTask(ctx, node.ID)
@@ -69,7 +74,7 @@ func TestImportPreparationKeepsManualConfigurationAndHistory(t *testing.T) {
 	}
 	assertManual()
 	claim, err = db.ClaimTask(ctx, node.ID)
-	if err != nil || claim == nil || claim.ID != imported.ID || claim.ConfigContent != source {
+	if err != nil || claim == nil || claim.ID != imported.ID || claim.ConfigContent != plan.Content {
 		t.Fatalf("import snapshot mismatch: %+v %v", claim, err)
 	}
 	if err = db.CompleteTask(ctx, node.ID, claim.ID, core.TaskResultRequest{LeaseID: claim.LeaseID, Error: "migration failed; rollback succeeded", InstanceStatus: &core.SharedInstanceStatus{Engine: core.EngineXray, TaskID: claim.ID, ConfigID: mutation.Config.ID, ConfigVersion: mutation.Config.Version, Status: "active", ObservedAt: time.Now().UTC()}}); err != nil {
@@ -80,14 +85,15 @@ func TestImportPreparationKeepsManualConfigurationAndHistory(t *testing.T) {
 	owner.call("POST", "/tasks/"+imported.ID+"/retry", nil, 201, &retry)
 	assertManual()
 	claim, err = db.ClaimTask(ctx, node.ID)
-	if err != nil || claim == nil || claim.ConfigContent != source {
+	if err != nil || claim == nil || claim.ConfigContent != plan.Content {
 		t.Fatalf("retry lost pinned source: %+v %v", claim, err)
 	}
 	if err = db.CompleteTask(ctx, node.ID, claim.ID, core.TaskResultRequest{LeaseID: claim.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := db.AgentConfig(store.WithConfigScope(ctx, owner.userID, false), node.ID, core.EngineXray)
-	if err != nil || cfg.Content != source || cfg.Version != mutation.Config.Version+1 {
+	source, sourceErr := serverconfig.PresetAccountingSource(core.EngineXray, plan.Content)
+	if err != nil || sourceErr != nil || cfg.Content != source || cfg.Version != mutation.Config.Version+1 {
 		t.Fatalf("successful import not committed atomically: %+v %v", cfg, err)
 	}
 	var diagnostic core.TaskDiagnostic

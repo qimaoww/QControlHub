@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func TestExistingSingBoxConfigDirectoryMigrationSucceeds(t *testing.T) {
@@ -41,7 +42,11 @@ func TestExistingSingBoxConfigDirectoryMigrationSucceeds(t *testing.T) {
 	}
 	fixture.assertServiceState(t, "sing-box.service", "inactive", "disabled")
 	fixture.assertServiceState(t, "qagent-sing-box.service", "active", "enabled")
-	assertFileContentAndMode(t, fixture.managed.ConfigPath, content, 0o600)
+	plan, err := serverconfig.PrepareMarkedSingBoxAccounting(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFileContentAndMode(t, fixture.managed.ConfigPath, plan.Content, 0o600)
 	if _, pending := fixture.executor.ExistingSpecs[core.EngineSingBox]; pending {
 		t.Fatal("completed sing-box directory migration remained pending")
 	}
@@ -367,6 +372,49 @@ func TestExistingCoreMigrationRejectsUnsupportedSingBoxOfficialArgv(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			if supportedExistingExecStart(core.EngineSingBox, existing, argv) {
 				t.Fatalf("unsupported sing-box official argv was accepted: %s", argv)
+			}
+		})
+	}
+}
+
+func TestExistingImportUsesVerifiedAccountingCandidate(t *testing.T) {
+	requireAgentRoot(t)
+	for _, fail := range []bool{false, true} {
+		name := "success"
+		if fail {
+			name = "rollback"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newExistingCoreMigrationFixture(t, fail)
+			source := `{"inbounds":[{"port":"21001-21002","listen":"127.0.0.1","protocol":"socks","settings":{"auth":"noauth"}}],"outbounds":[{"protocol":"freedom"}]}`
+			if err := os.WriteFile(fixture.existing.ConfigPath, []byte(source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := serverconfig.PrepareIndependentEgress(core.EngineXray, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task := core.Task{Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: plan.Content}
+			_, err = fixture.executor.Execute(context.Background(), task)
+			assertFileContentAndMode(t, fixture.existing.ConfigPath, source, 0o600)
+			if fail {
+				if err == nil {
+					t.Fatal("start failure was accepted")
+				}
+				assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
+				fixture.assertServiceState(t, "xray.service", "active", "enabled")
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFileContentAndMode(t, fixture.managed.ConfigPath, plan.Content, 0o600)
+			record, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray)
+			if err != nil || record.RequestConfigDigest != coreMigrationConfigDigest(plan.Content) || record.ConfigDigest != coreMigrationConfigDigest(plan.Content) {
+				t.Fatalf("migration lost converted request binding: %+v %v", record, err)
+			}
+			if _, err := fixture.executor.Execute(context.Background(), task); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

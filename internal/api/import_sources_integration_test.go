@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -44,7 +45,7 @@ func TestImportSourceSelectionPinsProvenanceAndAuthorization(t *testing.T) {
 		t.Fatalf("source did not reach Agent: %+v %v", claim, err)
 	}
 	dependency := core.ImportDependency{Field: "routing.rules[0].ip[0]", Source: "/srv/规则 one.dat", Resolved: "/srv/archive/规则 one.dat", Destination: "/usr/local/lib/qagent/cores/imports/digest/file.dat", Kind: "input"}
-	content := `{"inbounds":[],"outbounds":[],"opaque":{"large":9007199254740995}}`
+	content := `{"inbounds":[{"protocol":"http","port":21002}],"outbounds":[{"protocol":"freedom"}],"opaque":{"large":9007199254740995}}`
 	digest := strings.Repeat("d", 64)
 	if err := db.CompleteTask(ctx, node.ID, read.ID, core.TaskResultRequest{LeaseID: claim.LeaseID, Success: true, Output: content, ImportSourceDigest: digest, ImportDependencies: []core.ImportDependency{dependency}}); err != nil {
 		t.Fatal(err)
@@ -59,10 +60,14 @@ func TestImportSourceSelectionPinsProvenanceAndAuthorization(t *testing.T) {
 	}
 	shared.call("GET", "/tasks/"+read.ID+"/config-snapshot", nil, http.StatusNotFound, nil)
 	shared.call("POST", "/agents/"+node.ID+"/configs/xray/import", store.ConfigImportRequest{SnapshotTaskID: read.ID, Name: "denied shared import"}, http.StatusForbidden, nil)
+	plan, err := serverconfig.PrepareIndependentEgress(core.EngineXray, content)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var task core.Task
 	owner.call("POST", "/agents/"+node.ID+"/configs/xray/import", store.ConfigImportRequest{SnapshotTaskID: read.ID, Name: "selected service"}, http.StatusCreated, &task)
 	claim, err = db.ClaimTask(ctx, node.ID)
-	if err != nil || claim == nil || claim.ExistingSourceID != first || claim.ImportSourceDigest != digest || claim.ConfigContent != content {
+	if err != nil || claim == nil || claim.ExistingSourceID != first || claim.ImportSourceDigest != digest || claim.ConfigContent != plan.Content {
 		state, _ := db.GetTask(ctx, task.ID)
 		t.Fatalf("import lost source binding: %+v %v state=%+v", claim, err, state)
 	}

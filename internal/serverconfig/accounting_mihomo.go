@@ -107,12 +107,20 @@ func prepareMihomoAccounting(root map[string]any) (AccountingPlan, error) {
 	}
 	var clones, groupClones []any
 	seenPorts, seenNames := map[int]bool{}, map[string]bool{}
-	for _, raw := range listeners {
+	for index, raw := range listeners {
 		in := mapValue(raw)
 		name := stringValue(in["name"])
 		port := trafficPortNumber(in["port"])
-		if !tagPattern.MatchString(name) || port == 0 || seenPorts[port] || seenNames[name] || stringValue(in["rule"]) != "" || stringValue(in["proxy"]) != "" {
-			return plan, fmt.Errorf("Mihomo requires tagged listeners using global rules")
+		if !tagPattern.MatchString(name) || seenNames[name] {
+			return plan, fmt.Errorf("listeners[%d].name %q 必须是合法且唯一的标识", index, name)
+		}
+		if port == 0 || seenPorts[port] {
+			return plan, fmt.Errorf("listeners[%d].port 必须是可独立统计的唯一端口", index)
+		}
+		for _, key := range []string{"rule", "proxy"} {
+			if stringValue(in[key]) != "" {
+				return plan, fmt.Errorf("listeners[%d].%s 覆盖全局路由，现有统计无法保证独立出口归属", index, key)
+			}
 		}
 		seenPorts[port], seenNames[name] = true, true
 		mark := uint32(0x51430000) | uint32(port)

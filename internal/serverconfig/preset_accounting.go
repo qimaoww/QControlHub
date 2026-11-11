@@ -46,5 +46,5 @@ func PlanPresetAccounting(engine core.Engine, content string) (AccountingPlan, e
 	if err != nil {
 		return AccountingPlan{}, err
 	}
-	return PrepareAccounting(engine, source)
+	return PrepareIndependentEgress(engine, source)
 }

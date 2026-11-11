@@ -52,14 +52,12 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 			return
 		}
 	}
-	if len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
-		plan, err := serverconfig.PlanPresetAccounting(engine, content)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		content = plan.Content
+	plan, err := serverconfig.PlanPresetAccounting(engine, content)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	content = plan.Content
 	candidate := input.Config
 	candidate.AgentID, candidate.Engine, candidate.Content = agent.ID, engine, content
 	candidate.Version++

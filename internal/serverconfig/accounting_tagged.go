@@ -251,15 +251,18 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	var clones, legacyClones []any
 	seenPorts, seenTags := map[int]bool{}, map[string]bool{}
-	for _, raw := range inbounds {
+	for index, raw := range inbounds {
 		in := mapValue(raw)
 		tag := stringValue(in["tag"])
 		port := trafficPortNumber(in[portKey])
 		if xray && (xrayInternalAPIInbound(root, in) || xhttpGroupOwner(root, tag) != "") {
 			continue
 		}
-		if !tagPattern.MatchString(tag) || port == 0 || seenPorts[port] || seenTags[tag] {
-			return fmt.Errorf("accounting requires unique tagged single-port inbounds")
+		if !tagPattern.MatchString(tag) || seenTags[tag] {
+			return fmt.Errorf("inbounds[%d].tag %q 必须是合法且唯一的标识", index, tag)
+		}
+		if port == 0 || seenPorts[port] {
+			return fmt.Errorf("inbounds[%d].%s 必须是可独立统计的唯一端口", index, portKey)
 		}
 		if settings := mapValue(in["settings"]); settings["fallbacks"] != nil && len(xhttpGroupRouteTags(root, tag)) == 1 {
 			return fmt.Errorf("inbound fallbacks require explicit independent exit mapping")

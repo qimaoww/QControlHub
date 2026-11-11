@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -270,7 +271,22 @@ func testSSRustScriptMigration(t *testing.T, failStart bool) {
 	fixture.assertServiceState(t, fixture.existing.Service, "inactive", "disabled")
 	fixture.assertServiceState(t, fixture.managed.Service, "active", "enabled")
 	deployed, err := os.ReadFile(fixture.managed.ConfigPath)
-	if err != nil || string(deployed) != content {
+	var actual, original map[string]any
+	if err == nil {
+		err = json.Unmarshal(deployed, &actual)
+	}
+	if err == nil {
+		err = json.Unmarshal([]byte(content), &original)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := actual["servers"].([]any)[0].(map[string]any)
+	if server["outbound_fwmark"] != float64(uint32(0x51430000)|20001) {
+		t.Fatal("import did not establish the per-port exit mark")
+	}
+	delete(server, "outbound_fwmark")
+	if !reflect.DeepEqual(actual, original) {
 		t.Fatalf("script settings changed: %v\n%s", err, deployed)
 	}
 	if !strings.Contains(output, "firewall") {

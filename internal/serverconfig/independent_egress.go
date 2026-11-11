@@ -45,7 +45,12 @@ func PrepareIndependentEgress(engine core.Engine, content string) (AccountingPla
 	}
 	plan, err := PrepareAccounting(engine, content)
 	if err != nil && engine == core.EngineSingBox {
-		return PrepareMarkedSingBoxAccounting(content)
+		plan, err = PrepareMarkedSingBoxAccounting(content)
+	}
+	if err == nil {
+		if err := core.ValidateConfig(engine, plan.Content); err != nil {
+			return AccountingPlan{}, fmt.Errorf("规范化后的配置不可保存：%w", err)
+		}
 	}
 	return plan, err
 }
