@@ -233,6 +233,7 @@ export function networkToolsPage(ctx) {
     provider.hidden = !trace;
     hops.hidden = !trace;
     port.hidden = p === "icmp";
+    controls.get("port").min = t === "iperf3" ? 1024 : 1;
     duration.hidden = streams.hidden = bandwidth.hidden = t !== "iperf3";
     count.hidden = interval.hidden = timeout.hidden = t === "iperf3";
     size
@@ -609,6 +610,8 @@ export function networkToolsPage(ctx) {
       if (ctx.current()) {
         feedback.textContent = e.message;
         if (e.status === 401 || e.status === 403) {
+          history = [];
+          pinned = undefined;
           results.replaceChildren();
           snapshot = undefined;
         }
@@ -643,6 +646,10 @@ export function networkToolsPage(ctx) {
         feedback.textContent = error.message;
         if ([401, 403, 404].includes(error.status)) {
           pinned = undefined;
+          history =
+            error.status === 401
+              ? []
+              : history.filter((item) => item.id !== requestedID);
           renderSnapshot();
         }
       }
