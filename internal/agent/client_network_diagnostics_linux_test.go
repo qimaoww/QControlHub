@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/networkdiag"
 )
 
 func TestNetworkDiagnosticsPreservesExistingTaskSpool(t *testing.T) {
@@ -30,5 +31,24 @@ func TestNetworkDiagnosticsPreservesExistingTaskSpool(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(c.config.StatePath+".network-diagnostics", "journal.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCanceledCapabilityRefreshPreservesLastReport(t *testing.T) {
+	c := &Client{diagnosticCapabilities: core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"nexttrace": {Version: "last-verified"}}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.refreshDiagnosticCapabilities(ctx)
+	if got := c.diagnosticCapabilities.Tools["nexttrace"]; got.Version != "last-verified" || got.Error != "" {
+		t.Fatalf("canceled task poisoned heartbeat: %+v", got)
+	}
+}
+
+func TestCapabilityRefreshRecoversPriorProbeError(t *testing.T) {
+	c := &Client{diagnosticCapabilities: core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"nexttrace": {Error: "old external CLI failure"}}}}
+	c.refreshDiagnosticCapabilities(context.Background())
+	want := networkdiag.Capabilities(context.Background()).Tools["nexttrace"]
+	if got := c.diagnosticCapabilities.Tools["nexttrace"]; got != want {
+		t.Fatalf("old report persisted: got %+v want %+v", got, want)
 	}
 }

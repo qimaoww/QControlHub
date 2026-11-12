@@ -60,6 +60,7 @@ type completedTask struct {
 
 type Client struct {
 	diagnostics              *networkdiag.Manager
+	diagnosticRefreshMu      sync.Mutex
 	diagnosticCapabilitiesMu sync.RWMutex
 	diagnosticCapabilities   core.DiagnosticCapabilities
 	config                   ClientConfig

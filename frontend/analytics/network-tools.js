@@ -12,6 +12,7 @@ import {
   table,
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
+import { nodeName } from "./node-region.js";
 import { requestID } from "./request-id.js";
 import { networkName, networkKind } from "./nexttrace-format.js";
 import { downloadMeasurementImage } from "./network-tools-export.js";
@@ -47,6 +48,7 @@ const providers = [
 ];
 
 export function networkToolsPage(ctx) {
+  let regionAgents = [], readingRegions = false, readingNodes = false;
   let nodes,
     nodesSnapshot,
     reading = false,
@@ -202,14 +204,65 @@ export function networkToolsPage(ctx) {
     return `${n.agent_id}/${n.instance_id || ""}`;
   }
   function options(select, items) {
-    select.replaceChildren(
-      node(
-        "button",
-        { type: "button", tabindex: "-1" },
-        node("selectedcontent"),
-      ),
-      ...items.map(([v, t]) => node("option", { value: v }, t)),
-    );
+    const old = new Map([...select.options].map(option => [option.value, option]));
+    const desired = items.map(([v, t]) => {
+      const fresh = node("option", { value: v }, t), existing = old.get(v);
+      return existing ? patch(existing, fresh) : fresh;
+    });
+    if (!select.querySelector("button")) select.prepend(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")));
+    for (const option of [...select.options]) if (!desired.includes(option)) option.remove();
+    desired.forEach((option, index) => { if (select.options[index] !== option) select.insertBefore(option, select.options[index] || null); });
+  }
+  function nodeLabel(n) {
+    const agent = regionAgents.find(agent => agent.id === n.agent_id);
+    // The diagnostic identity remains agent_id/instance_id. Only the shared
+    // name component receives the host ID used by the existing region API.
+    const label = nodeName(ctx, { id: n.agent_id,
+      name: `${n.name}${n.instance_id ? " · 共享实例" : ""}${n.online ? "" : " · 离线"}`,
+      region_code: agent?.region_code || "" });
+    label.dataset.diagnosticNode = key(n);
+    label.dataset.regionCode = agent?.region_code || "";
+    return label;
+  }
+  async function loadRegions() {
+    if (readingRegions) return;
+    readingRegions = true;
+    try {
+      const agents = await ctx.api("/agents");
+      if (!ctx.current()) return;
+      regionAgents = agents;
+      refreshRegionLabels();
+    } catch (error) {
+      if (ctx.current() && [401, 403].includes(error.status)) {
+        regionAgents = [];
+        refreshRegionLabels();
+      }
+    } finally { readingRegions = false; }
+  }
+  function refreshRegionLabels() {
+    for (const i of [1, 2]) {
+      // Update option content in place: keep the open picker, focus, selected
+      // value and address controls intact while region resolution completes.
+      for (const label of controls.get(`node${i}`).querySelectorAll("option [data-diagnostic-node]")) {
+        const n = nodes?.find(n => key(n) === label.dataset.diagnosticNode);
+        if (!n) continue;
+        const fresh = nodeLabel(n);
+        if (label.dataset.regionCode !== fresh.dataset.regionCode) patch(label, fresh);
+      }
+    }
+    syncSelectedNodeLabels();
+  }
+  function syncSelectedNodeLabels() {
+    for (const i of [1, 2]) {
+      const n = selected(i), content = controls.get(`node${i}`).querySelector("selectedcontent");
+      if (!n || !content) continue;
+      const fresh = nodeLabel(n), old = content.querySelector("[data-diagnostic-node]");
+      // Native selectedcontent clones on selection, but does not follow a
+      // descendant's asynchronous region update in supported Chromium builds.
+      if (old?.dataset.diagnosticNode !== fresh.dataset.diagnosticNode ||
+          old?.dataset.regionCode !== fresh.dataset.regionCode || old?.textContent !== fresh.textContent)
+        content.replaceChildren(fresh);
+    }
   }
   function addresses(i) {
     const n = selected(i),
@@ -225,6 +278,7 @@ export function networkToolsPage(ctx) {
       : ips.find((ip) => !ip.includes(":")) || ips[0] || "";
   }
   function update() {
+    syncSelectedNodeLabels();
     const custom = value("target_mode") === "ip";
     n2.hidden = a2.hidden = custom;
     customIP.hidden = !custom;
@@ -366,6 +420,8 @@ export function networkToolsPage(ctx) {
   });
   form.addEventListener("change", update);
   async function loadNodes() {
+    if (readingNodes) return;
+    readingNodes = true;
     try {
       const data = await ctx.api("/network-diagnostics/nodes");
       if (!ctx.current()) return;
@@ -380,7 +436,7 @@ export function networkToolsPage(ctx) {
           ["", "请选择"],
           ...nodes.map((n) => [
             key(n),
-            `${n.name}${n.instance_id ? " · 共享实例" : ""}${n.online ? "" : " · 离线"}`,
+            nodeLabel(n),
           ]),
         ]);
         select.value = old;
@@ -398,7 +454,7 @@ export function networkToolsPage(ctx) {
         capability.hidden = false;
         forward.disabled = both.disabled = true;
       }
-    }
+    } finally { readingNodes = false; }
   }
   async function submit(bidirectional) {
     if (creating) return;
@@ -525,8 +581,9 @@ export function networkToolsPage(ctx) {
                     method: "POST",
                     body: {},
                   });
+                  feedback.textContent = "";
                   recordChoices.delete(tool);
-                  await loadResults();
+                  await Promise.allSettled([loadNodes(), loadResults()]);
                 } catch (e) {
                   feedback.textContent = e.message;
                   await loadResults();
@@ -723,11 +780,12 @@ export function networkToolsPage(ctx) {
     }
   }
   const refresh = () =>
-    Promise.allSettled([loadNodes(), loadResults(), loadPinned()]);
+    Promise.allSettled([loadNodes(), loadRegions(), loadResults(), loadPinned()]);
   ctx.onRefresh(refresh);
   void refresh();
   poll(ctx, loadResults, 2000);
   poll(ctx, loadNodes, 10000);
+  poll(ctx, loadRegions, 10000);
   if (requestedID) poll(ctx, loadPinned, 2000);
   const grantHost = node("div", { className: "a-stack" });
   if (ctx.can("agents.manage")) {

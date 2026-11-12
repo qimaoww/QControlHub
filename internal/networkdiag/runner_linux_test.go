@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,11 +94,8 @@ func TestCommandValidation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	joined := strings.Join(args, " ")
-	for _, expected := range []string{"--mtr --report", "--tcp", "--port 443", "--psize 64", "--data-provider disable-geoip"} {
-		if !strings.Contains(joined, expected) {
-			t.Errorf("missing %s: %s", expected, joined)
-		}
+	if len(args) != 1 || args[0] != "network-trace-stream" {
+		t.Fatalf("trace must use built-in stream: %v", args)
 	}
 	for _, target := range []string{"--help", "192.0.2.1\n--tcp", "127.0.0.1", "fe80::1%eth0"} {
 		c.Target.Address = target
@@ -222,7 +218,7 @@ func TestProviderReadinessAndSecretRedaction(t *testing.T) {
 	}
 	p := core.DiagnosticParameters{Tool: "traceroute", Protocol: "icmp", Provider: "DN42", Count: 1, IntervalMS: 200, TimeoutMS: 200, MaxHops: 2, Size: 64, Port: 443, Duration: 1, Streams: 1, Bandwidth: 1000}
 	_, args, e := Args(core.DiagnosticCommand{Role: "probe", Source: core.DiagnosticEndpoint{Address: "192.0.2.1"}, Target: core.DiagnosticEndpoint{Address: "192.0.2.2"}, Parameters: p})
-	if e != nil || !strings.Contains(strings.Join(args, " "), "--data-provider DN42") || slices.Contains(args, "disable-geoip") {
+	if e != nil || len(args) != 1 || args[0] != "network-trace-stream" || p.Provider != "DN42" {
 		t.Fatalf("DN42 silently replaced: %v %v", args, e)
 	}
 }

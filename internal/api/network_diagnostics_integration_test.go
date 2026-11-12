@@ -168,6 +168,27 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 		}
 	}
 	// A new retry revalidates both allocations and keeps the exact parameters.
+	// A stale failed probe blocks retry until a real Agent capability report
+	// replaces it. Recovery must not rewrite the old partial failure.
+	recovered := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"nexttrace": {Error: "old probe failed"}}, Providers: map[string]string{"disable-geoip": ""}, Addresses: []string{endpoints[a.ID].Address}}
+	if err := db.UpdateDiagnosticCapabilities(ctx, a.ID, &recovered); err != nil {
+		t.Fatal(err)
+	}
+	alice.call("POST", "/tasks/"+session.ID+"/retry", nil, http.StatusConflict, nil)
+	recovered.Tools["nexttrace"] = core.DiagnosticTool{Version: "NextTrace v1.7.6 (built-in)"}
+	if err := db.UpdateDiagnosticCapabilities(ctx, a.ID, &recovered); err != nil {
+		t.Fatal(err)
+	}
+	alice.call("GET", "/network-diagnostics/nodes", nil, 200, &nodes)
+	for _, n := range nodes {
+		if n.AgentID == a.ID && n.Capabilities.Tools["nexttrace"].Error != "" {
+			t.Fatal("node API retained old probe failure")
+		}
+	}
+	alice.call("GET", "/network-diagnostics/"+session.ID, nil, 200, &session)
+	if session.State != "failed" || len(session.Results) != 2 {
+		t.Fatal("capability recovery rewrote history")
+	}
 	var retry core.Task
 	alice.call("POST", "/tasks/"+session.ID+"/retry", nil, http.StatusCreated, &retry)
 	for _, sh := range access.Shares {

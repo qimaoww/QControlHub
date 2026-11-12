@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -21,6 +22,61 @@ import (
 	"github.com/nxtrace/NTrace-core/wshandle"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+// NextTraceEngineVersion follows the library locked in go.mod, not the optional CLI.
+const NextTraceEngineVersion = "v1.7.6"
+
+// Probe the same library backend as execution, without sending packets or
+// contacting metadata providers. Opening and closing the socket also verifies
+// the Agent's real raw-socket permission; installing a CLI cannot grant it.
+func nextTraceCapability(ctx context.Context) core.DiagnosticTool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return core.DiagnosticTool{Error: "NextTrace 内置版本未确认"}
+	}
+	if err := validateNextTraceBuild(info); err != nil {
+		return core.DiagnosticTool{Error: err.Error()}
+	}
+	local, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cfg := trace.Config{SrcAddr: "0.0.0.0", DstIP: net.IPv4(192, 0, 2, 1)}
+	if err := checkNextTraceBackend(local, trace.Method("icmp"), cfg); err != nil {
+		// An IPv6-only host can still run the engine. Family/protocol/source
+		// readiness is checked again against the actual command before use.
+		cfg.SrcAddr, cfg.DstIP = "::", net.ParseIP("2001:db8::1")
+		if second := checkNextTraceBackend(local, trace.Method("icmp"), cfg); second != nil {
+			return core.DiagnosticTool{Error: err.Error() + "；IPv6：" + second.Error()}
+		}
+	}
+	return core.DiagnosticTool{Version: "NextTrace " + NextTraceEngineVersion + " (built-in)"}
+}
+
+func validateNextTraceBuild(info *debug.BuildInfo) error {
+	for _, dependency := range info.Deps {
+		if dependency.Path == "github.com/nxtrace/NTrace-core" {
+			if dependency.Replace == nil && dependency.Version == NextTraceEngineVersion {
+				return nil
+			}
+			return fmt.Errorf("NextTrace 内置版本不兼容，需要 %s", NextTraceEngineVersion)
+		}
+	}
+	return errors.New("NextTrace 内置版本未确认")
+}
+
+func checkNextTraceBackend(ctx context.Context, method trace.Method, cfg trace.Config) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("NextTrace 能力检测已取消：%w", err)
+	}
+	for _, check := range trace.CheckProbeBackend(ctx, method, cfg) {
+		if check.Err != nil && !check.Optional {
+			return fmt.Errorf("NextTrace %s 检测失败：%w", check.Name, check.Err)
+		}
+		if check.Unknown && !check.Optional {
+			return fmt.Errorf("NextTrace %s 能力未确认", check.Name)
+		}
+	}
+	return ctx.Err()
+}
 
 // RunNextTraceStream runs the pinned upstream engine in a dedicated child. This
 // keeps its process globals and TCP listeners isolated from other Agent work.
@@ -49,16 +105,7 @@ func RunNextTraceStream(ctx context.Context, input io.Reader, output, diagnostic
 			return err
 		}
 	}
-	if ipgeo.IsNextTraceAPIProvider(p.Provider) {
-		if ipgeo.NextTraceAPIV4TokenConfigured() {
-			_ = ipgeo.PrepareNextTraceAPIV4FastIP(ctx, false)
-		} else {
-			conn := wshandle.NewWithContextAsync(ctx)
-			if conn != nil {
-				defer conn.Close()
-			}
-		}
-	}
+
 	method := trace.Method(p.Protocol)
 	target := net.ParseIP(c.Target.Address)
 	size, err := trace.NormalizePacketSize(method, target, p.Size)
@@ -76,6 +123,19 @@ func RunNextTraceStream(ctx context.Context, input io.Reader, output, diagnostic
 	cfg, err = trace.NormalizeExplicitSourceConfig(method, cfg)
 	if err != nil {
 		return err
+	}
+	if err := checkNextTraceBackend(ctx, method, cfg); err != nil {
+		return err
+	}
+	if ipgeo.IsNextTraceAPIProvider(p.Provider) {
+		if ipgeo.NextTraceAPIV4TokenConfigured() {
+			_ = ipgeo.PrepareNextTraceAPIV4FastIP(ctx, false)
+		} else {
+			conn := wshandle.NewWithContextAsync(ctx)
+			if conn != nil {
+				defer conn.Close()
+			}
+		}
 	}
 	util.SrcPort = cfg.SrcPort
 	util.DstIP = target.String()

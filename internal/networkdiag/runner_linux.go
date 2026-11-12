@@ -46,14 +46,9 @@ func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 	} else {
 		conn.Close()
 	}
-	for name, path := range map[string]string{"nexttrace": NextTracePath, "iperf3": "iperf3"} {
-		local, cancel := context.WithTimeout(ctx, 2*time.Second)
-		args := []string{"--version"}
-		if name == "nexttrace" {
-			args = []string{"--no-color", "--version"}
-		}
-		b, e := exec.CommandContext(local, path, args...).CombinedOutput()
-		cancel()
+	c.Tools["nexttrace"] = nextTraceCapability(ctx)
+	for name, path := range map[string]string{"iperf3": "iperf3"} {
+		b, e := probeDiagnosticCommand(ctx, path, "--version")
 		t := core.DiagnosticTool{}
 		switch {
 		case e != nil:
@@ -62,25 +57,35 @@ func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 				t.AutoInstall = os.Geteuid() == 0
 				t.Error = diagnosticToolName(name) + " 未安装"
 				if !t.AutoInstall {
-					t.Error += "，Agent 无安装权限；请管理员以 root 准备依赖后重启 Agent"
+					t.Error += "，Agent 无安装权限；请管理员以 root 准备依赖"
 				}
 			case errors.Is(e, os.ErrPermission):
-				t.Error = diagnosticToolName(name) + " 无执行权限；请节点管理员检查工具权限后重启 Agent"
+				t.Error = diagnosticToolName(name) + " 无执行权限；请节点管理员检查工具权限"
+			case errors.Is(e, context.Canceled):
+				t.Error = diagnosticToolName(name) + " 版本检测已取消"
+			case errors.Is(e, context.DeadlineExceeded):
+				t.Error = diagnosticToolName(name) + " 版本检测超时"
 			default:
-				t.Error = diagnosticToolName(name) + " 版本检测失败；请节点管理员检查工具能否执行后重启 Agent"
+				detail := core.DiagnosticText(redactProviderSecrets(string(b)).(string))
+				if len(detail) > 512 {
+					detail = detail[:512]
+				}
+				t.Error = fmt.Sprintf("%s 版本检测失败（%s）", diagnosticToolName(name), core.DiagnosticText(e.Error()))
+				if strings.TrimSpace(detail) != "" {
+					t.Error += "：" + strings.TrimSpace(detail)
+				}
 			}
-		case name == "nexttrace" && !strings.Contains(string(b), "NextTrace v1.7.6"):
-			t.Error = "NextTrace 版本不兼容，需要 v1.7.6；请节点管理员检查私有工具路径后执行 qagent prepare-network-tools，再重启 Agent"
 		default:
 			t.Version = strings.Split(strings.TrimSpace(string(b)), "\n")[0]
 		}
 		if name == "iperf3" && t.Error == "" {
-			local, cancel := context.WithTimeout(ctx, 2*time.Second)
-			help, e := exec.CommandContext(local, path, "--help").CombinedOutput()
-			cancel()
+			help, e := probeDiagnosticCommand(ctx, path, "--help")
+			if e != nil {
+				t.Error = fmt.Sprintf("iperf3 选项检测失败：%s", core.DiagnosticText(e.Error()))
+			}
 			for _, flag := range []string{"--idle-timeout", "--server-bitrate-limit", "--connect-timeout", "--get-server-output", "--json-stream", "--forceflush"} {
-				if e != nil || !strings.Contains(string(help), flag) {
-					t.Error = "iperf3 版本不兼容，缺少 " + flag + "；请节点管理员升级至支持该选项的版本（已验证 3.20）后重启 Agent"
+				if e == nil && !strings.Contains(string(help), flag) {
+					t.Error = "iperf3 版本不兼容，缺少 " + flag + "；请节点管理员升级至支持该选项的版本（已验证 3.20）"
 					break
 				}
 			}
@@ -147,6 +152,38 @@ func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 		}
 	}
 	return c
+}
+
+func diagnosticProcessEnvironment() []string {
+	environment := []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "HOME=/nonexistent", "NO_COLOR=1"}
+	for _, key := range []string{"NEXTTRACE_TOKEN", "NEXTTRACE_API_V4_TOKEN", "NEXTTRACE_IPINFO_TOKEN", "NEXTTRACE_IPINSIGHT_TOKEN", "NEXTTRACE_IPINFOLOCALPATH", "NEXTTRACE_CHUNZHENURL", "IPDBONE_BASE_URL", "IPDBONE_API_ID", "IPDBONE_API_KEY"} {
+		if v := os.Getenv(key); v != "" {
+			environment = append(environment, key+"="+v)
+		}
+	}
+	return environment
+}
+
+// Probe output, duration and descendants are bounded independently of heartbeat
+// delivery. The same process identity and environment execute the real tool.
+func probeDiagnosticCommand(ctx context.Context, path string, args ...string) ([]byte, error) {
+	local, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(local, path, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 100 * time.Millisecond
+	cmd.Env = diagnosticProcessEnvironment()
+	output := &limitedBuffer{limit: 64 << 10}
+	cmd.Stdout, cmd.Stderr = output, output
+	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	if local.Err() != nil {
+		err = local.Err()
+	}
+	return output.b.Bytes(), err
 }
 
 type limitedBuffer struct {
@@ -216,17 +253,11 @@ func Args(c core.DiagnosticCommand) (string, []string, error) {
 	if p.Tool == "ping" {
 		return "", nil, nil
 	}
-	args := []string{family, "--json", "--no-color", "--no-rdns", "--map", "--source", s.String(), "--queries", n(p.Count), "--ttl-time", n(p.IntervalMS), "--timeout", n(p.TimeoutMS), "--max-hops", n(p.MaxHops), "--psize", n(p.Size), "--parallel-requests", "1"}
-	if p.Tool == "mtr" {
-		args = args[:len(args)-2]
-		args = append(args, "--mtr", "--report", "--parallel-requests", n(p.MaxHops))
-	} else {
-		args = append(args, "--traceroute")
+	path, err := os.Executable()
+	if err != nil {
+		return "", nil, fmt.Errorf("无法定位 Agent 执行文件：%w", err)
 	}
-	if p.Protocol != "icmp" {
-		args = append(args, "--"+p.Protocol, "--port", n(p.Port), "--source-port", "-1")
-	}
-	return NextTracePath, append(args, "--data-provider", p.Provider, a.String()), nil
+	return path, []string{"network-trace-stream"}, nil
 }
 
 // runProcess uses a process group and a parent-death signal. A killed or
@@ -243,14 +274,7 @@ func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), lau
 		return ping(ctx, c)
 	}
 	streaming := c.Parameters.Tool == "traceroute" || c.Parameters.Tool == "mtr"
-	if streaming {
-		path, err = os.Executable()
-		if err != nil {
-			r.Error = "无法定位 Agent 执行文件"
-			return r
-		}
-		args = []string{"network-trace-stream"}
-	}
+
 	cmd := exec.CommandContext(ctx, path, args...)
 	if streaming {
 		body, _ := json.Marshal(c)
@@ -259,12 +283,7 @@ func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), lau
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 	// Inherit only operator-supplied NextTrace settings. Disable implicit loops,
 	// proxy inheritance and interactive token discovery.
-	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "HOME=/nonexistent", "NO_COLOR=1"}
-	for _, key := range []string{"NEXTTRACE_TOKEN", "NEXTTRACE_API_V4_TOKEN", "NEXTTRACE_IPINFO_TOKEN", "NEXTTRACE_IPINSIGHT_TOKEN", "NEXTTRACE_IPINFOLOCALPATH", "NEXTTRACE_CHUNZHENURL", "IPDBONE_BASE_URL", "IPDBONE_API_ID", "IPDBONE_API_KEY"} {
-		if v := os.Getenv(key); v != "" {
-			cmd.Env = append(cmd.Env, key+"="+v)
-		}
-	}
+	cmd.Env = diagnosticProcessEnvironment()
 	out := &limitedBuffer{limit: MaxOutput}
 	stderr := &limitedBuffer{limit: 8192}
 	cmd.Stdout = out
@@ -909,18 +928,18 @@ func (m *Manager) run(ctx context.Context, c core.DiagnosticCommand) {
 				if err == nil {
 					capability = Capabilities(ctx).Tools[tool]
 					if capability.Error != "" {
-						err = errors.New(capability.Error)
+						err = fmt.Errorf("准备后能力复检失败：%s", capability.Error)
 					}
 				}
 				if err != nil {
 					state := "failed"
-					message := "自动安装诊断依赖失败：" + core.DiagnosticText(err.Error()) + "；请检查节点软件源、下载连通性及安装权限后重试"
+					message := "诊断依赖准备失败：" + core.DiagnosticText(err.Error())
 					if errors.Is(ctx.Err(), context.Canceled) {
 						state = "canceled"
 						message = "测量已停止"
 					}
 					if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-						message = "诊断依赖安装超时；请检查节点软件源及下载连通性后重试"
+						message = "诊断依赖准备超时"
 					}
 					return core.DiagnosticResult{ID: c.ID, State: state, Cleaned: true, Error: message, At: time.Now().UTC(), ExitCode: -1}
 				}

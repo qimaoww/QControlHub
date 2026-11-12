@@ -32,7 +32,8 @@ func TestNetworkDiagnosticsRealAgents(t *testing.T) {
 		}
 		return strings.TrimSpace(string(b))
 	}
-	network := "qch-network-tools-20261112-net"
+	prefix := fmt.Sprintf("qch-netdiag-%d", time.Now().UnixNano())
+	network := prefix + "-net"
 	run("network", "create", "--internal", "--ipv6", "--subnet", "172.29.78.0/24", "--subnet", "fd42:7163:7800::/64", network)
 	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
 	artifact := os.Getenv("QCH_NETDIAG_ARTIFACT_DIR")
@@ -74,7 +75,7 @@ func TestNetworkDiagnosticsRealAgents(t *testing.T) {
 	if image == "" {
 		image = "qch-network-tools:20261112"
 	}
-	names := []string{"qch-network-tools-20261112-a", "qch-network-tools-20261112-b"}
+	names := []string{prefix + "-a", prefix + "-b"}
 	// A pre-existing unrelated iperf server must survive all task cleanup.
 	for i, name := range names {
 		var credential core.EnrollmentTokenCreated
