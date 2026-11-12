@@ -40,8 +40,14 @@ func (p DiagnosticParameters) Validate(ipv6 bool) error {
 	if p.Tool == "ping" && p.Protocol != "icmp" || p.Tool == "iperf3" && p.Protocol == "icmp" {
 		return bad("工具不支持所选协议")
 	}
-	if p.Count < 1 || p.Count > 100 || p.IntervalMS < 200 || p.IntervalMS > 5000 || p.TimeoutMS < 100 || p.TimeoutMS > 5000 || p.MaxHops < 1 || p.MaxHops > 64 {
-		return bad("次数 1–100、间隔 200–5000 ms、超时 100–5000 ms、跳数 1–64")
+	if p.Count < 1 {
+		return bad("次数或轮数必须为正整数")
+	}
+	if p.Tool != "mtr" && p.Count > 100 {
+		return bad("探测次数范围 1–100")
+	}
+	if p.IntervalMS < 200 || p.IntervalMS > 5000 || p.TimeoutMS < 100 || p.TimeoutMS > 5000 || p.MaxHops < 1 || p.MaxHops > 64 {
+		return bad("间隔 200–5000 ms、超时 100–5000 ms、跳数 1–64")
 	}
 	if p.Port < 1 || p.Port > 65535 || p.Duration < 1 || p.Duration > 60 || p.Streams < 1 || p.Streams > 4 || p.Bandwidth < 1000 || p.Bandwidth > 100000000 {
 		return bad("端口 1–65535、时长 1–60 s、并发流 1–4、带宽 1 Kbit/s–100 Mbit/s")

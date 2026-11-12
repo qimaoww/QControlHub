@@ -133,12 +133,18 @@ func RunNextTraceStream(ctx context.Context, input io.Reader, output, diagnostic
 		}
 		return runErr
 	}
-	// Use upstream's per-hop scheduler and statistics, not reaggregated probe events.
+	// Every TTL participates in the same MTR session. A single global worker
+	// would serialize all hops (and exhaust the deadline at 100 rounds).
+	// Upstream owns scheduling, response correlation and per-responder stats.
+	cfg.ParallelRequests = p.MaxHops
+	// TCP/UDP probes use SrcPort=-1 above, giving each probe a random tuple.
+	// The Agent still admits only one diagnostic session per node.
 	report := struct {
-		Schema  int                `json:"schema_version"`
-		Stats   []trace.MTRHopStat `json:"stats"`
-		PathEnd *trace.StopReason  `json:"path_end"`
-		Partial bool               `json:"partial"`
+		Schema    int                `json:"schema_version"`
+		Iteration int                `json:"iteration"`
+		Stats     []trace.MTRHopStat `json:"stats"`
+		PathEnd   *trace.StopReason  `json:"path_end"`
+		Partial   bool               `json:"partial"`
 	}{Schema: 1, Stats: []trace.MTRHopStat{}, Partial: true}
 	opts := trace.MTROptions{HopInterval: time.Duration(p.IntervalMS) * time.Millisecond, MaxPerHop: p.Count, ProgressThrottle: 250 * time.Millisecond, AsyncMetadata: true,
 		OnPathEnd:    func(reason *trace.StopReason) { mu.Lock(); defer mu.Unlock(); report.PathEnd = reason },
@@ -147,6 +153,7 @@ func RunNextTraceStream(ctx context.Context, input io.Reader, output, diagnostic
 		mu.Lock()
 		defer mu.Unlock()
 		report.Stats = stats
+		report.Iteration = iteration
 		emit(report, true)
 	})
 	mu.Lock()

@@ -187,7 +187,8 @@ func Args(c core.DiagnosticCommand) (string, []string, error) {
 	}
 	args := []string{family, "--json", "--no-color", "--no-rdns", "--map", "--source", s.String(), "--queries", n(p.Count), "--ttl-time", n(p.IntervalMS), "--timeout", n(p.TimeoutMS), "--max-hops", n(p.MaxHops), "--psize", n(p.Size), "--parallel-requests", "1"}
 	if p.Tool == "mtr" {
-		args = append(args, "--mtr", "--report")
+		args = args[:len(args)-2]
+		args = append(args, "--mtr", "--report", "--parallel-requests", n(p.MaxHops))
 	} else {
 		args = append(args, "--traceroute")
 	}

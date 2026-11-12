@@ -246,6 +246,8 @@ export function networkToolsPage(ctx) {
       ?.replaceChildren(
         t === "mtr" ? "轮数" : t === "traceroute" ? "每跳探测次数" : "次数",
       );
+    if (t === "mtr") controls.get("count").removeAttribute("max");
+    else controls.get("count").max = "100";
     provider.hidden = !trace;
     hops.hidden = !trace;
     port.hidden = p === "icmp";
@@ -339,7 +341,7 @@ export function networkToolsPage(ctx) {
           : ["icmp", "tcp", "udp"]
       ).map((p) => [p, p.toUpperCase()]),
     );
-    controls.get("count").value = t === "traceroute" ? 3 : t === "mtr" ? 10 : 5;
+    controls.get("count").value = t === "traceroute" ? 3 : t === "mtr" ? 100 : 5;
     controls.get("size").value = t === "iperf3" ? 131072 : t === "traceroute" ? 28 : 64;
     controls.get("port").value = t === "iperf3" ? 5201 : 80;
     update();
@@ -617,7 +619,7 @@ export function networkToolsPage(ctx) {
                         (r.error || r.output?.error) &&
                           r.error !== "测量已停止" &&
                           notice(r.error || r.output.error, "error"),
-                        renderOutput(tool, r.output, r.state),
+                        renderOutput(tool, r.output, r.state, params.count),
                         (tool === "traceroute" || tool === "mtr") &&
                           params.provider !== "disable-geoip" &&
                           r.output &&
@@ -843,7 +845,7 @@ export function networkToolsPage(ctx) {
   );
 }
 
-function renderOutput(tool, out, state) {
+function renderOutput(tool, out, state, rounds) {
   const running = state === "running";
   if (!out) return muted("尚无结果");
   if (tool === "ping")
@@ -871,31 +873,27 @@ function renderOutput(tool, out, state) {
     );
   if (tool === "mtr")
     return stack(
-      traceEnd(out.path_end?.reason, running),
+      actions(
+        traceEnd(out.path_end?.reason, running),
+        Number.isInteger(out.iteration) && muted(`轮次 ${out.iteration} / ${rounds}`),
+      ),
       table(
-        [
-          "TTL",
-          "地址",
-          "发送 / 接收",
-          "丢包",
-          "最近 / 平均（ms）",
-          "最佳 / 最差（ms）",
-          "标准差（ms）",
-          "网络",
-          "ASN / 归属",
-        ],
+        ["跳数", "响应主机", "ASN", "网络", "丢包", "发送 / 接收", "最近（ms）", "平均（ms）", "最佳（ms）", "最差（ms）", "标准差（ms）"],
         (out.stats || []).filter(Boolean).map((h) => [
           traceValue("hop", h.ttl),
-          traceValue(h.ip ? "ip" : "timeout", h.ip || "*"),
-          `${number(h.snt)} / ${number(h.received)}`,
-          `${number(h.loss_percent)}%`,
-          traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.last_ms)} / ${number(h.avg_ms)}` : "—"),
-          traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.best_ms)} / ${number(h.wrst_ms)}` : "—"),
-          h.received > 0 ? number(h.stdev_ms) : "—",
+          stack(
+            traceValue(h.ip ? "ip" : "timeout", h.ip || "*"),
+            h.host && h.host !== h.ip && muted(h.host),
+            h.geo && traceValue("geo", locationName(h.geo)),
+          ),
+          traceValue(networkKind(h.geo, h.ip), asnName(h.geo)),
           traceValue(networkName(h.geo) === "—" ? "timeout" : networkKind(h.geo, h.ip), networkName(h.geo)),
-          traceValue("geo", geo(h.geo)),
+          `${number(h.loss_percent)}%`,
+          `${number(h.snt)} / ${number(h.received)}`,
+          ...[h.last_ms, h.avg_ms, h.best_ms, h.wrst_ms, h.stdev_ms].map(value =>
+            traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? number(value) : "—")),
         ]),
-        { paginate: false, label: "MTR 跳点" },
+        { paginate: false, label: "MTR 跳点", columnWidths: ["4%", "28%", "7%", "12%", "6%", "8%", "7%", "7%", "7%", "7%", "7%"] },
       ),
     );
   if (tool === "traceroute") {
@@ -916,7 +914,7 @@ function renderOutput(tool, out, state) {
         [...hops.values()].map(h => [
           traceValue("hop", h.ttl),
           stack(traceValue(h.ip === "*" ? "timeout" : "ip", h.ip), h.hostname && muted(h.hostname)),
-          traceValue(networkKind(h.geo, h.ip), h.geo?.asnumber || h.geo?.asn ? `AS${String(h.geo.asnumber || h.geo.asn).replace(/^AS/i, "")}` : "—"),
+          traceValue(networkKind(h.geo, h.ip), asnName(h.geo)),
           traceValue(networkName(h.geo) === "—" ? "timeout" : networkKind(h.geo, h.ip), networkName(h.geo)),
           traceValue("geo", [...new Set([h.geo?.country || (/^(RFC|DOD)/.test(h.geo?.whois || "") ? h.geo.whois : ""), h.geo?.prov, h.geo?.city, h.geo?.district, h.geo?.owner, h.geo?.domain, h.geo?.isp].filter(Boolean))].join(" · ") || "—"),
           traceValue(h.ip === "*" ? "timeout" : "latency", h.samples.join(" / ")),
@@ -946,6 +944,13 @@ function renderOutput(tool, out, state) {
       ? table(["统计端", "吞吐", "传输量", "重传", "抖动（ms）", "丢包"], rows)
       : muted("未产生有效吞吐统计"),
   );
+}
+function asnName(g) {
+  const asn = g?.asnumber || g?.asn;
+  return asn ? `AS${String(asn).replace(/^AS/i, "")}` : "—";
+}
+function locationName(g) {
+  return [...new Set([g?.country || (/^(RFC|DOD)/.test(g?.whois || "") ? g.whois : ""), g?.prov, g?.city, g?.district, g?.owner, g?.domain, g?.isp].filter(Boolean))].join(" · ") || "—";
 }
 function traceValue(kind, value) {
   return node("span", { className: `a-trace-${kind}` }, value);

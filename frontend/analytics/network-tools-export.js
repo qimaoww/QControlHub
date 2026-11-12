@@ -47,7 +47,7 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
       const color=colored?getComputedStyle(colored).color:ink;
       const heading=headings[col];
       // Address columns may include reverse-DNS names on another line.
-      const value=hideSensitive && ["地址","响应地址"].includes(heading) ? (cell.textContent.trim()==="*"?"*":"已隐藏") : clean(cell.textContent.trim());
+      const value=hideSensitive && ["地址","响应地址","响应主机"].includes(heading) ? (cell.textContent.trim()==="*"?"*":"已隐藏") : clean(cell.textContent.trim());
       return {text:value,color};
     }));
     blocks.push({headings,rows});
@@ -71,7 +71,7 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
   for (const block of blocks) {
     block.y=height;
     if (block.text!=null) {block.lines=wrap(block.text,width-2*pad,block.size);height+=block.lines.length*(block.size+10)+12;continue;}
-    const weights=block.headings.map(h=>["跳数","TTL"].includes(h)?0.5:["归属","ASN / 归属"].includes(h)?3:["地址","响应地址","网络"].includes(h)?1.65:h.includes("延迟")?2.2:1.3);
+    const weights=block.headings.map(h=>["跳数","TTL"].includes(h)?0.5:["归属","ASN / 归属"].includes(h)?3:h === "响应主机" ? 3 : ["地址","响应地址","网络"].includes(h)?1.65:h.includes("延迟")?2.2:1.3);
     const total=weights.reduce((a,b)=>a+b,0);
     block.widths=weights.map(w=>(width-2*pad)*w/total);
     block.grid=[block.headings.map(text=>({text,color:soft})),...block.rows].map(row=>{
