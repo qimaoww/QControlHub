@@ -413,6 +413,8 @@ finished:
 		if r.Error == "" {
 			r.Error = fmt.Sprintf("工具退出码 %d", r.ExitCode)
 		}
+	} else if c.Parameters.Tool == "iperf3" && c.Role == "client" && iperfStream.report["end"] == nil {
+		r.Error = "iperf3 未返回完整结束结果"
 	} else if streaming && (len(stream.latest) == 0 || stream.partial) {
 		r.Error = "NextTrace 未返回完整结束结果"
 	} else if r.Error == "" {

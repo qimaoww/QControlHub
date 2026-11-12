@@ -932,10 +932,10 @@ function renderOutput(tool, out, state, rounds) {
   const current = intervals.at(-1);
   return stack(
     current && node("div", {className:"a-stat-grid"},
-      ...[["当前吞吐", `${number(current.bits_per_second/1000000)} Mbit/s`],
+      ...[[running ? "当前吞吐" : "最后一秒吞吐", `${number(current.bits_per_second/1000000)} Mbit/s`],
       ["已测时长", `${number(current.end)} s`],
       ["累计传输", `${number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)/1048576)} MiB`],
-      ["采样间隔", "1 s"]].map(([label,value]) => node("div", {className:"a-stat"}, muted(label), node("strong",{},value))),
+      ["平均吞吐", `${number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)*8/Math.max(current.end,0.001)/1000000)} Mbit/s`]].map(([label,value]) => node("div", {className:"a-stat"}, muted(label), node("strong",{},value))),
     ),
     intervals.length>0 && stack(
       node("h3",{},"测速过程"),
