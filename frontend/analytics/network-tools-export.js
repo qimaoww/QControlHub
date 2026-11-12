@@ -30,9 +30,14 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
     const reverse=r.id.endsWith("-reverse");
     const from=reverse?req.node2:req.node1,to=reverse?req.node1:req.node2;
     text(`${reverse?"回程":"去程"} · ${states[r.state] || r.state}`,20);
-    const endpoint=(ep,label)=>hideSensitive?label:[ep.name,ep.address].filter(Boolean).join(" · ");
+    const endpoint=(ep,label)=>hideSensitive?label:[...new Set([ep.name,ep.address].filter(Boolean))].join(" · ");
     text(`来源：${endpoint(from,reverse?"节点2":"节点1")}`,16);
     text(`目标：${endpoint(to,reverse?"节点1":req.target_mode==="ip"?"自定义 IP":"节点2")}`,16);
+    if (["traceroute","mtr"].includes(p.tool)) {
+      const reason=r.output?.StopReason?.reason || r.output?.path_end?.reason;
+      const outcome={destination_reached:"目标已响应",unreachable:"路径返回不可达",max_hops:"已达最大跳数，未确认目标可达"}[reason];
+      text(outcome || (r.state==="running"?"正在探测":"未确认目标可达"),14,soft);
+    }
     if (r.error && !hideSensitive) text(r.error,14,soft);
     const table=rendered.querySelector(`[data-measurement-result="${CSS.escape(r.id)}"] table`);
     if (!table) {text("尚无结果",16,soft);continue;}
@@ -66,7 +71,7 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
   for (const block of blocks) {
     block.y=height;
     if (block.text!=null) {block.lines=wrap(block.text,width-2*pad,block.size);height+=block.lines.length*(block.size+10)+12;continue;}
-    const weights=block.headings.map(h=>["归属","ASN / 归属"].includes(h)?3:["地址","响应地址","网络"].includes(h)?1.65:1.3);
+    const weights=block.headings.map(h=>["跳数","TTL"].includes(h)?0.5:["归属","ASN / 归属"].includes(h)?3:["地址","响应地址","网络"].includes(h)?1.65:h.includes("延迟")?2.2:1.3);
     const total=weights.reduce((a,b)=>a+b,0);
     block.widths=weights.map(w=>(width-2*pad)*w/total);
     block.grid=[block.headings.map(text=>({text,color:soft})),...block.rows].map(row=>{
