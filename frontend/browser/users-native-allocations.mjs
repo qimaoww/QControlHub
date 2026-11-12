@@ -15,6 +15,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
   globalThis.fetch = async (url, options = {}) => {
     const path = String(url).replace('/api/v1', '');
     if (path === '/agent-directory') return reply(directory);
+    if (path === '/agents') return reply([]);
     if (path === '/users/bob/agent-access') return failBobRead ? reply({ error: '另一用户读取失败' }, 500) : reply({ revision: 1, owned_agent_ids: [], shares: [] });
     if (path !== '/users/alice/agent-access') return nativeFetch(url, options);
     if (!options.method || options.method === 'GET') {
@@ -48,6 +49,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
   const open = async () => { await idle(); button('共享资源', row('alice')).click(); await waitFor(() => dialog()?.dataset.userAllocation === 'alice', '共享资源未打开'); };
   try {
     await open();
+    await waitFor(() => allocationRow('other') && dialog().textContent.includes('自有节点'), '已保存的共享分配未加载');
     const savedDialog = dialog(), savedUserRow = row('alice');
     button('刷新', document.querySelector('.a-top')).click(); await delay(30);
     assert.equal(dialog(), savedDialog, '刷新关闭共享资源弹窗');
@@ -235,7 +237,7 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     button('重新读取', dialog()).click();
     assert.ok(button('重新读取', dialog()).disabled, '读取期间允许重复请求');
     const readingDialog = dialog(); readingDialog.querySelector('[aria-label=关闭]').click();
-    assert.equal(dialog(), readingDialog, '读取期间关闭了当前分配');
+    assert.ok(!dialog(), '读取期间无法关闭当前分配');
     await restart({ ...session, user_id: 'another-admin' }); holdRead = false;
     await open(); button('编辑分配', dialog().querySelector('tbody tr')).click();
     input(form().elements.ports, '31111'); const newEditor = form();

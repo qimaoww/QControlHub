@@ -87,6 +87,7 @@ export function preparedDialog(ctx, title, labels, build, { wide = true, submit 
     if (!local.current()) return box;
     if (filled) return ctx.dialog(heading, element, options);
     filled = true;
+    box.closeWhilePending = false;
     box.querySelector('.a-dialog-head h2').textContent = heading;
     content.replaceChildren(element);
     return box;

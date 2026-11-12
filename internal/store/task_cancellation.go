@@ -3,11 +3,16 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (s *Store) CancelTask(ctx context.Context, id string) error {
+	if strings.HasPrefix(id, "ndg_") {
+		return s.StopDiagnostic(ctx, id)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -45,6 +50,24 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	previous, err := s.GetTask(ctx, id)
 	if err != nil {
 		return core.Task{}, err
+	}
+	if previous.Action == core.ActionNetworkDiagnostic {
+		d, err := s.GetDiagnostic(ctx, id)
+		if err != nil {
+			return core.Task{}, err
+		}
+		if !slices.Contains([]string{"failed", "canceled"}, d.State) {
+			return core.Task{}, ErrConflict
+		}
+		d.Request.RequestID, err = core.NewID("retry")
+		if err != nil {
+			return core.Task{}, err
+		}
+		created, err := s.CreateDiagnostic(ctx, d.Request)
+		if err != nil {
+			return core.Task{}, err
+		}
+		return s.GetTask(ctx, created.ID)
 	}
 	if previous.Action == core.ActionPanelFailure {
 		return core.Task{}, fmt.Errorf("%w: 面板失败记录未进入 Agent 执行，请修正后重新操作", ErrConflict)

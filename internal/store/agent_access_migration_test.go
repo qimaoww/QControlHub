@@ -227,6 +227,7 @@ func downgradeSharingSchemaForTest(t *testing.T, db *Store, ctx context.Context)
 	if _, err := db.pool.Exec(ctx, `
 		UPDATE agents SET owner_id='';
 		ALTER TABLE port_traffic_policies DROP COLUMN share_id, DROP COLUMN share_used_bytes, DROP COLUMN share_generation;
+		DROP TABLE network_diagnostic_grants;
 		DROP TABLE agent_share_ports;
 		DROP TABLE agent_shared_instance_ownership;
 		DROP TABLE agent_shares;

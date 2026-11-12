@@ -1,4 +1,5 @@
 import "./formatting_smoke.mjs";
+import "./request_id_smoke.mjs";
 import "./certificate_order_smoke.mjs";
 import "./permissions_smoke.mjs";
 import "./theme_smoke.mjs";

@@ -351,6 +351,12 @@ echo '== IPQuality 检查并自动补齐检测依赖 =='
   exit 1
 }
 
+echo '== 准备节点网络诊断工具 =='
+"$work_dir/qagent" prepare-network-tools || {
+  printf '%s\n' 'Network diagnostic dependency preparation failed' >&2
+  exit 1
+}
+
 echo '== 3/6 检测现有核心并暂存按需安装资源 =='
 run_discovery() {
   label=$1

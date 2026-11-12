@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 100
+const currentSchemaVersion = 101
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -277,8 +277,8 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text REFERENCES agents(id),
-    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure')),
-	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure') AND engine='')),
+    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure')),
+	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
@@ -309,7 +309,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -317,7 +317,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_engine_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_engine_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','panel-failure') AND engine=''));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure') AND engine=''));
 
 -- Reports inherit the task's durable ownership, lifecycle and retention.
 -- Large provider payloads stay out of ordinary task/status polling.
@@ -1210,7 +1210,8 @@ CREATE INDEX IF NOT EXISTS tasks_failure_key_idx ON tasks(owner_id,failure_key,c
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_panel_failure_check;
 ALTER TABLE tasks ADD CONSTRAINT tasks_panel_failure_check CHECK (
  (action='panel-failure' AND status='failed' AND attempt=0 AND started_at IS NULL AND lease_id IS NULL)
- OR (action<>'panel-failure' AND agent_id IS NOT NULL)
+ OR (action='network-diagnostic' AND agent_id IS NULL AND attempt=1 AND lease_id IS NULL)
+ OR (action NOT IN ('panel-failure','network-diagnostic') AND agent_id IS NOT NULL)
 );
 CREATE TABLE IF NOT EXISTS task_diagnostics (
  task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -1249,4 +1250,34 @@ CREATE TABLE IF NOT EXISTS config_binding_receipts (
 CREATE INDEX IF NOT EXISTS config_binding_receipts_task_idx ON config_binding_receipts(task_id);
 CREATE INDEX IF NOT EXISTS config_binding_receipts_owner_idx ON config_binding_receipts(owner_id);
 
+
+-- Diagnostic sessions have independent, renewable execution leases so an
+-- iperf listener never holds the ordinary single-task dispatch slot.
+CREATE TABLE IF NOT EXISTS network_diagnostic_capabilities (
+ agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+ capabilities jsonb NOT NULL CHECK(octet_length(capabilities::text)<=16384),
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS network_diagnostic_grants (
+ share_id text PRIMARY KEY REFERENCES agent_shares(id) ON DELETE CASCADE,
+ enabled boolean NOT NULL DEFAULT false,
+ revision bigint NOT NULL DEFAULT 1 CHECK(revision>0),
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS network_diagnostic_sessions (
+ id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+ owner_id text NOT NULL,
+ api_key_id text NOT NULL DEFAULT '',
+ owner_admin boolean NOT NULL,
+ request_id text NOT NULL,
+ node1 text NOT NULL,
+ node2 text NOT NULL CHECK(node1<>node2),
+ document jsonb NOT NULL CHECK(octet_length(document::text)<=2097152),
+ state text NOT NULL CHECK(state IN ('preparing','running','stopping','succeeded','failed','canceled','cleanup_pending')),
+ deadline timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(owner_id,request_id)
+);
+CREATE INDEX IF NOT EXISTS network_diagnostic_active_idx ON network_diagnostic_sessions(deadline)
+ WHERE state IN ('preparing','running','stopping','cleanup_pending');
 `

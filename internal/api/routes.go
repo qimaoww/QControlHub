@@ -11,6 +11,7 @@ func (s *Server) Handler() http.Handler {
 	s.certificateRoutes(mux)
 	s.apiKeyRoutes(mux)
 	s.apiContractRoutes(mux)
+	s.diagnosticRoutes(mux)
 	s.notificationRoutes(mux)
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.readiness)

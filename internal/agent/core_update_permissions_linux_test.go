@@ -42,7 +42,7 @@ func TestMihomoUpdateWithAgentServiceSandbox(t *testing.T) {
 			fields[key] = strings.TrimSpace(value)
 		}
 	}
-	if os.Geteuid() != 0 || fields["CapEff"] != "0000000000001401" || fields["NoNewPrivs"] != "1" {
+	if os.Geteuid() != 0 || fields["CapEff"] != "0000000000003401" || fields["NoNewPrivs"] != "1" {
 		t.Fatalf("test is not using the actual Agent identity/capabilities: uid=%d cap=%s nnp=%s", os.Geteuid(), fields["CapEff"], fields["NoNewPrivs"])
 	}
 	input := os.Getenv("QCH_TEST_CORE_INPUT")

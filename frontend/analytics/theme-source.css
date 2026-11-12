@@ -101,6 +101,12 @@ strong, b { font-weight: 600; }
 .a-button.a-icon-button { width: 36px; min-width: 36px; padding: 7px; }
 .a-badge { display: inline-flex; align-items: center; align-self: center; justify-self: start; max-width: 100%; padding: 2px 8px; border: 1px solid var(--border); border-radius: 20px; background: var(--tint); font-size: var(--text-caption); font-weight: 400; line-height: 18px; white-space: nowrap; }
 .a-badge.ok, .a-notice.ok { color: #155731; background: #eef9f0; border-color: #c9e8d2; }
+.a-trace-hop { color: #8a5a00; font-weight: 600; }
+.a-trace-ip { color: #a82570; font-weight: 600; }
+.a-trace-asn { color: #08783c; font-weight: 600; }
+.a-trace-geo { color: #245da8; }
+.a-trace-latency { color: #087c7c; font-variant-numeric: tabular-nums; }
+.a-trace-timeout { color: var(--soft-ink); }
 .a-badge.warn { color: #754511; background: #fff8e9; border-color: #efddbb; }
 .a-badge.bad, .a-notice.error { color: #a41a2b; background: #fff2f3; border-color: #f2cdd2; }
 .a-notice { border: 1px solid var(--border); background: var(--tint); border-radius: 6px; padding: 10px 12px; font-size: var(--text-label); font-weight: 400; line-height: 1.65; white-space: pre-wrap; }
@@ -602,3 +608,57 @@ strong, b { font-weight: 600; }
 .a-region-option .a-muted { font-size: var(--text-caption); }
 .a-region-options > .a-muted { grid-column: 1 / -1; padding: 8px; }
 @media (max-width: 40rem) { .a-region-options { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 40dvh; } }
+
+/* Tools measurements use a compact data strip, independent of dashboard cards. */
+.a-tools-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 8px 0; padding: 20px 0; border-block: 1px solid var(--border); }
+.a-tools-metrics > div { min-width: 0; padding-inline: 24px; border-inline-start: 1px solid var(--border); }
+.a-tools-metrics > div:first-child { padding-inline-start: 0; border-inline-start: 0; }
+.a-tools-metrics dt { margin-bottom: 10px; color: var(--soft-ink); font-size: var(--text-label); }
+.a-tools-metrics dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 0; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.a-tools-metric-value { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.a-tools-metric-unit { color: var(--soft-ink); font-size: 14px; }
+@media (max-width: 900px) {
+  .a-tools-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 24px; }
+  .a-tools-metrics > div { padding-inline: 16px; }
+  .a-tools-metrics > div:nth-child(odd) { padding-inline-start: 0; border-inline-start: 0; }
+  .a-tools-metrics dt { margin-bottom: 6px; }
+  .a-tools-metric-value { font-size: 24px; }
+  .a-tools-metric-unit { font-size: 12px; }
+}
+
+/* A shared, open layout for all four network tools. */
+.a-tools-page { gap: 32px; }
+.a-tools-panel { min-width: 0; padding: 0 4px; }
+.a-tools-panel > h2 { margin: 0 0 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.a-tools-form { gap: 24px; }
+.a-tools-choices { padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.a-tools-parameters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.a-tools-endpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin: 0; }
+.a-tools-endpoints > div { min-width: 0; }
+.a-tools-endpoints dt { margin-bottom: 6px; color: var(--soft-ink); font-size: var(--text-label); }
+.a-tools-endpoints dd { margin: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.a-tools-measurement { min-width: 0; padding-top: 24px; border-top: 1px solid var(--border); }
+.a-tools-path-status { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 24px; padding: 12px 0; border-top: 1px solid var(--border); }
+.a-tools-measurement .a-table-scroll { border: 0; border-radius: 0; }
+.a-tools-measurement .a-table-scroll :is(th,td) { font-variant-numeric: tabular-nums; }
+.a-tools-measurement .a-table-scroll th { white-space: nowrap; }
+@media (max-width: 1200px) {
+  .a-tools-parameters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .a-tools-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .a-tools-page { gap: 24px; }
+  .a-tools-panel { padding: 0; }
+  .a-tools-form { gap: 20px; }
+  .a-tools-endpoint-form { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .a-tools-endpoints:not(.a-tools-endpoint-form) { gap: 16px; }
+  .a-tools-measurement { padding-top: 20px; }
+  .a-tools-parameters { gap: 16px 12px; }
+  .a-tools-parameters .a-field-label { min-height: 36px; display: flex; align-items: end; }
+}
+/* Keep route columns readable in a horizontal viewport instead of squeezing IPs. */
+.a-tools-measurement [data-tool=traceroute] table { min-width: 1000px; }
+.a-tools-measurement [data-tool=mtr] table { min-width: 1400px; }
+.a-tools-measurement [data-tool=ping] table { min-width: 600px; }

@@ -22,26 +22,27 @@ const destinations = [
   ["概览", [["dashboard", "仪表盘", "grid", "overview.read"]]],
   ["节点与配置", [
     ["node-settings", "节点", "server", "agents.read"],
-    ["live-config", "实时配置", "file", "agent-config.read"],
-    ["archive-config", "配置档案", "file", "configs.read"],
-    ["client-access", "客户端接入", "link", "client-access.read"],
-    ["substore-sync", "订阅同步", "link", "client-access.read"],
+    ["live-config", "实时配置", "config-live", "agent-config.read"],
+    ["archive-config", "配置档案", "config-archive", "configs.read"],
+    ["client-access", "客户端接入", "plug", "client-access.read"],
+    ["substore-sync", "订阅同步", "sync", "client-access.read"],
     ["certificates", "证书", "shield", "certificates.read"],
   ]],
   ["运维", [
-    ["tasks", "任务", "list", "tasks.read"], ["core-logs", "日志", "list", "core-logs.read"],
-    ["client-connections", "客户端连接", "activity", "core-logs.read"],
-    ["traffic", "流量", "activity", "traffic.read"],
-    ["notifications", "通知", "activity", "settings.read"],
-    ["system-bbr", "TCP 调优", "settings", "system-bbr.read"], ["ip-quality", "IP 质量", "activity", "agents.read"],
+    ["tasks", "任务", "clipboard", "tasks.read"], ["core-logs", "日志", "terminal", "core-logs.read"],
+    ["client-connections", "客户端连接", "connections", "core-logs.read"],
+    ["traffic", "流量", "chart", "traffic.read"],
+    ["notifications", "通知", "bell", "settings.read"],
+    ["system-bbr", "TCP 调优", "tcp", "system-bbr.read"], ["ip-quality", "IP 质量", "globe-check", "agents.read"], ["network-tools", "工具", "tools", "tasks.execute"],
   ]],
   ["面板", [
-    ["api", "API", "link", "agent-access.read"],
-    ["settings", "面板设置", "settings", "settings.read"], ["users", "用户管理", "users", "users.manage"],
-    ["my-quota", "共享与额度", "users", "agent-access.read"], ["themes", "主题", "palette", "agent-access.read"],
+    ["api", "API", "braces", "agent-access.read"],
+    ["settings", "面板设置", "cog", "settings.read"], ["users", "用户管理", "user-shield", "users.manage"],
+    ["my-quota", "共享与额度", "quota", "agent-access.read"], ["themes", "主题", "palette", "agent-access.read"],
   ]],
 ];
 const pageModules = {
+ 'network-tools': ['network-tools','networkToolsPage'],
   dashboard: ['dashboard', 'dashboardPage'], 'node-settings': ['agents', 'nodesPage'], tasks: ['tasks', 'tasksPage'],
   'my-quota': ['quota', 'quotaPage'], 'archive-config': ['archives', 'archivePage'], themes: ['themes', 'themePage'],
   certificates: ['certificates', 'certificatesPage'], 'ip-quality': ['ip-quality', 'ipQualityPage'], users: ['users', 'usersPage'],
@@ -52,6 +53,7 @@ const pageModules = {
 };
 const pageModuleName = route => pageModules[route]?.[0] || 'dashboard';
 const routeModules = createRouteModuleLoader({
+ 'network-tools': () => import('./network-tools.js'),
   dashboard: () => import('./operations.js'), tasks: () => import('./operations.js'), quota: () => import('./operations.js'),
   agents: () => import('./nodes.js'), archives: () => import('./configs.js'), themes: () => import('./themes.js'),
   certificates: () => import('./certificates.js'), 'ip-quality': () => import('./ip-quality.js'), users: () => import('./users.js'),
@@ -185,7 +187,7 @@ export function startAnalytics({ app, session }) {
   function dialog(title, content, { wide = false, closeWhilePending = false } = {}) {
     const active = document.activeElement;
     const closeButton = button("", () => {
-      if (pending && !closeWhilePending) { announce("操作正在提交，请等待结果。", "warn"); return; }
+      if (pending && !box.closeWhilePending) { announce("操作正在提交，请等待结果。", "warn"); return; }
       if (box.onRequestClose) void box.onRequestClose();
       else box.close();
     }, { glyph: "close", title: "关闭", className: "a-icon-button" });
@@ -194,10 +196,11 @@ export function startAnalytics({ app, session }) {
     const box = node("dialog", { className: `a-dialog ${wide ? "wide" : ""}`, "aria-labelledby": heading.id },
       node("div", { className: "a-dialog-head" }, heading, closeButton),
       node("div", { className: "a-dialog-body" }, content));
+    box.closeWhilePending = closeWhilePending;
     document.body.append(box);
     box.addEventListener("cancel", event => {
-      if ((pending && !closeWhilePending) || box.onRequestClose) event.preventDefault();
-      if ((!pending || closeWhilePending) && box.onRequestClose) void box.onRequestClose();
+      if ((pending && !box.closeWhilePending) || box.onRequestClose) event.preventDefault();
+      if ((!pending || box.closeWhilePending) && box.onRequestClose) void box.onRequestClose();
     });
     box.addEventListener("close", () => {
       const restore = document.activeElement === document.body || box.contains(document.activeElement);

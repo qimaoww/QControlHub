@@ -49,6 +49,10 @@ if qagent_capability_is_bound 12; then
 	capabilities="${capabilities},^cap_net_admin"
 fi
 
+if qagent_capability_is_bound 13; then
+	capabilities="${capabilities},^cap_net_raw"
+fi
+
 depend() {
 	need net
 	after firewall nftables

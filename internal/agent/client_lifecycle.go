@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/networkdiag"
 )
 
 // ErrIdentityRejected means the control plane rejected the persisted Agent
@@ -47,7 +48,33 @@ func reconnectBackoffLimit(rejected bool) time.Duration {
 	return maxReconnectBackoff
 }
 
+func (c *Client) initializeNetworkDiagnostics(ctx context.Context) error {
+	var err error
+	c.diagnostics, err = networkdiag.New(ctx, filepath.Join(c.config.StatePath+".network-diagnostics", "journal.json"), &c.taskLifecycleMu)
+	if err == nil {
+		c.diagnostics.Prepare = func(ctx context.Context, tool string) error {
+			err := prepareNetworkTool(ctx, tool)
+			capabilities := networkdiag.Capabilities(ctx)
+			c.diagnosticCapabilitiesMu.Lock()
+			c.diagnosticCapabilities = capabilities
+			c.diagnosticCapabilitiesMu.Unlock()
+			return err
+		}
+	}
+	return err
+}
+
 func (c *Client) Run(ctx context.Context) error {
+	diagnosticErr := c.initializeNetworkDiagnostics(ctx)
+	if diagnosticErr != nil {
+		slog.Warn("network diagnostics unavailable", "error", diagnosticErr)
+		c.diagnosticCapabilities = core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{}, Providers: map[string]string{}, Addresses: []string{}}
+		for _, tool := range []string{"ping", "nexttrace", "iperf3"} {
+			c.diagnosticCapabilities.Tools[tool] = core.DiagnosticTool{Error: "诊断状态不可用，请检查 Agent 日志"}
+		}
+	} else {
+		c.diagnosticCapabilities = networkdiag.Capabilities(ctx)
+	}
 	maintenance, stopMaintenance := context.WithCancel(ctx)
 	maintenanceDone := make(chan struct{})
 	go func() { defer close(maintenanceDone); c.maintainImportedResources(maintenance) }()
@@ -561,6 +588,28 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 					return context.Cause(sessionContext)
 				}
 				continue
+			case core.WireDiagnostics:
+				for _, command := range message.Diagnostics {
+					if command.Source.AgentID != c.creds.AgentID {
+						return errors.New("diagnostic source does not match Agent")
+					}
+				}
+				results := []core.DiagnosticResult{}
+				if c.diagnostics != nil {
+					results = c.diagnostics.Apply(message.Diagnostics)
+				} else {
+					for _, command := range message.Diagnostics {
+						results = append(results, core.DiagnosticResult{ID: command.ID, State: "failed", Cleaned: false, Error: "诊断状态不可用，资源回收未确认", At: time.Now().UTC()})
+					}
+				}
+				for _, result := range results {
+					copyResult := result
+					select {
+					case outgoing <- core.WireMessage{Type: core.WireDiagnosticResult, DiagnosticResult: &copyResult}:
+					case <-sessionContext.Done():
+						return context.Cause(sessionContext)
+					}
+				}
 			case core.WireTask:
 				if message.Task == nil || activeTask != "" || !c.validTask(*message.Task) {
 					return errors.New("control plane returned an invalid or concurrent task envelope")

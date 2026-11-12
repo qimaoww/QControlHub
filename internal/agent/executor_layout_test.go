@@ -16,11 +16,11 @@ func TestProductionAgentUnitAllowsOnlyRequiredCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := string(contents)
-	requiredCapabilities := "CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE"
+	requiredCapabilities := "CAP_CHOWN CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW"
 	if !strings.Contains(unit, "CapabilityBoundingSet="+requiredCapabilities) || !strings.Contains(unit, "AmbientCapabilities="+requiredCapabilities) {
-		t.Fatal("production Agent unit does not retain the metadata, HTTP-01 and traffic-accounting capabilities")
+		t.Fatal("production Agent unit does not retain the metadata, HTTP-01, traffic-accounting and ICMP diagnostic capabilities")
 	}
-	for _, forbidden := range []string{"CAP_SYS_ADMIN", "CAP_SYS_PTRACE", "CAP_DAC_OVERRIDE", "CAP_NET_RAW", "CAP_SETUID", "CAP_SETGID"} {
+	for _, forbidden := range []string{"CAP_SYS_ADMIN", "CAP_SYS_PTRACE", "CAP_DAC_OVERRIDE", "CAP_SETUID", "CAP_SETGID"} {
 		if strings.Contains(unit, forbidden) {
 			t.Fatalf("production Agent unit grants unnecessary capability %s", forbidden)
 		}
@@ -131,7 +131,7 @@ func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown,^cap_setgid,^cap_setuid\"", "qagent_capability_is_bound 12", "capabilities=\"${capabilities},^cap_net_admin\"", "no_new_privs=true"} {
+	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown,^cap_setgid,^cap_setuid\"", "qagent_capability_is_bound 12", "capabilities=\"${capabilities},^cap_net_admin\"", "qagent_capability_is_bound 13", "capabilities=\"${capabilities},^cap_net_raw\"", "no_new_privs=true"} {
 		if !strings.Contains(string(agentService), required) {
 			t.Errorf("OpenRC Agent service is missing %q", required)
 		}

@@ -126,8 +126,15 @@ async function testNativeRegionResolution() {
   assert.equal(requests.length, 2, '新账号继承旧地区缓存');
   fail = true; const failed = { id: 'retry-region' };
   nodeRegionFlag(ctx, failed); await delay(0); fail = false;
-  const retry = nodeRegionFlag(ctx, failed); document.body.append(retry);
-  await waitFor(() => code(retry) === 'US', '地区查询失败被永久缓存');
+  nodeRegionFlag(ctx, failed);
+  assert.equal(requests.filter(path => path === '/agents/retry-region/region').length, 1, '地区查询失败退避期间重复请求');
+  const now = Date.now;
+  let retry;
+  try {
+    Date.now = () => now() + 60_001;
+    retry = nodeRegionFlag(ctx, failed); document.body.append(retry);
+    await waitFor(() => code(retry) === 'US', '地区查询退避结束后未重试');
+  } finally { Date.now = now; }
   assert.equal(requests.filter(path => path === '/agents/retry-region/region').length, 2, '地区重试次数错误');
   current = false; const late = nodeRegionFlag(ctx, { id: 'late-region' }); document.body.append(late);
   await delay(0); assert.equal(code(late), '', '旧页面响应仍写入旗帜');

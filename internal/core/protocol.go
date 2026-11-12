@@ -3,6 +3,7 @@ package core
 import "time"
 
 type HeartbeatRequest struct {
+	Diagnostics         *DiagnosticCapabilities `json:"diagnostics,omitempty"`
 	ProxyIngressReports []ProxyIngressReport    `json:"proxy_ingress_reports,omitempty"`
 	Version             string                  `json:"version,omitempty"`
 	OS                  string                  `json:"os,omitempty"`
@@ -63,6 +64,8 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
+	Diagnostics               []DiagnosticCommand        `json:"diagnostics,omitempty"`
+	DiagnosticResult          *DiagnosticResult          `json:"diagnostic_result,omitempty"`
 	ManagedCertificateSources []ManagedCertificateSource `json:"managed_certificate_sources,omitempty"`
 	ManagedCertificateReport  *ManagedCertificateReport  `json:"managed_certificate_report,omitempty"`
 	CertificateChallenges     []HTTPChallenge            `json:"certificate_challenges,omitempty"`

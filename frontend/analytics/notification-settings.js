@@ -1,6 +1,7 @@
 import { readRegion, loadingTable, loadingForm } from "./loading.js";
 import { node, button, actions, stack, grid, section, table, badge, field, muted, notice } from "./ui.js";
 import { date } from "./operations.js";
+import { requestID as id } from "./request-id.js";
 
 const types = [["telegram", "Telegram Bot"], ["webhook", "Webhook"], ["smtp", "SMTP 邮件"], ["bark", "Bark"], ["ntfy", "ntfy"], ["gotify", "Gotify"]];
 const fields = {
@@ -12,7 +13,6 @@ const fields = {
   gotify: [["url", "服务地址", true], ["token", "应用令牌", true]],
 };
 const statusNames = { pending: "等待投递", sending: "投递中", accepted: "平台已接受", failed: "投递失败", canceled: "已取消" };
-const id = () => crypto.randomUUID().replaceAll("-", "");
 
 export function notificationsPage(ctx) {
   const request = (path, options = {}) => ctx.api(path, { ...options, signal: AbortSignal.any([options.signal || ctx.signal, AbortSignal.timeout(15000)]) });

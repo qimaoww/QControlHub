@@ -5,11 +5,18 @@ import "github.com/qimaoww/qcontrolhub/internal/core"
 // apiKeyPolicies is the reviewed route capability registry. A missing entry denies
 // access. Documentation and self-authorization use this same registry.
 var apiKeyPolicies = map[string]apiKeyPolicy{
-	"GET /api/v1/tasks/{id}/diagnostics":               {Permissions: []core.Permission{core.PermissionTasksRead}},
-	"POST /api/v1/tasks/failures":                      {Write: true, Permissions: []core.Permission{core.PermissionTasksExecute}},
-	"POST /api/v1/agents/{id}/configs/{engine}/import": {Write: true, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksRead, core.PermissionTasksExecute}},
-	"PUT /api/v1/users/{id}":                           {Write: true, Permissions: []core.Permission{core.PermissionUsersManage}},
-	"GET /api/v1/openapi.json":                         {},
+	"GET /api/v1/network-diagnostics/nodes":             {Write: false, Permissions: []core.Permission{core.PermissionAgentsRead, core.PermissionTasksRead, core.PermissionTasksExecute}},
+	"GET /api/v1/network-diagnostics":                   {Write: false, Permissions: []core.Permission{core.PermissionAgentsRead, core.PermissionTasksRead, core.PermissionTasksExecute}},
+	"POST /api/v1/network-diagnostics":                  {Write: true, Permissions: []core.Permission{core.PermissionAgentsRead, core.PermissionTasksRead, core.PermissionTasksExecute}},
+	"GET /api/v1/network-diagnostics/{id}":              {Write: false, Permissions: []core.Permission{core.PermissionAgentsRead, core.PermissionTasksRead, core.PermissionTasksExecute}},
+	"POST /api/v1/network-diagnostics/{id}/stop":        {Write: true, Permissions: []core.Permission{core.PermissionAgentsRead, core.PermissionTasksRead, core.PermissionTasksExecute}},
+	"GET /api/v1/agents/{id}/diagnostic-grants":         {Write: false, Permissions: []core.Permission{core.PermissionAgentsManage}},
+	"PUT /api/v1/agents/{id}/diagnostic-grants/{share}": {Write: true, Permissions: []core.Permission{core.PermissionAgentsManage}},
+	"GET /api/v1/tasks/{id}/diagnostics":                {Permissions: []core.Permission{core.PermissionTasksRead}},
+	"POST /api/v1/tasks/failures":                       {Write: true, Permissions: []core.Permission{core.PermissionTasksExecute}},
+	"POST /api/v1/agents/{id}/configs/{engine}/import":  {Write: true, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksRead, core.PermissionTasksExecute}},
+	"PUT /api/v1/users/{id}":                            {Write: true, Permissions: []core.Permission{core.PermissionUsersManage}},
+	"GET /api/v1/openapi.json":                          {},
 
 	"DELETE /api/v1/agents/{id}":                                              {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentsManage}},
 	"DELETE /api/v1/certificate-http-grants":                                  {Write: true, Any: false, Permissions: []core.Permission{core.PermissionCertificatesGrant}},
