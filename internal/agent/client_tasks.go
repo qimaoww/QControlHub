@@ -206,6 +206,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				sideEffects = append(sideEffects, "prepare managed sing-box log capture window: "+core.DiagnosticText(err.Error()))
 			} else {
 				preparedLogTransition = true
+				ctx = c.logs.withManagedSingBoxTarget(ctx, c.executor)
 			}
 		} else if executionErr == nil && c.logs != nil && !task.SharedInstance && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
@@ -232,7 +233,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			}
 		}
 	}
-	if c.logs != nil && task.Engine == core.EngineSingBox && (coreLogSourceMayChange(task.Action) || task.InstallIfMissing) {
+	if c.logs != nil && !task.SharedInstance && task.Engine == core.EngineSingBox && (coreLogSourceMayChange(task.Action) || task.InstallIfMissing) {
 		collectorTransitionComplete := preparedLogTransition &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy)
 		if !collectorTransitionComplete {
