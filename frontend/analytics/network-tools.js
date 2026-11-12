@@ -495,6 +495,7 @@ export function networkToolsPage(ctx) {
               badge(params.protocol.toUpperCase()),
               badge(labels[d.state] || d.state),
               req.bidirectional && badge("双向"),
+              tool === "iperf3" && server && badge(server.cleaned ? "服务端已回收" : server.state === "ready" ? "服务端就绪" : "服务端准备中"),
             );
             const stop =
               !terminal(d.state) &&
@@ -556,21 +557,13 @@ export function networkToolsPage(ctx) {
                   }, {disabled:exportingImages.has(d.id)}),
                   field("隐藏敏感信息", "export-sensitive", true, {type:"checkbox", title:"隐藏节点名称、IP、主机名及诊断原文"}),
                 ),
-                muted(
-                  tool === "iperf3"
-                    ? `${params.duration} s · ${params.streams} 流 · ${params.size} 字节`
-                    : `${tool === "traceroute" ? `每跳 ${params.count} 次探测` : `${params.count} ${tool === "mtr" ? "轮" : "次"}`} · ${params.interval_ms} ms 间隔 · ${params.timeout_ms} ms 超时 · ${params.size} 字节${tool === "ping" ? "负载" : `总包长 · ${params.max_hops} 跳 · ${params.provider}`}`,
+                node("details", {className:"a-query-options"},
+                  node("summary", {}, "测试参数"),
+                  table(["参数", "设置"], [
+                    ...(tool === "iperf3" ? [["时长", `${params.duration} s`], ["并发流", params.streams], ["目标端口", params.port], ["数据长度", `${params.size} 字节`]] : [[tool === "mtr" ? "轮数" : "探测次数", params.count], ["间隔", `${params.interval_ms} ms`], ["单次超时", `${params.timeout_ms} ms`], ["包大小", `${params.size} 字节`], ...(["mtr", "traceroute"].includes(tool) ? [["最大跳数", params.max_hops], ["IP 查询提供方", params.provider]] : [])]),
+                    ...(d.byte_limit>0 ? [["共享流量预算", `${number(d.byte_limit/1048576)} MiB`]] : []),
+                  ], {paginate:false}),
                 ),
-                d.byte_limit > 0 && muted(`共享流量预算：${number(d.byte_limit / 1048576)} MiB`),
-                server &&
-                  actions(
-                    muted("接收端服务"),
-                    badge(
-                      server.cleaned
-                        ? "已回收"
-                        : labels[server.state] || server.state,
-                    ),
-                  ),
                 server?.error &&
                   server.error !== "测量已停止" &&
                   notice(server.error, "error"),
@@ -600,7 +593,7 @@ export function networkToolsPage(ctx) {
                             "h3",
                             {},
                             tool === "iperf3"
-                              ? "测速结果"
+                              ? (r.state === "running" ? "测速中" : "测速结果")
                               : reverse
                                 ? "回程"
                                 : "去程",
@@ -614,7 +607,7 @@ export function networkToolsPage(ctx) {
                         (r.error || r.output?.error) &&
                           r.error !== "测量已停止" &&
                           notice(r.error || r.output.error, "error"),
-                        renderOutput(tool, r.output, r.state, params.count),
+                        node("div", {className:"a-stack", "data-export-output":""},renderOutput(tool, r.output, r.state, params.count)),
                         (tool === "traceroute" || tool === "mtr") &&
                           params.provider !== "disable-geoip" &&
                           r.output &&
@@ -935,10 +928,25 @@ function renderOutput(tool, out, state, rounds) {
         r.jitter_ms == null ? "—" : number(r.jitter_ms),
         r.lost_percent == null ? "—" : `${number(r.lost_percent)}%`,
       ]);
+  const intervals = (out.intervals || []).filter(item => item?.sum).map(item => item.sum);
+  const current = intervals.at(-1);
   return stack(
+    current && node("div", {className:"a-stat-grid"},
+      ...[["当前吞吐", `${number(current.bits_per_second/1000000)} Mbit/s`],
+      ["已测时长", `${number(current.end)} s`],
+      ["累计传输", `${number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)/1048576)} MiB`],
+      ["采样间隔", "1 s"]].map(([label,value]) => node("div", {className:"a-stat"}, muted(label), node("strong",{},value))),
+    ),
+    intervals.length>0 && stack(
+      node("h3",{},"测速过程"),
+      table(["时间段（s）", "吞吐", "传输量", "重传", "抖动（ms）", "丢包"], intervals.map(item => [
+        `${number(item.start)}–${number(item.end)}`, `${number(item.bits_per_second/1000000)} Mbit/s`, `${number(item.bytes/1048576)} MiB`,
+        item.retransmits==null ? "—" : number(item.retransmits), item.jitter_ms==null ? "—" : number(item.jitter_ms), item.lost_percent==null ? "—" : `${number(item.lost_percent)}%`,
+      ]), {paginate:false,label:"iperf3 每秒统计"}),
+    ),
     rows.length
-      ? table(["统计端", "吞吐", "传输量", "实际时长（s）", "重传", "抖动（ms）", "丢包"], rows)
-      : muted("未产生有效吞吐统计"),
+      ? stack(node("h3",{},"汇总"), table(["统计端", "吞吐", "传输量", "实际时长（s）", "重传", "抖动（ms）", "丢包"], rows, {paginate:false}))
+      : !intervals.length && muted(running ? "正在建立测速连接…" : "未产生有效吞吐统计"),
   );
 }
 function asnName(g) {

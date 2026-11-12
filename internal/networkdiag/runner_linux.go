@@ -67,7 +67,7 @@ func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 			local, cancel := context.WithTimeout(ctx, 2*time.Second)
 			help, e := exec.CommandContext(local, path, "--help").CombinedOutput()
 			cancel()
-			for _, flag := range []string{"--idle-timeout", "--server-bitrate-limit", "--connect-timeout", "--get-server-output"} {
+			for _, flag := range []string{"--idle-timeout", "--server-bitrate-limit", "--connect-timeout", "--get-server-output", "--json-stream", "--forceflush"} {
 				if e != nil || !strings.Contains(string(help), flag) {
 					t.Error = "iperf3 缺少有界服务端所需能力"
 					break
@@ -188,7 +188,7 @@ func Args(c core.DiagnosticCommand) (string, []string, error) {
 			}
 			return "iperf3", args, nil
 		}
-		args = append(args, "--client", a.String(), "--parallel", n(p.Streams), "--length", n(p.Size), "--connect-timeout", "5000", "--get-server-output")
+		args = append(args, "--client", a.String(), "--parallel", n(p.Streams), "--length", n(p.Size), "--connect-timeout", "5000", "--get-server-output", "--json-stream", "--forceflush", "--interval", "1")
 		if c.ByteLimit > 0 {
 			args = append(args, "--bytes", strconv.FormatInt(c.ByteLimit, 10))
 		} else {
@@ -263,6 +263,13 @@ func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), lau
 			stream.publish = progress[0]
 		}
 		cmd.Stdout = stream
+	}
+	iperfStream := &iperfStreamWriter{}
+	if c.Parameters.Tool == "iperf3" && c.Role == "client" {
+		if len(progress) > 0 {
+			iperfStream.publish = progress[0]
+		}
+		cmd.Stdout = iperfStream
 	}
 	cmd.Stderr = stderr
 	cmd.Cancel = func() error {
@@ -346,6 +353,9 @@ finished:
 		if secret := os.Getenv(key); secret != "" {
 			r.Stderr = strings.ReplaceAll(r.Stderr, secret, "[redacted]")
 		}
+	}
+	if len(iperfStream.latest) > 0 {
+		out.b.Write(iperfStream.latest)
 	}
 	if streaming && len(stream.latest) > 0 {
 		out.b.Write(stream.latest)

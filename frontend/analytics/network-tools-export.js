@@ -40,8 +40,9 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
       text(outcome || (r.state==="running"?"正在探测":"未确认目标可达"),14,soft);
     }
     if (r.error && !hideSensitive) text(r.error,14,soft);
-    const table=rendered.querySelector(`[data-measurement-result="${CSS.escape(r.id)}"] table`);
-    if (!table) {text("尚无结果",16,soft);continue;}
+    const tables=[...rendered.querySelectorAll(`[data-measurement-result="${CSS.escape(r.id)}"] [data-export-output] table`)];
+    if (!tables.length) {text("尚无结果",16,soft);continue;}
+    for (const table of tables) {
     const headings=[...table.querySelectorAll("thead th")].map(c=>c.textContent.trim());
     const rows=[...table.querySelectorAll("tbody tr")].map(row=>[...row.cells].map((cell,col)=>{
       const colored=cell.querySelector('[class*="a-trace-"]');
@@ -52,6 +53,7 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
       return {text:value,color};
     }));
     blocks.push({headings,rows});
+    }
   }
   if (!measurements.length) text("尚无结果",16,soft);
   await document.fonts.ready;
