@@ -80,6 +80,9 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if warning != "" {
 		return "", fmt.Errorf("导入配置无法建立独立出口：%s", warning)
 	}
+	if err := bindPreparedCoreLogTarget(ctx, engine, managed, coreMigrationConfigDigest(managedContent)); err != nil {
+		return "", err
+	}
 	validationPlan := resourcePlan
 	validationPlan.managedContent = managedContent
 	if err := e.validateImportPlanSnapshot(ctx, engine, validationSpec, validationPlan); err != nil {

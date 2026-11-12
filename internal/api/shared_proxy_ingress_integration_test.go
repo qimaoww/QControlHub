@@ -191,3 +191,69 @@ func mustProtocol(t *testing.T, engine core.Engine, key string) serverconfig.Pro
 	}
 	return p
 }
+
+// A break-glass administrator's workspace remains a host deployment when the
+// node belongs to a database user. Its empty owner ID is a reserved identity.
+func TestSharedProxyIngressWithLegacyAdminHostWorkspace(t *testing.T) {
+	for _, mode := range []string{"nginx", "caddy"} {
+		t.Run(mode, func(t *testing.T) {
+			db, ctx, admin, owner, guest := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "owned ingress", core.EngineSingBox)
+			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureManagedTLSCertificates, core.AgentFeatureSharedProxyIngress)
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			grantConfigScopeAPIAgent(t, ctx, db, agent, guest, 21001)
+			base := "/agents/" + agent.ID + "/configs/sing-box"
+			plan, err := serverconfig.NewPlan(mustProtocol(t, core.EngineSingBox, "vless-ws-tls"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan.TLSMode, plan.TLSPublicPort, plan.Port, plan.TLSServerName, plan.TransportPath = mode, 443, 22001, "host.example.test", "/host"
+			var host configMutationResult
+			admin.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}, http.StatusOK, &host)
+			completeConfigScopeAPITask(t, ctx, db, host.Task)
+			plan.Port, plan.Tag, plan.TLSServerName, plan.TransportPath = 21001, "guest", "guest.example.test", "/guest"
+			var candidate configMutationResult
+			body := map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": plan}
+			guest.call("POST", base+"/server-inbounds", body, http.StatusConflict, nil)
+			setAPIProxyIngresses(t, admin, guest, agent.ID, []core.ProxyIngress{{Mode: mode, Port: 443}})
+			guest.call("POST", base+"/server-inbounds", body, http.StatusOK, &candidate)
+			completeConfigScopeAPITask(t, ctx, db, candidate.Task)
+			// Source deployment must use the saved current entry and the latest
+			// grant, with an atomic rejection that leaves the draft reusable.
+			setAPIProxyIngresses(t, admin, guest, agent.ID, []core.ProxyIngress{})
+			source := map[string]any{"name": candidate.Config.Name, "content": candidate.Config.Content, "version": candidate.Config.Version, "intent": "deploy"}
+			var conflict struct {
+				Code, Reason, Field string
+				RequestID           string `json:"request_id"`
+			}
+			guest.call("POST", base+"/source", source, http.StatusConflict, &conflict)
+			if conflict.Code != "port_conflict" || conflict.Reason != "ingress_unauthorized" || conflict.Field != "tls_public_port" || conflict.RequestID == "" {
+				t.Fatalf("source conflict lost diagnostics: %+v", conflict)
+			}
+			if task, err := db.ClaimTask(ctx, agent.ID); err != nil || task != nil {
+				t.Fatalf("rejected source queued work: %+v %v", task, err)
+			}
+			var retained core.Config
+			guest.call("GET", base, nil, http.StatusOK, &retained)
+			if retained.ID != candidate.Config.ID || retained.Version != candidate.Config.Version || retained.Content != candidate.Config.Content {
+				t.Fatal("rejected source deployment changed the draft")
+			}
+			regranted := setAPIProxyIngresses(t, admin, guest, agent.ID, []core.ProxyIngress{{Mode: mode, Port: 443}})
+			var retry configMutationResult
+			guest.call("POST", base+"/source", source, http.StatusOK, &retry)
+			claimed, err := db.ClaimTask(ctx, agent.ID)
+			if err != nil || claimed == nil || claimed.ID != retry.Task.ID || !claimed.SharedInstance || claimed.SharedTrafficID != regranted.ID || len(claimed.TLSFrontends) != 1 {
+				t.Fatalf("source target: %+v %v", claimed, err)
+			}
+			frontend := claimed.TLSFrontends[0]
+			if frontend.Mode != mode || frontend.PublicPort != 443 || frontend.BackendPort != plan.Port || frontend.SharedIngressGeneration != regranted.ProxyIngresses[0].Generation {
+				t.Fatalf("stale source entry: %+v", frontend)
+			}
+			if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true, InstanceStatus: &core.SharedInstanceStatus{Engine: claimed.Engine, ShareID: regranted.ID, ConfigID: claimed.ConfigID, ConfigVersion: claimed.ConfigVersion, TaskID: claimed.ID, AppliedTaskID: claimed.ID, Status: "active", ObservedAt: time.Now().UTC()}}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

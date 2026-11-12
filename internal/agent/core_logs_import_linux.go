@@ -24,6 +24,30 @@ func (collector *CoreLogCollector) CompleteManagedSingBoxSource(executor *Execut
 	return collector.refreshImportedSingBoxSource(executor, &succeeded)
 }
 
+func (collector *CoreLogCollector) withManagedSingBoxTarget(ctx context.Context, executor *Executor) context.Context {
+	if executor == nil {
+		return ctx
+	}
+	collector.mu.Lock()
+	transition := collector.transitions[core.EngineSingBox]
+	collector.mu.Unlock()
+	executor.specsMu.RLock()
+	path := executor.Specs[core.EngineSingBox].ConfigPath
+	executor.specsMu.RUnlock()
+	return context.WithValue(ctx, preparedCoreLogTargetKey{}, preparedCoreLogTarget(func(engine core.Engine, spec EngineSpec, digest string) error {
+		if engine != core.EngineSingBox || spec.ConfigPath != path || digest == "" {
+			return errors.New("prepared configuration does not belong to the sing-box source transition")
+		}
+		collector.mu.Lock()
+		defer collector.mu.Unlock()
+		if transition == nil || collector.transitions[engine] != transition {
+			return errors.New("prepared configuration belongs to an expired sing-box source transition")
+		}
+		transition.targetDigest = digest
+		return nil
+	}))
+}
+
 func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Executor, succeeded *bool) error {
 	if executor == nil {
 		return nil

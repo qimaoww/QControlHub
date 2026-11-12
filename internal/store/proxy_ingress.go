@@ -77,7 +77,10 @@ func proxyIngressGrantTx(ctx context.Context, tx pgx.Tx, agentID, owner string, 
 		return 0, false, nil
 	}
 	var hostAuthority bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents a WHERE a.id=$1 AND a.owner_id=$2)
+	// Empty ownership is reserved for the legacy/break-glass administrator's
+	// workspace. It has host authority even on a user-owned node. Callers pass
+	// the persisted configuration owner, never an owner from the request body.
+	if err := tx.QueryRow(ctx, `SELECT $2::text='' OR EXISTS(SELECT 1 FROM agents a WHERE a.id=$1 AND a.owner_id=$2)
 	 OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=$2 AND u.role='admin' AND NOT u.disabled)`, agentID, owner).Scan(&hostAuthority); err != nil {
 		return 0, false, err
 	}
