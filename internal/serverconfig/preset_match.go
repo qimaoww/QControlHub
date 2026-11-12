@@ -9,7 +9,8 @@ import (
 // A native protocol name is only a parsing hint. The catalog describes concrete
 // transport/security combinations, including the flow of the represented user.
 // Keep unmatched projections for bound TLS metadata, but never use them as forms
-// or client profiles until that metadata has established a matching preset.
+// until that metadata has established a matching preset. Client export reads
+// native connection parameters independently of form eligibility.
 func matchesParsedPreset(engine core.Engine, input Input) bool {
 	if input.Port < 1 || input.Port > 65535 {
 		return false

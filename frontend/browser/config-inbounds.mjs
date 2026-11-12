@@ -310,7 +310,6 @@ async function testUDP443Options() {
 async function testSourceOnlyProjection() {
   for (const engine of ['xray','sing-box','mihomo']) {
     const test=await fixture(engine,{protocol:'vless',plan:{source_only:true}});
-    assert(!test.click('复制入站连接'),'unmatched native inbound offered a preset client');
     test.click('modify');
     await waitFor(()=>editor()?.elements.fragment,'unmatched native inbound did not open source');
     assert(!editor().elements.protocol&&!test.calls.some(call=>call.path.endsWith("/plans"))&&!test.writes.length,'source-only edit silently selected a preset');

@@ -12,9 +12,6 @@ import (
 // BuildClientOutbound exports only client connection material from a deployed
 // inbound. Never serialize Input: it also contains server private keys.
 func BuildClientOutbound(engine core.Engine, input Input, address, serverName string) (json.RawMessage, error) {
-	if input.SourceOnly {
-		return nil, fmt.Errorf("此配置无法可靠生成客户端连接，请使用完整源码配置")
-	}
 	if err := validateClientConnection(input); err != nil {
 		return nil, err
 	}

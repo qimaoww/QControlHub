@@ -1,6 +1,7 @@
 package serverconfig
 
 import (
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,9 +51,6 @@ func TestManualPresetSemanticBoundaries(t *testing.T) {
 			if !tc.matched {
 				if _, err := Generate(tc.engine, got); err == nil {
 					t.Fatal("unmatched native projection generated a preset")
-				}
-				if _, err := BuildClientProfile(got, "192.0.2.1", ""); err == nil {
-					t.Fatal("unmatched native projection exported a client")
 				}
 				if _, _, err := InboundSource(tc.engine, tc.source, "manual"); err != nil {
 					t.Fatal("source editor unavailable", err)
@@ -128,5 +126,25 @@ func TestPublishedPresetsRemainEditableAfterBoundMetadata(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPlainNativeVLESSStillExportsActualClientSemantics(t *testing.T) {
+	source := `{"inbounds":[{"tag":"manual","listen":"::","port":21001,"protocol":"vless","settings":{"decryption":"none","clients":[{"id":"123e4567-e89b-42d3-a456-426614174000"}]}}]}`
+	parsed, ok := Parse(core.EngineXray, source)
+	if !ok || !parsed.SourceOnly {
+		t.Fatal("plain VLESS should stay in source editor")
+	}
+	profile, err := BuildClientProfile(parsed, "192.0.2.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := url.Parse(profile.URI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := uri.Query()
+	if (query.Get("security") != "" && query.Get("security") != "none") || query.Get("flow") != "" || query.Get("encryption") != "none" || query.Get("type") != "tcp" {
+		t.Fatalf("client inherited a preset security default: %s", profile.URI)
 	}
 }
