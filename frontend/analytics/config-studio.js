@@ -606,11 +606,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const nativeInput=inbounds.find(input=>input.tag===target.tag&&input.port===target.port);
       const input=nativeInput&&!nativeInput.source_only?nativeInput:null;
       const object=managed.find(item=>item.inbound&&item.tag===target.tag);
-      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),target.kind,
+      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),input?target.kind:'自定义',
         deployment.inboundState(target.port,object?.enabled),actions(
         ctx.can('agent-config.read')&&button('访问限制',()=>restrictions(target)),
         writable&&object&&toggle(object),
-        writable&&button('修改',()=>input?inboundEdit(input):inboundSource(target)),
+        writable&&button('修改',()=>input?inboundEdit(input):files()),
         ctx.can('client-access.read')&&nativeInput&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(nativeInput))),
         writable&&button('删除',()=>removeInbound(target),{tone:'danger'}),
         writable&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{
