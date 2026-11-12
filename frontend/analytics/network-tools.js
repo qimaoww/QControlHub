@@ -875,6 +875,7 @@ function renderOutput(tool, out) {
           h.received > 0 ? number(h.stdev_ms) : "—",
           geo(h.geo),
         ]),
+        { paginate: false, label: "MTR 跳点" },
       ),
     );
   if (tool === "traceroute") {
@@ -898,6 +899,7 @@ function renderOutput(tool, out) {
           [h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.owner].filter(Boolean).join(" · ") || "—",
           h.samples.join(" / "),
         ]),
+        { paginate: false, label: "路由跳点" },
       ),
     );
   }
