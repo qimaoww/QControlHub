@@ -72,6 +72,8 @@ export function networkToolsPage(ctx) {
   const recordPicker = field("测量时间", "measurement", "", { options: [] }),
     recordSelect = recordPicker.querySelector("select");
   recordSelect.addEventListener("change", () => {
+    const content = recordSelect.querySelector("selectedcontent");
+    if (content) delete content.dataset.recordLabel;
     if (recordSelect.selectedIndex === 0) recordChoices.delete(value("tool"));
     else recordChoices.set(value("tool"), recordSelect.value);
     snapshot = undefined;
@@ -166,6 +168,7 @@ export function networkToolsPage(ctx) {
         if ([...select.options].some(option => option.value === address) && address)
           select.value = address;
       }
+      syncSelectedNodeLabels([controls.get("node1"), controls.get("node2")]);
       update();
     },
     { glyph: "sync" },
@@ -252,15 +255,16 @@ export function networkToolsPage(ctx) {
       }
     }
     syncSelectedNodeLabels();
+    renderSnapshot();
   }
-  function syncSelectedNodeLabels() {
+  function syncSelectedNodeLabels(changed = []) {
     for (const i of [1, 2]) {
       const n = selected(i), content = controls.get(`node${i}`).querySelector("selectedcontent");
       if (!n || !content) continue;
       const fresh = nodeLabel(n), old = content.querySelector("[data-diagnostic-node]");
       // Native selectedcontent clones on selection, but does not follow a
       // descendant's asynchronous region update in supported Chromium builds.
-      if (old?.dataset.diagnosticNode !== fresh.dataset.diagnosticNode ||
+      if (changed.includes(controls.get(`node${i}`)) || old?.dataset.diagnosticNode !== fresh.dataset.diagnosticNode ||
           old?.dataset.regionCode !== fresh.dataset.regionCode || old?.textContent !== fresh.textContent)
         content.replaceChildren(fresh);
     }
@@ -278,8 +282,8 @@ export function networkToolsPage(ctx) {
       ? old
       : ips.find((ip) => !ip.includes(":")) || ips[0] || "";
   }
-  function update() {
-    syncSelectedNodeLabels();
+  function update(event) {
+    syncSelectedNodeLabels(event?.target ? [event.target] : []);
     const custom = value("target_mode") === "ip";
     n2.hidden = a2.hidden = custom;
     customIP.hidden = !custom;
@@ -440,7 +444,7 @@ export function networkToolsPage(ctx) {
             nodeLabel(n),
           ]),
         ]);
-        select.value = old;
+        if (select.value !== old) select.value = old;
         addresses(i);
       }
       update();
@@ -731,21 +735,41 @@ export function networkToolsPage(ctx) {
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const choice = recordChoices.get(t), selected = data.find(item => item.id === choice) || data[0];
     if (choice && !data.some(item => item.id === choice)) recordChoices.delete(t);
-    const choices = data.map((item, index) => [item.id,
-      `${index === 0 ? "最新 · " : ""}${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()} · ${endpointLabel(item.request.node1)} ${item.request.bidirectional ? "↔" : "→"} ${endpointLabel(item.request.node2)}`]);
-    const signature = JSON.stringify([t, choices]);
+    const regions = item => [item.request.node1, item.request.node2].map(endpoint => regionAgents.find(agent => agent.id === endpoint.agent_id)?.region_code || "");
+    const signature = JSON.stringify([t, data.map(item => [item.id, item.created_at, item.request, regions(item)])]);
     if (signature !== recordOptions) {
+      const choices = data.map(item => [item.id, recordLabel(item)]);
       options(recordSelect, choices);
       recordOptions = signature;
     }
     recordPicker.hidden = !data.length;
-    recordSelect.value = selected?.id || "";
+    if (recordSelect.value !== (selected?.id || "")) recordSelect.value = selected?.id || "";
+    const content = recordSelect.querySelector("selectedcontent"), labelSignature = selected && JSON.stringify([selected.id, selected.request, regions(selected)]);
+    if (selected && content && content.dataset.recordLabel !== labelSignature) {
+      content.replaceChildren(recordLabel(selected));
+      content.dataset.recordLabel = labelSignature;
+    }
     const visible = selected ? [selected] : [];
     const next = JSON.stringify([t, visible, historyTool, historyError]);
     if (next !== snapshot) {
       snapshot = next;
       render(visible);
     }
+  }
+  function recordLabel(item) {
+    const endpoint = (value) => {
+      const name = value.name && value.name !== value.address ? value.name : value.agent_id ? "节点" : "目标 IP";
+      const label = value.agent_id ? nodeName(ctx, {id:value.agent_id, name,
+        region_code:regionAgents.find(agent => agent.id === value.agent_id)?.region_code || ""}) : name;
+      return node("div", {}, label, node("div", {}, muted(value.address)));
+    };
+    return node("div", {},
+      muted(`${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()}`),
+      node("div", {className:"a-tools-endpoints", "data-record-endpoints":""},
+        endpoint(item.request.node1),
+        node("span", {className:"a-muted", role:"img", "aria-label":item.request.bidirectional ? "双向" : "单向"}, item.request.bidirectional ? "↔" : "→"),
+        endpoint(item.request.node2)),
+    );
   }
   async function loadPinned() {
     if (!requestedID || readingPinned) return;
@@ -1066,12 +1090,6 @@ function querySummary(tool, out, provider) {
       ? "部分地址未返回归属信息"
       : "已返回归属信息";
   return `IP 查询：${provider} · ${status}`;
-}
-
-function endpointLabel(endpoint) {
-  return endpoint.name && endpoint.name !== endpoint.address
-    ? `${endpoint.name}${endpoint.instance_id ? " · 共享实例" : ""} (${endpoint.address})`
-    : endpoint.address;
 }
 
 // Keep actual API identifiers without repeating a wrapped copy of the summary.

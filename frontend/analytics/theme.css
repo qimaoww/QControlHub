@@ -276,6 +276,9 @@ strong, b { font-weight: 600; }
   .a-field select > button { display: flex; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: start; }
   .a-field selectedcontent { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .a-field select::picker-icon { content: ""; width: 7px; height: 7px; flex: none; margin-inline: auto 3px; border-right: 1.5px solid #71717a; border-bottom: 1.5px solid #71717a; rotate: 45deg; translate: 0 -2px; }
+  .a-tools-page select[name="measurement"] selectedcontent { white-space: normal; }
+  .a-tools-page select[name="measurement"] { position: relative; }
+  .a-tools-page select[name="measurement"]::picker-icon { position: absolute; inset-inline-end: 16px; inset-block-start: 22px; margin: 0; }
   .a-field select:open { border-color: #a1a1aa; }
   .a-field select::picker(select) {
     padding: 4px; margin-block: 6px; border: 1px solid var(--border); border-radius: 8px;
@@ -635,6 +638,7 @@ strong, b { font-weight: 600; }
 .a-tools-parameters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .a-tools-endpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin: 0; }
 .a-tools-endpoints > div { min-width: 0; }
+.a-tools-endpoints[data-record-endpoints] { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: center; }
 .a-tools-endpoints dt { margin-bottom: 6px; color: var(--soft-ink); font-size: var(--text-label); }
 .a-tools-endpoints dd { margin: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .a-tools-measurement { min-width: 0; padding-top: 24px; border-top: 1px solid var(--border); }

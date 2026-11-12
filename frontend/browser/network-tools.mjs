@@ -38,7 +38,16 @@ export async function testDiagnosticNodeFlags(preview = false) {
     assert.equal(control('address1').value,address,'地区更新重置地址');
     await waitFor(()=>control('measurement').options.length===2,'测量记录未载入');
     const latest = control('measurement').options[0].textContent;
-    for (const text of ['历史来源节点','2001:db8::1','历史目标节点','2001:db8::2','共享实例','↔','ICMP']) assert.ok(latest.includes(text),`记录缺少 ${text}`);
+    for (const text of ['历史来源节点','2001:db8::1','历史目标节点','2001:db8::2','↔','ICMP']) assert.ok(latest.includes(text),`记录缺少 ${text}`);
+    assert.equal(control('measurement').options[0].querySelectorAll('.a-probe-name').length,2,'记录未分行');
+    for (const root of [control('measurement').options[0],control('measurement').querySelector('selectedcontent')]) {
+      assert.ok(root.querySelector('[data-region-code="HK"]') && root.querySelector('[data-region-code="TW"]'),'记录两端旗帜缺失');
+    }
+    assert.ok(!latest.includes('最新') && !latest.includes('共享实例'),'记录保留冗余标签');
+    const path = control('measurement').querySelector('selectedcontent [data-record-endpoints]');
+    const [source, direction, target] = [...path.children].map(child=>child.getBoundingClientRect());
+    assert.ok(source.right<direction.left && direction.right<target.left,'方向箭头未独立置于两端之间');
+    assert.ok(Math.abs(direction.top+direction.height/2-(source.top+source.height/2))<2,'方向箭头未垂直居中');
     choose('measurement','record-1');
     assert.ok(host.querySelector('[data-refresh-key="record-1"]'),'选择记录与结果不一致');
     assert.equal(control('measurement').options[1].textContent.split('192.0.2.99').length,2,'自定义目标地址重复');
@@ -52,8 +61,17 @@ export async function testDiagnosticNodeFlags(preview = false) {
     assert.equal(document.activeElement,control('node1'),'地区刷新丢失焦点');
     assert.equal(control('address1').value,address,'刷新重置参数');
     assert.equal(control('measurement').value,'record-1','刷新重置历史记录选择');
+    assert.ok(control('measurement').querySelector('selectedcontent [data-region-code="US"]'),'地区刷新未更新已选记录旗帜');
     choose('measurement','record-0');
     if (preview) return;
+    records[0].request.node1.name += '超长节点名称'.repeat(12);
+    records[0].request.node1.address = '2001:db8:1234:5678:abcd:ef01:2345:6789';
+    await refresh();
+    const selectedRecord = control('measurement').querySelector('selectedcontent');
+    assert.ok(selectedRecord.textContent.includes(records[0].request.node1.address),'记录截断 IPv6 数据');
+    for (const column of selectedRecord.querySelectorAll('.a-tools-endpoints > div')) assert.ok(column.scrollWidth<=column.clientWidth+1,'长记录信息超出分组');
+    selectedRecord.querySelector('img').dispatchEvent(new Event('error'));
+    assert.ok(selectedRecord.textContent.includes('US') && selectedRecord.textContent.includes('历史来源节点'),'记录旗帜失败未回退');
     [...host.querySelectorAll('button')].find(button=>button.textContent==='交换两端').click();
     assert.equal(code(1),'TW','交换后节点1旗帜错配');assert.equal(code(2),'US','交换后节点2旗帜错配');
     choose('target_mode','ip');choose('target_mode','');
