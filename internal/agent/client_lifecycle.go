@@ -52,16 +52,32 @@ func (c *Client) initializeNetworkDiagnostics(ctx context.Context) error {
 	var err error
 	c.diagnostics, err = networkdiag.New(ctx, filepath.Join(c.config.StatePath+".network-diagnostics", "journal.json"), &c.taskLifecycleMu)
 	if err == nil {
+		agentContext := ctx
 		c.diagnostics.Prepare = func(ctx context.Context, tool string) error {
 			err := prepareNetworkTool(ctx, tool)
-			capabilities := networkdiag.Capabilities(ctx)
-			c.diagnosticCapabilitiesMu.Lock()
-			c.diagnosticCapabilities = capabilities
-			c.diagnosticCapabilitiesMu.Unlock()
+			// Task cancellation must not poison capabilities published by the Agent.
+			c.refreshDiagnosticCapabilities(agentContext)
 			return err
 		}
 	}
 	return err
+}
+
+func (c *Client) refreshDiagnosticCapabilities(ctx context.Context) {
+	c.diagnosticRefreshMu.Lock()
+	defer c.diagnosticRefreshMu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	capabilities := networkdiag.Capabilities(bounded)
+	if bounded.Err() != nil {
+		return
+	}
+	c.diagnosticCapabilitiesMu.Lock()
+	c.diagnosticCapabilities = capabilities
+	c.diagnosticCapabilitiesMu.Unlock()
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -75,6 +91,25 @@ func (c *Client) Run(ctx context.Context) error {
 	} else {
 		c.diagnosticCapabilities = networkdiag.Capabilities(ctx)
 	}
+	if diagnosticErr == nil {
+		refreshContext, stopRefresh := context.WithCancel(ctx)
+		refreshDone := make(chan struct{})
+		go func() {
+			defer close(refreshDone)
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-refreshContext.Done():
+					return
+				case <-ticker.C:
+					c.refreshDiagnosticCapabilities(refreshContext)
+				}
+			}
+		}()
+		defer func() { stopRefresh(); <-refreshDone }()
+	}
+
 	maintenance, stopMaintenance := context.WithCancel(ctx)
 	maintenanceDone := make(chan struct{})
 	go func() { defer close(maintenanceDone); c.maintainImportedResources(maintenance) }()

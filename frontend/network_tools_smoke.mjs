@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { networkDiagnosticError } from './analytics/network-tools.js';
+const summary='测试节点：NextTrace 原始套接字权限不足';
+const error={message:`${summary}\n诊断详情：\nconflict: ${summary}（请求 ID：req_example）`,requestID:'req_example'};
+const shown=networkDiagnosticError(error);
+assert.equal(shown.split(summary).length,2,'duplicate API cause remained');
+assert.ok(shown.includes('conflict') && shown.includes('req_example'),'API identifiers were lost');
+const distinct={...error,message:`${summary}\n诊断详情：\nbackend: permission denied（请求 ID：req_example）`};
+assert.equal(networkDiagnosticError(distinct),distinct.message,'distinct backend evidence was hidden');
+assert.equal(networkDiagnosticError({message:'Authorization: Bearer secret'}).includes('secret'),false,'feedback leaked credentials');
+console.log('Diagnostic feedback removes only repeated API causes and preserves identifiers');

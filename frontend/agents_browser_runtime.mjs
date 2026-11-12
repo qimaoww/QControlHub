@@ -107,6 +107,8 @@ try {
     await testSharedNodeRuntime(scenario);
   } else if (mode === "readonly") {
     await testReadonlyRuntime(scenario);
+  } else if (mode.startsWith("diagnostic-regions")) {
+    await (await import('./browser/network-tools.mjs')).testDiagnosticNodeFlags(new URLSearchParams(location.search).has('preview'));
   } else if (mode.startsWith("regions")) {
     await testRegionRuntime(scenario);
   } else if (mode.startsWith("enrollment")) {

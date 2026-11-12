@@ -12,6 +12,8 @@ import {
   table,
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
+import { redactDiagnostic } from "../modules/errors.js";
+import { nodeName } from "./node-region.js";
 import { requestID } from "./request-id.js";
 import { networkName, networkKind } from "./nexttrace-format.js";
 import { downloadMeasurementImage } from "./network-tools-export.js";
@@ -47,6 +49,7 @@ const providers = [
 ];
 
 export function networkToolsPage(ctx) {
+  let regionAgents = [], readingRegions = false, readingNodes = false;
   let nodes,
     nodesSnapshot,
     reading = false,
@@ -69,6 +72,8 @@ export function networkToolsPage(ctx) {
   const recordPicker = field("测量时间", "measurement", "", { options: [] }),
     recordSelect = recordPicker.querySelector("select");
   recordSelect.addEventListener("change", () => {
+    const content = recordSelect.querySelector("selectedcontent");
+    if (content) delete content.dataset.recordLabel;
     if (recordSelect.selectedIndex === 0) recordChoices.delete(value("tool"));
     else recordChoices.set(value("tool"), recordSelect.value);
     snapshot = undefined;
@@ -163,6 +168,7 @@ export function networkToolsPage(ctx) {
         if ([...select.options].some(option => option.value === address) && address)
           select.value = address;
       }
+      syncSelectedNodeLabels([controls.get("node1"), controls.get("node2")]);
       update();
     },
     { glyph: "sync" },
@@ -202,14 +208,66 @@ export function networkToolsPage(ctx) {
     return `${n.agent_id}/${n.instance_id || ""}`;
   }
   function options(select, items) {
-    select.replaceChildren(
-      node(
-        "button",
-        { type: "button", tabindex: "-1" },
-        node("selectedcontent"),
-      ),
-      ...items.map(([v, t]) => node("option", { value: v }, t)),
-    );
+    const old = new Map([...select.options].map(option => [option.value, option]));
+    const desired = items.map(([v, t]) => {
+      const fresh = node("option", { value: v }, t), existing = old.get(v);
+      return existing ? patch(existing, fresh) : fresh;
+    });
+    if (!select.querySelector("button")) select.prepend(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")));
+    for (const option of [...select.options]) if (!desired.includes(option)) option.remove();
+    desired.forEach((option, index) => { if (select.options[index] !== option) select.insertBefore(option, select.options[index] || null); });
+  }
+  function nodeLabel(n) {
+    const agent = regionAgents.find(agent => agent.id === n.agent_id);
+    // The diagnostic identity remains agent_id/instance_id. Only the shared
+    // name component receives the host ID used by the existing region API.
+    const label = nodeName(ctx, { id: n.agent_id,
+      name: `${n.name}${n.instance_id ? " · 共享实例" : ""}${n.online ? "" : " · 离线"}`,
+      region_code: agent?.region_code || "" });
+    label.dataset.diagnosticNode = key(n);
+    label.dataset.regionCode = agent?.region_code || "";
+    return label;
+  }
+  async function loadRegions() {
+    if (readingRegions) return;
+    readingRegions = true;
+    try {
+      const agents = await ctx.api("/agents");
+      if (!ctx.current()) return;
+      regionAgents = agents;
+      refreshRegionLabels();
+    } catch (error) {
+      if (ctx.current() && [401, 403].includes(error.status)) {
+        regionAgents = [];
+        refreshRegionLabels();
+      }
+    } finally { readingRegions = false; }
+  }
+  function refreshRegionLabels() {
+    for (const i of [1, 2]) {
+      // Update option content in place: keep the open picker, focus, selected
+      // value and address controls intact while region resolution completes.
+      for (const label of controls.get(`node${i}`).querySelectorAll("option [data-diagnostic-node]")) {
+        const n = nodes?.find(n => key(n) === label.dataset.diagnosticNode);
+        if (!n) continue;
+        const fresh = nodeLabel(n);
+        if (label.dataset.regionCode !== fresh.dataset.regionCode) patch(label, fresh);
+      }
+    }
+    syncSelectedNodeLabels();
+    renderSnapshot();
+  }
+  function syncSelectedNodeLabels(changed = []) {
+    for (const i of [1, 2]) {
+      const n = selected(i), content = controls.get(`node${i}`).querySelector("selectedcontent");
+      if (!n || !content) continue;
+      const fresh = nodeLabel(n), old = content.querySelector("[data-diagnostic-node]");
+      // Native selectedcontent clones on selection, but does not follow a
+      // descendant's asynchronous region update in supported Chromium builds.
+      if (changed.includes(controls.get(`node${i}`)) || old?.dataset.diagnosticNode !== fresh.dataset.diagnosticNode ||
+          old?.dataset.regionCode !== fresh.dataset.regionCode || old?.textContent !== fresh.textContent)
+        content.replaceChildren(fresh);
+    }
   }
   function addresses(i) {
     const n = selected(i),
@@ -224,7 +282,8 @@ export function networkToolsPage(ctx) {
       ? old
       : ips.find((ip) => !ip.includes(":")) || ips[0] || "";
   }
-  function update() {
+  function update(event) {
+    syncSelectedNodeLabels(event?.target ? [event.target] : []);
     const custom = value("target_mode") === "ip";
     n2.hidden = a2.hidden = custom;
     customIP.hidden = !custom;
@@ -366,6 +425,8 @@ export function networkToolsPage(ctx) {
   });
   form.addEventListener("change", update);
   async function loadNodes() {
+    if (readingNodes) return;
+    readingNodes = true;
     try {
       const data = await ctx.api("/network-diagnostics/nodes");
       if (!ctx.current()) return;
@@ -380,10 +441,10 @@ export function networkToolsPage(ctx) {
           ["", "请选择"],
           ...nodes.map((n) => [
             key(n),
-            `${n.name}${n.instance_id ? " · 共享实例" : ""}${n.online ? "" : " · 离线"}`,
+            nodeLabel(n),
           ]),
         ]);
-        select.value = old;
+        if (select.value !== old) select.value = old;
         addresses(i);
       }
       update();
@@ -394,11 +455,11 @@ export function networkToolsPage(ctx) {
         if (e.status === 401 || e.status === 403)
           for (const name of ["node1", "node2", "address1", "address2"])
             options(controls.get(name), [["", "请选择"]]);
-        capability.textContent = e.message;
+        capability.textContent = networkDiagnosticError(e);
         capability.hidden = false;
         forward.disabled = both.disabled = true;
       }
-    }
+    } finally { readingNodes = false; }
   }
   async function submit(bidirectional) {
     if (creating) return;
@@ -464,7 +525,7 @@ export function networkToolsPage(ctx) {
       await loadResults();
     } catch (e) {
       if (ctx.current()) {
-        feedback.textContent = e.message;
+        feedback.textContent = networkDiagnosticError(e);
         await loadResults();
       }
     } finally {
@@ -510,7 +571,7 @@ export function networkToolsPage(ctx) {
                     );
                     await loadResults();
                   } catch (e) {
-                    feedback.textContent = e.message;
+                    feedback.textContent = networkDiagnosticError(e);
                   }
                 },
                 { disabled: d.state === "stopping" },
@@ -525,10 +586,11 @@ export function networkToolsPage(ctx) {
                     method: "POST",
                     body: {},
                   });
+                  feedback.textContent = "";
                   recordChoices.delete(tool);
-                  await loadResults();
+                  await Promise.allSettled([loadNodes(), loadResults()]);
                 } catch (e) {
-                  feedback.textContent = e.message;
+                  feedback.textContent = networkDiagnosticError(e);
                   await loadResults();
                 } finally {
                   if (control.isConnected) control.disabled = false;
@@ -553,7 +615,7 @@ export function networkToolsPage(ctx) {
                     const hidden=record.querySelector('input[name="export-sensitive"]').checked;
                     control.disabled=true;
                     try { await downloadMeasurementImage(d, record, hidden, () => ctx.current()); }
-                    catch(e) { feedback.textContent=e.message; }
+                    catch(e) { feedback.textContent=networkDiagnosticError(e); }
                     finally { exportingImages.delete(d.id); if(control.isConnected) control.disabled=false; }
                   }, {disabled:exportingImages.has(d.id)}),
                   field("隐藏敏感信息", "export-sensitive", true, {type:"checkbox", title:"隐藏节点名称、IP、主机名及诊断原文"}),
@@ -645,8 +707,8 @@ export function networkToolsPage(ctx) {
       renderSnapshot();
     } catch (e) {
       if (ctx.current() && requestedTool === value("tool")) {
-        feedback.textContent = e.message;
-        historyError = e.message;
+        feedback.textContent = networkDiagnosticError(e);
+        historyError = networkDiagnosticError(e);
         if (e.status === 401 || e.status === 403) {
           history = [];
           pinned = undefined;
@@ -673,21 +735,41 @@ export function networkToolsPage(ctx) {
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const choice = recordChoices.get(t), selected = data.find(item => item.id === choice) || data[0];
     if (choice && !data.some(item => item.id === choice)) recordChoices.delete(t);
-    const choices = data.map((item, index) => [item.id,
-      `${index === 0 ? "最新 · " : ""}${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()}`]);
-    const signature = JSON.stringify([t, choices]);
+    const regions = item => [item.request.node1, item.request.node2].map(endpoint => regionAgents.find(agent => agent.id === endpoint.agent_id)?.region_code || "");
+    const signature = JSON.stringify([t, data.map(item => [item.id, item.created_at, item.request, regions(item)])]);
     if (signature !== recordOptions) {
+      const choices = data.map(item => [item.id, recordLabel(item)]);
       options(recordSelect, choices);
       recordOptions = signature;
     }
     recordPicker.hidden = !data.length;
-    recordSelect.value = selected?.id || "";
+    if (recordSelect.value !== (selected?.id || "")) recordSelect.value = selected?.id || "";
+    const content = recordSelect.querySelector("selectedcontent"), labelSignature = selected && JSON.stringify([selected.id, selected.request, regions(selected)]);
+    if (selected && content && content.dataset.recordLabel !== labelSignature) {
+      content.replaceChildren(recordLabel(selected));
+      content.dataset.recordLabel = labelSignature;
+    }
     const visible = selected ? [selected] : [];
     const next = JSON.stringify([t, visible, historyTool, historyError]);
     if (next !== snapshot) {
       snapshot = next;
       render(visible);
     }
+  }
+  function recordLabel(item) {
+    const endpoint = (value) => {
+      const name = value.name && value.name !== value.address ? value.name : value.agent_id ? "节点" : "目标 IP";
+      const label = value.agent_id ? nodeName(ctx, {id:value.agent_id, name,
+        region_code:regionAgents.find(agent => agent.id === value.agent_id)?.region_code || ""}) : name;
+      return node("div", {}, label, node("div", {}, muted(value.address)));
+    };
+    return node("div", {},
+      muted(`${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()}`),
+      node("div", {className:"a-tools-endpoints", "data-record-endpoints":""},
+        endpoint(item.request.node1),
+        node("span", {className:"a-muted", role:"img", "aria-label":item.request.bidirectional ? "双向" : "单向"}, item.request.bidirectional ? "↔" : "→"),
+        endpoint(item.request.node2)),
+    );
   }
   async function loadPinned() {
     if (!requestedID || readingPinned) return;
@@ -708,7 +790,7 @@ export function networkToolsPage(ctx) {
       }
     } catch (error) {
       if (ctx.current()) {
-        feedback.textContent = error.message;
+        feedback.textContent = networkDiagnosticError(error);
         if ([401, 403, 404].includes(error.status)) {
           pinned = undefined;
           history =
@@ -723,11 +805,12 @@ export function networkToolsPage(ctx) {
     }
   }
   const refresh = () =>
-    Promise.allSettled([loadNodes(), loadResults(), loadPinned()]);
+    Promise.allSettled([loadNodes(), loadRegions(), loadResults(), loadPinned()]);
   ctx.onRefresh(refresh);
   void refresh();
   poll(ctx, loadResults, 2000);
   poll(ctx, loadNodes, 10000);
+  poll(ctx, loadRegions, 10000);
   if (requestedID) poll(ctx, loadPinned, 2000);
   const grantHost = node("div", { className: "a-stack" });
   if (ctx.can("agents.manage")) {
@@ -749,7 +832,7 @@ export function networkToolsPage(ctx) {
           ]);
       })
       .catch((e) => {
-        if (ctx.current()) grantHost.textContent = e.message;
+        if (ctx.current()) grantHost.textContent = networkDiagnosticError(e);
       });
     select.addEventListener("change", async () => {
       const epoch = ++grantEpoch,
@@ -791,7 +874,7 @@ export function networkToolsPage(ctx) {
                 await loadNodes();
               } catch (e) {
                 input.checked = !input.checked;
-                feedback.textContent = e.message;
+                feedback.textContent = networkDiagnosticError(e);
               } finally {
                 input.disabled = false;
               }
@@ -801,7 +884,7 @@ export function networkToolsPage(ctx) {
         );
       } catch (e) {
         if (ctx.current() && epoch === grantEpoch)
-          grantHost.textContent = e.message;
+          grantHost.textContent = networkDiagnosticError(e);
       }
     });
     return node("div", {className:"a-stack a-tools-page"},
@@ -1009,8 +1092,15 @@ function querySummary(tool, out, provider) {
   return `IP 查询：${provider} · ${status}`;
 }
 
-function endpointLabel(endpoint) {
-  return endpoint.name && endpoint.name !== endpoint.address
-    ? `${endpoint.name} (${endpoint.address})`
-    : endpoint.address;
+// Keep actual API identifiers without repeating a wrapped copy of the summary.
+export function networkDiagnosticError(error) {
+  const text = redactDiagnostic(error?.message || "操作未完成");
+  const marker = "\n诊断详情：\n", boundary = text.indexOf(marker);
+  if (boundary < 0) return text;
+  const summary = text.slice(0, boundary), suffix = error.requestID ? `（请求 ID：${error.requestID}）` : "";
+  const details = text.slice(boundary + marker.length);
+  const cause = suffix && details.endsWith(suffix) ? details.slice(0, -suffix.length) : details;
+  const wrapped = cause.match(/^([a-z][a-z _-]{0,63}): ([\s\S]*)$/);
+  if (!wrapped || wrapped[2] !== summary) return text;
+  return `${summary}（${wrapped[1]}${error.requestID ? `；请求 ID：${error.requestID}` : ""}）`;
 }

@@ -1,3 +1,4 @@
+import "./network_tools_smoke.mjs";
 import "./formatting_smoke.mjs";
 import "./request_id_smoke.mjs";
 import "./certificate_order_smoke.mjs";
