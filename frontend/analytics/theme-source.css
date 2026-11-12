@@ -625,3 +625,36 @@ strong, b { font-weight: 600; }
   .a-tools-metric-value { font-size: 24px; }
   .a-tools-metric-unit { font-size: 12px; }
 }
+
+/* A shared, open layout for all four network tools. */
+.a-tools-page { gap: 32px; }
+.a-tools-panel { min-width: 0; padding: 0 4px; }
+.a-tools-panel > h2 { margin: 0 0 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.a-tools-form { gap: 24px; }
+.a-tools-choices { padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.a-tools-parameters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.a-tools-endpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin: 0; }
+.a-tools-endpoints > div { min-width: 0; }
+.a-tools-endpoints dt { margin-bottom: 6px; color: var(--soft-ink); font-size: var(--text-label); }
+.a-tools-endpoints dd { margin: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.a-tools-measurement { min-width: 0; padding-top: 24px; border-top: 1px solid var(--border); }
+.a-tools-path-status { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 24px; padding: 12px 0; border-top: 1px solid var(--border); }
+.a-tools-measurement .a-table-scroll { border: 0; border-radius: 0; }
+.a-tools-measurement .a-table-scroll :is(th,td) { font-variant-numeric: tabular-nums; }
+.a-tools-measurement .a-table-scroll th { white-space: nowrap; }
+@media (max-width: 1200px) {
+  .a-tools-parameters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .a-tools-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .a-tools-page { gap: 24px; }
+  .a-tools-panel { padding: 0; }
+  .a-tools-form { gap: 20px; }
+  .a-tools-endpoint-form { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .a-tools-endpoints:not(.a-tools-endpoint-form) { gap: 16px; }
+  .a-tools-measurement { padding-top: 20px; }
+  .a-tools-parameters { gap: 16px 12px; }
+  .a-tools-parameters .a-field-label { min-height: 36px; display: flex; align-items: end; }
+}

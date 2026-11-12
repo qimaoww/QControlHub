@@ -40,6 +40,9 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
       text(outcome || (r.state==="running"?"正在探测":"未确认目标可达"),14,soft);
     }
     if (r.error && !hideSensitive) text(r.error,14,soft);
+    for (const metric of rendered.querySelectorAll(`[data-measurement-result="${CSS.escape(r.id)}"] [data-export-output] .a-tools-metrics > div`)) {
+      text(`${metric.querySelector("dt").textContent}: ${metric.querySelector(".a-tools-metric-value").textContent} ${metric.querySelector(".a-tools-metric-unit").textContent}`,16);
+    }
     const tables=[...rendered.querySelectorAll(`[data-measurement-result="${CSS.escape(r.id)}"] [data-export-output] table`)];
     if (!tables.length) {text("尚无结果",16,soft);continue;}
     for (const table of tables) {

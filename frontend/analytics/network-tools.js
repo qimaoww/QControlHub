@@ -3,7 +3,6 @@ import {
   button,
   actions,
   stack,
-  grid,
   section,
   field,
   muted,
@@ -183,10 +182,10 @@ export function networkToolsPage(ctx) {
   );
   const form = node(
     "form",
-    { className: "a-stack a-card-body", onsubmit: (e) => e.preventDefault() },
-    node("div", { className: "a-form-grid" }, tool, protocol, targetMode),
+    { className: "a-stack a-tools-form", onsubmit: (e) => e.preventDefault() },
+    node("div", { className: "a-form-grid a-tools-choices" }, tool, protocol, targetMode),
     actions(node("h3", {}, "测试两端"), swap),
-    grid(stack(n1, a1), targetColumn),
+    node("div", {className:"a-tools-endpoints a-tools-endpoint-form"}, stack(n1, a1), targetColumn),
     capability,
     node("h3", {}, "测试参数"),
     parameterGrid,
@@ -234,7 +233,7 @@ export function networkToolsPage(ctx) {
     const t = value("tool"),
       p = value("protocol"),
       trace = ["traceroute", "mtr"].includes(t);
-    parameterGrid.className = t === "ping" ? "a-grid" : "a-form-grid";
+    parameterGrid.className = "a-tools-parameters";
     count
       .querySelector(".a-field-label")
       ?.replaceChildren(
@@ -585,9 +584,8 @@ export function networkToolsPage(ctx) {
                       const reverse = r.id.endsWith("-reverse");
                       const from = reverse ? req.node2 : req.node1,
                         to = reverse ? req.node1 : req.node2;
-                      return section(
-                        "",
-                        node("div", { className: "a-card-body a-stack", "data-measurement-result": r.id },
+                      return node("section", {className:"a-tools-measurement"},
+                        node("div", { className: "a-stack", "data-measurement-result": r.id },
                         actions(
                           node(
                             "h3",
@@ -600,9 +598,8 @@ export function networkToolsPage(ctx) {
                           ),
                           badge(labels[r.state] || r.state),
                         ),
-                        grid(
-                          stack(muted("来源"), node("strong", {}, from.name || from.address), from.name && muted(from.address)),
-                          stack(muted("目标"), node("strong", {}, to.name || to.address), to.name && muted(to.address)),
+                        node("dl", {className:"a-tools-endpoints"},
+                          endpointView("来源", from), endpointView("目标", to),
                         ),
                         (r.error || r.output?.error) &&
                           r.error !== "测量已停止" &&
@@ -805,9 +802,9 @@ export function networkToolsPage(ctx) {
           grantHost.textContent = e.message;
       }
     });
-    return stack(
-      section("新建测量", form),
-      section("测量记录", node("div", { className: "a-card-body a-stack" }, recordPicker, results)),
+    return node("div", {className:"a-stack a-tools-page"},
+      toolPanel("新建测量", form),
+      toolPanel("测量记录", node("div", { className: "a-stack" }, recordPicker, results)),
       node(
         "details",
         {},
@@ -827,41 +824,47 @@ export function networkToolsPage(ctx) {
       ),
     );
   }
-  return stack(
-    section("新建测量", form),
-    section("测量记录", node("div", { className: "a-card-body a-stack" }, recordPicker, results)),
+  return node("div", {className:"a-stack a-tools-page"},
+    toolPanel("新建测量", form),
+    toolPanel("测量记录", node("div", { className: "a-stack" }, recordPicker, results)),
   );
+}
+
+function toolPanel(title, content) {
+  return node("section", {className:"a-tools-panel"}, node("h2", {}, title), content);
+}
+function endpointView(label, endpoint) {
+  return node("div", {}, node("dt", {}, label), node("dd", {},
+    node("strong", {}, endpoint.name || endpoint.address),
+    endpoint.name && muted(endpoint.address),
+  ));
+}
+function metricStrip(label, items) {
+  return node("dl", {className:"a-tools-metrics", "aria-label":label},
+    ...items.map(([name,value,unit]) => node("div", {}, node("dt",{},name),
+      node("dd",{},node("span",{className:"a-tools-metric-value"},value),
+        node("span",{className:"a-tools-metric-unit"},unit)))));
 }
 
 function renderOutput(tool, out, state, rounds) {
   const running = state === "running";
   if (!out) return muted("尚无结果");
   if (tool === "ping")
-    return table(
-      [
-        "发送",
-        "接收",
-        "丢包",
-        "最小 / 平均 / 最大（ms）",
-        "标准差（ms）",
-        "目标响应",
-      ],
-      [
-        [
-          number(out.sent),
-          number(out.received),
-          `${number(out.loss_percent)}%`,
-          out.received > 0
-            ? `${number(out.min_ms)} / ${number(out.avg_ms)} / ${number(out.max_ms)}`
-            : "—",
-          out.received > 0 ? number(out.stdev_ms) : "—",
-          out.reached ? "已收到响应" : "未收到目标响应",
-        ],
-      ],
+    return stack(
+      metricStrip("Ping 统计", [
+        ["发送", number(out.sent), "包"],
+        ["接收", number(out.received), "包"],
+        ["丢包", number(out.loss_percent), "%"],
+        ["平均延迟", out.received > 0 ? number(out.avg_ms) : "—", "ms"],
+      ]),
+      table(["最小延迟（ms）", "最大延迟（ms）", "标准差（ms）", "目标响应"], [[
+        ...[out.min_ms, out.max_ms, out.stdev_ms].map(v => out.received > 0 ? number(v) : "—"),
+        out.reached ? "已收到响应" : "未收到目标响应",
+      ]], {paginate:false, label:"Ping 延迟统计"}),
     );
   if (tool === "mtr")
     return stack(
-      actions(
+      node("div", {className:"a-tools-path-status"},
         traceEnd(out.path_end?.reason, running),
         Number.isInteger(out.iteration) && muted(`轮次 ${out.iteration} / ${rounds}`),
       ),
@@ -896,7 +899,7 @@ function renderOutput(tool, out, state, rounds) {
       if (!hop.geo && h.Geo) hop.geo = h.Geo;
     }
     return stack(
-      traceEnd(out.StopReason?.reason, running),
+      node("div", {className:"a-tools-path-status"}, traceEnd(out.StopReason?.reason, running)),
       table(
         ["跳数", "响应地址", "ASN", "网络", "归属", "延迟（ms）"],
         [...hops.values()].map(h => [
@@ -931,13 +934,12 @@ function renderOutput(tool, out, state, rounds) {
   const intervals = (out.intervals || []).filter(item => item?.sum).map(item => item.sum);
   const current = intervals.at(-1);
   return stack(
-    current && node("dl", {className:"a-tools-metrics", "aria-label":"测速概况"},
-      ...[[running ? "当前吞吐" : "最后一秒吞吐", number(current.bits_per_second/1000000), "Mbit/s"],
+    current && metricStrip("测速概况", [
+      [running ? "当前吞吐" : "最后一秒吞吐", number(current.bits_per_second/1000000), "Mbit/s"],
       ["平均吞吐", number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)*8/Math.max(current.end,0.001)/1000000), "Mbit/s"],
       ["累计传输", number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)/1048576), "MiB"],
-      ["已测时长", number(current.end), "s"]].map(([label,value,unit]) =>
-        node("div", {}, node("dt",{},label), node("dd",{},node("span",{className:"a-tools-metric-value"},value),node("span",{className:"a-tools-metric-unit"},unit)))),
-    ),
+      ["已测时长", number(current.end), "s"],
+    ]),
     intervals.length>0 && stack(
       node("h3",{},"测速过程"),
       table(["时间段（s）", "吞吐", "传输量", "重传", "抖动（ms）", "丢包"], intervals.map(item => [
