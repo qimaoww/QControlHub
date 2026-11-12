@@ -355,7 +355,10 @@ func (s *Store) GetDiagnostic(ctx context.Context, id string) (core.DiagnosticSe
 	return d, nil
 }
 func (s *Store) ListDiagnostics(ctx context.Context) ([]core.DiagnosticSession, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM network_diagnostic_sessions WHERE owner_id=$1 AND (created_at>now()-interval '7 days' OR state IN ('preparing','running','stopping','cleanup_pending')) ORDER BY created_at DESC LIMIT 30`, scopeForConfig(ctx).OwnerID)
+	return s.ListDiagnosticsForTool(ctx, "")
+}
+func (s *Store) ListDiagnosticsForTool(ctx context.Context, tool string) ([]core.DiagnosticSession, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM network_diagnostic_sessions WHERE owner_id=$1 AND ($2='' OR document->'request'->'parameters'->>'tool'=$2) AND (created_at>now()-interval '7 days' OR state IN ('preparing','running','stopping','cleanup_pending')) ORDER BY created_at DESC LIMIT 30`, scopeForConfig(ctx).OwnerID, tool)
 	if err != nil {
 		return nil, err
 	}

@@ -58,15 +58,18 @@ export function networkToolsPage(ctx) {
     location.hash.split("?")[1] || "",
   ).get("measurement");
   let history = [],
+    historyTool = "", historyError = "",
     pinned,
     readingPinned = false;
-  const controls = new Map(),
-    expanded = new Map();
-  results.addEventListener("click", (event) => {
-    const summary = event.target.closest("summary");
-    const disclosure = summary?.parentElement;
-    if (disclosure?.hasAttribute("data-refresh-key"))
-      expanded.set(disclosure.dataset.refreshKey, !disclosure.open);
+  const controls = new Map(), recordChoices = new Map();
+  let recordOptions = "", pinnedOpened = false;
+  const recordPicker = field("测量时间", "measurement", "", { options: [] }),
+    recordSelect = recordPicker.querySelector("select");
+  recordSelect.addEventListener("change", () => {
+    if (recordSelect.selectedIndex === 0) recordChoices.delete(value("tool"));
+    else recordChoices.set(value("tool"), recordSelect.value);
+    snapshot = undefined;
+    renderSnapshot();
   });
   function f(label, name, value, attrs = {}) {
     const el = field(label, name, value, attrs);
@@ -332,19 +335,35 @@ export function networkToolsPage(ctx) {
           : ["icmp", "tcp", "udp"]
       ).map((p) => [p, p.toUpperCase()]),
     );
-    controls.get("size").value = t === "iperf3" ? 131072 : 64;
+    controls.get("count").value = t === "traceroute" ? 3 : t === "mtr" ? 10 : 5;
+    controls.get("size").value = t === "iperf3" ? 131072 : t === "traceroute" ? 28 : 64;
+    controls.get("port").value = t === "iperf3" ? 5201 : 80;
     update();
+    renderSnapshot();
+    void loadResults();
   });
   controls.get("protocol").addEventListener("change", () => {
     if (value("tool") === "iperf3")
       controls.get("size").value = value("protocol") === "udp" ? 1200 : 131072;
+    if (value("tool") === "traceroute") {
+      const ipv6 = value("address1").includes(":"), p = value("protocol");
+      controls.get("size").value = (p === "tcp" ? 44 : 28) + (ipv6 ? p === "udp" ? 22 : 20 : 0);
+      controls.get("port").value = p === "udp" ? 33494 : 80;
+    }
     update();
   });
   for (const i of [1, 2])
     controls.get(`node${i}`).addEventListener("change", () => {
       addresses(i);
       update();
+      if (value("tool") === "traceroute")
+        controls.get("size").value = Math.max(Number(value("size")), Number(controls.get("size").min));
     });
+  controls.get("address1").addEventListener("change", () => {
+    update();
+    if (value("tool") === "traceroute")
+      controls.get("size").value = Math.max(Number(value("size")), Number(controls.get("size").min));
+  });
   form.addEventListener("change", update);
   async function loadNodes() {
     try {
@@ -440,6 +459,7 @@ export function networkToolsPage(ctx) {
         body: pending.body,
       });
       pending = null;
+      recordChoices.delete(body.parameters.tool);
       await loadResults();
     } catch (e) {
       if (ctx.current()) {
@@ -456,7 +476,7 @@ export function networkToolsPage(ctx) {
       "div",
       { className: "a-stack" },
       items.length
-        ? items.map((d, index) => {
+        ? items.map((d) => {
             const req = d.request,
               tool = req.parameters.tool,
               params = req.parameters;
@@ -470,11 +490,11 @@ export function networkToolsPage(ctx) {
               (r) => !r.id.endsWith("-server"),
             );
             const server = d.results?.[d.id + "-server"];
-            const direction = req.bidirectional ? "⇄" : "→";
-            const summary = node(
-              "summary",
-              {},
-              `${new Date(d.created_at).toLocaleString("zh-CN")} · ${name} / ${params.protocol.toUpperCase()} · ${req.node1.name} ${direction} ${req.node2.name} · ${labels[d.state] || d.state}`,
+            const summary = actions(
+              node("h3", {}, name),
+              badge(params.protocol.toUpperCase()),
+              badge(labels[d.state] || d.state),
+              req.bidirectional && badge("双向"),
             );
             const stop =
               !terminal(d.state) &&
@@ -503,6 +523,7 @@ export function networkToolsPage(ctx) {
                     method: "POST",
                     body: {},
                   });
+                  recordChoices.delete(tool);
                   await loadResults();
                 } catch (e) {
                   feedback.textContent = e.message;
@@ -512,21 +533,20 @@ export function networkToolsPage(ctx) {
                 }
               });
             const details = node(
-              "details",
+              "div",
               {
-                className: "a-disclosure",
+                className: "a-stack",
                 "data-refresh-key": d.id,
-                open: index === 0,
               },
               summary,
               node(
                 "div",
-                { className: "a-disclosure-body a-stack" },
+                { className: "a-stack" },
                 actions(stop, retry),
                 muted(
                   tool === "iperf3"
                     ? `${params.duration} s · ${params.streams} 流 · ${number(params.bandwidth / 1000000)} Mbit/s / 流 · ${params.size} 字节`
-                    : `${params.count} ${tool === "mtr" ? "轮" : "次"} · ${params.interval_ms} ms 间隔 · ${params.timeout_ms} ms 超时 · ${params.size} 字节${tool === "ping" ? "负载" : `总包长 · ${params.max_hops} 跳 · ${params.provider}`}`,
+                    : `${tool === "traceroute" ? `每跳 ${params.count} 次探测` : `${params.count} ${tool === "mtr" ? "轮" : "次"}`} · ${params.interval_ms} ms 间隔 · ${params.timeout_ms} ms 超时 · ${params.size} 字节${tool === "ping" ? "负载" : `总包长 · ${params.max_hops} 跳 · ${params.provider}`}`,
                 ),
                 server &&
                   actions(
@@ -558,7 +578,9 @@ export function networkToolsPage(ctx) {
                       const reverse = r.id.endsWith("-reverse");
                       const from = reverse ? req.node2 : req.node1,
                         to = reverse ? req.node1 : req.node2;
-                      return stack(
+                      return section(
+                        "",
+                        node("div", { className: "a-card-body a-stack" },
                         actions(
                           node(
                             "h3",
@@ -571,7 +593,10 @@ export function networkToolsPage(ctx) {
                           ),
                           badge(labels[r.state] || r.state),
                         ),
-                        muted(`${endpointLabel(from)} → ${endpointLabel(to)}`),
+                        grid(
+                          stack(muted("来源"), node("strong", {}, from.name || from.address), from.name && muted(from.address)),
+                          stack(muted("目标"), node("strong", {}, to.name || to.address), to.name && muted(to.address)),
+                        ),
                         (r.error || r.output?.error) &&
                           r.error !== "测量已停止" &&
                           notice(r.error || r.output.error, "error"),
@@ -587,6 +612,7 @@ export function networkToolsPage(ctx) {
                             node("summary", {}, "工具诊断"),
                             code(r.stderr),
                           ),
+                        ),
                       );
                     })
                   : muted(
@@ -596,50 +622,65 @@ export function networkToolsPage(ctx) {
             );
             return details;
           })
-        : muted("暂无测量记录"),
+        : historyError ? notice(historyError, "error") : muted(historyTool === value("tool") ? "暂无测量记录" : "正在读取测量记录…"),
     );
     patch(results, fresh);
-    const ids = new Set(items.map((item) => item.id));
-    for (const id of expanded.keys()) if (!ids.has(id)) expanded.delete(id);
-    for (const disclosure of results.querySelectorAll(
-      "details[data-refresh-key]",
-    )) {
-      const id = disclosure.dataset.refreshKey;
-      disclosure.open = expanded.has(id)
-        ? expanded.get(id)
-        : id === items[0]?.id;
-    }
   }
   async function loadResults() {
     if (reading) return;
     reading = true;
+    const requestedTool = value("tool");
     try {
-      const data = await ctx.api("/network-diagnostics");
-      if (!ctx.current()) return;
+      const data = await ctx.api(`/network-diagnostics?tool=${encodeURIComponent(requestedTool)}`);
+      if (!ctx.current() || requestedTool !== value("tool")) return;
       history = data;
+      historyTool = requestedTool;
+      historyError = "";
       renderSnapshot();
     } catch (e) {
-      if (ctx.current()) {
+      if (ctx.current() && requestedTool === value("tool")) {
         feedback.textContent = e.message;
+        historyError = e.message;
         if (e.status === 401 || e.status === 403) {
           history = [];
           pinned = undefined;
+          recordChoices.clear();
+          recordPicker.hidden = true;
+          options(recordSelect, []);
+          recordOptions = "";
           results.replaceChildren();
           snapshot = undefined;
         }
+        renderSnapshot();
       }
     } finally {
       reading = false;
+      if (ctx.current() && requestedTool !== value("tool")) void loadResults();
     }
   }
   function renderSnapshot() {
-    const data = pinned
+    const all = pinned
       ? [pinned, ...history.filter((item) => item.id !== pinned.id)]
       : history;
-    const next = JSON.stringify(data);
+    const t = value("tool"), data = all
+      .filter(item => item.request.parameters.tool === t)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const choice = recordChoices.get(t), selected = data.find(item => item.id === choice) || data[0];
+    if (choice && !data.some(item => item.id === choice)) recordChoices.delete(t);
+    const choices = data.map((item, index) => [item.id,
+      `${index === 0 ? "最新 · " : ""}${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()}`]);
+    const signature = JSON.stringify([t, choices]);
+    if (signature !== recordOptions) {
+      options(recordSelect, choices);
+      recordOptions = signature;
+    }
+    recordPicker.hidden = !data.length;
+    recordSelect.value = selected?.id || "";
+    const visible = selected ? [selected] : [];
+    const next = JSON.stringify([t, visible, historyTool, historyError]);
     if (next !== snapshot) {
       snapshot = next;
-      render(data);
+      render(visible);
     }
   }
   async function loadPinned() {
@@ -651,6 +692,12 @@ export function networkToolsPage(ctx) {
       );
       if (ctx.current()) {
         pinned = data;
+        if (!pinnedOpened) {
+          pinnedOpened = true;
+          controls.get("tool").value = data.request.parameters.tool;
+          controls.get("tool").dispatchEvent(new Event("change", { bubbles: true }));
+          recordChoices.set(data.request.parameters.tool, data.id);
+        }
         renderSnapshot();
       }
     } catch (error) {
@@ -753,7 +800,7 @@ export function networkToolsPage(ctx) {
     });
     return stack(
       section("新建测量", form),
-      section("测量记录", node("div", { className: "a-card-body" }, results)),
+      section("测量记录", node("div", { className: "a-card-body a-stack" }, recordPicker, results)),
       node(
         "details",
         {},
@@ -775,7 +822,7 @@ export function networkToolsPage(ctx) {
   }
   return stack(
     section("新建测量", form),
-    section("测量记录", node("div", { className: "a-card-body" }, results)),
+    section("测量记录", node("div", { className: "a-card-body a-stack" }, recordPicker, results)),
   );
 }
 
@@ -830,21 +877,30 @@ function renderOutput(tool, out) {
         ]),
       ),
     );
-  if (tool === "traceroute")
+  if (tool === "traceroute") {
+    const hops = new Map();
+    for (const h of (out.Hops || []).flat()) {
+      const ip = h.Success ? (typeof h.Address === "string" ? h.Address : h.Address?.IP) || "*" : "*";
+      const key = `${h.TTL}/${ip}`;
+      if (!hops.has(key)) hops.set(key, { ttl: h.TTL, ip, samples: [], geo: h.Geo, hostname: h.Hostname });
+      const hop = hops.get(key);
+      hop.samples.push(h.Success ? number(h.RTT / 1000000) : "*");
+      if (!hop.geo && h.Geo) hop.geo = h.Geo;
+    }
     return stack(
       muted(pathReason(out.StopReason?.reason)),
       table(
-        ["TTL", "响应地址", "延迟（ms）", "ASN / 归属"],
-        (out.Hops || [])
-          .flat()
-          .map((h) => [
-            h.TTL,
-            h.Success ? h.Address?.IP || h.Address || "*" : "*",
-            h.Success ? number(h.RTT / 1000000) : "无响应",
-            geo(h.Geo),
-          ]),
+        ["跳数", "响应地址", "ASN", "归属", "延迟（ms）"],
+        [...hops.values()].map(h => [
+          h.ttl,
+          stack(node("strong", {}, h.ip), h.hostname && muted(h.hostname)),
+          h.geo?.asnumber || h.geo?.asn || "—",
+          [h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.owner].filter(Boolean).join(" · ") || "—",
+          h.samples.join(" / "),
+        ]),
       ),
     );
+  }
   const end = out.end || {},
     rows = [];
   for (const [name, r] of [

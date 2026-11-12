@@ -19010,6 +19010,17 @@
     "/api/v1/network-diagnostics": {
       "get": {
         "operationId": "listDiagnostics_api_v1_network-diagnostics",
+        "parameters": [
+          {
+            "description": "可选筛选；时间使用带时区 RFC3339，+ 须 URL 编码。",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

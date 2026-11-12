@@ -24,7 +24,14 @@ func (s *Server) diagnosticNodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, nodes)
 }
 func (s *Server) listDiagnostics(w http.ResponseWriter, r *http.Request) {
-	items, e := s.store.ListDiagnostics(r.Context())
+	tool := r.URL.Query().Get("tool")
+	switch tool {
+	case "", "ping", "traceroute", "mtr", "iperf3":
+	default:
+		writeError(w, http.StatusBadRequest, "不支持的诊断工具")
+		return
+	}
+	items, e := s.store.ListDiagnosticsForTool(r.Context(), tool)
 	if e != nil {
 		writeStoreError(w, e)
 		return
