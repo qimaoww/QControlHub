@@ -118,17 +118,18 @@ async function testSSRustOverrides(){
     const test=await fixture('ss-rust',{native:true,shared,tags:[tag,'second'],globalFields:{outbound_bind_addr:'192.0.2.1'}});test.confirm=true;
     const edit=async()=>{
       test.select(tag);test.click('modify');
-      await waitFor(()=>dialog()?.querySelector('[name=fragment]'),'native SS Rust source editor missing');
+      await waitFor(()=>dialog()?.querySelector('[name=content]'),'custom SS Rust configuration editor missing');
       return dialog().querySelector('form');
     };
     const submit=async(current,fragment,count)=>{
-      current.elements.fragment.value=JSON.stringify(fragment,null,2);current.elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));
+      const document=JSON.parse(current.elements.content.value);document.servers=document.servers.map(item=>item.remarks===tag?fragment:item);
+      current.elements.content.value=JSON.stringify(document,null,2);current.elements.content.dispatchEvent(new Event('input',{bubbles:true}));
       current.requestSubmit();await test.settle(count);
     };
     try{
-      const original=JSON.parse(test.saved().content),current=await edit(),entry=JSON.parse(current.elements.fragment.value);
-      assert(!dialog().querySelector('img,script')&&dialog().textContent.includes(tag),'inbound identity escaped text or injected markup');
-      assert(test.calls.some(call=>call.path.split('?')[0]===`/agents/node/configs/ss-rust/server-inbounds/${encodeURIComponent(tag)}`),'native source read did not encode selected inbound identity');
+      const original=JSON.parse(test.saved().content),current=await edit(),entry=JSON.parse(current.elements.content.value).servers.find(item=>item.remarks===tag);
+      assert(!dialog().querySelector('img,script')&&entry.remarks===tag,'inbound identity escaped text or injected markup');
+      assert(!test.calls.some(call=>call.path.includes('/server-inbounds/')),'custom configuration unexpectedly fetched a native fragment');
       assert(!Object.hasOwn(entry,'mode')&&!Object.hasOwn(entry,'outbound_bind_addr'),'inherited globals were copied into native port overrides');
       await submit(current,{...entry,mode:'udp_only',outbound_udp_allow_fragmentation:false},1);
       let saved=JSON.parse(test.saved().content);
@@ -139,10 +140,10 @@ async function testSSRustOverrides(){
       form().elements.fragment.value='"tcp_only"';form().elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));test.submit('deploy');await test.settle(2);
       saved=JSON.parse(test.saved().content);
       assert(saved.mode==='tcp_only'&&JSON.stringify(saved.servers)===port,'global default mutation erased port overrides');
-      const reopened=await edit(),inherited=JSON.parse(reopened.elements.fragment.value);delete inherited.mode;
+      const reopened=await edit(),inherited=JSON.parse(reopened.elements.content.value).servers.find(item=>item.remarks===tag);delete inherited.mode;
       await submit(reopened,inherited,3);saved=JSON.parse(test.saved().content);
       assert(saved.mode==='tcp_only'&&!Object.hasOwn(saved.servers.find(item=>item.remarks===tag),'mode')&&saved.servers.find(item=>item.remarks===tag).outbound_udp_allow_fragmentation===false,'removing port override lost inheritance or unrelated options');
-      assert(test.writes[0].original_tag===tag&&test.writes[0].expected_version===1&&test.writes[1].path.endsWith('/fields/mode')&&test.writes[1].expected_version===2&&test.writes[2].expected_version===3,'scoped mutations lost original identity or CAS');
+      assert(test.writes[0].path.endsWith('/source')&&test.writes[0].version===1&&test.writes[1].path.endsWith('/fields/mode')&&test.writes[1].expected_version===2&&test.writes[2].version===3,'scoped mutations lost original identity or CAS');
       assert(test.confirmations.some(item=>item.message.includes('重启')),'SS Rust deployment omitted restart confirmation');
     }finally{test.dispose();}
   }

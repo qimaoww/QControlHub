@@ -207,7 +207,7 @@ func parseSingBox(content string) (Input, bool) {
 		input.CertificatePath = stringValue(tls["certificate_path"])
 		input.PrivateKeyPath = stringValue(tls["key_path"])
 	}
-	if reality := mapValue(tls["reality"]); reality["enabled"] == true {
+	if reality := mapValue(tls["reality"]); tls["enabled"] == true && reality["enabled"] == true {
 		input.RealityEnabled = true
 		input.TLSServerName = ""
 		input.TLSEnabled = false

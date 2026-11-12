@@ -119,6 +119,11 @@ func MarshalClientMetadata(input Input) (string, error) {
 // ApplyClientMetadata hydrates parsed source with client-only values. The
 // store scopes metadata to a configuration version and inbound tag.
 func ApplyClientMetadata(input *Input, encoded string) error {
+	defer func() {
+		if input != nil && input.parsedEngine != "" {
+			input.SourceOnly = !matchesParsedPreset(input.parsedEngine, *input)
+		}
+	}()
 	if input == nil || strings.TrimSpace(encoded) == "" {
 		return nil
 	}

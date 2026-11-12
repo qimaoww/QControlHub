@@ -215,7 +215,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     if (!await latest(ctx)) return;
     if (operation !== 'add') {
       const found = current.inbounds.find(item => item.tag === input.tag);
-      if (!found) throw new Error('入站已变化，请重新选择');
+      if (!found || found.source_only) throw new Error('入站已变化，请重新选择完整入站配置');
       input = found;
     }
     const originalProtocol = current.protocols.find(item => item.key === input?.protocol);
@@ -603,14 +603,15 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     const controls=writable&&button('添加入站',()=>inboundEdit(null,'add'),{tone:'primary'});
     const status=deployment.element;
     const rows=targets.map(target=>{
-      const input=inbounds.find(input=>input.tag===target.tag&&input.port===target.port);
+      const nativeInput=inbounds.find(input=>input.tag===target.tag&&input.port===target.port);
+      const input=nativeInput&&!nativeInput.source_only?nativeInput:null;
       const object=managed.find(item=>item.inbound&&item.tag===target.tag);
-      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),target.kind,
+      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),input?target.kind:'自定义',
         deployment.inboundState(target.port,object?.enabled),actions(
         ctx.can('agent-config.read')&&button('访问限制',()=>restrictions(target)),
         writable&&object&&toggle(object),
-        writable&&button('修改',()=>input?inboundEdit(input):inboundSource(target)),
-        ctx.can('client-access.read')&&input&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(input))),
+        writable&&button('修改',()=>input?inboundEdit(input):files()),
+        ctx.can('client-access.read')&&nativeInput&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(nativeInput))),
         writable&&button('删除',()=>removeInbound(target),{tone:'danger'}),
         writable&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{
           let binding='';try{binding=outboundBinding(target);}catch(error){ctx.announce(error.message,'error');return;}
