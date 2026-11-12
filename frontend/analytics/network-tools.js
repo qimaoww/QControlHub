@@ -99,7 +99,7 @@ export function networkToolsPage(ctx) {
   });
   const externalHint = muted("连接已有 iperf3 服务端；面板仅停止本次客户端。");
   const targetColumn = stack(n2, a2, customIP, externalHint);
-  const provider = f("IP 查询提供方", "provider", "disable-geoip", {
+  const provider = f("IP 查询提供方", "provider", "NextTrace-API", {
     options: providers,
   });
   const count = f("次数 / 轮数", "count", 5, {
