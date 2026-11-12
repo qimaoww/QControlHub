@@ -69,7 +69,7 @@ export function networkToolsPage(ctx) {
     readingPinned = false;
   const controls = new Map(), recordChoices = new Map();
   let recordOptions = "", pinnedOpened = false;
-  const recordPicker = field("测量时间", "measurement", "", { options: [] }),
+  const recordPicker = field("测量记录", "measurement", "", { options: [] }),
     recordSelect = recordPicker.querySelector("select");
   recordSelect.addEventListener("change", () => {
     if (recordSelect.selectedIndex === 0) recordChoices.delete(value("tool"));
@@ -732,7 +732,7 @@ export function networkToolsPage(ctx) {
     const choice = recordChoices.get(t), selected = data.find(item => item.id === choice) || data[0];
     if (choice && !data.some(item => item.id === choice)) recordChoices.delete(t);
     const choices = data.map((item, index) => [item.id,
-      `${index === 0 ? "最新 · " : ""}${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()}`]);
+      `${index === 0 ? "最新 · " : ""}${new Date(item.created_at).toLocaleString("zh-CN")} · ${item.request.parameters.protocol.toUpperCase()} · ${endpointLabel(item.request.node1)} ${item.request.bidirectional ? "↔" : "→"} ${endpointLabel(item.request.node2)}`]);
     const signature = JSON.stringify([t, choices]);
     if (signature !== recordOptions) {
       options(recordSelect, choices);
@@ -1070,7 +1070,7 @@ function querySummary(tool, out, provider) {
 
 function endpointLabel(endpoint) {
   return endpoint.name && endpoint.name !== endpoint.address
-    ? `${endpoint.name} (${endpoint.address})`
+    ? `${endpoint.name}${endpoint.instance_id ? " · 共享实例" : ""} (${endpoint.address})`
     : endpoint.address;
 }
 

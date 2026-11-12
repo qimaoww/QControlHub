@@ -3,19 +3,20 @@ import { node } from '../analytics/ui.js';
 import { assert, waitFor } from './assertions.mjs';
 
 // Exercise the production form in the existing real-browser region matrix.
-export async function testDiagnosticNodeFlags() {
+export async function testDiagnosticNodeFlags(preview = false) {
   window.dispatchEvent(new Event('pagehide'));
   const controller = new AbortController();
   let active = true, refresh, releaseRegions;
   let regionGate = new Promise(resolve => { releaseRegions = resolve; });
   let agents = [{id:'host-a',region_code:'HK'}, {id:'host-b',region_code:'TW'}];
   let nodes = ['host-a','host-b'].map((agent_id,index) => ({agent_id,instance_id:`share-${index}`,name:`同名节点 ${'长名称'.repeat(12)}`,online:true,capabilities:{tools:{ping:{version:'ICMP'},nexttrace:{version:'NextTrace v1.7.6 (built-in)'}},providers:{'disable-geoip':''},addresses:[`192.0.2.${index+1}`]}}));
+  const records = [0,1].map(index => ({id:`record-${index}`,created_at:`2026-11-12T12:0${1-index}:00Z`,state:'succeeded',results:{},request:{parameters:{tool:'ping',protocol:'icmp',count:3,interval_ms:1000,timeout_ms:1000,size:56},bidirectional:index===0,node1:{agent_id:'host-a',instance_id:'share-0',name:'历史来源节点',address:'2001:db8::1'},node2:index===0?{agent_id:'host-b',instance_id:'share-1',name:'历史目标节点',address:'2001:db8::2'}:{name:'192.0.2.99',address:'192.0.2.99'}}}));
   const calls = [];
   const ctx = {signal:controller.signal,current:()=>active,state:{data:{}},can:permission=>['agents.read','tasks.execute'].includes(permission),onRefresh:run=>{refresh=run},api:async path=>{
     calls.push(path);
     if (path==='/agents') { await regionGate; return structuredClone(agents); }
     if (path==='/network-diagnostics/nodes') return structuredClone(nodes);
-    if (path.startsWith('/network-diagnostics?')) return [];
+    if (path.startsWith('/network-diagnostics?')) return structuredClone(records);
     throw new Error(`unexpected diagnostic request: ${path}`);
   }};
   const host = node('main',{className:'a-main'},networkToolsPage(ctx));
@@ -34,6 +35,12 @@ export async function testDiagnosticNodeFlags() {
     await waitFor(()=>code(1)==='HK' && code(2)==='TW','两端已选旗帜未更新');
     assert.ok(control('node2').querySelector('selectedcontent img[src$="/cn"]'),'未复用台湾旗帜规则');
     assert.equal(control('address1').value,address,'地区更新重置地址');
+    await waitFor(()=>control('measurement').options.length===2,'测量记录未载入');
+    const latest = control('measurement').options[0].textContent;
+    for (const text of ['历史来源节点','2001:db8::1','历史目标节点','2001:db8::2','共享实例','↔','ICMP']) assert.ok(latest.includes(text),`记录缺少 ${text}`);
+    choose('measurement','record-1');
+    assert.ok(host.querySelector('[data-refresh-key="record-1"]'),'选择记录与结果不一致');
+    assert.equal(control('measurement').options[1].textContent.split('192.0.2.99').length,2,'自定义目标地址重复');
     assert.ok(!calls.some(path=>path.includes('/region')),'诊断身份触发错误地区请求');
     const option = control('node1').options[1];
     control('node1').focus();
@@ -43,6 +50,9 @@ export async function testDiagnosticNodeFlags() {
     assert.equal(control('node1').options[1],option,'地区刷新重建选项');
     assert.equal(document.activeElement,control('node1'),'地区刷新丢失焦点');
     assert.equal(control('address1').value,address,'刷新重置参数');
+    assert.equal(control('measurement').value,'record-1','刷新重置历史记录选择');
+    choose('measurement','record-0');
+    if (preview) return;
     [...host.querySelectorAll('button')].find(button=>button.textContent==='交换两端').click();
     assert.equal(code(1),'TW','交换后节点1旗帜错配');assert.equal(code(2),'US','交换后节点2旗帜错配');
     choose('target_mode','ip');choose('target_mode','');
