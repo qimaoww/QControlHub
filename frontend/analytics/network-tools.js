@@ -13,6 +13,7 @@ import {
   table,
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
+import { requestID } from "./request-id.js";
 
 const labels = {
   preparing: "准备中",
@@ -419,7 +420,7 @@ export function networkToolsPage(ctx) {
     if (!pending || pending.signature !== signature)
       pending = {
         signature,
-        body: { ...body, request_id: crypto.randomUUID() },
+        body: { ...body, request_id: requestID() },
       };
     if (!form.reportValidity()) return;
     creating = true;

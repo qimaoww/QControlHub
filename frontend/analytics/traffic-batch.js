@@ -1,7 +1,7 @@
 import { node, button, actions, stack, table, field, notice } from './ui.js';
+import { requestID } from './request-id.js';
 
 const labels={reset:'清零当前周期',quota:'设置配额','remove-quota':'取消配额',delete:'删除流量记录'};
-const requestID=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('');
 export function trafficBatch(ctx, policies, agentName, onSaved) {
   const selected=new Set(), results=node('div'), feedback=notice('');
   let uncertain=null,last=null;
