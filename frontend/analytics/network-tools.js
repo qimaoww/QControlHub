@@ -12,6 +12,7 @@ import {
   table,
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
+import { redactDiagnostic } from "../modules/errors.js";
 import { nodeName } from "./node-region.js";
 import { requestID } from "./request-id.js";
 import { networkName, networkKind } from "./nexttrace-format.js";
@@ -450,7 +451,7 @@ export function networkToolsPage(ctx) {
         if (e.status === 401 || e.status === 403)
           for (const name of ["node1", "node2", "address1", "address2"])
             options(controls.get(name), [["", "请选择"]]);
-        capability.textContent = e.message;
+        capability.textContent = networkDiagnosticError(e);
         capability.hidden = false;
         forward.disabled = both.disabled = true;
       }
@@ -520,7 +521,7 @@ export function networkToolsPage(ctx) {
       await loadResults();
     } catch (e) {
       if (ctx.current()) {
-        feedback.textContent = e.message;
+        feedback.textContent = networkDiagnosticError(e);
         await loadResults();
       }
     } finally {
@@ -566,7 +567,7 @@ export function networkToolsPage(ctx) {
                     );
                     await loadResults();
                   } catch (e) {
-                    feedback.textContent = e.message;
+                    feedback.textContent = networkDiagnosticError(e);
                   }
                 },
                 { disabled: d.state === "stopping" },
@@ -585,7 +586,7 @@ export function networkToolsPage(ctx) {
                   recordChoices.delete(tool);
                   await Promise.allSettled([loadNodes(), loadResults()]);
                 } catch (e) {
-                  feedback.textContent = e.message;
+                  feedback.textContent = networkDiagnosticError(e);
                   await loadResults();
                 } finally {
                   if (control.isConnected) control.disabled = false;
@@ -610,7 +611,7 @@ export function networkToolsPage(ctx) {
                     const hidden=record.querySelector('input[name="export-sensitive"]').checked;
                     control.disabled=true;
                     try { await downloadMeasurementImage(d, record, hidden, () => ctx.current()); }
-                    catch(e) { feedback.textContent=e.message; }
+                    catch(e) { feedback.textContent=networkDiagnosticError(e); }
                     finally { exportingImages.delete(d.id); if(control.isConnected) control.disabled=false; }
                   }, {disabled:exportingImages.has(d.id)}),
                   field("隐藏敏感信息", "export-sensitive", true, {type:"checkbox", title:"隐藏节点名称、IP、主机名及诊断原文"}),
@@ -702,8 +703,8 @@ export function networkToolsPage(ctx) {
       renderSnapshot();
     } catch (e) {
       if (ctx.current() && requestedTool === value("tool")) {
-        feedback.textContent = e.message;
-        historyError = e.message;
+        feedback.textContent = networkDiagnosticError(e);
+        historyError = networkDiagnosticError(e);
         if (e.status === 401 || e.status === 403) {
           history = [];
           pinned = undefined;
@@ -765,7 +766,7 @@ export function networkToolsPage(ctx) {
       }
     } catch (error) {
       if (ctx.current()) {
-        feedback.textContent = error.message;
+        feedback.textContent = networkDiagnosticError(error);
         if ([401, 403, 404].includes(error.status)) {
           pinned = undefined;
           history =
@@ -807,7 +808,7 @@ export function networkToolsPage(ctx) {
           ]);
       })
       .catch((e) => {
-        if (ctx.current()) grantHost.textContent = e.message;
+        if (ctx.current()) grantHost.textContent = networkDiagnosticError(e);
       });
     select.addEventListener("change", async () => {
       const epoch = ++grantEpoch,
@@ -849,7 +850,7 @@ export function networkToolsPage(ctx) {
                 await loadNodes();
               } catch (e) {
                 input.checked = !input.checked;
-                feedback.textContent = e.message;
+                feedback.textContent = networkDiagnosticError(e);
               } finally {
                 input.disabled = false;
               }
@@ -859,7 +860,7 @@ export function networkToolsPage(ctx) {
         );
       } catch (e) {
         if (ctx.current() && epoch === grantEpoch)
-          grantHost.textContent = e.message;
+          grantHost.textContent = networkDiagnosticError(e);
       }
     });
     return node("div", {className:"a-stack a-tools-page"},
@@ -1071,4 +1072,17 @@ function endpointLabel(endpoint) {
   return endpoint.name && endpoint.name !== endpoint.address
     ? `${endpoint.name} (${endpoint.address})`
     : endpoint.address;
+}
+
+// Keep actual API identifiers without repeating a wrapped copy of the summary.
+export function networkDiagnosticError(error) {
+  const text = redactDiagnostic(error?.message || "操作未完成");
+  const marker = "\n诊断详情：\n", boundary = text.indexOf(marker);
+  if (boundary < 0) return text;
+  const summary = text.slice(0, boundary), suffix = error.requestID ? `（请求 ID：${error.requestID}）` : "";
+  const details = text.slice(boundary + marker.length);
+  const cause = suffix && details.endsWith(suffix) ? details.slice(0, -suffix.length) : details;
+  const wrapped = cause.match(/^([a-z][a-z _-]{0,63}): ([\s\S]*)$/);
+  if (!wrapped || wrapped[2] !== summary) return text;
+  return `${summary}（${wrapped[1]}${error.requestID ? `；请求 ID：${error.requestID}` : ""}）`;
 }
