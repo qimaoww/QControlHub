@@ -604,7 +604,7 @@ export function networkToolsPage(ctx) {
                         (r.error || r.output?.error) &&
                           r.error !== "测量已停止" &&
                           notice(r.error || r.output.error, "error"),
-                        node("div", {className:"a-stack", "data-export-output":""},renderOutput(tool, r.output, r.state, params.count)),
+                        node("div", {className:"a-stack", "data-export-output":"", "data-tool":tool},renderOutput(tool, r.output, r.state, params.count)),
                         (tool === "traceroute" || tool === "mtr") &&
                           params.provider !== "disable-geoip" &&
                           r.output &&
@@ -836,7 +836,7 @@ function toolPanel(title, content) {
 function endpointView(label, endpoint) {
   return node("div", {}, node("dt", {}, label), node("dd", {},
     node("strong", {}, endpoint.name || endpoint.address),
-    endpoint.name && muted(endpoint.address),
+    endpoint.name && endpoint.name !== endpoint.address && muted(endpoint.address),
   ));
 }
 function metricStrip(label, items) {
@@ -910,7 +910,7 @@ function renderOutput(tool, out, state, rounds) {
           traceValue("geo", [...new Set([h.geo?.country || (/^(RFC|DOD)/.test(h.geo?.whois || "") ? h.geo.whois : ""), h.geo?.prov, h.geo?.city, h.geo?.district, h.geo?.owner, h.geo?.domain, h.geo?.isp].filter(Boolean))].join(" · ") || "—"),
           traceValue(h.ip === "*" ? "timeout" : "latency", h.samples.join(" / ")),
         ]),
-        { paginate: false, label: "路由跳点" },
+        { paginate: false, label: "路由跳点", columnWidths:["5%", "16%", "9%", "14%", "34%", "22%"] },
       ),
     );
   }

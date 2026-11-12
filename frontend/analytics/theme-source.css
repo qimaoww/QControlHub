@@ -658,3 +658,7 @@ strong, b { font-weight: 600; }
   .a-tools-parameters { gap: 16px 12px; }
   .a-tools-parameters .a-field-label { min-height: 36px; display: flex; align-items: end; }
 }
+/* Keep route columns readable in a horizontal viewport instead of squeezing IPs. */
+.a-tools-measurement [data-tool=traceroute] table { min-width: 1000px; }
+.a-tools-measurement [data-tool=mtr] table { min-width: 1400px; }
+.a-tools-measurement [data-tool=ping] table { min-width: 600px; }
