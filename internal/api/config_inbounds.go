@@ -205,6 +205,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
 	}
+	previewChanged := false
 	if input.SnapshotTaskID != "" {
 		if !s.sessionAllows(request, core.PermissionTasksRead) {
 			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
@@ -216,6 +217,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			writeStoreError(w, err)
 			return
 		}
+		previewChanged = snapshot != current.Content
 		current.AgentID, current.Engine = agent.ID, engine
 		current.Content, err = s.accountingUpdateSource(request.Context(), current, snapshot)
 		if err != nil {
@@ -223,6 +225,29 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			return
 		}
 		currentErr = nil
+	}
+	if input.Operation == "modify" {
+		projections := serverconfig.ParseAll(engine, current.Content)
+		if current.ID != "" && !previewChanged {
+			if err := s.hydrateClientMetadata(request.Context(), current, projections); err != nil {
+				writeInternalError(w, err)
+				return
+			}
+		}
+		found := false
+		for _, existing := range projections {
+			if existing.Tag == input.OriginalTag {
+				if found || existing.SourceOnly {
+					mutationError("此配置无法安全使用预设，请使用完整入站配置")
+					return
+				}
+				found = true
+			}
+		}
+		if !found {
+			mutationError("此配置无法安全使用预设，请使用完整入站配置")
+			return
+		}
 	}
 	content := generated
 	var existingShadowsocksRustPolicies []core.MainlandAccessPolicy

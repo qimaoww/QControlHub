@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"filippo.io/edwards25519"
@@ -314,7 +315,8 @@ func parseMihomo(content string) (Input, bool) {
 	}
 	if input.Protocol == ProtocolHy2 {
 		if users := mapValue(listener["users"]); len(users) > 0 {
-			for name, password := range users {
+			for _, name := range sortedUserKeys(users) {
+				password := users[name]
 				input.Username, input.Credential = name, stringValue(password)
 				break
 			}
@@ -322,7 +324,8 @@ func parseMihomo(content string) (Input, bool) {
 	}
 	if input.Protocol == ProtocolTUIC {
 		if users := mapValue(listener["users"]); len(users) > 0 {
-			for uuid, password := range users {
+			for _, uuid := range sortedUserKeys(users) {
+				password := users[uuid]
 				input.Credential, input.SecondaryCredential = uuid, stringValue(password)
 				break
 			}
@@ -330,7 +333,8 @@ func parseMihomo(content string) (Input, bool) {
 	}
 	if input.Protocol == ProtocolAnyTLS {
 		if users := mapValue(listener["users"]); len(users) > 0 {
-			for name, password := range users {
+			for _, name := range sortedUserKeys(users) {
+				password := users[name]
 				input.Username, input.Credential = name, stringValue(password)
 				break
 			}
@@ -384,4 +388,13 @@ func endpointHost(value string) string {
 		return strings.Trim(host, "[]")
 	}
 	return ""
+}
+
+func sortedUserKeys(users map[string]any) []string {
+	keys := make([]string, 0, len(users))
+	for key := range users {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

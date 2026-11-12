@@ -12,11 +12,20 @@ const close = test => test.topDialog()?.querySelector('[aria-label="关闭"]').c
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
     const params = new URLSearchParams(location.search);
-    window.inboundFixture = await fixture(params.get('engine') || 'xray', {missing:params.has('missing'),protocol:params.get('protocol')});
+    const engine=params.get('engine') || 'xray', sourceOnly=params.has('source-only');
+    const account={uuid:'123e4567-e89b-42d3-a456-426614174000'};
+    const manual=engine==='xray'
+      ? {inbounds:[{tag:'manual',protocol:'vless',listen:'0.0.0.0',port:21001,settings:{decryption:'none',clients:[{id:account.uuid}]}}],outbounds:[{tag:'direct',protocol:'freedom'}]}
+      : engine==='sing-box'
+        ? {inbounds:[{tag:'manual',type:'vless',listen:'::',listen_port:21001,users:[account]}],outbounds:[{tag:'direct',type:'direct'}]}
+        : {listeners:[{name:'manual',type:'vless',listen:'::',port:21001,users:[account]}],rules:['MATCH,DIRECT']};
+    window.inboundFixture = await fixture(engine, {missing:params.has('missing'),protocol:params.get('protocol'),
+      ...(sourceOnly?{plan:{source_only:true},tags:['manual'],content:JSON.stringify(manual,null,2)}:{})});
     if (params.has('modal')) window.inboundFixture.click('add');
-    if (params.has('modify')) { window.inboundFixture.select('second'); window.inboundFixture.click('modify'); }
+    if (params.has('modify')) { window.inboundFixture.select(sourceOnly?'manual':'second'); window.inboundFixture.click('modify'); }
     return;
   }
+  await testSourceOnlyProjection();
   await testUDP443Options();
   await testCopyInboundConnections();
   await testSourceCorrection();
@@ -138,15 +147,15 @@ export async function testConfigInboundsRuntime(preview = false) {
     native.clickButton('读取托管配置');
     await waitFor(()=>native.snapshotReads===1&&!native.root.hasAttribute('aria-busy'),'native reverse read failed');
     assert(native.row('first').textContent.includes('23101')&&!native.writes.length,'reverse read did not update inbound preview or silently saved');
-    native.click('modify');await waitFor(()=>editor()?.elements.fragment,'native source editor missing');
+    native.click('modify');await waitFor(()=>editor()?.elements.content,'custom configuration editor missing');
     let form=editor();assert(!form.elements.protocol && form.querySelector('[type=submit]').textContent==='保存并部署','native object was converted into a preset');
-    const value=JSON.parse(form.elements.fragment.value);assert((value.port||value.listen_port||value.server_port)===23101,'native editor used stale panel configuration');value.custom={options:['a','b'],nested:{enabled:true}};
-    form.elements.fragment.value=JSON.stringify(value);form.elements.fragment.dispatchEvent(new Event('input',{bubbles:true}));
+    const document=JSON.parse(form.elements.content.value), entries=document.inbounds||document.listeners||document.servers, value=entries[0];assert((value.port||value.listen_port||value.server_port)===23101,'custom editor used stale panel configuration');value.custom={options:['a','b'],nested:{enabled:true}};
+    form.elements.content.value=JSON.stringify(document);form.elements.content.dispatchEvent(new Event('input',{bubbles:true}));
     native.confirm=false;close(native);await pause();assert(editor()===form,'native draft was discarded without confirmation');
     native.confirm=true;form.requestSubmit();await native.settle(1);
-    assert(native.writes[0].original_tag==='first'&&native.writes[0].expected_version===1&&native.writes[0].snapshot_task_id?.startsWith('read-')&&JSON.parse(native.writes[0].fragment).custom.nested.enabled,'native edit lost custom fields or CAS');
-    native.click('modify');await waitFor(()=>editor()?.elements.fragment,'native reread did not open');
-    assert(JSON.parse(editor().elements.fragment.value).custom.options.length===2,'reverse read lost custom protocol options');
+    assert(native.writes[0].path.endsWith('/source')&&native.writes[0].version===1&&JSON.parse(native.writes[0].content)[Object.keys(document).find(key=>['inbounds','listeners','servers'].includes(key))][0].custom.nested.enabled,'custom edit lost full source or CAS');
+    native.click('modify');await waitFor(()=>editor()?.elements.content,'custom reread did not open');
+    const reread=JSON.parse(editor().elements.content.value);assert((reread.inbounds||reread.listeners||reread.servers)[0].custom.options.length===2,'reverse read lost custom protocol options');
     close(native);await pause();native.click('delete');await waitFor(()=>editor()?.elements.intent,'native delete missing');native.submit('deploy');await native.settle(2);
     assert(native.writes[1].original_tag==='first','native deletion selected another resource');native.dispose();
   }
@@ -296,4 +305,17 @@ async function testUDP443Options() {
   const tag = test.writes[0].input.tag; test.select(tag); test.click('modify'); await ready();
   assert(!editor().elements.block_udp_443.checked, 'saved false reopened as true');
   test.dispose();
+}
+
+async function testSourceOnlyProjection() {
+  for (const engine of ['xray','sing-box','mihomo']) {
+    const test=await fixture(engine,{protocol:'vless',plan:{source_only:true}});
+    assert([...test.root.querySelectorAll('.a-port-list tbody tr')].every(row=>row.cells[2].textContent==='自定义'),'unmatched native inbound did not display custom');
+    test.click('modify');
+    await waitFor(()=>editor()?.elements.content,'unmatched native inbound did not open complete configuration');
+    assert(!editor().elements.protocol&&!test.calls.some(call=>call.path.endsWith("/plans"))&&!test.writes.length,'source-only edit silently selected a preset');
+    close(test);await pause();
+    test.click('modify');await waitFor(()=>editor()?.elements.content,'custom configuration editor did not reopen');
+    test.dispose();
+  }
 }

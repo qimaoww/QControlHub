@@ -24,6 +24,9 @@ var (
 )
 
 func Generate(engine core.Engine, input Input) (string, error) {
+	if input.SourceOnly {
+		return "", errors.New("此配置无法安全使用预设，请使用完整入站配置")
+	}
 	protocol, ok := FindProtocol(engine, input.Protocol)
 	if !ok {
 		return "", errors.New("不支持的服务端入站协议")

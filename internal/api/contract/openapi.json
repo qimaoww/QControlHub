@@ -5330,6 +5330,9 @@
           "snell_version": {
             "type": "integer"
           },
+          "source_only": {
+            "type": "boolean"
+          },
           "ss_rust_dns": {
             "type": "string"
           },
@@ -9633,6 +9636,7 @@
                   "snell_shadow_tls_version": 1,
                   "snell_udp": false,
                   "snell_version": 1,
+                  "source_only": false,
                   "ss_rust_dns": "example",
                   "ss_rust_ipv6_first": false,
                   "ss_rust_outbound_bind_addr": "example",
@@ -9788,6 +9792,7 @@
                   "snell_shadow_tls_version": 1,
                   "snell_udp": false,
                   "snell_version": 1,
+                  "source_only": false,
                   "ss_rust_dns": "example",
                   "ss_rust_ipv6_first": false,
                   "ss_rust_outbound_bind_addr": "example",
@@ -10006,6 +10011,7 @@
                   "snell_shadow_tls_version": 1,
                   "snell_udp": false,
                   "snell_version": 1,
+                  "source_only": false,
                   "ss_rust_dns": "example",
                   "ss_rust_ipv6_first": false,
                   "ss_rust_outbound_bind_addr": "example",
@@ -11092,6 +11098,7 @@
                       "snell_shadow_tls_version": 1,
                       "snell_udp": false,
                       "snell_version": 1,
+                      "source_only": false,
                       "ss_rust_dns": "example",
                       "ss_rust_ipv6_first": false,
                       "ss_rust_outbound_bind_addr": "example",
@@ -11488,6 +11495,7 @@
                       "snell_shadow_tls_version": 1,
                       "snell_udp": false,
                       "snell_version": 1,
+                      "source_only": false,
                       "ss_rust_dns": "example",
                       "ss_rust_ipv6_first": false,
                       "ss_rust_outbound_bind_addr": "example",
