@@ -150,3 +150,14 @@ for(const engine of ["xray","sing-box","mihomo"]){
   const unsupported=engine==="xray"?{protocol:"vless",settings:{vnext:[{}]},streamSettings:{network:"kcp"}}:{type:"vless",transport:{type:"quic"},network:"quic"};
   assert.equal(readOutboundPreset(engine,unsupported),null,"unrepresentable native transport entered a lossy form");
 }
+
+const realityWithInactiveTLS={tag:"manual",protocol:"vless",settings:{vnext:[{address:"example.test",port:443,users:[{id:"123e4567-e89b-42d3-a456-426614174000",flow:"xtls-rprx-vision"}]}]},streamSettings:{network:"tcp",security:"reality",tlsSettings:{serverName:"inactive.test"},realitySettings:{serverName:"active.test",publicKey:"active-key",shortId:"ab"}}};
+const realityProjection=readOutboundPreset("xray",realityWithInactiveTLS);
+assert.equal(realityProjection.values.serverName,"active.test");
+assert.equal(realityProjection.values.publicKey,"active-key");
+for (const security of ["none","future"]) {
+  const native=structuredClone(realityWithInactiveTLS);native.streamSettings.security=security;
+  assert.equal(readOutboundPreset("xray",native),null,"invalid security/flow entered preset form");
+}
+const disabledReality={tag:"manual",type:"vless",server:"example.test",server_port:443,uuid:"test",tls:{enabled:false,reality:{enabled:true,public_key:"inactive-key"}}};
+assert.equal(readOutboundPreset("sing-box",disabledReality).values.security,"none");

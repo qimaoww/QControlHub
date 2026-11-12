@@ -12,11 +12,20 @@ const close = test => test.topDialog()?.querySelector('[aria-label="关闭"]').c
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
     const params = new URLSearchParams(location.search);
-    window.inboundFixture = await fixture(params.get('engine') || 'xray', {missing:params.has('missing'),protocol:params.get('protocol')});
+    const engine=params.get('engine') || 'xray', sourceOnly=params.has('source-only');
+    const account={uuid:'123e4567-e89b-42d3-a456-426614174000'};
+    const manual=engine==='xray'
+      ? {inbounds:[{tag:'manual',protocol:'vless',listen:'0.0.0.0',port:21001,settings:{decryption:'none',clients:[{id:account.uuid}]}}],outbounds:[{tag:'direct',protocol:'freedom'}]}
+      : engine==='sing-box'
+        ? {inbounds:[{tag:'manual',type:'vless',listen:'::',listen_port:21001,users:[account]}],outbounds:[{tag:'direct',type:'direct'}]}
+        : {listeners:[{name:'manual',type:'vless',listen:'::',port:21001,users:[account]}],rules:['MATCH,DIRECT']};
+    window.inboundFixture = await fixture(engine, {missing:params.has('missing'),protocol:params.get('protocol'),
+      ...(sourceOnly?{plan:{source_only:true},tags:['manual'],content:JSON.stringify(manual,null,2)}:{})});
     if (params.has('modal')) window.inboundFixture.click('add');
-    if (params.has('modify')) { window.inboundFixture.select('second'); window.inboundFixture.click('modify'); }
+    if (params.has('modify')) { window.inboundFixture.select(sourceOnly?'manual':'second'); window.inboundFixture.click('modify'); }
     return;
   }
+  await testSourceOnlyProjection();
   await testUDP443Options();
   await testCopyInboundConnections();
   await testSourceCorrection();
@@ -296,4 +305,17 @@ async function testUDP443Options() {
   const tag = test.writes[0].input.tag; test.select(tag); test.click('modify'); await ready();
   assert(!editor().elements.block_udp_443.checked, 'saved false reopened as true');
   test.dispose();
+}
+
+async function testSourceOnlyProjection() {
+  for (const engine of ['xray','sing-box','mihomo']) {
+    const test=await fixture(engine,{protocol:'vless',plan:{source_only:true}});
+    assert(!test.click('复制入站连接'),'unmatched native inbound offered a preset client');
+    test.click('modify');
+    await waitFor(()=>editor()?.elements.fragment,'unmatched native inbound did not open source');
+    assert(!editor().elements.protocol&&!test.calls.some(call=>call.path.endsWith("/plans"))&&!test.writes.length,'source-only edit silently selected a preset');
+    close(test);await pause();
+    test.click('modify');await waitFor(()=>editor()?.elements.fragment,'source-only editor did not reopen');
+    test.dispose();
+  }
 }

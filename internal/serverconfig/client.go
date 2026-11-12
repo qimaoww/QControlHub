@@ -20,6 +20,9 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if input.SourceOnly {
+		return ClientProfile{}, errors.New("此配置无法可靠生成客户端连接，请使用完整源码配置")
+	}
 	if err := validateClientConnection(input); err != nil {
 		return ClientProfile{}, err
 	}

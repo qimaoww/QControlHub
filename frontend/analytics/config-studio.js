@@ -215,7 +215,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     if (!await latest(ctx)) return;
     if (operation !== 'add') {
       const found = current.inbounds.find(item => item.tag === input.tag);
-      if (!found) throw new Error('入站已变化，请重新选择');
+      if (!found || found.source_only) throw new Error('入站已变化，请重新选择完整入站配置');
       input = found;
     }
     const originalProtocol = current.protocols.find(item => item.key === input?.protocol);
@@ -603,7 +603,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     const controls=writable&&button('添加入站',()=>inboundEdit(null,'add'),{tone:'primary'});
     const status=deployment.element;
     const rows=targets.map(target=>{
-      const input=inbounds.find(input=>input.tag===target.tag&&input.port===target.port);
+      const input=inbounds.find(input=>!input.source_only&&input.tag===target.tag&&input.port===target.port);
       const object=managed.find(item=>item.inbound&&item.tag===target.tag);
       return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),target.kind,
         deployment.inboundState(target.port,object?.enabled),actions(

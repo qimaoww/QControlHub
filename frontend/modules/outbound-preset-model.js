@@ -124,16 +124,20 @@ export function readOutboundPreset(engine, out) {
     if (!peer) return null;
     const user = peer.users?.[0] || {};
     Object.assign(values,{server:peer.address,port:peer.port,credential:user.id || peer.password || "",username:user.user || "",password:user.pass || "",method:peer.method || "",flow:user.flow || ""});
-    const stream=out.streamSettings || {}, tls=stream.tlsSettings || stream.realitySettings || {};
+    const stream=out.streamSettings || {}, tls=(stream.security === "reality" ? stream.realitySettings : stream.tlsSettings) || {};
     values.transport=stream.network || "tcp"; if(values.transport==="raw")values.transport="tcp";
     values.security=stream.security || "none";
     Object.assign(values,{serverName:tls.serverName || "",publicKey:tls.publicKey || tls.password || "",shortId:tls.shortId || "",path:stream.wsSettings?.path || stream.grpcSettings?.serviceName || stream.xhttpSettings?.path || "",host:stream.wsSettings?.host || stream.wsSettings?.headers?.Host || ""});
   } else if (engine === "mihomo") {
     Object.assign(values,{server:out.server,port:out.port,credential:out.uuid || out.password || "",username:out.username || "",password:out.password || "",method:out.cipher || "",transport:out.network || "tcp",security:out["reality-opts"] ? "reality" : out.tls || ["trojan","hysteria2","tuic","anytls"].includes(protocol) ? "tls" : "none",serverName:out.servername || out.sni || "",publicKey:out["reality-opts"]?.["public-key"] || "",shortId:out["reality-opts"]?.["short-id"] || "",path:out["ws-opts"]?.path || out["grpc-opts"]?.["grpc-service-name"] || "",host:out["ws-opts"]?.headers?.Host || ""});
   } else {
-    Object.assign(values,{server:out.server,port:out.server_port,credential:out.uuid || out.password || "",username:out.username || "",password:out.password || "",method:out.method || "",transport:out.transport?.type || "tcp",security:out.tls?.reality?.enabled ? "reality" : out.tls?.enabled ? "tls" : "none",serverName:out.tls?.server_name || "",publicKey:out.tls?.reality?.public_key || "",shortId:out.tls?.reality?.short_id || "",path:out.transport?.path || out.transport?.service_name || "",host:out.transport?.headers?.Host || ""});
+    Object.assign(values,{server:out.server,port:out.server_port,credential:out.uuid || out.password || "",username:out.username || "",password:out.password || "",method:out.method || "",transport:out.transport?.type || "tcp",security:out.tls?.enabled && out.tls?.reality?.enabled ? "reality" : out.tls?.enabled ? "tls" : "none",serverName:out.tls?.server_name || "",publicKey:out.tls?.reality?.public_key || "",shortId:out.tls?.reality?.short_id || "",path:out.transport?.path || out.transport?.service_name || "",host:out.transport?.headers?.Host || ""});
   }
   if (!["tcp","ws","grpc",...(engine === "xray" ? ["xhttp"] : [])].includes(values.transport)) return null;
+  if (!["none","tls","reality"].includes(values.security) || values.security === "reality" && protocol !== "vless") return null;
+  if (values.security === "reality" && (!values.serverName || !values.publicKey)) return null;
+  if (values.flow && (protocol !== "vless" || values.flow !== "xtls-rprx-vision" || values.transport !== "tcp" || values.security === "none")) return null;
+  if (["hysteria2","tuic","anytls"].includes(protocol) && values.security !== "tls") return null;
   return {protocol,values};
 }
 

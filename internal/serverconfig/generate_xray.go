@@ -164,9 +164,9 @@ func parseXray(content string) (Input, bool) {
 			input.Network = "tcp"
 		}
 	}
-	user := firstMap(settings["users"])
-	if user == nil {
-		user = firstMap(settings["clients"])
+	user := firstMap(settings["clients"])
+	if _, present := settings["clients"]; !present {
+		user = firstMap(settings["users"])
 	}
 	if user != nil {
 		input.Username = stringValue(user["email"])
@@ -181,15 +181,32 @@ func parseXray(content string) (Input, bool) {
 	}
 	stream := mapValue(inbound["streamSettings"])
 	switch stringValue(stream["network"]) {
+	case "", "raw", "tcp":
+	case "hysteria":
+		if input.Protocol != ProtocolHy2 || intValue(settings["version"]) != 2 {
+			return Input{}, false
+		}
 	case "ws":
 		input.Transport = "websocket"
 		input.TransportPath = stringValue(mapValue(stream["wsSettings"])["path"])
+		input.TransportHost = stringValue(mapValue(stream["wsSettings"])["host"])
+		if input.TransportHost == "" {
+			input.TransportHost = stringValue(mapValue(mapValue(stream["wsSettings"])["headers"])["Host"])
+		}
 	case "grpc":
 		input.Transport = "grpc"
 		input.TransportPath = stringValue(mapValue(stream["grpcSettings"])["serviceName"])
 	case "xhttp", "splithttp":
 		input.Transport = "xhttp"
 		parseXHTTPSettings(&input, stream)
+	default:
+		return Input{}, false
+	}
+	if security := stringValue(stream["security"]); security != "" && security != "none" && security != "tls" && security != "reality" {
+		return Input{}, false
+	}
+	if input.Protocol == ProtocolHy2 && intValue(settings["version"]) != 2 {
+		return Input{}, false
 	}
 	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" && input.VLESSDecryption != "none" {
 		var err error
