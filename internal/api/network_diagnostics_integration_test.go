@@ -18,9 +18,6 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	for i, agent := range []core.Agent{a, b} {
 		grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 5201)
 		caps := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}, "nexttrace": {Version: "v1.7.6"}, "iperf3": {Version: "3.18"}}, Providers: map[string]string{"disable-geoip": "", "ipdb.one": "missing credentials"}, Addresses: []string{[]string{"192.0.2.2", "192.0.2.3"}[i]}}
-		if i == 0 {
-			caps.Tools["nexttrace"] = core.DiagnosticTool{AutoInstall: true, Error: "NextTrace 未安装"}
-		}
 		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: append(agent.Features, core.AgentFeatureNetworkDiagnostics)}); err != nil {
 			t.Fatal(err)
 		}
@@ -60,6 +57,23 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	invalid = request
 	invalid.Node2 = invalid.Node1
 	alice.call("POST", "/network-diagnostics", invalid, 400, nil)
+	// Denied raw sockets are not an installable dependency. Both the node
+	// response and admission must retain the real failure until a new report.
+	denied := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"nexttrace": {Error: "NextTrace 原始套接字检测被拒绝（EPERM）；检查 CAP_NET_RAW 并重启 Agent"}}, Providers: map[string]string{"disable-geoip": ""}, Addresses: []string{endpoints[a.ID].Address}}
+	if err := db.UpdateDiagnosticCapabilities(ctx, a.ID, &denied); err != nil {
+		t.Fatal(err)
+	}
+	alice.call("GET", "/network-diagnostics/nodes", nil, 200, &nodes)
+	alice.call("POST", "/network-diagnostics", request, http.StatusConflict, nil)
+	for _, n := range nodes {
+		if n.AgentID == a.ID && (n.Capabilities.Tools["nexttrace"].Error == "" || n.Capabilities.Tools["nexttrace"].AutoInstall) {
+			t.Fatal("permission failure advertised as ready/installable")
+		}
+	}
+	restored := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}, "nexttrace": {Version: "NextTrace v1.7.6 (built-in)"}, "iperf3": {Version: "3.20"}}, Providers: map[string]string{"disable-geoip": "", "ipdb.one": "missing credentials"}, Addresses: []string{endpoints[a.ID].Address}}
+	if err := db.UpdateDiagnosticCapabilities(ctx, a.ID, &restored); err != nil {
+		t.Fatal(err)
+	}
 	var session core.DiagnosticSession
 	alice.call("POST", "/network-diagnostics", request, 201, &session)
 	alice.call("POST", "/network-diagnostics", request, 201, nil)
@@ -170,7 +184,7 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	// A new retry revalidates both allocations and keeps the exact parameters.
 	// A stale failed probe blocks retry until a real Agent capability report
 	// replaces it. Recovery must not rewrite the old partial failure.
-	recovered := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"nexttrace": {Error: "old probe failed"}}, Providers: map[string]string{"disable-geoip": ""}, Addresses: []string{endpoints[a.ID].Address}}
+	recovered := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"nexttrace": {Error: "NextTrace 原始套接字检测被拒绝（EPERM）"}}, Providers: map[string]string{"disable-geoip": ""}, Addresses: []string{endpoints[a.ID].Address}}
 	if err := db.UpdateDiagnosticCapabilities(ctx, a.ID, &recovered); err != nil {
 		t.Fatal(err)
 	}

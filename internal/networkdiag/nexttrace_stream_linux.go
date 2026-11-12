@@ -12,6 +12,7 @@ import (
 	"net"
 	"runtime/debug"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -45,7 +46,10 @@ func nextTraceCapability(ctx context.Context) core.DiagnosticTool {
 		// readiness is checked again against the actual command before use.
 		cfg.SrcAddr, cfg.DstIP = "::", net.ParseIP("2001:db8::1")
 		if second := checkNextTraceBackend(local, trace.Method("icmp"), cfg); second != nil {
-			return core.DiagnosticTool{Error: err.Error() + "；IPv6：" + second.Error()}
+			if rawSocketDenied(err) && rawSocketDenied(second) {
+				return core.DiagnosticTool{Error: "NextTrace 原始套接字检测被拒绝（" + rawSocketFamilyDenials(err, second) + "）；" + rawSocketRecovery}
+			}
+			return core.DiagnosticTool{Error: err.Error() + "；" + second.Error()}
 		}
 	}
 	return core.DiagnosticTool{Version: "NextTrace " + NextTraceEngineVersion + " (built-in)"}
@@ -63,13 +67,42 @@ func validateNextTraceBuild(info *debug.BuildInfo) error {
 	return errors.New("NextTrace 内置版本未确认")
 }
 
+// All supported protocols receive raw ICMP replies. Installing a CLI or
+// switching protocol does not repair a denied backend.
+const rawSocketRecovery = "请管理员核对 Agent 服务的 CAP_NET_RAW 与宿主机/容器限制；旧服务配置需更新并重启 Agent，刷新页面或重装 NextTrace 无法授权"
+
+func rawSocketFamilyDenials(v4, v6 error) string {
+	if rawSocketDenial(v4) == rawSocketDenial(v6) {
+		return "IPv4/IPv6: " + rawSocketDenial(v4)
+	}
+	return "IPv4: " + rawSocketDenial(v4) + "；IPv6: " + rawSocketDenial(v6)
+}
+
+func rawSocketDenial(err error) string {
+	if errors.Is(err, syscall.EPERM) {
+		return "EPERM: operation not permitted"
+	}
+	return "EACCES: permission denied"
+}
+
+func rawSocketDenied(err error) bool {
+	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)
+}
+
 func checkNextTraceBackend(ctx context.Context, method trace.Method, cfg trace.Config) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("NextTrace 能力检测已取消：%w", err)
 	}
 	for _, check := range trace.CheckProbeBackend(ctx, method, cfg) {
 		if check.Err != nil && !check.Optional {
-			return fmt.Errorf("NextTrace %s 检测失败：%w", check.Name, check.Err)
+			family := "IPv6"
+			if cfg.DstIP.To4() != nil {
+				family = "IPv4"
+			}
+			if rawSocketDenied(check.Err) {
+				return fmt.Errorf("NextTrace %s %s 检测失败：%w；%s", family, check.Name, check.Err, rawSocketRecovery)
+			}
+			return fmt.Errorf("NextTrace %s %s 检测失败：%w", family, check.Name, check.Err)
 		}
 		if check.Unknown && !check.Optional {
 			return fmt.Errorf("NextTrace %s 能力未确认", check.Name)

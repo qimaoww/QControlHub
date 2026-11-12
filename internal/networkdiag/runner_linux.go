@@ -39,13 +39,7 @@ const NextTracePath = "/usr/local/lib/qagent/network-tools/nexttrace"
 // Capabilities never return credentials or local database paths.
 func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 	c := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{}, Providers: map[string]string{}, Addresses: []string{}}
-	c.Tools["ping"] = core.DiagnosticTool{Version: "QControlHub ICMP v1"}
-	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	if err != nil {
-		c.Tools["ping"] = core.DiagnosticTool{Error: "缺少 ICMP 原始套接字权限"}
-	} else {
-		conn.Close()
-	}
+	c.Tools["ping"] = pingCapability()
 	c.Tools["nexttrace"] = nextTraceCapability(ctx)
 	for name, path := range map[string]string{"iperf3": "iperf3"} {
 		b, e := probeDiagnosticCommand(ctx, path, "--version")
@@ -152,6 +146,26 @@ func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 		}
 	}
 	return c
+}
+
+// Like NextTrace, ping is usable when either address family can open its
+// real ICMP backend. An unavailable family is not a permission denial.
+func pingCapability() core.DiagnosticTool {
+	var failures []error
+	for _, backend := range []struct{ network, address, family string }{
+		{"ip4:icmp", "0.0.0.0", "IPv4"}, {"ip6:ipv6-icmp", "::", "IPv6"},
+	} {
+		conn, err := icmp.ListenPacket(backend.network, backend.address)
+		if err == nil {
+			conn.Close()
+			return core.DiagnosticTool{Version: "QControlHub ICMP v1"}
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", backend.family, err))
+	}
+	if rawSocketDenied(failures[0]) && rawSocketDenied(failures[1]) {
+		return core.DiagnosticTool{Error: "ICMP 原始套接字检测被拒绝（" + rawSocketFamilyDenials(failures[0], failures[1]) + "）；" + rawSocketRecovery}
+	}
+	return core.DiagnosticTool{Error: fmt.Sprintf("ICMP 套接字检测失败（%v；%v）", failures[0], failures[1])}
 }
 
 func diagnosticProcessEnvironment() []string {
@@ -488,9 +502,16 @@ func diagnosticFailure(c core.DiagnosticCommand, message, stderr string, exit in
 		return name + " 连接被拒绝；请确认目标服务端、端口和防火墙允许 TCP 控制连接"
 	case strings.Contains(text, "address already in use"):
 		return name + " 端口已被占用；请选择其他已授权端口，不会关闭已有服务"
+	case strings.Contains(text, "address family not supported"):
+		return name + " 所选地址族不可用；请检查 Agent 的地址族限制和节点 IPv4/IPv6 配置"
+	case strings.Contains(text, "cannot assign requested address"):
+		return name + " 源地址不可用；请确认该地址仍分配给所选节点"
 	case strings.Contains(text, "network is unreachable"), strings.Contains(text, "no route to host"):
 		return name + " 无法连接目标网络；请检查所选地址族、节点路由和网络连通性"
 	case strings.Contains(text, "permission denied"), strings.Contains(text, "operation not permitted"):
+		if (c.Parameters.Tool == "traceroute" || c.Parameters.Tool == "mtr") && strings.Contains(text, "icmp_socket") {
+			return name + " 测量子进程原始套接字检测被拒绝；" + rawSocketRecovery
+		}
 		return name + " 权限不足；请节点管理员检查 Agent 的执行权限和原始套接字能力"
 	case strings.Contains(text, "dns resolution failed"), strings.Contains(text, "no such host"):
 		return name + " 域名解析失败；请检查节点 DNS 和查询服务网络，已获得的探测结果仍会保留"
