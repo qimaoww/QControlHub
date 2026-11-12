@@ -14,6 +14,7 @@ import {
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
 import { requestID } from "./request-id.js";
+import { networkName, networkKind } from "./nexttrace-format.js";
 import { downloadMeasurementImage } from "./network-tools-export.js";
 
 const exportingImages = new Set();
@@ -891,7 +892,7 @@ function renderOutput(tool, out, state) {
           traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.last_ms)} / ${number(h.avg_ms)}` : "—"),
           traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.best_ms)} / ${number(h.wrst_ms)}` : "—"),
           h.received > 0 ? number(h.stdev_ms) : "—",
-          traceValue("asn", networkName(h.geo)),
+          traceValue(networkName(h.geo) === "—" ? "timeout" : networkKind(h.geo, h.ip), networkName(h.geo)),
           traceValue("geo", geo(h.geo)),
         ]),
         { paginate: false, label: "MTR 跳点" },
@@ -915,9 +916,9 @@ function renderOutput(tool, out, state) {
         [...hops.values()].map(h => [
           traceValue("hop", h.ttl),
           stack(traceValue(h.ip === "*" ? "timeout" : "ip", h.ip), h.hostname && muted(h.hostname)),
-          traceValue("asn", h.geo?.asnumber || h.geo?.asn ? `AS${String(h.geo.asnumber || h.geo.asn).replace(/^AS/i, "")}` : "—"),
-          traceValue("asn", networkName(h.geo)),
-          traceValue("geo", [...new Set([h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.district, h.geo?.owner, h.geo?.domain, h.geo?.isp].filter(Boolean))].join(" · ") || "—"),
+          traceValue(networkKind(h.geo, h.ip), h.geo?.asnumber || h.geo?.asn ? `AS${String(h.geo.asnumber || h.geo.asn).replace(/^AS/i, "")}` : "—"),
+          traceValue(networkName(h.geo) === "—" ? "timeout" : networkKind(h.geo, h.ip), networkName(h.geo)),
+          traceValue("geo", [...new Set([h.geo?.country || (/^(RFC|DOD)/.test(h.geo?.whois || "") ? h.geo.whois : ""), h.geo?.prov, h.geo?.city, h.geo?.district, h.geo?.owner, h.geo?.domain, h.geo?.isp].filter(Boolean))].join(" · ") || "—"),
           traceValue(h.ip === "*" ? "timeout" : "latency", h.samples.join(" / ")),
         ]),
         { paginate: false, label: "路由跳点" },
@@ -951,10 +952,6 @@ function traceValue(kind, value) {
 }
 function traceHops(out) {
   return (Array.isArray(out?.Hops) ? out.Hops : []).flat().filter((hop) => hop && typeof hop === "object" && hop.TTL > 0);
-}
-function networkName(g) {
-  if (!g?.whois) return "—";
-  return `[${g.whois}]`;
 }
 function traceEnd(reason, running) {
   if (running) return traceValue("timeout", "正在探测");
