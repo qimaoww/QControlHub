@@ -33,6 +33,10 @@ func TestNextTraceExecutionPermissionsSandbox(t *testing.T) {
 		t.Skip("requires an isolated dual-stack network with fixture addresses and explicit RAW policy")
 	}
 	allowed := mode != "denied"
+	pingReady := pingCapability()
+	if (pingReady.Error == "") != allowed || pingReady.AutoInstall {
+		t.Fatalf("ping capability disagrees: %+v", pingReady)
+	}
 	cap := nextTraceCapability(context.Background())
 	if (cap.Error == "") != allowed || cap.AutoInstall {
 		t.Fatalf("capability: %+v", cap)
@@ -48,7 +52,7 @@ func TestNextTraceExecutionPermissionsSandbox(t *testing.T) {
 		if family == 6 {
 			source, target = "fd42:7163::10", "fd42:7163::11"
 		}
-		familyAllowed := allowed && !(mode == "ipv4-only" && family == 6)
+		familyAllowed := allowed && !(mode == "ipv4-only" && family == 6) && !(mode == "ipv6-only" && family == 4)
 		for _, protocol := range []string{"icmp", "udp", "tcp"} {
 			for _, tool := range []string{"traceroute", "mtr"} {
 				t.Run(fmt.Sprintf("%d/%s/%s", family, protocol, tool), func(t *testing.T) {

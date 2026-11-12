@@ -39,13 +39,7 @@ const NextTracePath = "/usr/local/lib/qagent/network-tools/nexttrace"
 // Capabilities never return credentials or local database paths.
 func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 	c := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{}, Providers: map[string]string{}, Addresses: []string{}}
-	c.Tools["ping"] = core.DiagnosticTool{Version: "QControlHub ICMP v1"}
-	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	if err != nil {
-		c.Tools["ping"] = core.DiagnosticTool{Error: "缺少 ICMP 原始套接字权限"}
-	} else {
-		conn.Close()
-	}
+	c.Tools["ping"] = pingCapability()
 	c.Tools["nexttrace"] = nextTraceCapability(ctx)
 	for name, path := range map[string]string{"iperf3": "iperf3"} {
 		b, e := probeDiagnosticCommand(ctx, path, "--version")
@@ -152,6 +146,26 @@ func Capabilities(ctx context.Context) core.DiagnosticCapabilities {
 		}
 	}
 	return c
+}
+
+// Like NextTrace, ping is usable when either address family can open its
+// real ICMP backend. An unavailable family is not a permission denial.
+func pingCapability() core.DiagnosticTool {
+	var failures []error
+	for _, backend := range []struct{ network, address, family string }{
+		{"ip4:icmp", "0.0.0.0", "IPv4"}, {"ip6:ipv6-icmp", "::", "IPv6"},
+	} {
+		conn, err := icmp.ListenPacket(backend.network, backend.address)
+		if err == nil {
+			conn.Close()
+			return core.DiagnosticTool{Version: "QControlHub ICMP v1"}
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", backend.family, err))
+	}
+	if rawSocketDenied(failures[0]) && rawSocketDenied(failures[1]) {
+		return core.DiagnosticTool{Error: "ICMP 原始套接字检测被拒绝（" + rawSocketFamilyDenials(failures[0], failures[1]) + "）；" + rawSocketRecovery}
+	}
+	return core.DiagnosticTool{Error: fmt.Sprintf("ICMP 套接字检测失败（%v；%v）", failures[0], failures[1])}
 }
 
 func diagnosticProcessEnvironment() []string {

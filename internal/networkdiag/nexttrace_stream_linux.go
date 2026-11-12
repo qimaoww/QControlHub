@@ -47,11 +47,7 @@ func nextTraceCapability(ctx context.Context) core.DiagnosticTool {
 		cfg.SrcAddr, cfg.DstIP = "::", net.ParseIP("2001:db8::1")
 		if second := checkNextTraceBackend(local, trace.Method("icmp"), cfg); second != nil {
 			if rawSocketDenied(err) && rawSocketDenied(second) {
-				reason := "IPv4: " + rawSocketDenial(err) + "；IPv6: " + rawSocketDenial(second)
-				if rawSocketDenial(err) == rawSocketDenial(second) {
-					reason = "IPv4/IPv6: " + rawSocketDenial(err)
-				}
-				return core.DiagnosticTool{Error: "NextTrace 原始套接字检测被拒绝（" + reason + "）；" + rawSocketRecovery}
+				return core.DiagnosticTool{Error: "NextTrace 原始套接字检测被拒绝（" + rawSocketFamilyDenials(err, second) + "）；" + rawSocketRecovery}
 			}
 			return core.DiagnosticTool{Error: err.Error() + "；" + second.Error()}
 		}
@@ -74,6 +70,13 @@ func validateNextTraceBuild(info *debug.BuildInfo) error {
 // All supported protocols receive raw ICMP replies. Installing a CLI or
 // switching protocol does not repair a denied backend.
 const rawSocketRecovery = "请管理员核对 Agent 服务的 CAP_NET_RAW 与宿主机/容器限制；旧服务配置需更新并重启 Agent，刷新页面或重装 NextTrace 无法授权"
+
+func rawSocketFamilyDenials(v4, v6 error) string {
+	if rawSocketDenial(v4) == rawSocketDenial(v6) {
+		return "IPv4/IPv6: " + rawSocketDenial(v4)
+	}
+	return "IPv4: " + rawSocketDenial(v4) + "；IPv6: " + rawSocketDenial(v6)
+}
 
 func rawSocketDenial(err error) string {
 	if errors.Is(err, syscall.EPERM) {
