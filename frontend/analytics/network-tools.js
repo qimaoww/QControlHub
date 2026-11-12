@@ -152,9 +152,11 @@ export function networkToolsPage(ctx) {
   const swap = button(
     "交换两端",
     () => {
-      const a = controls.get("node1").value;
-      controls.get("node1").value = controls.get("node2").value;
-      controls.get("node2").value = a;
+      for (const field of ["node", "address"]) {
+        const a = controls.get(`${field}1`).value;
+        controls.get(`${field}1`).value = controls.get(`${field}2`).value;
+        controls.get(`${field}2`).value = a;
+      }
       addresses(1);
       addresses(2);
       update();
