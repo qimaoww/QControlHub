@@ -61,8 +61,9 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// readable connection country/node columns within their scroll container,
 	// and a complete source-service selector row on mobile import forms,
 	// and responsive notification records with wrapped dates and reachable actions,
-	// and source indentation, line numbers and JSON syntax highlighting.
-	const expected = "882e9925e6e8f3470cc5056c6249abe46869cb24b1ef340c5adb351829f4963e"
+	// and source indentation, line numbers and JSON syntax highlighting, and
+	// the approved open tools layout, metric strips and readable route columns.
+	const expected = "6f8a7bf6445d0361d8c257429ff5143a5e61e3fa206bf0e2990421e7ab786fc5"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}
