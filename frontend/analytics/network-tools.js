@@ -853,7 +853,7 @@ function renderOutput(tool, out) {
     );
   if (tool === "mtr")
     return stack(
-      muted(pathReason(out.path_end?.reason)),
+      traceEnd(out.path_end?.reason),
       table(
         [
           "TTL",
@@ -866,14 +866,14 @@ function renderOutput(tool, out) {
           "ASN / 归属",
         ],
         (out.stats || []).map((h) => [
-          h.ttl,
-          h.ip || "*",
+          traceValue("hop", h.ttl),
+          traceValue(h.ip ? "ip" : "timeout", h.ip || "*"),
           `${number(h.snt)} / ${number(h.received)}`,
           `${number(h.loss_percent)}%`,
-          h.received > 0 ? `${number(h.last_ms)} / ${number(h.avg_ms)}` : "—",
-          h.received > 0 ? `${number(h.best_ms)} / ${number(h.wrst_ms)}` : "—",
+          traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.last_ms)} / ${number(h.avg_ms)}` : "—"),
+          traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.best_ms)} / ${number(h.wrst_ms)}` : "—"),
           h.received > 0 ? number(h.stdev_ms) : "—",
-          geo(h.geo),
+          traceValue("geo", geo(h.geo)),
         ]),
         { paginate: false, label: "MTR 跳点" },
       ),
@@ -889,15 +889,15 @@ function renderOutput(tool, out) {
       if (!hop.geo && h.Geo) hop.geo = h.Geo;
     }
     return stack(
-      muted(pathReason(out.StopReason?.reason)),
+      traceEnd(out.StopReason?.reason),
       table(
         ["跳数", "响应地址", "ASN", "归属", "延迟（ms）"],
         [...hops.values()].map(h => [
-          h.ttl,
-          stack(node("strong", {}, h.ip), h.hostname && muted(h.hostname)),
-          h.geo?.asnumber || h.geo?.asn || "—",
-          [h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.owner].filter(Boolean).join(" · ") || "—",
-          h.samples.join(" / "),
+          traceValue("hop", h.ttl),
+          stack(traceValue(h.ip === "*" ? "timeout" : "ip", h.ip), h.hostname && muted(h.hostname)),
+          traceValue("asn", h.geo?.asnumber || h.geo?.asn || "—"),
+          traceValue("geo", [h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.owner].filter(Boolean).join(" · ") || "—"),
+          traceValue(h.ip === "*" ? "timeout" : "latency", h.samples.join(" / ")),
         ]),
         { paginate: false, label: "路由跳点" },
       ),
@@ -924,6 +924,12 @@ function renderOutput(tool, out) {
       ? table(["统计端", "吞吐", "传输量", "重传", "抖动（ms）", "丢包"], rows)
       : muted("未产生有效吞吐统计"),
   );
+}
+function traceValue(kind, value) {
+  return node("span", { className: `a-trace-${kind}` }, value);
+}
+function traceEnd(reason) {
+  return traceValue(reason === "destination_reached" ? "asn" : "timeout", pathReason(reason));
 }
 function pathReason(reason) {
   return (
