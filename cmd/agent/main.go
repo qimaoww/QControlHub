@@ -21,6 +21,15 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "prepare-network-tool" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if err := agent.RunNetworkToolPreparation(ctx, os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "network-trace-stream" {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()

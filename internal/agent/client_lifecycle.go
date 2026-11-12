@@ -51,6 +51,16 @@ func reconnectBackoffLimit(rejected bool) time.Duration {
 func (c *Client) initializeNetworkDiagnostics(ctx context.Context) error {
 	var err error
 	c.diagnostics, err = networkdiag.New(ctx, filepath.Join(c.config.StatePath+".network-diagnostics", "journal.json"), &c.taskLifecycleMu)
+	if err == nil {
+		c.diagnostics.Prepare = func(ctx context.Context, tool string) error {
+			err := prepareNetworkTool(ctx, tool)
+			capabilities := networkdiag.Capabilities(ctx)
+			c.diagnosticCapabilitiesMu.Lock()
+			c.diagnosticCapabilities = capabilities
+			c.diagnosticCapabilitiesMu.Unlock()
+			return err
+		}
+	}
 	return err
 }
 

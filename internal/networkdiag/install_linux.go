@@ -19,7 +19,7 @@ import (
 )
 
 // These digests are the v1.7.6 GitHub release asset digests. Installation is
-// explicit, outside the sandboxed service, and never replaces a user's tool.
+// performed by the bounded privileged helper and never replaces a user's tool.
 var nextTraceAssets = map[string]string{
 	"amd64": "3868c8190c961b534b8f2d0ed528796fc48d46a818ee5268fe2dfc6aa44b3a5e",
 	"arm64": "e4c4e818f6cebf8d8ee3df3976a304c8bac2bb3bea3160a23fd5bce18095c9e6",
@@ -27,29 +27,52 @@ var nextTraceAssets = map[string]string{
 }
 
 func Prepare(ctx context.Context) error {
+	if err := PrepareTool(ctx, "iperf3"); err != nil {
+		return err
+	}
+	return PrepareTool(ctx, "nexttrace")
+}
+
+// PrepareTool accepts only fixed dependencies; task input cannot name packages,
+// repositories, paths or command arguments.
+func PrepareTool(ctx context.Context, tool string) error {
+	if tool != "iperf3" && tool != "nexttrace" {
+		return errors.New("不支持的诊断依赖")
+	}
 	if os.Geteuid() != 0 {
 		return errors.New("工具准备需要 root")
 	}
-	if _, err := exec.LookPath("iperf3"); err != nil {
-		var command string
-		var args []string
-		for _, plan := range [][]string{{"apt-get", "install", "-y", "--no-install-recommends", "iperf3"}, {"apk", "add", "--no-cache", "iperf3"}, {"dnf", "install", "-y", "iperf3"}, {"yum", "install", "-y", "iperf3"}, {"zypper", "--non-interactive", "install", "iperf3"}} {
-			if _, e := exec.LookPath(plan[0]); e == nil {
-				command = plan[0]
-				args = plan[1:]
-				break
+	if tool == "iperf3" {
+		if _, err := exec.LookPath("iperf3"); err != nil {
+			var command string
+			var args []string
+			for _, plan := range [][]string{{"apt-get", "install", "-y", "--no-install-recommends", "iperf3"}, {"apk", "add", "--no-cache", "iperf3"}, {"dnf", "install", "-y", "iperf3"}, {"yum", "install", "-y", "iperf3"}, {"zypper", "--non-interactive", "install", "iperf3"}} {
+				if _, e := exec.LookPath(plan[0]); e == nil {
+					command = plan[0]
+					args = plan[1:]
+					break
+				}
+			}
+			if command == "" {
+				return errors.New("请使用发行版包管理器安装 iperf3")
+			}
+			if command == "apt-get" {
+				update := exec.CommandContext(ctx, command, "update")
+				update.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+				update.Stdout, update.Stderr = os.Stdout, os.Stderr
+				if err := update.Run(); err != nil {
+					return fmt.Errorf("更新 iperf3 软件源索引失败：%w", err)
+				}
+			}
+			cmd := exec.CommandContext(ctx, command, args...)
+			cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err = cmd.Run(); err != nil {
+				return fmt.Errorf("install iperf3: %w", err)
 			}
 		}
-		if command == "" {
-			return errors.New("请使用发行版包管理器安装 iperf3")
-		}
-		cmd := exec.CommandContext(ctx, command, args...)
-		cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err = cmd.Run(); err != nil {
-			return fmt.Errorf("install iperf3: %w", err)
-		}
+		return nil
 	}
 	arch := runtime.GOARCH
 	if arch == "arm" {

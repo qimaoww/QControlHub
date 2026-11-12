@@ -18,6 +18,9 @@ func TestNetworkDiagnosticsAuthorizationAndLifecycle(t *testing.T) {
 	for i, agent := range []core.Agent{a, b} {
 		grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 5201)
 		caps := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}, "nexttrace": {Version: "v1.7.6"}, "iperf3": {Version: "3.18"}}, Providers: map[string]string{"disable-geoip": "", "ipdb.one": "missing credentials"}, Addresses: []string{[]string{"192.0.2.2", "192.0.2.3"}[i]}}
+		if i == 0 {
+			caps.Tools["nexttrace"] = core.DiagnosticTool{AutoInstall: true, Error: "NextTrace 未安装"}
+		}
 		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: append(agent.Features, core.AgentFeatureNetworkDiagnostics)}); err != nil {
 			t.Fatal(err)
 		}

@@ -63,8 +63,11 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	if c.traffic != nil {
 		c.traffic.collect(ctx, false)
 	}
+	c.diagnosticCapabilitiesMu.RLock()
+	diagnostics := c.diagnosticCapabilities
+	c.diagnosticCapabilitiesMu.RUnlock()
 	heartbeat := &core.HeartbeatRequest{
-		Diagnostics: &c.diagnosticCapabilities,
+		Diagnostics: &diagnostics,
 		Version:     c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 		SharedInstances:     sharedInstances,

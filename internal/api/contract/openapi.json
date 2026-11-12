@@ -2429,6 +2429,9 @@
           "sequence": {
             "type": "integer"
           },
+          "stage": {
+            "type": "string"
+          },
           "state": {
             "type": "string"
           },
@@ -2477,6 +2480,9 @@
       "core_DiagnosticTool": {
         "additionalProperties": false,
         "properties": {
+          "auto_install": {
+            "type": "boolean"
+          },
           "error": {
             "type": "string"
           },

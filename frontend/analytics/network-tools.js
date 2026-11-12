@@ -272,7 +272,7 @@ export function networkToolsPage(ctx) {
     both.hidden = !trace || custom;
     both.textContent = t === "mtr" ? "双向 MTR" : "双向追踪";
     const pair = [selected(1), selected(2)],
-      reasons = [];
+      reasons = [], preparation = [];
     for (let i = 0; i < (custom ? 1 : 2); i++) {
       const n = pair[i];
       if (!n) {
@@ -282,7 +282,8 @@ export function networkToolsPage(ctx) {
       if (!n.online) reasons.push(`${n.name} 离线`);
       const name = trace ? "nexttrace" : t,
         tool = n.capabilities?.tools?.[name];
-      if (!tool?.version || tool.error)
+      if (tool?.auto_install) preparation.push(`${n.name}：开始后自动安装 ${name === "nexttrace" ? "NextTrace" : name}`);
+      if (!tool?.auto_install && (!tool?.version || tool.error))
         reasons.push(
           `${n.name}：${tool?.error || "请升级 Agent 并准备诊断工具"}`,
         );
@@ -313,7 +314,7 @@ export function networkToolsPage(ctx) {
       (reason) => !reason.startsWith("请选择"),
     );
     capability.textContent = nodes
-      ? visibleReasons.join("；") ||
+      ? visibleReasons.join("；") || preparation.join("；") ||
         ((custom ? [pair[0]] : pair).every(Boolean) &&
         pair.some((n) => n?.instance_id)
           ? `使用宿主机网络${t === "iperf3" ? "；测速按流量上限预留共享额度" : ""}。`
@@ -394,6 +395,7 @@ export function networkToolsPage(ctx) {
           for (const name of ["node1", "node2", "address1", "address2"])
             options(controls.get(name), [["", "请选择"]]);
         capability.textContent = e.message;
+        capability.hidden = false;
         forward.disabled = both.disabled = true;
       }
     }
@@ -596,7 +598,7 @@ export function networkToolsPage(ctx) {
                                 ? "回程"
                                 : "去程",
                           ),
-                          badge(labels[r.state] || r.state),
+                          badge(r.stage === "installing" ? "正在安装诊断工具" : labels[r.state] || r.state),
                         ),
                         node("dl", {className:"a-tools-endpoints"},
                           endpointView("来源", from), endpointView("目标", to),

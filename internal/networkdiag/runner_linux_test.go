@@ -251,3 +251,55 @@ func TestUnconfirmedCleanupBlocksNewWork(t *testing.T) {
 		t.Fatalf("uncertain process ownership did not block new work: %+v", r)
 	}
 }
+
+func TestAutomaticPreparationCanStopAndDoesNotReplay(t *testing.T) {
+	caps := Capabilities(context.Background())
+	if len(caps.Addresses) == 0 {
+		t.Skip("node interface required")
+	}
+	t.Setenv("PATH", t.TempDir()) // iperf3 is genuinely absent from executable lookup.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	life := &sync.Mutex{}
+	m, err := New(ctx, filepath.Join(t.TempDir(), "journal"), life)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	var calls int
+	m.Prepare = func(ctx context.Context, tool string) error {
+		calls++
+		if tool != "iperf3" {
+			t.Errorf("unexpected install %s", tool)
+		}
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	p := core.DiagnosticParameters{Tool: "iperf3", Protocol: "tcp", Provider: "disable-geoip", Count: 1, IntervalMS: 200, TimeoutMS: 200, MaxHops: 1, Size: 64, Port: 5201, Duration: 1, Streams: 1}
+	c := core.DiagnosticCommand{ID: "ndg_prepare-client", SessionID: "ndg_prepare", Role: "client", Source: core.DiagnosticEndpoint{Address: caps.Addresses[0]}, Target: core.DiagnosticEndpoint{Address: "192.0.2.1"}, Parameters: p, Deadline: time.Now().Add(time.Minute)}
+	m.Apply([]core.DiagnosticCommand{c})
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("installation did not start")
+	}
+	if got := m.Apply([]core.DiagnosticCommand{c})[0]; got.Stage != "installing" {
+		t.Fatalf("missing installation state: %+v", got)
+	}
+	stop := c
+	stop.Role = "stop"
+	m.Apply([]core.DiagnosticCommand{stop})
+	until := time.Now().Add(5 * time.Second)
+	for time.Now().Before(until) {
+		r := m.Apply([]core.DiagnosticCommand{c})[0]
+		if r.Terminal() {
+			if r.State != "canceled" || !r.Cleaned || calls != 1 {
+				t.Fatalf("installation replayed or did not stop: %+v calls=%d", r, calls)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("stop blocked behind installation lifecycle lock")
+}

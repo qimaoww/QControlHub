@@ -237,7 +237,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 			tool = "nexttrace"
 		}
 		t, ok := c.Tools[tool]
-		if !ok || t.Error != "" || t.Version == "" {
+		if !ok || !t.AutoInstall && (t.Error != "" || t.Version == "") {
 			return fail(fmt.Errorf("%w: %s：%s", ErrConflict, ep.Name, t.Error))
 		}
 		if tool == "nexttrace" {
@@ -585,7 +585,7 @@ func (s *Store) AgentDiagnosticCommands(ctx context.Context, agentID string) ([]
 	return result, nil
 }
 func (s *Store) CompleteDiagnosticCommand(ctx context.Context, agentID string, r core.DiagnosticResult) error {
-	if len(r.ID) > 100 || len(r.Output) > 512<<10 || len(r.Stderr) > 8192 || len(r.Error) > 8192 || !slices.Contains([]string{"ready", "running", "succeeded", "failed", "canceled"}, r.State) {
+	if (r.Stage != "" && r.Stage != "installing") || len(r.ID) > 100 || len(r.Output) > 512<<10 || len(r.Stderr) > 8192 || len(r.Error) > 8192 || !slices.Contains([]string{"ready", "running", "succeeded", "failed", "canceled"}, r.State) {
 		return ErrInvalid
 	}
 	parts := strings.Split(r.ID, "-")

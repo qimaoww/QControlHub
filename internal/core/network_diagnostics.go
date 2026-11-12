@@ -110,8 +110,9 @@ type DiagnosticGrant struct {
 }
 
 type DiagnosticTool struct {
-	Version string `json:"version"`
-	Error   string `json:"error,omitempty"`
+	AutoInstall bool   `json:"auto_install,omitempty"`
+	Version     string `json:"version"`
+	Error       string `json:"error,omitempty"`
 }
 type DiagnosticCapabilities struct {
 	Tools     map[string]DiagnosticTool `json:"tools"`
@@ -160,6 +161,7 @@ type DiagnosticCommand struct {
 	Deadline   time.Time            `json:"deadline"`
 }
 type DiagnosticResult struct {
+	Stage    string          `json:"stage,omitempty"`
 	Sequence uint64          `json:"sequence,omitempty"`
 	ID       string          `json:"id"`
 	State    string          `json:"state"` // running, ready, succeeded, failed, canceled
