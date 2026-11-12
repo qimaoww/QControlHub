@@ -12,6 +12,9 @@ import {
   table,
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
+import { readRegion } from "./loading.js";
+import { accountStorage } from "../modules/account-storage.js";
+import { createNodeOrderSync, orderNodesBySavedOrder } from "../modules/node-order.js";
 import { redactDiagnostic } from "../modules/errors.js";
 import { nodeName } from "./node-region.js";
 import { requestID } from "./request-id.js";
@@ -49,6 +52,9 @@ const providers = [
 ];
 
 export function networkToolsPage(ctx) {
+  let renderManagementOrder = () => {};
+  const ordering = createNodeOrderSync(ctx.api, accountStorage, ctx.current, false);
+  const orderRead = readRegion(ctx, "节点排序", () => ordering.load(), () => { renderNodes(); renderManagementOrder(); });
   let regionAgents = [], readingRegions = false, readingNodes = false;
   let nodes,
     nodesSnapshot,
@@ -424,6 +430,23 @@ export function networkToolsPage(ctx) {
       controls.get("size").value = Math.max(Number(value("size")), Number(controls.get("size").min));
   });
   form.addEventListener("change", update);
+  function renderNodes() {
+    if (!nodes) return;
+    for (const i of [1, 2]) {
+      const select = controls.get(`node${i}`),
+        old = select.value;
+      options(select, [
+        ["", "请选择"],
+        ...orderNodesBySavedOrder(nodes.map(n => ({ id: n.agent_id, diagnostic: n })), ordering.ids()).map(({ diagnostic: n }) => [
+          key(n),
+          nodeLabel(n),
+        ]),
+      ]);
+      if (select.value !== old) select.value = old;
+      addresses(i);
+    }
+    update();
+  }
   async function loadNodes() {
     if (readingNodes) return;
     readingNodes = true;
@@ -434,20 +457,7 @@ export function networkToolsPage(ctx) {
       if (nextNodes === nodesSnapshot) return;
       nodesSnapshot = nextNodes;
       nodes = data;
-      for (const i of [1, 2]) {
-        const select = controls.get(`node${i}`),
-          old = select.value;
-        options(select, [
-          ["", "请选择"],
-          ...nodes.map((n) => [
-            key(n),
-            nodeLabel(n),
-          ]),
-        ]);
-        if (select.value !== old) select.value = old;
-        addresses(i);
-      }
-      update();
+      renderNodes();
     } catch (e) {
       if (ctx.current()) {
         nodes = undefined;
@@ -805,11 +815,11 @@ export function networkToolsPage(ctx) {
     }
   }
   const refresh = () =>
-    Promise.allSettled([loadNodes(), loadRegions(), loadResults(), loadPinned()]);
+    Promise.allSettled([loadNodes(), orderRead.load(), loadRegions(), loadResults(), loadPinned()]);
   ctx.onRefresh(refresh);
   void refresh();
   poll(ctx, loadResults, 2000);
-  poll(ctx, loadNodes, 10000);
+  poll(ctx, () => Promise.allSettled([loadNodes(), orderRead.load()]), 10000);
   poll(ctx, loadRegions, 10000);
   if (requestedID) poll(ctx, loadPinned, 2000);
   const grantHost = node("div", { className: "a-stack" });
@@ -818,18 +828,23 @@ export function networkToolsPage(ctx) {
         options: [["", "请选择"]],
       }),
       select = management.querySelector("select");
+    let managedAgents = [];
+    renderManagementOrder = () => {
+      const old = select.value;
+      options(select, [
+        ["", "请选择"],
+        ...orderNodesBySavedOrder(managedAgents, ordering.ids())
+          .filter(a => a.can_manage !== false && ctx.can("agents.manage", a))
+          .map(a => [a.id, a.name]),
+      ]);
+      if (select.value !== old) select.value = old;
+    };
     void ctx
       .api("/agents")
       .then((items) => {
-        if (ctx.current())
-          options(select, [
-            ["", "请选择"],
-            ...items
-              .filter(
-                (a) => a.can_manage !== false && ctx.can("agents.manage", a),
-              )
-              .map((a) => [a.id, a.name]),
-          ]);
+        if (!ctx.current()) return;
+        managedAgents = items;
+        renderManagementOrder();
       })
       .catch((e) => {
         if (ctx.current()) grantHost.textContent = networkDiagnosticError(e);
@@ -888,7 +903,7 @@ export function networkToolsPage(ctx) {
       }
     });
     return node("div", {className:"a-stack a-tools-page"},
-      toolPanel("新建测量", form),
+      toolPanel("新建测量", stack(orderRead.element, form)),
       toolPanel("测量记录", node("div", { className: "a-stack" }, recordPicker, results)),
       node(
         "details",
@@ -910,7 +925,7 @@ export function networkToolsPage(ctx) {
     );
   }
   return node("div", {className:"a-stack a-tools-page"},
-    toolPanel("新建测量", form),
+    toolPanel("新建测量", stack(orderRead.element, form)),
     toolPanel("测量记录", node("div", { className: "a-stack" }, recordPicker, results)),
   );
 }

@@ -5,6 +5,8 @@ package agent
 import (
 	"bytes"
 	"io/fs"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub"
@@ -63,6 +65,29 @@ func TestAgentOpenRCPolicyPreservesOnlyEnvironmentOverrides(t *testing.T) {
 	for _, line := range []string{"capabilities=''", "command_user='nobody'", `export QCH_AGENT_NAME='x'; capabilities=''`, "export QCH_AGENT_NAME=$(id)", "export QCH_AGENT_NAME='x' # custom"} {
 		if agentOpenRCEnvironmentExport.MatchString(line) {
 			t.Fatalf("administrator shell policy accepted: %s", line)
+		}
+	}
+}
+
+func TestOlderAgentPolicyAddsOnlyRaw(t *testing.T) {
+	legacy, err := os.ReadFile("testdata/agent-systemd-pre-certificates.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundled, err := fs.ReadFile(qcontrolhub.AgentServiceAssets(), "deploy/systemd/qagent.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, changed := agentNetworkPolicyUpgrade(legacy, bundled, ServiceManagerSystemd)
+	if !changed || !bytes.Equal(bytes.ReplaceAll(got, []byte(" CAP_NET_RAW"), nil), legacy) {
+		t.Fatal("older managed policy not recovered without unrelated changes")
+	}
+	if strings.Count(string(got), " CAP_NET_RAW") != 2 || bytes.Contains(got, []byte("CAP_NET_BIND_SERVICE")) {
+		t.Fatal("wrong capability scope")
+	}
+	for _, current := range [][]byte{got, append(append([]byte{}, legacy...), []byte("# administrator\n")...), bytes.ReplaceAll(legacy, []byte("NoNewPrivileges=true"), []byte("NoNewPrivileges=false"))} {
+		if _, changed := agentNetworkPolicyUpgrade(current, bundled, ServiceManagerSystemd); changed {
+			t.Fatal("repeated recovery or administrator policy overwritten")
 		}
 	}
 }

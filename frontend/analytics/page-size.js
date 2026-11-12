@@ -4,7 +4,8 @@ import { field } from './ui.js';
 export const pageSizes = [30, 50, 100, 200];
 export function pageSizePreference(ctx, page, onChange) {
   let preference, saving = false;
-  const element = field('每页条数', 'page_size', 30, { options: pageSizes.map(size => [String(size), String(size)]), disabled: true });
+  const element = field('每页条数', 'page_size', 30, { options: pageSizes.map(size => [String(size), `${size} 条/页`]), 'aria-label': '每页条数', disabled: true });
+  element.querySelector('label').hidden = true;
   const select = element.querySelector('select');
   const endpoint = `/preferences/page-size/${page}`;
   function accept(value) {

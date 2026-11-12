@@ -6,15 +6,18 @@ import { assert, waitFor } from './assertions.mjs';
 export async function testDiagnosticNodeFlags(preview = false) {
   window.dispatchEvent(new Event('pagehide'));
   const controller = new AbortController();
-  let active = true, refresh, releaseRegions;
+  let active = true, refresh, releaseRegions, releaseOrder;
+  let order = ["unavailable-host", "host-b", "host-a"], orderFailure = false;
+  let orderGate = new Promise(resolve => { releaseOrder = resolve; });
   let regionGate = new Promise(resolve => { releaseRegions = resolve; });
-  let agents = [{id:'host-a',region_code:'HK'}, {id:'host-b',region_code:'TW'}];
+  let agents = [{id:'host-a',name:'节点 A',region_code:'HK'}, {id:'host-b',name:'节点 B',region_code:'TW'}, {id:'host-denied',name:'禁止管理',can_manage:false}];
   let nodes = ['host-a','host-b'].map((agent_id,index) => ({agent_id,instance_id:`share-${index}`,name:`同名节点 ${'长名称'.repeat(12)}`,online:true,capabilities:{tools:{ping:{version:'ICMP'},nexttrace:{version:'NextTrace v1.7.6 (built-in)'}},providers:{'disable-geoip':''},addresses:[`192.0.2.${index+1}`]}}));
   const records = [0,1].map(index => ({id:`record-${index}`,created_at:`2026-11-12T12:0${1-index}:00Z`,state:'succeeded',results:{},request:{parameters:{tool:'ping',protocol:'icmp',count:3,interval_ms:1000,timeout_ms:1000,size:56},bidirectional:index===0,node1:{agent_id:'host-a',instance_id:'share-0',name:'历史来源节点',address:'2001:db8::1'},node2:index===0?{agent_id:'host-b',instance_id:'share-1',name:'历史目标节点',address:'2001:db8::2'}:{name:'192.0.2.99',address:'192.0.2.99'}}}));
   for (const record of records) for (const id of [record.id,...(record.request.bidirectional?[record.id+'-reverse']:[])]) record.results[id]={id,state:'succeeded',output:{sent:3,received:3,loss_percent:0,avg_ms:0.2,min_ms:0.1,max_ms:0.3,stdev_ms:0.1,reached:true}};
   const calls = [];
-  const ctx = {signal:controller.signal,current:()=>active,state:{data:{}},can:permission=>['agents.read','tasks.execute'].includes(permission),onRefresh:run=>{refresh=run},api:async path=>{
+  const ctx = {signal:controller.signal,current:()=>active,state:{data:{}},can:permission=>['agents.read','tasks.execute','agents.manage'].includes(permission),onRefresh:run=>{refresh=run},api:async path=>{
     calls.push(path);
+    if (path==='/preferences/node-order') { await orderGate; if (orderFailure) throw new Error('order unavailable'); return {ids:[...order],revision:1}; }
     if (path==='/agents') { await regionGate; return structuredClone(agents); }
     if (path==='/network-diagnostics/nodes') return structuredClone(nodes);
     if (path.startsWith('/network-diagnostics?')) return structuredClone(records);
@@ -32,8 +35,18 @@ export async function testDiagnosticNodeFlags(preview = false) {
     const start = [...host.querySelectorAll('button')].find(button=>button.textContent==='开始测试');
     assert.ok(!start.disabled,'未加载地区阻塞可用诊断');
     const address = control('address1').value;
+    const nodeOption = control('node1').querySelector(`option[value="${key(nodes[0])}"]`);
+    control('node1').focus();
+    releaseOrder();
+    await waitFor(()=>control('node1').options[1]?.value===key(nodes[1]),'未采用账号保存的节点顺序');
+    for (const i of [1,2]) assert.equal([...control(`node${i}`).options].slice(1).map(option=>option.value).join(','),[key(nodes[1]),key(nodes[0])].join(','),'两端排序不一致或显示了无权节点');
+    assert.equal(control('node1').querySelector(`option[value="${key(nodes[0])}"]`),nodeOption,'排序重建节点选项');
+    assert.equal(control('node1').value,key(nodes[0]),'排序重置节点选择');
+    assert.equal(control('address1').value,address,'排序重置地址');
+    assert.equal(document.activeElement,control('node1'),'排序丢失焦点');
     releaseRegions();
     await waitFor(()=>code(1)==='HK' && code(2)==='TW','两端已选旗帜未更新');
+    assert.equal([...control('grant_node').options].slice(1).map(option=>option.value).join(','),'host-b,host-a','授权节点未排序或包含无管理权限节点');
     assert.ok(control('node2').querySelector('selectedcontent img[src$="/cn"]'),'未复用台湾旗帜规则');
     assert.equal(control('address1').value,address,'地区更新重置地址');
     await waitFor(()=>control('measurement').options.length===2,'测量记录未载入');
@@ -52,16 +65,27 @@ export async function testDiagnosticNodeFlags(preview = false) {
     assert.ok(host.querySelector('[data-refresh-key="record-1"]'),'选择记录与结果不一致');
     assert.equal(control('measurement').options[1].textContent.split('192.0.2.99').length,2,'自定义目标地址重复');
     assert.ok(!calls.some(path=>path.includes('/region')),'诊断身份触发错误地区请求');
-    const option = control('node1').options[1];
+    const option = control('node1').querySelector(`option[value="${key(nodes[0])}"]`);
     control('node1').focus();
     agents[0].region_code='US';regionGate=Promise.resolve();
     await refresh();
     await waitFor(()=>code(1)==='US','刷新未恢复地区');
-    assert.equal(control('node1').options[1],option,'地区刷新重建选项');
+    assert.equal(control('node1').querySelector(`option[value="${key(nodes[0])}"]`),option,'地区刷新重建选项');
     assert.equal(document.activeElement,control('node1'),'地区刷新丢失焦点');
     assert.equal(control('address1').value,address,'刷新重置参数');
     assert.equal(control('measurement').value,'record-1','刷新重置历史记录选择');
     assert.ok(control('measurement').querySelector('selectedcontent [data-region-code="US"]'),'地区刷新未更新已选记录旗帜');
+    order = ['host-a','host-b'];await refresh();
+    assert.equal(control('node1').options[1].value,key(nodes[0]),'节点数据未变时未刷新保存顺序');
+    assert.equal(control('grant_node').options[1].value,'host-a','授权节点未随保存顺序更新');
+    assert.equal(control('node1').value,key(nodes[0]),'顺序更新重置选择');
+    nodes.push({...structuredClone(nodes[1]),instance_id:'share-other'});await refresh();
+    assert.equal([...control('node1').options].slice(1).map(option=>option.value).join(','),'host-a/share-0,host-b/share-1,host-b/share-other','共享实例未按宿主机稳定排序');
+    nodes.pop();await refresh();
+    orderFailure=true;await refresh();
+    assert.equal(control('node1').options[1].value,key(nodes[0]),'排序读取失败丢失有效顺序');
+    orderFailure=false;order=['host-b','host-a'];await refresh();
+    assert.equal(control('node1').options[1].value,key(nodes[1]),'排序读取失败后未恢复');
     choose('measurement','record-0');
     if (preview) return;
     records[0].request.node1.name += '超长节点名称'.repeat(12);
@@ -78,15 +102,15 @@ export async function testDiagnosticNodeFlags(preview = false) {
     assert.equal(code(2),'US','切换目标类型丢失旗帜');
     const image = control('node1').querySelector('option[value="host-b/share-1"] img');
     image.dispatchEvent(new Event('error'));
-    assert.ok(control('node1').options[2].textContent.includes('TW'),'图片失败没有地区代码回退');
+    assert.ok(control('node1').querySelector('option[value="host-b/share-1"]').textContent.includes('TW'),'图片失败没有地区代码回退');
     agents[1].region_code='';await refresh();
     assert.equal(code(1),'','未知地区保留旧旗帜');
     assert.ok(control('node1').textContent.includes('同名节点'),'未知地区丢失节点名称');
     nodes=nodes.slice(0,1);await refresh();
     assert.equal(control('node1').value,'','授权撤销保留失效选择');
     assert.equal(control('node1').options.length,2,'授权撤销保留失效节点');
-    regionGate=new Promise(resolve=>{releaseRegions=resolve});
-    const pending=refresh();active=false;controller.abort();releaseRegions();await pending;
+    regionGate=new Promise(resolve=>{releaseRegions=resolve});orderGate=new Promise(resolve=>{releaseOrder=resolve});
+    const pending=refresh();active=false;controller.abort();releaseRegions();releaseOrder();await pending;
     assert.equal(control('node1').options.length,2,'迟到响应改变已销毁页面');
     assert.ok(document.documentElement.scrollWidth<=innerWidth+1,'诊断长节点名称造成页面溢出');
   } finally { active=false;controller.abort(); }
