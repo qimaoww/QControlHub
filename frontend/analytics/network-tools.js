@@ -931,11 +931,12 @@ function renderOutput(tool, out, state, rounds) {
   const intervals = (out.intervals || []).filter(item => item?.sum).map(item => item.sum);
   const current = intervals.at(-1);
   return stack(
-    current && node("div", {className:"a-stat-grid"},
-      ...[[running ? "当前吞吐" : "最后一秒吞吐", `${number(current.bits_per_second/1000000)} Mbit/s`],
-      ["已测时长", `${number(current.end)} s`],
-      ["累计传输", `${number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)/1048576)} MiB`],
-      ["平均吞吐", `${number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)*8/Math.max(current.end,0.001)/1000000)} Mbit/s`]].map(([label,value]) => node("div", {className:"a-stat"}, muted(label), node("strong",{},value))),
+    current && node("dl", {className:"a-tools-metrics", "aria-label":"测速概况"},
+      ...[[running ? "当前吞吐" : "最后一秒吞吐", number(current.bits_per_second/1000000), "Mbit/s"],
+      ["平均吞吐", number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)*8/Math.max(current.end,0.001)/1000000), "Mbit/s"],
+      ["累计传输", number(intervals.reduce((sum,item)=>sum+(item.bytes || 0),0)/1048576), "MiB"],
+      ["已测时长", number(current.end), "s"]].map(([label,value,unit]) =>
+        node("div", {}, node("dt",{},label), node("dd",{},node("span",{className:"a-tools-metric-value"},value),node("span",{className:"a-tools-metric-unit"},unit)))),
     ),
     intervals.length>0 && stack(
       node("h3",{},"测速过程"),

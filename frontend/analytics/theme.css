@@ -608,3 +608,20 @@ strong, b { font-weight: 600; }
 .a-region-option .a-muted { font-size: var(--text-caption); }
 .a-region-options > .a-muted { grid-column: 1 / -1; padding: 8px; }
 @media (max-width: 40rem) { .a-region-options { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 40dvh; } }
+
+/* Tools measurements use a compact data strip, independent of dashboard cards. */
+.a-tools-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 8px 0; padding: 20px 0; border-block: 1px solid var(--border); }
+.a-tools-metrics > div { min-width: 0; padding-inline: 24px; border-inline-start: 1px solid var(--border); }
+.a-tools-metrics > div:first-child { padding-inline-start: 0; border-inline-start: 0; }
+.a-tools-metrics dt { margin-bottom: 10px; color: var(--soft-ink); font-size: var(--text-label); }
+.a-tools-metrics dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 0; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.a-tools-metric-value { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.a-tools-metric-unit { color: var(--soft-ink); font-size: 14px; }
+@media (max-width: 900px) {
+  .a-tools-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 24px; }
+  .a-tools-metrics > div { padding-inline: 16px; }
+  .a-tools-metrics > div:nth-child(odd) { padding-inline-start: 0; border-inline-start: 0; }
+  .a-tools-metrics dt { margin-bottom: 6px; }
+  .a-tools-metric-value { font-size: 24px; }
+  .a-tools-metric-unit { font-size: 12px; }
+}
