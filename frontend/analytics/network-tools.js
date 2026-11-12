@@ -209,12 +209,15 @@ export function networkToolsPage(ctx) {
   function addresses(i) {
     const n = selected(i),
       select = controls.get(`address${i}`),
-      old = select.value;
+      old = select.value,
+      ips = n?.capabilities?.addresses || [];
     options(select, [
       ["", "请选择"],
-      ...(n?.capabilities?.addresses || []).map((ip) => [ip, ip]),
+      ...ips.map((ip) => [ip, ip]),
     ]);
-    select.value = [...select.options].some((o) => o.value === old) ? old : "";
+    select.value = old && ips.includes(old)
+      ? old
+      : ips.find((ip) => !ip.includes(":")) || ips[0] || "";
   }
   function update() {
     const custom = value("target_mode") === "ip";
