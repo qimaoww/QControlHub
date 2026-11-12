@@ -5,6 +5,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -23,14 +24,58 @@ import (
 
 var agentOpenRCEnvironmentExport = regexp.MustCompile(`^export QCH_[A-Z0-9_]+='(?:[^']|'\\'')*'$`)
 
-// Recognize the exact policy shipped immediately before diagnostics added RAW.
+// Recognize exact shipped policies, including installations that predate
+// certificate management. A binary upgrade never updated those service files.
 // Never overwrite administrator changes or extend an administrator's drop-ins.
 func agentNetworkPolicyUpgrade(current, bundled []byte, kind string) ([]byte, bool) {
 	legacy := bytes.ReplaceAll(bundled, []byte(" CAP_NET_RAW"), nil)
 	if kind == ServiceManagerOpenRC {
 		legacy = bytes.ReplaceAll(bundled, []byte("if qagent_capability_is_bound 13; then\n\tcapabilities=\"${capabilities},^cap_net_raw\"\nfi\n\n"), nil)
 	}
-	return bundled, !bytes.Equal(legacy, bundled) && bytes.Equal(current, legacy)
+	if !bytes.Equal(legacy, bundled) && bytes.Equal(current, legacy) {
+		return bundled, true
+	}
+	if kind != ServiceManagerSystemd || !olderAgentSystemdPolicy(current) {
+		return nil, false
+	}
+	// Only add RAW. Do not grant BIND_SERVICE/identity capabilities or replace
+	// unrelated service isolation when recovering an older managed policy.
+	lines := strings.Split(string(current), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "CapabilityBoundingSet=") || strings.HasPrefix(line, "AmbientCapabilities=") {
+			lines[i] += " CAP_NET_RAW"
+		}
+	}
+	return []byte(strings.Join(lines, "\n")), true
+}
+
+// SHA-256 allowlist of every older systemd template on published main. Match
+// the entire file so even a comment or unrelated administrator setting keeps
+// the service outside automatic recovery.
+func olderAgentSystemdPolicy(current []byte) bool {
+	switch fmt.Sprintf("%x", sha256.Sum256(current)) {
+	case "925d98f26d188a6c4b15868184ccc0c96e6048463e74b2e780d4b584339f302f": // b84342e8
+		return true
+	case "61f577c4e2f8e99ef9a5357bc3c55286bea4a6c25e7c53a5ed44a2bd36e339c8": // 40c19e80
+		return true
+	case "cd9b0e670000fd5a43f8697ff7ba7e5b48647a19745be8a33afc0a5fb822b33b": // 02f8429e
+		return true
+	case "52ef15c4df336f941945d7fe30ed82846ece0c043d9952c22dce4ac00537b3e4": // 6179366e
+		return true
+	case "e84dc5376f9fc8747c290ce663db2f0af012b73065c7c45c2ca1018aedcfb7e3": // b5c76a9d
+		return true
+	case "a4516271fc24d1a748650e5c23c57d28ace76da36db41aaa5b70db375848d7a9": // d5bc3926
+		return true
+	case "caa6e73d0a7d31f17adb7d16e2c1bd054f7ea3bdf2addb09672866993181bb53": // 4768b3cd
+		return true
+	case "7d1401b566d00041eacbf49e508836b6eb6feb22c55e93ad34e32159cf4a9f5e": // 0e537993
+		return true
+	case "fa3912c9518dfbaf27e2a118b83eb166b979ab17005b1e652fbe670cc1d44017": // b7409554
+		return true
+	case "9b98113daffc03a2627d5cbf645a48ad113740c076f3e53a5fc2593ab40a4ba7": // 107bde75
+		return true
+	}
+	return false
 }
 
 // A service name is not proof that this Agent belongs to it. Bind the repair

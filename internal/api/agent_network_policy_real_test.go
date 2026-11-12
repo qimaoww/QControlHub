@@ -22,6 +22,10 @@ func TestAgentRawPolicyUpgradeSandbox(t *testing.T) {
 	container := os.Getenv("QCH_RAW_POLICY_CONTAINER")
 	binary := os.Getenv("QCH_RAW_POLICY_BINARY")
 	openrc := os.Getenv("QCH_RAW_POLICY_MANAGER") == "openrc"
+	older := os.Getenv("QCH_RAW_POLICY_OLDER") == "1"
+	if older && openrc {
+		t.Fatal("older fixture is systemd only")
+	}
 	policyPath, assetPath := "/etc/systemd/system/qagent.service", "../../deploy/systemd/qagent.service"
 	if openrc {
 		policyPath, assetPath = "/etc/init.d/qagent", "../../deploy/openrc/qagent"
@@ -98,6 +102,18 @@ func TestAgentRawPolicyUpgradeSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	legacyMask := "0000000000001401"
+	if older {
+		original, err := os.ReadFile("../agent/testdata/agent-systemd-pre-certificates.service")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run("cat", policyPath) != strings.TrimSpace(string(original)) {
+			t.Fatal("older service fixture mismatch")
+		}
+		want = bytes.ReplaceAll(original, []byte("CAP_CHOWN CAP_NET_ADMIN\n"), []byte("CAP_CHOWN CAP_NET_ADMIN CAP_NET_RAW\n"))
+		legacyMask = "0000000000001001"
+	}
 	before := ""
 	wait := func(ready, upgraded bool) core.DiagnosticNode {
 		t.Helper()
@@ -136,7 +152,7 @@ func TestAgentRawPolicyUpgradeSandbox(t *testing.T) {
 	}
 	before = pid()
 	status := run("cat", "/proc/"+before+"/status")
-	if !openrc && !strings.Contains(status, "CapBnd:\t0000000000001401") {
+	if !openrc && !strings.Contains(status, "CapBnd:\t"+legacyMask) {
 		t.Fatalf("legacy RAW denial was not real: %s", status)
 	}
 	var task core.Task
@@ -151,10 +167,13 @@ func TestAgentRawPolicyUpgradeSandbox(t *testing.T) {
 	}
 	status = run("cat", "/proc/"+after+"/status")
 	expectedAmbient := "0000000000003401"
+	if older {
+		expectedAmbient = "0000000000003001"
+	}
 	if openrc {
 		expectedAmbient = "00000000000034c1"
 	}
-	if (!openrc && !strings.Contains(status, "CapBnd:\t0000000000003401")) || !strings.Contains(status, "CapAmb:\t"+expectedAmbient) || !strings.Contains(status, "NoNewPrivs:\t1") {
+	if (!openrc && !strings.Contains(status, "CapBnd:\t"+expectedAmbient)) || !strings.Contains(status, "CapAmb:\t"+expectedAmbient) || !strings.Contains(status, "NoNewPrivs:\t1") {
 		t.Fatal("new process did not receive the shipped narrow capability policy")
 	}
 	got := run("cat", policyPath)
