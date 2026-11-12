@@ -69,7 +69,7 @@ export function networkToolsPage(ctx) {
     readingPinned = false;
   const controls = new Map(), recordChoices = new Map();
   let recordOptions = "", pinnedOpened = false;
-  const recordPicker = field("测量记录", "measurement", "", { options: [] }),
+  const recordPicker = field("测量时间", "measurement", "", { options: [] }),
     recordSelect = recordPicker.querySelector("select");
   recordSelect.addEventListener("change", () => {
     if (recordSelect.selectedIndex === 0) recordChoices.delete(value("tool"));

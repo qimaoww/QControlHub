@@ -11,6 +11,7 @@ export async function testDiagnosticNodeFlags(preview = false) {
   let agents = [{id:'host-a',region_code:'HK'}, {id:'host-b',region_code:'TW'}];
   let nodes = ['host-a','host-b'].map((agent_id,index) => ({agent_id,instance_id:`share-${index}`,name:`同名节点 ${'长名称'.repeat(12)}`,online:true,capabilities:{tools:{ping:{version:'ICMP'},nexttrace:{version:'NextTrace v1.7.6 (built-in)'}},providers:{'disable-geoip':''},addresses:[`192.0.2.${index+1}`]}}));
   const records = [0,1].map(index => ({id:`record-${index}`,created_at:`2026-11-12T12:0${1-index}:00Z`,state:'succeeded',results:{},request:{parameters:{tool:'ping',protocol:'icmp',count:3,interval_ms:1000,timeout_ms:1000,size:56},bidirectional:index===0,node1:{agent_id:'host-a',instance_id:'share-0',name:'历史来源节点',address:'2001:db8::1'},node2:index===0?{agent_id:'host-b',instance_id:'share-1',name:'历史目标节点',address:'2001:db8::2'}:{name:'192.0.2.99',address:'192.0.2.99'}}}));
+  for (const record of records) for (const id of [record.id,...(record.request.bidirectional?[record.id+'-reverse']:[])]) record.results[id]={id,state:'succeeded',output:{sent:3,received:3,loss_percent:0,avg_ms:0.2,min_ms:0.1,max_ms:0.3,stdev_ms:0.1,reached:true}};
   const calls = [];
   const ctx = {signal:controller.signal,current:()=>active,state:{data:{}},can:permission=>['agents.read','tasks.execute'].includes(permission),onRefresh:run=>{refresh=run},api:async path=>{
     calls.push(path);
