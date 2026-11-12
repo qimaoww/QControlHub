@@ -18,6 +18,7 @@ import (
 	"github.com/nxtrace/NTrace-core/ipgeo"
 	"github.com/nxtrace/NTrace-core/trace"
 	"github.com/nxtrace/NTrace-core/util"
+	"github.com/nxtrace/NTrace-core/wshandle"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -38,12 +39,26 @@ func RunNextTraceStream(ctx context.Context, input io.Reader, output, diagnostic
 	if _, _, err := Args(c); err != nil {
 		return err
 	}
-	if err := nxconfig.InitConfigWithWriter(diagnostics); err != nil {
-		return err
-	}
+
 	color.Output = diagnostics
 	color.NoColor = true
 	p := c.Parameters
+	util.SuppressFastIPOutput = true
+	if p.Provider == "DN42" {
+		if err := nxconfig.InitConfigWithWriter(diagnostics); err != nil {
+			return err
+		}
+	}
+	if ipgeo.IsNextTraceAPIProvider(p.Provider) {
+		if ipgeo.NextTraceAPIV4TokenConfigured() {
+			_ = ipgeo.PrepareNextTraceAPIV4FastIP(ctx, false)
+		} else {
+			conn := wshandle.NewWithContextAsync(ctx)
+			if conn != nil {
+				defer conn.Close()
+			}
+		}
+	}
 	method := trace.Method(p.Protocol)
 	target := net.ParseIP(c.Target.Address)
 	size, err := trace.NormalizePacketSize(method, target, p.Size)

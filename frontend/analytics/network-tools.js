@@ -968,8 +968,10 @@ function geo(g) {
 function querySummary(tool, out, provider) {
   const hops = tool === "mtr" ? out.stats || [] : (out.Hops || []).flat().filter(Boolean);
   const observed = hops.filter((h) => (tool === "mtr" ? h.ip : h.Success));
-  const enriched = observed.filter((h) => geo(h.geo || h.Geo) !== "—");
-  const status = !enriched.length
+  const failedLookup = (g) => g && (["timeout", "error"].includes(g.source) || g.country === "网络故障");
+  const failed = observed.filter((h) => failedLookup(h.geo || h.Geo));
+  const enriched = observed.filter((h) => !failedLookup(h.geo || h.Geo) && geo(h.geo || h.Geo) !== "—");
+  const status = failed.length ? "部分地址查询失败" : !enriched.length
     ? "未返回归属信息"
     : enriched.length < observed.length
       ? "部分地址未返回归属信息"
