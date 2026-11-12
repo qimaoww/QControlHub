@@ -867,7 +867,7 @@ function renderOutput(tool, out, state) {
           "网络",
           "ASN / 归属",
         ],
-        (out.stats || []).map((h) => [
+        (out.stats || []).filter(Boolean).map((h) => [
           traceValue("hop", h.ttl),
           traceValue(h.ip ? "ip" : "timeout", h.ip || "*"),
           `${number(h.snt)} / ${number(h.received)}`,
@@ -883,7 +883,7 @@ function renderOutput(tool, out, state) {
     );
   if (tool === "traceroute") {
     const hops = new Map();
-    for (const h of (out.Hops || []).flat()) {
+    for (const h of traceHops(out)) {
       if (!h?.TTL) continue;
       const ip = h.Success ? (typeof h.Address === "string" ? h.Address : h.Address?.IP) || "*" : "*";
       const key = `${h.TTL}/${ip}`;
@@ -933,6 +933,9 @@ function renderOutput(tool, out, state) {
 function traceValue(kind, value) {
   return node("span", { className: `a-trace-${kind}` }, value);
 }
+function traceHops(out) {
+  return (Array.isArray(out?.Hops) ? out.Hops : []).flat().filter((hop) => hop && typeof hop === "object" && hop.TTL > 0);
+}
 function networkName(g) {
   if (!g?.whois) return "—";
   return `[${g.whois}]`;
@@ -966,7 +969,7 @@ function geo(g) {
 }
 
 function querySummary(tool, out, provider) {
-  const hops = tool === "mtr" ? out.stats || [] : (out.Hops || []).flat().filter(Boolean);
+  const hops = tool === "mtr" ? (out.stats || []).filter(Boolean) : traceHops(out);
   const observed = hops.filter((h) => (tool === "mtr" ? h.ip : h.Success));
   const failedLookup = (g) => g && (["timeout", "error"].includes(g.source) || g.country === "网络故障");
   const failed = observed.filter((h) => failedLookup(h.geo || h.Geo));

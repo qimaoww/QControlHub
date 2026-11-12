@@ -86,6 +86,23 @@ func RunNextTraceStream(ctx context.Context, input io.Reader, output, diagnostic
 		if partial && time.Since(last) < 250*time.Millisecond {
 			return
 		}
+		// Upstream represents not-yet-filled TTL slots as nil slices. Emit empty
+		// arrays so older open browser tabs also tolerate live snapshots.
+		if res, ok := value.(*trace.Result); ok {
+			hops := make([][]trace.Hop, len(res.Hops))
+			for i, row := range res.Hops {
+				if row == nil {
+					hops[i] = []trace.Hop{}
+				} else {
+					hops[i] = row
+				}
+			}
+			value = struct {
+				Hops        [][]trace.Hop
+				StopReason  *trace.StopReason `json:",omitempty"`
+				TraceMapUrl string
+			}{hops, res.StopReason, res.TraceMapUrl}
+		}
 		data, e := json.Marshal(value)
 		if e == nil && len(data) > MaxOutput {
 			e = errors.New("diagnostic snapshot exceeds limit")
