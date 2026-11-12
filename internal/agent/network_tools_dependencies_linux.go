@@ -32,6 +32,11 @@ func prepareNetworkTool(ctx context.Context, tool string) error {
 	if tool != "nexttrace" && tool != "iperf3" {
 		return errors.New("不支持的诊断依赖")
 	}
+	// The built-in engine must be checked in the actual Agent context. The
+	// package installation helper deliberately has a different capability set.
+	if tool == "nexttrace" {
+		return networkdiag.PrepareTool(ctx, tool)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute+10*time.Second)
 	defer cancel()
 	executable, err := os.Executable()

@@ -488,9 +488,16 @@ func diagnosticFailure(c core.DiagnosticCommand, message, stderr string, exit in
 		return name + " 连接被拒绝；请确认目标服务端、端口和防火墙允许 TCP 控制连接"
 	case strings.Contains(text, "address already in use"):
 		return name + " 端口已被占用；请选择其他已授权端口，不会关闭已有服务"
+	case strings.Contains(text, "address family not supported"):
+		return name + " 所选地址族不可用；请检查 Agent 的地址族限制和节点 IPv4/IPv6 配置"
+	case strings.Contains(text, "cannot assign requested address"):
+		return name + " 源地址不可用；请确认该地址仍分配给所选节点"
 	case strings.Contains(text, "network is unreachable"), strings.Contains(text, "no route to host"):
 		return name + " 无法连接目标网络；请检查所选地址族、节点路由和网络连通性"
 	case strings.Contains(text, "permission denied"), strings.Contains(text, "operation not permitted"):
+		if (c.Parameters.Tool == "traceroute" || c.Parameters.Tool == "mtr") && strings.Contains(text, "icmp_socket") {
+			return name + " 测量子进程原始套接字检测被拒绝；" + rawSocketRecovery
+		}
 		return name + " 权限不足；请节点管理员检查 Agent 的执行权限和原始套接字能力"
 	case strings.Contains(text, "dns resolution failed"), strings.Contains(text, "no such host"):
 		return name + " 域名解析失败；请检查节点 DNS 和查询服务网络，已获得的探测结果仍会保留"

@@ -40,7 +40,7 @@ func TestIPerfStreamPreservesIncrementalAndFinalStatistics(t *testing.T) {
 
 func TestDiagnosticFailureMessages(t *testing.T) {
 	c := core.DiagnosticCommand{Parameters: core.DiagnosticParameters{Tool: "iperf3"}}
-	for _, tc := range [][2]string{{"connection refused", "TCP 控制连接"}, {"address already in use", "不会关闭已有服务"}, {"no route to host", "地址族"}, {"operation not permitted", "权限"}, {"DNS resolution failed", "DNS"}, {"connection timed out", "UDP 测试"}} {
+	for _, tc := range [][2]string{{"connection refused", "TCP 控制连接"}, {"address already in use", "不会关闭已有服务"}, {"no route to host", "地址族"}, {"operation not permitted", "权限"}, {"address family not supported by protocol", "地址族不可用"}, {"cannot assign requested address", "源地址不可用"}, {"DNS resolution failed", "DNS"}, {"connection timed out", "UDP 测试"}} {
 		if got := diagnosticFailure(c, "工具退出码 1", tc[0], 1); !strings.Contains(got, tc[1]) {
 			t.Fatalf("%s: %s", tc[0], got)
 		}

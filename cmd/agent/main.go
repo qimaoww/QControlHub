@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,20 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "recover-agent-network-policy" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		pid, err := strconv.Atoi(os.Args[3])
+		if err == nil {
+			err = agent.RunAgentNetworkPolicyRecovery(ctx, os.Args[2], pid)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) == 3 && os.Args[1] == "prepare-network-tool" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
@@ -247,6 +262,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	slog.Info("QControlHub agent starting", "version", version)
+	if err := agent.StartAgentNetworkPolicyRecovery(ctx, serviceManager); err != nil {
+		slog.Warn("Agent network policy recovery requires administrator review", "error", err)
+	}
 	if err := client.Run(ctx); err != nil {
 		// Run retries control-plane identity rejection internally instead of
 		// returning it, so any error here is fatal. Exit non-zero so the service
