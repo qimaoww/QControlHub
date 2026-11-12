@@ -106,7 +106,7 @@ strong, b { font-weight: 600; }
 .a-trace-asn { color: #08783c; font-weight: 600; }
 .a-trace-geo { color: #245da8; }
 .a-trace-latency { color: #087c7c; font-variant-numeric: tabular-nums; }
-.a-trace-timeout { color: var(--muted); }
+.a-trace-timeout { color: var(--soft-ink); }
 .a-badge.warn { color: #754511; background: #fff8e9; border-color: #efddbb; }
 .a-badge.bad, .a-notice.error { color: #a41a2b; background: #fff2f3; border-color: #f2cdd2; }
 .a-notice { border: 1px solid var(--border); background: var(--tint); border-radius: 6px; padding: 10px 12px; font-size: var(--text-label); font-weight: 400; line-height: 1.65; white-space: pre-wrap; }

@@ -895,7 +895,7 @@ function renderOutput(tool, out) {
         [...hops.values()].map(h => [
           traceValue("hop", h.ttl),
           stack(traceValue(h.ip === "*" ? "timeout" : "ip", h.ip), h.hostname && muted(h.hostname)),
-          traceValue("asn", h.geo?.asnumber || h.geo?.asn || "—"),
+          traceValue("asn", h.geo?.asnumber || h.geo?.asn ? `AS${String(h.geo.asnumber || h.geo.asn).replace(/^AS/i, "")}` : "—"),
           traceValue("geo", [h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.owner].filter(Boolean).join(" · ") || "—"),
           traceValue(h.ip === "*" ? "timeout" : "latency", h.samples.join(" / ")),
         ]),
