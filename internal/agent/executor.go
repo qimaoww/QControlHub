@@ -446,6 +446,13 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 				return "", fmt.Errorf("check completed %s migration: %w", task.Engine, err)
 			}
 			if completed {
+				record, err := readCoreMigrationRecord(e.MigrationMarkerPrefix, task.Engine)
+				if err != nil {
+					return "", err
+				}
+				if err := bindPreparedCoreLogTarget(ctx, task.Engine, spec, record.ConfigDigest); err != nil {
+					return "", err
+				}
 				return fmt.Sprintf("%s existing service migration was already completed with this configuration", task.Engine), nil
 			}
 			return "", fmt.Errorf("%s has no existing service pending manual import", task.Engine)
@@ -475,6 +482,9 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		if accountingWarning != "" {
 			return accountingWarning, errors.New("独立出口校验失败，未部署配置")
+		}
+		if err := bindPreparedCoreLogTarget(ctx, task.Engine, spec, coreMigrationConfigDigest(prepared)); err != nil {
+			return "", err
 		}
 		if task.SharedInstance {
 			stripped, stripErr := serverconfig.SharedInstanceRuntimeContent(task.Engine, prepared)
