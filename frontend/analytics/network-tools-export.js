@@ -23,7 +23,8 @@ export async function downloadMeasurementImage(session, rendered, hideSensitive,
   };
   text(`${tool} · ${p.protocol.toUpperCase()} · ${states[session.state] || session.state}`,24);
   text(`测量时间：${new Date(session.created_at).toLocaleString("zh-CN")}`,14,soft);
-  text(p.tool==="iperf3" ? `${p.duration} s · ${p.streams} 流 · ${p.bandwidth/1000000} Mbit/s / 流 · ${p.size} 字节` : `${p.count} ${p.tool==="mtr"?"轮":p.tool==="traceroute"?"次 / 跳":"次"} · ${p.interval_ms} ms 间隔 · ${p.timeout_ms} ms 超时 · ${p.size} 字节${p.tool==="ping"?"负载":`总包长 · ${p.max_hops} 跳 · ${p.provider}`}`,14,soft);
+  text(p.tool==="iperf3" ? `${p.duration} s · ${p.streams} 流 · ${p.size} 字节` : `${p.count} ${p.tool==="mtr"?"轮":p.tool==="traceroute"?"次 / 跳":"次"} · ${p.interval_ms} ms 间隔 · ${p.timeout_ms} ms 超时 · ${p.size} 字节${p.tool==="ping"?"负载":`总包长 · ${p.max_hops} 跳 · ${p.provider}`}`,14,soft);
+  if (session.byte_limit > 0) text(`共享流量预算：${session.byte_limit/1048576} MiB`,14,soft);
   if (hideSensitive) text("节点名称、IP、主机名及诊断原文已隐藏",14,soft);
   const measurements=Object.values(session.results || {}).filter(r=>!r.id.endsWith("-server"));
   for (const [i,r] of measurements.entries()) {

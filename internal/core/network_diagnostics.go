@@ -49,8 +49,8 @@ func (p DiagnosticParameters) Validate(ipv6 bool) error {
 	if p.IntervalMS < 200 || p.IntervalMS > 5000 || p.TimeoutMS < 100 || p.TimeoutMS > 5000 || p.MaxHops < 1 || p.MaxHops > 64 {
 		return bad("间隔 200–5000 ms、超时 100–5000 ms、跳数 1–64")
 	}
-	if p.Port < 1 || p.Port > 65535 || p.Duration < 1 || p.Duration > 60 || p.Streams < 1 || p.Streams > 4 || p.Bandwidth < 1000 || p.Bandwidth > 100000000 {
-		return bad("端口 1–65535、时长 1–60 s、并发流 1–4、带宽 1 Kbit/s–100 Mbit/s")
+	if p.Port < 1 || p.Port > 65535 || p.Duration < 1 || p.Duration > 60 || p.Streams < 1 || p.Streams > 4 || p.Bandwidth < 0 || p.Bandwidth > 100000000 || p.Bandwidth > 0 && p.Bandwidth < 1000 {
+		return bad("端口 1–65535、时长 1–60 s、并发流 1–4、带宽为默认值或 1 Kbit/s–100 Mbit/s")
 	}
 	if p.Tool == "iperf3" && p.Port < 1024 {
 		return bad("测速端口范围 1024–65535")
@@ -88,6 +88,20 @@ func (p DiagnosticParameters) Validate(ipv6 bool) error {
 		return bad("IP 查询提供方")
 	}
 	return nil
+}
+
+// TrafficReservation preserves conservative shared accounting. Default TCP
+// has no bitrate target; shared execution also gets a byte ceiling, below.
+func (p DiagnosticParameters) TrafficReservation() int64 {
+	rate := p.Bandwidth
+	if rate == 0 {
+		if p.Protocol == "udp" {
+			rate = 1000000
+		} else {
+			rate = 100000000
+		}
+	}
+	return rate * int64(p.Streams) * int64(p.Duration) / 8 * 2
 }
 
 type DiagnosticGrant struct {
@@ -136,6 +150,7 @@ func DiagnosticAddress(s string) (netip.Addr, error) {
 }
 
 type DiagnosticCommand struct {
+	ByteLimit  int64                `json:"byte_limit,omitempty"`
 	ID         string               `json:"id"`
 	SessionID  string               `json:"session_id"`
 	Role       string               `json:"role"` // probe, server, client, stop
@@ -156,6 +171,7 @@ type DiagnosticResult struct {
 	At       time.Time       `json:"at"`
 }
 type DiagnosticSession struct {
+	ByteLimit int64                       `json:"byte_limit,omitempty"`
 	ID        string                      `json:"id"`
 	OwnerID   string                      `json:"owner_id"`
 	Request   DiagnosticRequest           `json:"request"`

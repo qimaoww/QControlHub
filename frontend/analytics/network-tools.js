@@ -146,11 +146,6 @@ export function networkToolsPage(ctx) {
     max: 60,
   });
   const streams = f("并发流", "streams", 1, { type: "number", min: 1, max: 4 });
-  const bandwidth = f("每流目标带宽（bit/s）", "bandwidth", 20000000, {
-    type: "number",
-    min: 1000,
-    max: 100000000,
-  });
   const forward = button("开始测试", () => void submit(false), {
       disabled: true,
       tone: "primary",
@@ -185,7 +180,6 @@ export function networkToolsPage(ctx) {
     timeout,
     hops,
     streams,
-    bandwidth,
   );
   const form = node(
     "form",
@@ -252,7 +246,7 @@ export function networkToolsPage(ctx) {
     hops.hidden = !trace;
     port.hidden = p === "icmp";
     controls.get("port").min = t === "iperf3" ? 1024 : 1;
-    duration.hidden = streams.hidden = bandwidth.hidden = t !== "iperf3";
+    duration.hidden = streams.hidden = t !== "iperf3";
     count.hidden = interval.hidden = timeout.hidden = t === "iperf3";
     size
       .querySelector(".a-field-label")
@@ -426,7 +420,6 @@ export function networkToolsPage(ctx) {
         "port",
         "duration",
         "streams",
-        "bandwidth",
       ].map((k) => [
         k,
         ["tool", "protocol", "provider"].includes(k)
@@ -434,6 +427,7 @@ export function networkToolsPage(ctx) {
           : Number(value(k)),
       ]),
     );
+    parameters.bandwidth = 0;
     const body = {
       target_mode: value("target_mode"),
       node1: endpoint(1),
@@ -564,9 +558,10 @@ export function networkToolsPage(ctx) {
                 ),
                 muted(
                   tool === "iperf3"
-                    ? `${params.duration} s · ${params.streams} 流 · ${number(params.bandwidth / 1000000)} Mbit/s / 流 · ${params.size} 字节`
+                    ? `${params.duration} s · ${params.streams} 流 · ${params.size} 字节`
                     : `${tool === "traceroute" ? `每跳 ${params.count} 次探测` : `${params.count} ${tool === "mtr" ? "轮" : "次"}`} · ${params.interval_ms} ms 间隔 · ${params.timeout_ms} ms 超时 · ${params.size} 字节${tool === "ping" ? "负载" : `总包长 · ${params.max_hops} 跳 · ${params.provider}`}`,
                 ),
+                d.byte_limit > 0 && muted(`共享流量预算：${number(d.byte_limit / 1048576)} MiB`),
                 server &&
                   actions(
                     muted("接收端服务"),
@@ -935,13 +930,14 @@ function renderOutput(tool, out, state, rounds) {
         name,
         `${number(r.bits_per_second / 1000000)} Mbit/s`,
         `${number(r.bytes / 1048576)} MiB`,
+        number(r.seconds),
         r.retransmits == null ? "—" : number(r.retransmits),
         r.jitter_ms == null ? "—" : number(r.jitter_ms),
         r.lost_percent == null ? "—" : `${number(r.lost_percent)}%`,
       ]);
   return stack(
     rows.length
-      ? table(["统计端", "吞吐", "传输量", "重传", "抖动（ms）", "丢包"], rows)
+      ? table(["统计端", "吞吐", "传输量", "实际时长（s）", "重传", "抖动（ms）", "丢包"], rows)
       : muted("未产生有效吞吐统计"),
   );
 }

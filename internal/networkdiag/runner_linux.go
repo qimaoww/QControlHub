@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -172,11 +173,30 @@ func Args(c core.DiagnosticCommand) (string, []string, error) {
 	}
 	n := strconv.Itoa
 	if p.Tool == "iperf3" {
+		if c.ByteLimit < 0 || c.ByteLimit > p.TrafficReservation()/2 {
+			return "", nil, errors.New("共享测速流量预算无效")
+		}
 		args := []string{family, "--json", "--bind", s.String(), "--port", n(p.Port)}
 		if c.Role == "server" {
-			return "iperf3", append(args, "--server", "--one-off", "--idle-timeout", "10", "--server-bitrate-limit", strconv.FormatInt(p.Bandwidth*int64(p.Streams)*2, 10)), nil
+			args = append(args, "--server", "--one-off", "--idle-timeout", "10")
+			rate := p.Bandwidth
+			if rate == 0 && p.Protocol == "udp" {
+				rate = 1000000
+			}
+			if rate > 0 {
+				args = append(args, "--server-bitrate-limit", strconv.FormatInt(rate*int64(p.Streams)*2, 10))
+			}
+			return "iperf3", args, nil
 		}
-		args = append(args, "--client", a.String(), "--time", n(p.Duration), "--parallel", n(p.Streams), "--bitrate", strconv.FormatInt(p.Bandwidth, 10), "--length", n(p.Size), "--connect-timeout", "5000", "--get-server-output")
+		args = append(args, "--client", a.String(), "--parallel", n(p.Streams), "--length", n(p.Size), "--connect-timeout", "5000", "--get-server-output")
+		if c.ByteLimit > 0 {
+			args = append(args, "--bytes", strconv.FormatInt(c.ByteLimit, 10))
+		} else {
+			args = append(args, "--time", n(p.Duration))
+		}
+		if p.Bandwidth > 0 {
+			args = append(args, "--bitrate", strconv.FormatInt(p.Bandwidth, 10))
+		}
 		if p.Protocol == "udp" {
 			args = append(args, "--udp")
 		}
@@ -263,7 +283,32 @@ func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), lau
 		return r
 	}
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	processDone := make(chan struct{})
+	var durationEnded atomic.Bool
+	go func() { err := cmd.Wait(); close(processDone); done <- err }()
+	// A shared full-speed test ends on its byte allowance or wall-clock bound.
+	// SIGINT lets iperf3 write its genuine partial/final JSON statistics. This
+	// timer is local and independent of the browser/control-plane connection.
+	if c.Role == "client" && c.ByteLimit > 0 {
+		timer := time.AfterFunc(time.Duration(c.Parameters.Duration)*time.Second, func() {
+			select {
+			case <-processDone:
+				return
+			default:
+			}
+			durationEnded.Store(true)
+			_ = cmd.Process.Signal(syscall.SIGINT)
+			grace := time.NewTimer(2 * time.Second)
+			defer grace.Stop()
+			select {
+			case <-processDone:
+				return
+			case <-grace.C:
+				_ = cmd.Process.Kill()
+			}
+		})
+		defer timer.Stop()
+	}
 	if c.Role == "server" {
 		ticker := time.NewTicker(25 * time.Millisecond)
 		defer ticker.Stop()
@@ -304,6 +349,22 @@ finished:
 	}
 	if streaming && len(stream.latest) > 0 {
 		out.b.Write(stream.latest)
+	}
+	if durationEnded.Load() && ctx.Err() == nil && c.Parameters.Tool == "iperf3" && json.Valid(out.b.Bytes()) {
+		var report map[string]json.RawMessage
+		_ = json.Unmarshal(out.b.Bytes(), &report)
+		var end map[string]json.RawMessage
+		_ = json.Unmarshal(report["end"], &end)
+		var message string
+		_ = json.Unmarshal(report["error"], &message)
+		if (len(end["sum_sent"]) > 0 || len(end["sum_received"]) > 0 || len(end["sum"]) > 0) && (message == "" || strings.Contains(message, "interrupt")) {
+			delete(report, "error")
+			report["limit_reason"] = json.RawMessage(`"duration"`)
+			body, _ := json.Marshal(report)
+			out.b.Reset()
+			out.b.Write(body)
+			err = nil
+		}
 	}
 	if json.Valid(out.b.Bytes()) {
 		r.Output = append(json.RawMessage(nil), out.b.Bytes()...)

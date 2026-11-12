@@ -248,7 +248,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		}
 		if ep.InstanceID != "" && in.Parameters.Tool == "iperf3" {
 			var allowed bool
-			budget := in.Parameters.Bandwidth * int64(in.Parameters.Streams) * int64(in.Parameters.Duration) / 8 * 2
+			budget := in.Parameters.TrafficReservation()
 			// Reserve a conservative upper bound immediately. The reservation remains
 			// charged on interrupted/unknown tests instead of allowing quota bypass.
 			if err = tx.QueryRow(ctx, `SELECT ($4 OR sh.ports_unrestricted OR EXISTS(SELECT 1 FROM agent_share_ports p WHERE p.share_id=sh.id AND p.port=$2)) AND (sh.limit_bytes=0 OR sh.used_bytes+$3<=sh.limit_bytes) FROM agent_shares sh WHERE sh.id=$1 FOR UPDATE`, ep.InstanceID, in.Parameters.Port, budget, ep.AgentID != in.Node2.AgentID).Scan(&allowed); err != nil {
@@ -296,6 +296,14 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	now := time.Now().UTC()
 	deadline := now.Add(10 * time.Minute)
 	session := core.DiagnosticSession{ID: id, OwnerID: scopeForConfig(ctx).OwnerID, Request: in, State: "preparing", Results: map[string]core.DiagnosticResult{}, CreatedAt: now, Deadline: deadline}
+	if in.Parameters.Tool == "iperf3" && in.Parameters.Protocol == "tcp" && in.Parameters.Bandwidth == 0 {
+		for _, ep := range endpoints {
+			if ep.InstanceID != "" {
+				session.ByteLimit = in.Parameters.TrafficReservation() / 2 / int64(in.Parameters.Streams)
+				break
+			}
+		}
+	}
 	keyID := ""
 	if key, ok := ctx.Value(apiKeyAuthContextKey{}).(apiKeyAuth); ok {
 		keyID = key.ID
@@ -313,7 +321,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	if in.Parameters.Tool == "iperf3" {
 		for _, ep := range endpoints {
 			if ep.InstanceID != "" {
-				budget := in.Parameters.Bandwidth * int64(in.Parameters.Streams) * int64(in.Parameters.Duration) / 8 * 2
+				budget := in.Parameters.TrafficReservation()
 				if _, err = tx.Exec(ctx, `UPDATE agent_shares SET used_bytes=used_bytes+$2 WHERE id=$1`, ep.InstanceID, budget); err != nil {
 					return fail(err)
 				}
@@ -401,7 +409,7 @@ func diagnosticCommands(d core.DiagnosticSession) []core.DiagnosticCommand {
 	p := d.Request.Parameters
 	a, b := d.Request.Node1, d.Request.Node2
 	makeCommand := func(suffix, role string, source, target core.DiagnosticEndpoint) core.DiagnosticCommand {
-		return core.DiagnosticCommand{ID: d.ID + suffix, SessionID: d.ID, Role: role, Source: source, Target: target, Parameters: p, Deadline: d.Deadline}
+		return core.DiagnosticCommand{ID: d.ID + suffix, SessionID: d.ID, Role: role, Source: source, Target: target, Parameters: p, Deadline: d.Deadline, ByteLimit: d.ByteLimit}
 	}
 	if p.Tool != "iperf3" {
 		commands := []core.DiagnosticCommand{makeCommand("-forward", "probe", a, b)}
