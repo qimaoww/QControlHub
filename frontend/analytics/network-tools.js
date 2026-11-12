@@ -14,6 +14,9 @@ import {
 } from "./ui.js";
 import { patch, poll } from "./live-dom.js";
 import { requestID } from "./request-id.js";
+import { downloadMeasurementImage } from "./network-tools-export.js";
+
+const exportingImages = new Set();
 
 const labels = {
   preparing: "准备中",
@@ -542,7 +545,20 @@ export function networkToolsPage(ctx) {
               node(
                 "div",
                 { className: "a-stack" },
-                actions(stop, retry),
+                actions(stop, retry,
+                  button("导出图片", async (event) => {
+                    const control=event.currentTarget;
+                    const record=control.closest("[data-refresh-key]");
+                    if (exportingImages.has(d.id)) return;
+                    exportingImages.add(d.id);
+                    const hidden=record.querySelector('input[name="export-sensitive"]').checked;
+                    control.disabled=true;
+                    try { await downloadMeasurementImage(d, record, hidden, () => ctx.current()); }
+                    catch(e) { feedback.textContent=e.message; }
+                    finally { exportingImages.delete(d.id); if(control.isConnected) control.disabled=false; }
+                  }, {disabled:exportingImages.has(d.id)}),
+                  field("隐藏敏感信息", "export-sensitive", true, {type:"checkbox", title:"隐藏节点名称、IP、主机名及诊断原文"}),
+                ),
                 muted(
                   tool === "iperf3"
                     ? `${params.duration} s · ${params.streams} 流 · ${number(params.bandwidth / 1000000)} Mbit/s / 流 · ${params.size} 字节`
@@ -580,7 +596,7 @@ export function networkToolsPage(ctx) {
                         to = reverse ? req.node1 : req.node2;
                       return section(
                         "",
-                        node("div", { className: "a-card-body a-stack" },
+                        node("div", { className: "a-card-body a-stack", "data-measurement-result": r.id },
                         actions(
                           node(
                             "h3",
