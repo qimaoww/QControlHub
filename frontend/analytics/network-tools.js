@@ -600,7 +600,7 @@ export function networkToolsPage(ctx) {
                         (r.error || r.output?.error) &&
                           r.error !== "测量已停止" &&
                           notice(r.error || r.output.error, "error"),
-                        renderOutput(tool, r.output),
+                        renderOutput(tool, r.output, r.state),
                         (tool === "traceroute" || tool === "mtr") &&
                           params.provider !== "disable-geoip" &&
                           r.output &&
@@ -826,7 +826,8 @@ export function networkToolsPage(ctx) {
   );
 }
 
-function renderOutput(tool, out) {
+function renderOutput(tool, out, state) {
+  const running = state === "running";
   if (!out) return muted("尚无结果");
   if (tool === "ping")
     return table(
@@ -853,7 +854,7 @@ function renderOutput(tool, out) {
     );
   if (tool === "mtr")
     return stack(
-      traceEnd(out.path_end?.reason),
+      traceEnd(out.path_end?.reason, running),
       table(
         [
           "TTL",
@@ -863,6 +864,7 @@ function renderOutput(tool, out) {
           "最近 / 平均（ms）",
           "最佳 / 最差（ms）",
           "标准差（ms）",
+          "网络",
           "ASN / 归属",
         ],
         (out.stats || []).map((h) => [
@@ -873,6 +875,7 @@ function renderOutput(tool, out) {
           traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.last_ms)} / ${number(h.avg_ms)}` : "—"),
           traceValue(h.received > 0 ? "latency" : "timeout", h.received > 0 ? `${number(h.best_ms)} / ${number(h.wrst_ms)}` : "—"),
           h.received > 0 ? number(h.stdev_ms) : "—",
+          traceValue("asn", networkName(h.geo)),
           traceValue("geo", geo(h.geo)),
         ]),
         { paginate: false, label: "MTR 跳点" },
@@ -881,6 +884,7 @@ function renderOutput(tool, out) {
   if (tool === "traceroute") {
     const hops = new Map();
     for (const h of (out.Hops || []).flat()) {
+      if (!h?.TTL) continue;
       const ip = h.Success ? (typeof h.Address === "string" ? h.Address : h.Address?.IP) || "*" : "*";
       const key = `${h.TTL}/${ip}`;
       if (!hops.has(key)) hops.set(key, { ttl: h.TTL, ip, samples: [], geo: h.Geo, hostname: h.Hostname });
@@ -889,14 +893,15 @@ function renderOutput(tool, out) {
       if (!hop.geo && h.Geo) hop.geo = h.Geo;
     }
     return stack(
-      traceEnd(out.StopReason?.reason),
+      traceEnd(out.StopReason?.reason, running),
       table(
-        ["跳数", "响应地址", "ASN", "归属", "延迟（ms）"],
+        ["跳数", "响应地址", "ASN", "网络", "归属", "延迟（ms）"],
         [...hops.values()].map(h => [
           traceValue("hop", h.ttl),
           stack(traceValue(h.ip === "*" ? "timeout" : "ip", h.ip), h.hostname && muted(h.hostname)),
           traceValue("asn", h.geo?.asnumber || h.geo?.asn ? `AS${String(h.geo.asnumber || h.geo.asn).replace(/^AS/i, "")}` : "—"),
-          traceValue("geo", [h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.owner].filter(Boolean).join(" · ") || "—"),
+          traceValue("asn", networkName(h.geo)),
+          traceValue("geo", [...new Set([h.geo?.country, h.geo?.prov, h.geo?.city, h.geo?.district, h.geo?.owner, h.geo?.domain, h.geo?.isp].filter(Boolean))].join(" · ") || "—"),
           traceValue(h.ip === "*" ? "timeout" : "latency", h.samples.join(" / ")),
         ]),
         { paginate: false, label: "路由跳点" },
@@ -928,7 +933,12 @@ function renderOutput(tool, out) {
 function traceValue(kind, value) {
   return node("span", { className: `a-trace-${kind}` }, value);
 }
-function traceEnd(reason) {
+function networkName(g) {
+  if (!g?.whois) return "—";
+  return `[${g.whois}]`;
+}
+function traceEnd(reason, running) {
+  if (running) return traceValue("timeout", "正在探测");
   return traceValue(reason === "destination_reached" ? "asn" : "timeout", pathReason(reason));
 }
 function pathReason(reason) {
@@ -956,7 +966,7 @@ function geo(g) {
 }
 
 function querySummary(tool, out, provider) {
-  const hops = tool === "mtr" ? out.stats || [] : (out.Hops || []).flat();
+  const hops = tool === "mtr" ? out.stats || [] : (out.Hops || []).flat().filter(Boolean);
   const observed = hops.filter((h) => (tool === "mtr" ? h.ip : h.Success));
   const enriched = observed.filter((h) => geo(h.geo || h.Geo) !== "—");
   const status = !enriched.length

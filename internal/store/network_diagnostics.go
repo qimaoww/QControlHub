@@ -609,6 +609,9 @@ func (s *Store) CompleteDiagnosticCommand(ctx context.Context, agentID string, r
 		return ErrForbidden
 	}
 	if old, ok := d.Results[r.ID]; ok {
+		if old.Sequence > r.Sequence {
+			return nil
+		}
 		if old.Terminal() && old.Cleaned {
 			return nil
 		}

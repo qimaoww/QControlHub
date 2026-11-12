@@ -2426,6 +2426,9 @@
             "type": "string"
           },
           "output": {},
+          "sequence": {
+            "type": "integer"
+          },
           "state": {
             "type": "string"
           },

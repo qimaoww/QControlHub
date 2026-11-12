@@ -139,6 +139,7 @@ type DiagnosticCommand struct {
 	Deadline   time.Time            `json:"deadline"`
 }
 type DiagnosticResult struct {
+	Sequence uint64          `json:"sequence,omitempty"`
 	ID       string          `json:"id"`
 	State    string          `json:"state"` // running, ready, succeeded, failed, canceled
 	Output   json.RawMessage `json:"output,omitempty"`

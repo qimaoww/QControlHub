@@ -200,7 +200,7 @@ func Args(c core.DiagnosticCommand) (string, []string, error) {
 // runProcess uses a process group and a parent-death signal. A killed or
 // re-executed Agent cannot leave a listening server behind. Cancellation is
 // independent of taskLifecycleMu and WSS result delivery.
-func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), launched func(int) error) core.DiagnosticResult {
+func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), launched func(int) error, progress ...func(json.RawMessage)) core.DiagnosticResult {
 	r := core.DiagnosticResult{ID: c.ID, State: "failed", Cleaned: true, At: time.Now().UTC(), ExitCode: -1}
 	path, args, err := Args(c)
 	if err != nil {
@@ -210,7 +210,20 @@ func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), lau
 	if c.Parameters.Tool == "ping" {
 		return ping(ctx, c)
 	}
+	streaming := c.Parameters.Tool == "traceroute" || c.Parameters.Tool == "mtr"
+	if streaming {
+		path, err = os.Executable()
+		if err != nil {
+			r.Error = "无法定位 Agent 执行文件"
+			return r
+		}
+		args = []string{"network-trace-stream"}
+	}
 	cmd := exec.CommandContext(ctx, path, args...)
+	if streaming {
+		body, _ := json.Marshal(c)
+		cmd.Stdin = bytes.NewReader(body)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 	// Inherit only operator-supplied NextTrace settings. Disable implicit loops,
 	// proxy inheritance and interactive token discovery.
@@ -223,6 +236,13 @@ func runProcess(ctx context.Context, c core.DiagnosticCommand, ready func(), lau
 	out := &limitedBuffer{limit: MaxOutput}
 	stderr := &limitedBuffer{limit: 8192}
 	cmd.Stdout = out
+	stream := &snapshotWriter{}
+	if streaming {
+		if len(progress) > 0 {
+			stream.publish = progress[0]
+		}
+		cmd.Stdout = stream
+	}
 	cmd.Stderr = stderr
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -281,6 +301,9 @@ finished:
 			r.Stderr = strings.ReplaceAll(r.Stderr, secret, "[redacted]")
 		}
 	}
+	if streaming && len(stream.latest) > 0 {
+		out.b.Write(stream.latest)
+	}
 	if json.Valid(out.b.Bytes()) {
 		r.Output = append(json.RawMessage(nil), out.b.Bytes()...)
 		var decoded any
@@ -318,6 +341,8 @@ finished:
 		if r.Error == "" {
 			r.Error = fmt.Sprintf("工具退出码 %d", r.ExitCode)
 		}
+	} else if streaming && (len(stream.latest) == 0 || stream.partial) {
+		r.Error = "NextTrace 未返回完整结束结果"
 	} else if r.Error == "" {
 		r.State = "succeeded"
 	}
@@ -756,10 +781,21 @@ func (m *Manager) run(ctx context.Context, c core.DiagnosticCommand) {
 			return errors.New("process identity unavailable")
 		}
 		return m.save()
+	}, func(output json.RawMessage) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		e := m.entries[c.ID]
+		e.Result.Output = output
+		e.Result.At = time.Now().UTC()
+		e.Result.Sequence++
+		if err := m.save(); err != nil {
+			e.cancel()
+		}
 	})
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e := m.entries[c.ID]
+	r.Sequence = e.Result.Sequence + 1
 	e.Result = r
 	if e.cancel != nil {
 		e.cancel()
