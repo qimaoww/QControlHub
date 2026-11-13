@@ -101,7 +101,12 @@ var preferenceCountry = preferenceRule{func(raw json.RawMessage) bool {
 }, map[string]any{"type": "string", "maxLength": 2, "description": "Supported country code, or an empty filter"}}
 
 var uiPreferenceRules = map[string]map[string]preferenceRule{
-	"dashboard":     {"traffic_month": preferenceCalendar("2006-01", false)},
+	"dashboard": {
+		"traffic_month":       preferenceCalendar("2006-01", false),
+		"traffic_rank_period": preferenceEnum("month", "cycle"),
+		"traffic_rank_limit":  preferenceEnum("5", "10", "all"),
+		"traffic_rank_scope":  preferenceEnum("all", "current"),
+	},
 	"node-region":   {"region_search": preferenceText(200)},
 	"notifications": {"template_event": preferenceEnum("task.failed", "agent.offline", "agent.online", "traffic.quota", "traffic.warning", "speed.high", "speed.low", "speed.recovered", "panel.update")},
 	"shell":         {"collapsed": preferenceBool},

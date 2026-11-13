@@ -103,5 +103,6 @@ func New(dataStore *store.Store, config Config) *Server {
 		sessions:                   make(map[string]apiSession),
 		sessionTTL:                 sessionTTL(config.SessionTTL),
 		connections:                make(map[string]liveConnection),
+		panelStartedAt:             time.Now().UTC(),
 	}
 }

@@ -70,7 +70,7 @@ export async function testIPQualityRefresh({ fixture, refresh, card, reportDay, 
   if(descriptor)Object.defineProperty(document,"hidden",descriptor);else delete document.hidden;
   release=null;fixture.readGate=response=>new Promise(resolve=>{release=()=>resolve(response);});
   refreshButton().click();await waitFor(()=>release,"leave-page read missing");
-  location.hash="#dashboard";await waitFor(()=>document.title.startsWith("仪表盘"),"page did not leave");
+  location.hash="#dashboard";await waitFor(()=>document.title.startsWith("仪表盘")&&!main()?.querySelector('[aria-busy="true"]'),"page did not leave");
   const leftReads=reads();release();await delay(5100);assert.equal(reads(),leftReads,"old page resumed polling");
   location.hash="#ip-quality";await waitFor(()=>card()&&settled(),"page did not reenter");await loaded();assertContent("reentry");
   fixture.readStatus=403;await refresh();assert.equal(card().querySelector("img"),null,"denial retained report");

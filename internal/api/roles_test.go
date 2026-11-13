@@ -87,6 +87,12 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPost, "/api/v1/templates"},
 		{http.MethodDelete, "/api/v1/templates/tpl_test"},
 		{http.MethodPost, "/api/v1/templates/tpl_test/apply"},
+		{http.MethodGet, "/api/v1/dashboard/probes"},
+		{http.MethodPost, "/api/v1/dashboard/probes"},
+		{http.MethodPut, "/api/v1/dashboard/probes/dpb_test"},
+		{http.MethodDelete, "/api/v1/dashboard/probes/dpb_test"},
+		{http.MethodPost, "/api/v1/dashboard/probes/dpb_test/run"},
+		{http.MethodPost, "/api/v1/dashboard/probes/dpb_test/stop"},
 	}
 	status := func(item route, token string) int {
 		handler := New(nil, Config{AdminToken: adminToken, OperatorTokens: []string{operatorToken}, AuditorTokens: []string{auditorToken}, ReadonlyTokens: []string{readonlyToken}}).Handler()
@@ -120,6 +126,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPut, "/api/v1/substore-sync/settings"}, {http.MethodPost, "/api/v1/substore-sync/targets"}, {http.MethodPost, "/api/v1/substore-sync/targets/sst_test/remote"}, {http.MethodPut, "/api/v1/substore-sync/targets/sst_test"}, {http.MethodDelete, "/api/v1/substore-sync/targets/sst_test"}, {http.MethodPut, "/api/v1/substore-sync/selections"}, {http.MethodPost, "/api/v1/substore-sync/test"}, {http.MethodPost, "/api/v1/substore-sync/run"},
 		{http.MethodPost, "/api/v1/traffic-endpoints/sync"}, {http.MethodPost, "/api/v1/traffic-policies"}, {http.MethodPut, "/api/v1/traffic-policies/trf_test"}, {http.MethodPost, "/api/v1/traffic-policies/trf_test/reset"}, {http.MethodDelete, "/api/v1/traffic-policies/trf_test"},
 		{http.MethodPost, "/api/v1/templates"}, {http.MethodDelete, "/api/v1/templates/tpl_test"}, {http.MethodPost, "/api/v1/templates/tpl_test/apply"},
+		{http.MethodPost, "/api/v1/dashboard/probes"}, {http.MethodPut, "/api/v1/dashboard/probes/dpb_test"}, {http.MethodDelete, "/api/v1/dashboard/probes/dpb_test"}, {http.MethodPost, "/api/v1/dashboard/probes/dpb_test/run"}, {http.MethodPost, "/api/v1/dashboard/probes/dpb_test/stop"},
 	}
 	for _, item := range readonlyDenied {
 		if got := status(item, readonlyToken); got != http.StatusForbidden {
@@ -151,6 +158,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/settings"},
 		{http.MethodGet, "/api/v1/settings/deployment"},
 		{http.MethodPost, "/api/v1/settings/check-update"},
+		{http.MethodPost, "/api/v1/dashboard/probes"}, {http.MethodPut, "/api/v1/dashboard/probes/dpb_test"}, {http.MethodDelete, "/api/v1/dashboard/probes/dpb_test"}, {http.MethodPost, "/api/v1/dashboard/probes/dpb_test/run"}, {http.MethodPost, "/api/v1/dashboard/probes/dpb_test/stop"},
 	}
 	for _, item := range auditorDenied {
 		if got := status(item, auditorToken); got != http.StatusForbidden {

@@ -176,3 +176,65 @@ func TestPanelMetricsCancellationDoesNotReplaceSnapshot(t *testing.T) {
 		t.Fatal("canceled collection replaced the previous sample")
 	}
 }
+
+func TestPanelMetricsMaintainsBoundedHistoryAndRuntimeStatus(t *testing.T) {
+	t.Parallel()
+	server := New(nil, Config{AdminToken: "panel-admin"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	var calls atomic.Int64
+	go func() {
+		defer close(done)
+		server.monitorPanelMetrics(ctx, func(context.Context) (core.HostMetrics, error) {
+			step := calls.Add(1)
+			return core.HostMetrics{
+				CollectedAt:       time.Now().UTC(),
+				CPUAvailable:      true,
+				CPUPercent:        float64(step % 100),
+				MemoryAvailable:   true,
+				MemoryUsedBytes:   uint64(1024 + step),
+				MemoryTotalBytes:  4096,
+				DiskAvailable:     true,
+				DiskUsedBytes:     2048,
+				DiskTotalBytes:    8192,
+				NetworkAvailable:  true,
+				NetworkRXBPS:      uint64(step * 10),
+				NetworkTXBPS:      uint64(step * 5),
+				NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.0.2.10"}}},
+				PublicIPv4:        "192.0.2.10",
+			}, nil
+		}, time.Millisecond)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for calls.Load() < panelMetricsHistoryCapacity+8 {
+		if time.Now().After(deadline) {
+			t.Fatalf("collected only %d samples before deadline", calls.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	response := httptest.NewRecorder()
+	server.getPanelMetrics(response, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var snapshot core.PanelMetricsSnapshot
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.History) != panelMetricsHistoryCapacity {
+		t.Fatalf("history length = %d, want capped %d", len(snapshot.History), panelMetricsHistoryCapacity)
+	}
+	if snapshot.History[0].MemoryUsedBytes >= snapshot.History[len(snapshot.History)-1].MemoryUsedBytes {
+		t.Fatalf("history did not keep oldest-to-newest chronological order: %+v", snapshot.History)
+	}
+	if snapshot.PanelRuntime == nil || snapshot.PanelRuntime.SampleWindowCapacity != panelMetricsHistoryCapacity || snapshot.PanelRuntime.SampleIntervalSeconds != 2 {
+		t.Fatalf("unexpected runtime status: %+v", snapshot.PanelRuntime)
+	}
+	if snapshot.BBR != nil || len(snapshot.NetworkInterfaces) != 0 || snapshot.PublicIPv4 != "" {
+		t.Fatal("panel metrics history/snapshot leaked host config fields")
+	}
+}

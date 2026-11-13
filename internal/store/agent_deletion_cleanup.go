@@ -75,6 +75,8 @@ var agentCleanupSteps = []agentCleanupStep{
 	// Entries must be gone before their referenced batch markers are removed.
 	{"delete core log batches", `DELETE FROM core_log_batches WHERE ctid IN
         (SELECT ctid FROM core_log_batches WHERE agent_id=$1 LIMIT $2)`},
+	{"delete dashboard probe pairs", `DELETE FROM dashboard_probe_pairs WHERE ctid IN
+        (SELECT ctid FROM dashboard_probe_pairs WHERE node1_agent_id=$1 OR node2_agent_id=$1 LIMIT $2)`},
 }
 
 func (s *Store) cleanupDeletedAgent(ctx context.Context, id string) error {
