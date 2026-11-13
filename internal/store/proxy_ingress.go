@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
+	"reflect"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
@@ -15,7 +15,7 @@ import (
 // withdrawal, even if the node was offline throughout that transition.
 func rotateProxyIngressesTx(ctx context.Context, tx pgx.Tx, shareID string) error {
 	_, err := tx.Exec(ctx, `UPDATE agent_shares s SET proxy_ingress_revision=proxy_ingress_revision+1,
-		proxy_ingress_error='', proxy_ingresses=(SELECT jsonb_agg(g || jsonb_build_object('generation',s.proxy_ingress_revision+1) ORDER BY n)
+		proxy_ingress_error='', proxy_ingresses=(SELECT jsonb_agg((g - 'legacy') || jsonb_build_object('generation',s.proxy_ingress_revision+1) ORDER BY n)
 		FROM jsonb_array_elements(s.proxy_ingresses) WITH ORDINALITY entry(g,n))
 		WHERE s.id=$1 AND s.proxy_ingresses<>'[]'::jsonb`, shareID)
 	return err
@@ -28,7 +28,7 @@ func setProxyIngressesTx(ctx context.Context, tx pgx.Tx, agentID, userID string,
 		return nil
 	}
 	if len(*requested) > 32 {
-		return fmt.Errorf("%w: 最多授权 32 个托管入口", ErrInvalid)
+		return fmt.Errorf("%w: 授权条目过多；仅支持 Nginx、Caddy", ErrInvalid)
 	}
 	var id string
 	var prior []core.ProxyIngress
@@ -38,33 +38,39 @@ func setProxyIngressesTx(ctx context.Context, tx pgx.Tx, agentID, userID string,
 	 FROM agent_shares s JOIN agents a ON a.id=s.agent_id WHERE s.agent_id=$1 AND s.user_id=$2`, agentID, userID, core.AgentFeatureSharedProxyIngress).Scan(&id, &prior, &revision, &supported); err != nil {
 		return err
 	}
-	next := append([]core.ProxyIngress{}, (*requested)...)
-	sort.Slice(next, func(i, j int) bool { return next[i].Port < next[j].Port })
-	for i := range next {
-		g := &next[i]
-		if !g.Valid() || i > 0 && next[i-1].Port == g.Port {
-			return fmt.Errorf("%w: 托管入口需指定 Nginx/Caddy 和不重复的有效端口", ErrInvalid)
+	next := []core.ProxyIngress{}
+	seen := map[string]bool{}
+	for _, input := range *requested {
+		if !core.ValidProxyMode(input.Mode) || input.Scope != "" && input.Scope != core.ProxyIngressTypeScope ||
+			input.Port != 0 && !core.ValidProxyPort(input.Port) || input.Scope == core.ProxyIngressTypeScope && input.Port != 0 {
+			return fmt.Errorf("%w: 请选择有效的 Nginx/Caddy 反代类型", ErrInvalid)
 		}
-		g.Generation = revision + 1 // Client-supplied generations never authorize use.
+		if seen[input.Mode] {
+			continue
+		}
+		seen[input.Mode] = true
+		g := core.ProxyIngress{Mode: input.Mode, Scope: core.ProxyIngressTypeScope, Generation: revision + 1}
 		for _, old := range prior {
-			if old.Port == g.Port && old.Mode == g.Mode {
-				g.Generation = old.Generation
+			if old.Mode == g.Mode {
+				g = old
 			}
 		}
-		var incompatible bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shares s, jsonb_array_elements(s.proxy_ingresses) g
-		 WHERE s.agent_id=$1 AND s.id<>$2 AND s.enabled AND (g->>'port')::int=$3 AND g->>'mode'<>$4)`, agentID, id, g.Port, g.Mode).Scan(&incompatible); err != nil {
-			return err
-		}
-		if incompatible {
-			return fmt.Errorf("%w: 该公共端口已有其他反代类型的授权", ErrConflict)
-		}
+		next = append(next, g)
 	}
-	if slices.Equal(prior, next) {
+	sort.Slice(next, func(i, j int) bool { return next[i].Mode < next[j].Mode })
+	if reflect.DeepEqual(prior, next) {
 		return nil
 	}
-	if len(next) > 0 && !supported {
-		return fmt.Errorf("%w: 请先升级 Agent（%s）再授权共用入口", ErrConflict, core.AgentFeatureSharedProxyIngress)
+	adding := false
+	for _, g := range next {
+		found := false
+		for _, old := range prior {
+			found = found || old.Mode == g.Mode
+		}
+		adding = adding || !found
+	}
+	if adding && !supported {
+		return fmt.Errorf("%w: 请先升级 Agent（%s）再共享反代", ErrConflict, core.AgentFeatureSharedProxyIngress)
 	}
 	_, err := tx.Exec(ctx, `UPDATE agent_shares SET proxy_ingresses=$2,proxy_ingress_revision=proxy_ingress_revision+1,
 	 proxy_ingress_error='',updated_at=now() WHERE id=$1`, id, next)
@@ -87,15 +93,39 @@ func proxyIngressGrantTx(ctx context.Context, tx pgx.Tx, agentID, owner string, 
 	if hostAuthority {
 		return 0, true, nil
 	}
-	var generation int64
-	err := tx.QueryRow(ctx, `SELECT (g->>'generation')::bigint FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
-	 JOIN agents a ON a.id=s.agent_id,
-	 jsonb_array_elements(s.proxy_ingresses) g WHERE s.agent_id=$1 AND s.user_id=$2 AND s.enabled AND s.status='accepted'
-	 AND a.features ? $5 AND NOT u.disabled AND (g->>'port')::int=$3 AND g->>'mode'=$4`, agentID, owner, f.PublicPort, f.Mode, core.AgentFeatureSharedProxyIngress).Scan(&generation)
+	var grants []core.ProxyIngress
+	var features []string
+	err := tx.QueryRow(ctx, `SELECT s.proxy_ingresses,a.features FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
+	 JOIN agents a ON a.id=s.agent_id WHERE s.agent_id=$1 AND s.user_id=$2 AND s.enabled AND s.status='accepted'
+	 AND NOT u.disabled`, agentID, owner).Scan(&grants, &features)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
-	return generation, err == nil, err
+	if err != nil {
+		return 0, false, err
+	}
+	for _, g := range grants {
+		if !g.Matches(f) {
+			continue
+		}
+		if f.SharedIngressGeneration > 0 && g.Authorizes(f) {
+			if containsFeature(features, core.AgentFeatureSharedProxyIngress) {
+				return f.SharedIngressGeneration, true, nil
+			}
+			// Old Agents may finish existing port-scoped work, never consume a
+			// type grant. These server-created leases cannot survive revocation.
+			for _, lease := range g.Legacy {
+				if containsFeature(features, core.AgentFeatureSharedProxyIngressLegacy) && lease.Port == f.PublicPort && lease.Generation == f.SharedIngressGeneration {
+					return lease.Generation, true, nil
+				}
+			}
+		}
+		if containsFeature(features, core.AgentFeatureSharedProxyIngress) {
+			return g.Generation, true, nil
+		}
+		return 0, false, fmt.Errorf("%w: 请先升级 Agent（%s）再使用共享反代", ErrConflict, core.AgentFeatureSharedProxyIngress)
+	}
+	return 0, false, nil
 }
 
 func (s *Store) cancelUnauthorizedProxyIngressTasksTx(ctx context.Context, tx pgx.Tx, agentID string) error {
@@ -133,7 +163,7 @@ func (s *Store) cancelUnauthorizedProxyIngressTasksTx(ctx context.Context, tx pg
 				continue
 			}
 			generation, allowed, err := proxyIngressGrantTx(ctx, tx, agentID, item.owner, f)
-			if err != nil {
+			if err != nil && !errors.Is(err, ErrConflict) {
 				return err
 			}
 			if !allowed || generation != f.SharedIngressGeneration {
@@ -173,7 +203,10 @@ func (s *Store) recordProxyIngressReports(ctx context.Context, agentID string, r
 }
 
 func proxyIngressShareColumns(alias string) string {
-	return alias + `.proxy_ingresses,CASE
+	return `(SELECT COALESCE(jsonb_agg(g - 'legacy' ORDER BY g->>'mode'),'[]'::jsonb) FROM jsonb_array_elements(` + alias + `.proxy_ingresses) g),CASE
+	 WHEN ` + alias + `.proxy_ingress_applied_revision=` + alias + `.proxy_ingress_revision+` + alias + `.invitation_revision AND ` + alias + `.proxy_ingress_error<>'' THEN 'failed'
+	 WHEN ` + alias + `.enabled AND ` + alias + `.status='accepted' AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=` + alias + `.user_id AND u.disabled)
+	 AND ` + alias + `.proxy_ingresses<>'[]'::jsonb AND NOT EXISTS(SELECT 1 FROM agents a WHERE a.id=` + alias + `.agent_id AND a.features ? 'shared-proxy-ingress-v2') THEN 'upgrade_required'
 	 WHEN ` + alias + `.proxy_ingress_revision=1 THEN ''
 	 WHEN ` + alias + `.proxy_ingress_applied_revision=` + alias + `.proxy_ingress_revision+` + alias + `.invitation_revision
 	 AND ` + alias + `.proxy_ingress_applied_revoked=(NOT ` + alias + `.enabled OR ` + alias + `.status<>'accepted' OR EXISTS(SELECT 1 FROM panel_users u WHERE u.id=` + alias + `.user_id AND u.disabled))
@@ -189,6 +222,46 @@ func candidateFrontends(task *core.Task) []core.TLSFrontend {
 		return nil
 	}
 	return task.TLSFrontends
+}
+
+// A successful policy receipt proves that withdrawn routes have been removed.
+// Keep saved configuration/history intact while checking the actual remaining
+// listeners. Pending or failed cleanup continues to protect the old routes.
+func synchronizedProxyFrontendsTx(ctx context.Context, tx pgx.Tx, agentID, configID string, version int, frontends []core.TLSFrontend, applied []core.ProxyIngress) ([]core.TLSFrontend, error) {
+	if len(applied) == 0 {
+		return frontends, nil
+	}
+	var grants []core.ProxyIngress
+	var revoked bool
+	err := tx.QueryRow(ctx, `SELECT s.proxy_ingresses,NOT s.enabled OR s.status<>'accepted' OR u.disabled
+	 FROM agent_shared_instance_ownership o JOIN agent_shares s ON s.id=o.share_id JOIN panel_users u ON u.id=s.user_id
+	 WHERE o.agent_id=$1 AND o.config_id=$2 AND o.config_version=$3
+	 AND s.proxy_ingress_applied_revision=s.proxy_ingress_revision+s.invitation_revision AND s.proxy_ingress_error=''
+	 AND s.proxy_ingress_applied_revoked=(NOT s.enabled OR s.status<>'accepted' OR u.disabled)`, agentID, configID, version).Scan(&grants, &revoked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return frontends, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if revoked {
+		grants = nil
+	}
+	next := []core.TLSFrontend{}
+	for _, f := range frontends {
+		keep := true
+		for _, lease := range applied {
+			if lease.Mode == f.Mode && lease.Port == f.PublicPort && !f.LocalOnly {
+				f.SharedIngressGeneration = lease.Generation
+				keep = core.ProxyIngressAuthorized(grants, f)
+				break
+			}
+		}
+		if keep {
+			next = append(next, f)
+		}
+	}
+	return next, nil
 }
 func proxyIngressConflictMessage(reason string) string {
 	switch reason {

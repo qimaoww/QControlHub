@@ -6,7 +6,7 @@ import { assert, waitFor, delay } from './browser/assertions.mjs';
 export async function testAgentSharingRuntime() {
   const nativeFetch = globalThis.fetch;
   let session = { user_id: 'alice', username: 'alice', role: 'user', permissions: ['overview.read', 'agents.read', 'agents.manage', 'agent-access.read', 'settings.read'], csrf_token: 'sharing-fixture' };
-  const agent = { id: 'own', name: 'Alice 自有节点', can_manage: true, status: 'online', capabilities: ['mihomo', 'xray'], features: ['shared-traffic-v1', 'shared-engines-v1', 'independent-egress-v1'] };
+  const agent = { id: 'own', name: 'Alice 自有节点', can_manage: true, status: 'online', capabilities: ['mihomo', 'xray'], features: ['shared-traffic-v1', 'shared-engines-v1', 'independent-egress-v1', 'shared-proxy-ingress-v2'] };
   let sharing = { revision: 2, shares: [{ id: 'shr_bob', username: 'bob', user_id: 'bob-id', status: 'accepted', invitation_revision: 2, engines: ['mihomo'], ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
   const writes = [], reads = [];
   let hold = false, release, rejectRead = false, holdRead = false, readStatus = 503, retainedFailures = 0;
@@ -148,6 +148,20 @@ export async function testAgentSharingRuntime() {
     }
     input(field('limit_gib'),'3');submit();await waitFor(()=>idle()&&form().querySelector('[type=submit]').disabled,'额度保存未结束');
     assert.equal(JSON.stringify(sharing.shares[0].ports),'[0]','修改额度丢失无限制端口');
+    for (const modes of [['nginx'], ['caddy'], ['nginx','caddy'], []]) {
+      form().querySelector('details').open = true;
+      assert.equal(form().querySelectorAll('[name=proxy_mode]').length, 2, '反代类型重复');
+      assert.ok(!form().querySelector('[name=proxy_port]') && !button('添加入口'), '仍要求逐端口授权');
+      for (const control of form().querySelectorAll('[name=proxy_mode]')) {
+        if (control.checked !== modes.includes(control.value)) control.click();
+      }
+      await close(); await open();
+      assert.equal([...form().querySelectorAll('[name=proxy_mode]:checked')].map(el=>el.value).join(','), modes.join(','), '反代草稿丢失');
+      submit(); await waitFor(()=>idle()&&form().querySelector('[type=submit]').disabled, '类型授权未保存');
+      assert.equal(JSON.stringify(writes.at(-1).shares[0].proxy_ingresses), JSON.stringify(modes.map(mode=>({mode,scope:'type'}))), '请求保留共享端口');
+      button('重新读取').click(); await waitFor(idle, '类型授权回填失败');
+      assert.equal([...form().querySelectorAll('[name=proxy_mode]:checked')].map(el=>el.value).join(','), modes.join(','));
+    }
     await close();sharing.shares[0].engines=['xray'];agent.capabilities=['mihomo'];await boot();await open();
     assert.ok(form().querySelector('[name=engines][value=xray]')?.checked&&dialog().textContent.includes('xray · 不可用'),'不可用的已有内核分配被丢弃');
     input(field('limit_gib'),'4');submit();await waitFor(()=>idle()&&form().querySelector('[type=submit]').disabled,'已有分配保存未结束');

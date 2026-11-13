@@ -202,16 +202,7 @@ func (c *Client) Run(ctx context.Context) error {
 			return stopLegacySharedBase(ctx, c.executor.serviceManager(), engine, spec, ports)
 		}
 		c.traffic.inspectProxyIngresses = func(ctx context.Context, engine core.Engine, shareID string, grants []core.ProxyIngress) (bool, error) {
-			frontends, stopped, err := sharedIngressFrontends(c.executor.serviceManager(), engine, shareID)
-			if err != nil || stopped {
-				return false, err
-			}
-			for _, f := range frontends {
-				if !core.ProxyIngressAuthorized(grants, f) {
-					return true, nil
-				}
-			}
-			return false, nil
+			return c.executor.reconcileSharedProxyIngresses(ctx, engine, shareID, grants)
 		}
 		c.traffic.haltShare = func(ctx context.Context, engine core.Engine, shareID string) error {
 			c.executor.specsMu.RLock()

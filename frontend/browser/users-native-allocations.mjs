@@ -2,7 +2,7 @@ import { assert, waitFor, delay } from './assertions.mjs';
 
 export async function testNativeAllocations({ button, dialog, input, row, modal, confirm, fits, restart, session }) {
   const nativeFetch = globalThis.fetch;
-  const agent = id => ({ id, name: `${id} 节点`, capabilities: ['mihomo', 'xray'] });
+  const agent = id => ({ id, name: `${id} 节点`, capabilities: ['mihomo', 'xray'], shared_proxy_ingress: true });
   const directory = ['owned', 'shared', 'other', 'new'].map(agent);
   let access = { revision: 4, isolated: true, owned_agent_ids: ['owned'], shares: [
     { id: 's1', agent_id: 'shared', enabled: true, status: 'accepted', engines: ['mihomo', 'ss-rust'], ports: [31001], limit_bytes: 1024 ** 3, used_bytes: 123, http_domains: ['example.test'] },
@@ -132,6 +132,15 @@ export async function testNativeAllocations({ button, dialog, input, row, modal,
     assert.equal(untouched.used_bytes, 87, '单节点编辑清除另一节点的用量');
     assert.ok(!writes.at(-1).shares.find(share => share.agent_id === 'other').reinvite, '单节点编辑重发其他节点的邀请');
     await idle(); button('编辑分配', allocationRow('shared')).click();
+    for (const modes of [['nginx'], ['caddy'], ['nginx','caddy'], []]) {
+      form().querySelector('details').open = true;
+      assert.ok(!form().querySelector('[name=proxy_port]'), '用户分配仍要求共享端口');
+      for (const control of form().querySelectorAll('[name=proxy_mode]')) { if (control.checked !== modes.includes(control.value)) control.click(); }
+      form().requestSubmit(); await waitFor(()=>!form(), '反代类型分配未保存');
+      same(access.shares[0].proxy_ingresses, modes.map(mode=>({mode,scope:'type'})), '用户分配请求未使用类型授权');
+      button('编辑分配', allocationRow('shared')).click();
+      same([...form().querySelectorAll('[name=proxy_mode]:checked')].map(el=>el.value), modes, '用户分配未回填');
+    }
     const xray = form().querySelector('[name=engines][value=xray]'); xray.checked = true; xray.dispatchEvent(new Event('change', { bubbles: true }));
     assert.ok(form().textContent.includes('用户需重新接受'), '授权扩大缺少同意说明');
     form().requestSubmit(); await waitFor(() => !form(), '授权扩大未保存');

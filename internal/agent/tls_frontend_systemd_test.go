@@ -123,10 +123,41 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	other.Tag = "other"
 	other.Path = "/second"
 	other.BackendPort++
+	other.SharedIngressGeneration = 7
 	shared := "qagent-sing-box@shr_0000000000000001.service"
 	if kind == ServiceManagerOpenRC {
 		shared = "qagent-sing-box-shr_0000000000000001"
 	}
+	invoke(shared, core.ActionDeploy, false, []core.TLSFrontend{other}, true)
+	// Both providers belong to this instance, on distinct real listeners.
+	// Withdraw Nginx through the same helper used by live policy reconciliation.
+	caddyRoute := other
+	caddyRoute.Mode, caddyRoute.PublicPort, caddyRoute.Tag = "caddy", 8443, "caddy-retained"
+	caddyRoute.Certificate, caddyRoute.PrivateKey, caddyRoute.ACMEEmail = "", "", ""
+	caddyRoute.CertificatePath = "/etc/qcontrolhub/panel-certificates/crt_0000000000000001/cert.pem"
+	caddyRoute.PrivateKeyPath = "/etc/qcontrolhub/panel-certificates/crt_0000000000000001/key.pem"
+	caddyRoute.SharedIngressGeneration = 8
+	invoke(shared, core.ActionDeploy, false, []core.TLSFrontend{other, caddyRoute}, true)
+	managerForRevoke, _ := NewServiceManager(kind)
+	executor := &Executor{Services: managerForRevoke, tlsFrontendHelperPath: "/usr/local/lib/qagent/qagent"}
+	stop, err := executor.reconcileSharedProxyIngresses(ctx, core.EngineSingBox, "shr_0000000000000001", []core.ProxyIngress{{Mode: "caddy", Scope: core.ProxyIngressTypeScope, Generation: 8}})
+	if err != nil || stop {
+		t.Fatalf("partial provider withdrawal stopped the instance: %t %v", stop, err)
+	}
+	if err := probeFrontendTLS(ctx, caddyRoute); err != nil {
+		t.Fatal("partial withdrawal broke retained Caddy", err)
+	}
+	if err := probeFrontendTLS(ctx, frontends[0]); err != nil {
+		t.Fatal("partial withdrawal broke host Nginx", err)
+	}
+	remaining, stopped, err := sharedIngressFrontends(managerForRevoke, core.EngineSingBox, "shr_0000000000000001")
+	if err != nil || stopped || len(remaining) != 1 || remaining[0].Mode != "caddy" {
+		t.Fatalf("partial cleanup was not persisted: %+v %t %v", remaining, stopped, err)
+	}
+	if err := probeFrontendTLS(ctx, caddyRoute, true); err != nil {
+		t.Fatal("retained Caddy backend request", err)
+	}
+	// Restore the separate Nginx route for the existing multi-instance checks.
 	invoke(shared, core.ActionDeploy, false, []core.TLSFrontend{other}, true)
 	// Run the failure inside the same fixed privileged-helper sandbox, so it
 	// can restore service files even though the long-running Agent cannot.

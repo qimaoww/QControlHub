@@ -59,11 +59,12 @@ func TestManagedTLSAccountDefaultForSharedDeployments(t *testing.T) {
 	setEmail(owner, "owner@example.test")
 	setEmail(recipient, "recipient@example.test")
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "acme-shared", core.EngineSingBox)
-	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureACMEFallback, core.AgentFeatureSharedCoreInstances)
+	agent.Features = append(agent.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureACMEFallback, core.AgentFeatureSharedCoreInstances)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
-	grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 23456, 8443)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 23456)
+	setAPIProxyIngresses(t, admin, recipient, agent.ID, []core.ProxyIngress{{Mode: "nginx"}, {Mode: "caddy"}})
 	base := "/agents/" + agent.ID + "/configs/sing-box"
 	var plan serverconfig.Input
 	recipient.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plan)

@@ -76,6 +76,7 @@ func (s *Store) overlaySharedInstanceRuntime(ctx context.Context, agents []core.
 		agent.SharedAllocation = &allocation
 		instance.ID = allocation.ID
 		instance.UpgradeRequired = !containsFeature(agent.Features, core.AgentFeatureSharedCoreLifecycle)
+		instance.UpgradeRequired = instance.UpgradeRequired || len(allocation.ProxyIngresses) > 0 && !containsFeature(agent.Features, core.AgentFeatureSharedProxyIngress)
 		if allocation.LimitBytes > 0 && allocation.UsedBytes >= allocation.LimitBytes {
 			instance.Restriction = "共享额度已耗尽，请联系节点所有者调整额度"
 		} else if len(allocation.Ports) == 0 {

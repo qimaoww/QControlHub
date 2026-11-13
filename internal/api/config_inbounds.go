@@ -69,7 +69,7 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 	}
 	if protocol.SupportsManagedTLS && !agent.CanManage && (plan.TLSMode == "caddy" || plan.TLSMode == "nginx") {
 		if input.Input == nil {
-			plan.TLSPublicPort, err = s.sharedManagedTLSPublicPort(request.Context(), s.configOwnerID(request), agent.ID, engine)
+			plan.TLSPublicPort, err = s.sharedManagedTLSPublicPort(request.Context(), s.configOwnerID(request), agent.ID, engine, &plan)
 			if err != nil {
 				writeStoreError(w, err)
 				return

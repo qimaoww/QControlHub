@@ -17,6 +17,39 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
     await wait(page,"!document.querySelector('[aria-busy=true]') && [...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent==='任务详情')");
     await close();
   };
+  const inspectProxyDialog = async entrance => {
+    await evaluate(page,"document.querySelectorAll('.a-toast-close').forEach(button=>button.click())");
+    await wait(page,"!document.querySelector('.a-toast')");
+    await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:1,y:1},page);
+    const sizes = mode === 'mobile' ? [[390,844],[844,390],[768,1024],[1024,768]] : [[1920,1080],[3840,2160],[2560,1440],[1280,900],[960,720],[600,800]];
+    for (const [width,height] of sizes) {
+      await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:mode==='mobile'},page);
+      await evaluate(page,"new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+      const dimensions = await evaluate(page,`(()=>{const box=document.querySelector('dialog[open]'),r=box.getBoundingClientRect();return {width:innerWidth,height:innerHeight,dpr:devicePixelRatio,scale:visualViewport.scale,fits:r.left>=0&&r.top>=0&&r.right<=innerWidth+1&&r.bottom<=innerHeight+1&&box.scrollWidth<=box.clientWidth+1&&document.documentElement.scrollWidth<=innerWidth+1}})()`);
+      assert.ok(dimensions.fits,`${entrance}: ${JSON.stringify(dimensions)}`);
+      record(`${entrance}: CSS viewport ${dimensions.width}x${dimensions.height}, DPR ${dimensions.dpr}, scale ${dimensions.scale}; Chromium ${mode==='mobile'?'touch emulation':'desktop'}`);
+      await screenshot(page,`analytics-${entrance}-types-${width}x${height}`);
+    }
+    await call('Emulation.setDeviceMetricsOverride',{width:mode==='mobile'?390:1440,height:mode==='mobile'?844:1000,deviceScaleFactor:1,mobile:mode==='mobile'},page);
+    for (const modes of [[],['nginx'],['caddy'],['nginx','caddy']]) {
+      await evaluate(page,`document.querySelectorAll('dialog[open] [name=proxy_mode]').forEach(input=>{if(input.checked!==${JSON.stringify(modes)}.includes(input.value))input.click()})`);
+      await screenshot(page,`analytics-${entrance}-state-${modes.join('-')||'none'}`);
+    }
+    await evaluate(page,"document.querySelector('dialog[open] [name=proxy_mode]').focus()");
+    for (let toggle=0;toggle<2;toggle++) {
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32},page);
+      await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32},page);
+      assert.equal(await evaluate(page,"document.activeElement.checked"),toggle===1,'keyboard toggles provider grant');
+    }
+    if (mode === 'mobile') {
+      const point = await evaluate(page,"(()=>{const input=document.querySelector('dialog[open] [name=proxy_mode]');input.scrollIntoView({block:'center'});const r=input.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+      for (let toggle=0;toggle<2;toggle++) {
+        await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]},page);
+        await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},page);
+        await wait(page,`document.querySelector('dialog[open] [name=proxy_mode]').checked===${toggle===1}`);
+      }
+    }
+  };
   await navigate('#node-settings');
   const originalOrder = await evaluate(page,"[...document.querySelectorAll('[data-node-drag]')].map(control=>control.dataset.nodeDrag)");
   assert.ok(originalOrder.length > 1, 'ordering exercises multiple real nodes');
@@ -156,14 +189,32 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
   await close(); await navigate('#my-quota');
   await evaluate(page,`document.querySelector(${JSON.stringify('[data-sharing-agent="'+agentID+'"]')}).click()`);
   await wait(page,"[...document.querySelectorAll('dialog[open] h2')].some(title=>title.textContent.includes('共享 Agent')) && !document.querySelector('[aria-busy=true]')");await click('添加用户');
-  await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.querySelector('[name=username]').value='alice';form.querySelector('[name=ports]').value='23450-23451';form.querySelector('[name=limit_gib]').value='1';form.querySelector('[name=engines]').checked=true;form.requestSubmit()})()");
+  await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] form');form.querySelector('[name=username]').value='alice';form.querySelector('[name=ports]').value='23450-23451';form.querySelector('[name=limit_gib]').value='1';form.querySelector('[name=engines]').checked=true;form.querySelector('[name=proxy_mode][value=nginx]').checked=true;form.querySelector('[name=proxy_mode][value=caddy]').checked=true;form.requestSubmit()})()");
   await wait(page,"document.querySelector('.a-toast-region')?.textContent.includes('共享设置已保存') && !document.querySelector('[aria-busy=true]')");
-  const sharing=await api(page,identity,'GET',`/agents/${agentID}/sharing`);assert.deepEqual(sharing.shares[0].ports,[23450,23451]);assert.equal(sharing.shares[0].status,'pending');
+  const sharing=await api(page,identity,'GET',`/agents/${agentID}/sharing`);assert.deepEqual(sharing.shares[0].ports,[23450,23451]);assert.equal(sharing.shares[0].status,'pending');assert.deepEqual(sharing.shares[0].proxy_ingresses.map(g=>g.mode).sort(),['caddy','nginx']);assert.ok(sharing.shares[0].proxy_ingresses.every(g=>g.scope==='type'&&!('port' in g)));
   assert.ok(await evaluate(page,"document.querySelector('dialog[open] button[type=submit]').disabled"),'saved sharing has no pending submission');
+  await evaluate(page,"document.querySelector('dialog[open] details').open=true");
+  assert.ok(await evaluate(page,"!document.querySelector('dialog[open] [name=proxy_port]') && document.querySelectorAll('dialog[open] [name=proxy_mode]:checked').length===2"));
+  await screenshot(page,'analytics-node-sharing-types');
+  await inspectProxyDialog('node-sharing');
   await evaluate(page,"document.querySelector('dialog[open] [aria-label=关闭]').click()");
   await wait(page,"!document.querySelector('dialog[open]')");
   assert.ok(await evaluate(page,"!document.querySelector('dialog[open]')"),'closing saved sharing does not ask to save again');
-  await screenshot(page,'analytics-node-sharing');await close();await api(page,identity,'PUT',`/agents/${agentID}/sharing`,{revision:sharing.revision,shares:[]});
+  await screenshot(page,'analytics-node-sharing');
+  await evaluate(page,"location.hash='#users'");
+  await wait(page,"document.querySelector('.a-top h1')?.textContent==='用户管理' && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page,"[...document.querySelectorAll('tbody tr')].find(row=>row.cells[0].textContent==='alice').querySelectorAll('button')[1].click()");
+  await wait(page,"!!document.querySelector('dialog[open] [data-label],dialog[open] tbody') && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page,`[...document.querySelectorAll('dialog[open] tbody tr')].find(row=>row.cells[0]?.textContent===${JSON.stringify(sharing.shares[0].agent_name)}).querySelector('button').click()`);
+  await wait(page,"document.querySelectorAll('dialog[open] [name=proxy_mode]:checked').length===2");
+  await evaluate(page,"document.querySelector('dialog[open] details').open=true");
+  await screenshot(page,'analytics-user-sharing-types');
+  await inspectProxyDialog('user-sharing');
+  await evaluate(page,"document.querySelector('dialog[open] [name=proxy_mode][value=nginx]').click();document.querySelector('dialog[open] form').requestSubmit()");
+  await wait(page,"!document.querySelector('dialog[open] form') && !document.querySelector('[aria-busy=true]')");
+  const typeChange=await api(page,identity,'GET',`/agents/${agentID}/sharing`);
+  assert.deepEqual(typeChange.shares[0].proxy_ingresses.map(g=>g.mode),['caddy']);
+  await close();await api(page,identity,'PUT',`/agents/${agentID}/sharing`,{revision:typeChange.revision,shares:[]});
   await navigate(`#live-config?agent=${agentID}&engine=mihomo`);await click('添加入站','.a-main');
   await wait(page,"!!document.querySelector('dialog[open] [name=tag]') && !document.querySelector('[aria-busy=true]')");await screenshot(page,'analytics-inbound-editor');
   await evaluate(page,"(()=>{const form=document.querySelector('dialog[open] [name=tag]').form;form.elements.tag.value='theme-inbound';form.elements.port.value='23477';form.requestSubmit()})()");

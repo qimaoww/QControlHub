@@ -294,6 +294,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("retire obsolete integration settings: %w", err)
 		}
 	}
+	if appliedVersion < 102 {
+		if err := migrateProxyIngressTypes(ctx, tx); err != nil {
+			return fmt.Errorf("migrate proxy type authorizations: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
 		return fmt.Errorf("record schema migration version: %w", err)
 	}

@@ -107,7 +107,9 @@ func (s *Server) sharedXHTTPGroupPlan(ctx context.Context, owner, agentID string
 	return nil
 }
 
-func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID string, engine core.Engine) (int, error) {
+// Default only from the chosen provider's real configuration, otherwise HTTPS
+// uses 443. Without a provider grant, retain ordinary native TLS planning.
+func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID string, engine core.Engine, plan *serverconfig.Input) (int, error) {
 	access, err := s.store.UserAgentAccess(ctx, owner)
 	if err != nil {
 		return 0, err
@@ -123,22 +125,40 @@ func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID 
 		if !matched {
 			continue
 		}
-		for _, g := range share.ProxyIngresses {
-			if g.Port == 443 {
-				return 443, nil
+		modes := map[string]bool{}
+		for _, grant := range share.ProxyIngresses {
+			modes[grant.Mode] = true
+		}
+		if !modes[plan.TLSMode] {
+			if modes["caddy"] {
+				plan.TLSMode = "caddy"
+			} else if modes["nginx"] {
+				plan.TLSMode = "nginx"
+			} else {
+				break
 			}
 		}
-		if len(share.ProxyIngresses) > 0 {
-			return share.ProxyIngresses[0].Port, nil
+		configs, err := s.store.AgentConfigs(ctx, agentID)
+		if err != nil {
+			return 0, err
 		}
-		if core.UnrestrictedSharedPorts(share.Ports) || containsPlanPort(share.Ports, 443) {
-			return 443, nil
-		}
-		for _, port := range share.Ports {
-			if port != 80 {
-				return port, nil
+		for _, config := range configs {
+			metadata, err := s.store.ConfigClientMetadata(ctx, config.ID, config.Version)
+			if err != nil {
+				return 0, err
+			}
+			frontends, err := serverconfig.ManagedTLSFrontends(config.Engine, config.Content, metadata)
+			if err != nil {
+				return 0, err
+			}
+			for _, f := range frontends {
+				if !f.LocalOnly && f.Mode == plan.TLSMode {
+					return f.PublicPort, nil
+				}
 			}
 		}
+		return 443, nil
 	}
-	return 0, fmt.Errorf("%w: 未分配可用的公网 HTTPS 端口", store.ErrInvalid)
+	plan.TLSMode, plan.Listen, plan.TLSPublicPort = "native", "0.0.0.0", 0
+	return 0, nil
 }

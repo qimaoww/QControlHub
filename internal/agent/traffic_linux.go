@@ -235,6 +235,16 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	// Records and their activation guard survive reconnects/restarts. An older
+	// policy for the same allocation cannot replace a completed withdrawal or
+	// regrant, even when it arrives after a newer heartbeat snapshot.
+	for _, record := range manager.records {
+		if prior := record.Policy.SharedQuota; prior != nil {
+			if incoming, exists := groups[prior.ID]; exists && incoming.ProxyIngressRevision < prior.ProxyIngressRevision {
+				return errors.New("shared proxy authorization policy is stale; waiting for current policy")
+			}
+		}
+	}
 	unchanged := len(policies) == len(manager.records)
 	for _, policy := range policies {
 		record := manager.records[policy.ID]

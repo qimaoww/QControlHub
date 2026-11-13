@@ -18,6 +18,11 @@ docker run --name "$container" --init --sysctl net.ipv4.ip_unprivileged_port_sta
  QCH_SERVICE_MANAGER=openrc sh /src/deploy/bootstrap-core-services.sh --prepare-agent
  mkdir -p /usr/local/lib/qagent /run/openrc /etc/qcontrolhub/tls
  cp /fixtures/xhttp.crt /fixtures/xhttp.key /etc/qcontrolhub/tls/
+ mkdir -p /etc/qcontrolhub/panel-certificates/crt_0000000000000001
+ cp /fixtures/xhttp.crt /etc/qcontrolhub/panel-certificates/crt_0000000000000001/cert.pem
+ cp /fixtures/xhttp.key /etc/qcontrolhub/panel-certificates/crt_0000000000000001/key.pem
+ chown -R root:qcontrolhub-core /etc/qcontrolhub/panel-certificates
+ chmod -R g+rX,o-rwx /etc/qcontrolhub/panel-certificates
  chown -R root:qcontrolhub-core /etc/qcontrolhub/tls
  chmod 0750 /etc/qcontrolhub/tls
  chmod 0640 /etc/qcontrolhub/tls/*

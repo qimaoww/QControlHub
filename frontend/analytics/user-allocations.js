@@ -17,7 +17,7 @@ async function editUserAllocationsLoaded(ctx, user) {
   let directory = [], directoryReady = false, initialized = false;
   const directoryRead = readRegion(ctx, '节点选项', async signal => {
     const [visible, other] = await Promise.all([ctx.api('/agents', { signal }), ctx.api('/agent-directory', { signal })]);
-    return [...new Map([...list(other), ...list(visible).map(agent => ({ ...agent, shared_proxy_ingress: agent.features?.includes('shared-proxy-ingress-v1') }))].map(agent => [agent.id, agent])).values()];
+    return [...new Map([...list(other), ...list(visible).map(agent => ({ ...agent, shared_proxy_ingress: agent.features?.includes('shared-proxy-ingress-v2') }))].map(agent => [agent.id, agent])).values()];
   }, value => { directory = list(value); directoryReady = true; if (initialized && !editor) { draw(); const draft = drafts.get(user.id); if (draft) open(draft.original, draft.mode, draft); } }, { clear() { directory = []; directoryReady = false; if (initialized && !editor) draw(); } });
   void directoryRead.load();
   let saved = await ctx.api(path);
@@ -76,7 +76,7 @@ async function editUserAllocationsLoaded(ctx, user) {
     };
     const target = field('节点', 'agent_id', value.agent_id, { options: share ? [[share.agent_id, name(share)]] : [['', '选择节点'], ...available().map(agent => [agent.id, agent.name])], disabled: Boolean(share), required: true });
     const engines = node('div', { className: 'a-actions' });
-    const ports = field('授权端口', 'ports', value.ports, { placeholder: '21000-21100, 22000', hint: '留空未分配，0 表示不限端口' });
+    const ports = field('内核端口', 'ports', value.ports, { placeholder: '21000-21100, 22000', hint: '留空未分配，0 表示不限端口' });
     const limit = field('总额度 · GiB', 'limit', value.limit, { type: 'number', min: 0, max: 8388607, step: 'any', required: true, hint: `已用 ${bytes(original?.used_bytes)}，0 表示不限量` });
     const domains = field('HTTP-01 允许域名', 'domains', value.domains, { multiline: 2 });
     const ingress = proxyIngressEditor(value.proxy_ingresses, directory.find(item => item.id === value.agent_id)?.shared_proxy_ingress === true);
@@ -142,7 +142,7 @@ async function editUserAllocationsLoaded(ctx, user) {
     const owned = directory.filter(agent => list(saved.owned_agent_ids).includes(agent.id));
     const tools = actions(button('分配节点', () => open(null, 'add'), { disabled: !directoryReady || !available().length }), button('重新读取', () => void reloadSaved()));
     const allocations = table(['节点', '授权范围', '已用 / 总额度', '状态', '操作'], shares.map(share => [
-      name(share), stack(muted(list(share.engines).join(' / ') || '未分配内核'), node('span', {}, `端口 · ${sharedPortsLabel(share.ports)}`), muted(`托管入口 · ${proxyIngressLabel(share)}`)),
+      name(share), stack(muted(list(share.engines).join(' / ') || '未分配内核'), node('span', {}, `端口 · ${sharedPortsLabel(share.ports)}`), muted(`共享反代 · ${proxyIngressLabel(share)}`)),
       `${bytes(share.used_bytes)} / ${share.limit_bytes ? bytes(share.limit_bytes) : '不限量'}`, badge(agentShareStatus(share)),
       actions(button('编辑分配', () => open(share), { disabled: !directoryReady }),
         (!share.enabled || share.status === 'rejected') && button('重新邀请', () => open(share, 'invite'), { disabled: !directoryReady }),

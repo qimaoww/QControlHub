@@ -1232,6 +1232,7 @@
             "type": "string"
           },
           "proxy_ingresses": {
+            "description": "按 Nginx/Caddy 类型共享反代，每种类型一项，使用 scope=type 且不填写 port。省略/null 保留，空数组撤销；旧 mode+port 请求按类型归并。代次及升级兼容凭据由服务端生成，客户端值不授予执行权限。新增授权要求 shared-proxy-ingress-v2 Agent。",
             "items": {
               "$ref": "#/components/schemas/core_ProxyIngress"
             },
@@ -1311,7 +1312,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "按 Nginx/Caddy 类型共享反代，每种类型一项，使用 scope=type 且不填写 port。省略/null 保留，空数组撤销；旧 mode+port 请求按类型归并。代次及升级兼容凭据由服务端生成，客户端值不授予执行权限。新增授权要求 shared-proxy-ingress-v2 Agent。"
           },
           "reinvite": {
             "type": "boolean"
@@ -1405,7 +1407,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "按 Nginx/Caddy 类型共享反代，每种类型一项，使用 scope=type 且不填写 port。省略/null 保留，空数组撤销；旧 mode+port 请求按类型归并。代次及升级兼容凭据由服务端生成，客户端值不授予执行权限。新增授权要求 shared-proxy-ingress-v2 Agent。"
           },
           "reinvite": {
             "type": "boolean"
@@ -3677,12 +3680,49 @@
         "additionalProperties": false,
         "properties": {
           "generation": {
+            "readOnly": true,
             "type": "integer"
           },
+          "legacy": {
+            "description": "服务端生成的精确旧租约，仅发送给 Agent；共享详情不返回，客户端提交不生效。",
+            "items": {
+              "$ref": "#/components/schemas/core_ProxyIngressLease"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
           "mode": {
-            "default": "read_only",
-            "description": "省略为 read_only；读写模式不自动增加业务权限。",
+            "description": "共享的反代类型；同一共享关系每种类型至多一项。",
+            "enum": [
+              "nginx",
+              "caddy"
+            ],
             "type": "string"
+          },
+          "port": {
+            "description": "仅兼容旧请求或旧 Agent 策略；新共享响应省略。scope=type 时不得填写，不接受 0 或保留端口。",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "description": "类型授权，不分配监听端口；mode-only 请求也按此语义保存。",
+            "enum": [
+              "type"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "core_ProxyIngressLease": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "type": "integer"
           },
           "port": {
             "type": "integer"
@@ -3864,6 +3904,7 @@
             "type": "integer"
           },
           "proxy_ingresses": {
+            "description": "按 Nginx/Caddy 类型共享反代，每种类型一项，使用 scope=type 且不填写 port。省略/null 保留，空数组撤销；旧 mode+port 请求按类型归并。代次及升级兼容凭据由服务端生成，客户端值不授予执行权限。新增授权要求 shared-proxy-ingress-v2 Agent。",
             "items": {
               "$ref": "#/components/schemas/core_ProxyIngress"
             },

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -89,5 +90,49 @@ func TestProxyIngressRevocationWaitsForLifecycleAndRetriesCleanup(t *testing.T) 
 	old[0].SharedIngressGeneration = 4
 	if err := manager.authorizeProxyIngresses(revokedShare, old); err != nil {
 		t.Fatal(err)
+	}
+	for _, p := range policies {
+		if p.SharedQuota.ID == revokedShare {
+			p.SharedQuota.ProxyIngressRevision = 2
+			p.SharedQuota.ProxyIngresses = []core.ProxyIngress{grant}
+		}
+	}
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err == nil {
+		t.Fatal("delayed policy replaced renewed authority")
+	}
+	restarted := NewTrafficManager(filepath.Join(filepath.Dir(manager.statePath), "agent.json"))
+	restarted.now = manager.now
+	if err := restarted.SetPolicies(ctx, policies, "agt_shared"); err == nil {
+		t.Fatal("restart lost authorization policy ordering")
+	}
+}
+
+func TestProxyIngressTypeExecutionBoundary(t *testing.T) {
+	const share = "shr_0000000000000001"
+	for _, mode := range []string{"nginx", "caddy"} {
+		grant := core.ProxyIngress{Mode: mode, Scope: core.ProxyIngressTypeScope, Generation: 7, Legacy: []core.ProxyIngressLease{{Port: 443, Generation: 2}}}
+		quota := &core.SharedTrafficQuota{ID: share, ProxyIngresses: []core.ProxyIngress{grant}}
+		manager := &TrafficManager{records: map[string]*trafficRecord{"one": {Policy: core.PortTrafficPolicy{SharedQuota: quota}}}}
+		for _, port := range []int{443, 8443, 9443} {
+			f := core.TLSFrontend{Mode: mode, PublicPort: port, SharedIngressGeneration: 7}
+			if err := manager.authorizeProxyIngresses(share, []core.TLSFrontend{f}); err != nil {
+				t.Fatal("type restricted to old listener", err)
+			}
+			if manager.authorizeProxyIngresses("shr_0000000000000002", []core.TLSFrontend{f}) == nil {
+				t.Fatal("cross-instance authority")
+			}
+			f.SharedIngressGeneration = 0
+			if manager.authorizeProxyIngresses(share, []core.TLSFrontend{f}) == nil {
+				t.Fatal("snapshot omitted execution authority")
+			}
+			f.SharedIngressGeneration = 2
+			if allowed := manager.authorizeProxyIngresses(share, []core.TLSFrontend{f}) == nil; allowed != (port == 443) {
+				t.Fatal("old lease widened", port)
+			}
+		}
+		quota.Revoked = true
+		if manager.authorizeProxyIngresses(share, []core.TLSFrontend{{Mode: mode, PublicPort: 443, SharedIngressGeneration: 2}}) == nil {
+			t.Fatal("revocation retained migration lease")
+		}
 	}
 }

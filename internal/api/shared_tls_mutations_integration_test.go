@@ -15,9 +15,9 @@ func TestSharedTLSCertificateEditsAndFinalInboundDeletion(t *testing.T) {
 			name = "unrestricted"
 		}
 		t.Run(name, func(t *testing.T) {
-			db, ctx, _, owner, cdn := newConfigScopeAPIFixture(t)
+			db, ctx, admin, owner, cdn := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-tls-edits", core.EngineSingBox)
-			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
+			agent.Features = append(agent.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 				t.Fatal(err)
 			}
@@ -26,6 +26,7 @@ func TestSharedTLSCertificateEditsAndFinalInboundDeletion(t *testing.T) {
 				ports = []int{0}
 			}
 			grantConfigScopeAPIAgent(t, ctx, db, agent, cdn, ports...)
+			setAPIProxyIngresses(t, admin, cdn, agent.ID, []core.ProxyIngress{{Mode: "nginx"}, {Mode: "caddy"}})
 			base := "/agents/" + agent.ID + "/configs/sing-box"
 			var plan serverconfig.Input
 			cdn.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plan)
@@ -109,9 +110,9 @@ func TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry(t *testing.T) {
 			name = "unrestricted"
 		}
 		t.Run(name, func(t *testing.T) {
-			db, ctx, _, owner, cdn := newConfigScopeAPIFixture(t)
+			db, ctx, admin, owner, cdn := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-tls-port-conflicts", core.EngineSingBox)
-			agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
+			agent.Features = append(agent.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 				t.Fatal(err)
 			}
@@ -120,6 +121,7 @@ func TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry(t *testing.T) {
 				ports = []int{0}
 			}
 			grantConfigScopeAPIAgent(t, ctx, db, agent, cdn, ports...)
+			setAPIProxyIngresses(t, admin, cdn, agent.ID, []core.ProxyIngress{{Mode: "nginx"}, {Mode: "caddy"}})
 			base := "/agents/" + agent.ID + "/configs/sing-box"
 			var plan serverconfig.Input
 			cdn.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plan)
@@ -146,9 +148,9 @@ func TestSharedTLSPortConflictRetainsRevisionAndAllowsRetry(t *testing.T) {
 					t.Fatal("rejected port conflict created a task")
 				}
 			}
-			if !unrestricted {
-				assertConflict() // The public port has not been allocated.
-			}
+			setAPIProxyIngresses(t, admin, cdn, agent.ID, []core.ProxyIngress{})
+			assertConflict() // Ordinary port authority never substitutes for a provider grant.
+			setAPIProxyIngresses(t, admin, cdn, agent.ID, []core.ProxyIngress{{Mode: "nginx"}, {Mode: "caddy"}})
 			ownerPlan := plan
 			ownerPlan.Port, ownerPlan.TLSServerName = 22001, "owner.example.test"
 			var owned configMutationResult

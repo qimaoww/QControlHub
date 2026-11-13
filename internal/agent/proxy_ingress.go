@@ -81,7 +81,12 @@ func sharedIngressFrontends(manager *ServiceManager, engine core.Engine, shareID
 }
 
 func (manager *TrafficManager) authorizeProxyIngresses(shareID string, frontends []core.TLSFrontend) error {
-	if !slices.ContainsFunc(frontends, func(f core.TLSFrontend) bool { return f.SharedIngressGeneration > 0 }) {
+	for _, f := range frontends {
+		if !f.LocalOnly && f.SharedIngressGeneration == 0 {
+			return errors.New("共享反代缺少执行授权，请升级面板并重新部署")
+		}
+	}
+	if len(frontends) == 0 {
 		return nil
 	}
 	if manager == nil {
@@ -128,4 +133,41 @@ func (c *Client) finishTrafficPolicyTransition() {
 
 func proxyIngressRevocationReason() string {
 	return "托管入口授权已撤销，实例已停止；重新获授权后请重新部署"
+}
+
+// A partial withdrawal removes only the affected routes. When the final route
+// is withdrawn, retain the established instance stop/settlement semantics.
+func (e *Executor) reconcileSharedProxyIngresses(ctx context.Context, engine core.Engine, shareID string, grants []core.ProxyIngress) (bool, error) {
+	manager := e.serviceManager()
+	spec, err := sharedInstanceSpec(engine, DefaultSpecsForServiceManager(manager.Kind())[engine], shareID, manager.Kind())
+	if err != nil {
+		return false, err
+	}
+	tlsFrontendMutex.Lock()
+	m := &tlsFrontendManager{root: tlsFrontendRoot, state: tlsFrontendState, services: manager}
+	deployments, err := m.load()
+	tlsFrontendMutex.Unlock()
+	if err != nil {
+		return false, err
+	}
+	d := deployments[spec.Service]
+	if d.Stopped {
+		return false, nil
+	}
+	retained := []core.TLSFrontend{}
+	for _, f := range d.Frontends {
+		if core.ProxyIngressAuthorized(grants, f) {
+			retained = append(retained, f)
+		}
+	}
+	if len(retained) == len(d.Frontends) && len(d.RetiredFrontends) == 0 {
+		return false, nil
+	}
+	if len(retained) == 0 && len(d.Frontends) > 0 {
+		return true, nil
+	}
+	// Use the established privileged helper: long-running Agents can have a
+	// read-only /etc mount. Wait for persistent cleanup before acknowledging.
+	request := tlsFrontendRequest{Service: spec.Service, Kind: manager.Kind(), Action: core.ActionDeploy, Frontends: retained, Deadline: tlsOperationDeadline(ctx)}
+	return false, e.runTLSFrontendRequest(ctx, request)
 }

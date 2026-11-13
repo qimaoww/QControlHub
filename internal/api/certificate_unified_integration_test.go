@@ -68,12 +68,14 @@ func TestCaddyImportVerifiedSourceIsolationVersionsAndTombstone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	features := append(node.Features, core.AgentFeatureManagedTLS, core.AgentFeatureCertificates, core.AgentFeatureCaddyCertificates, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare)
+	features := append(node.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureCertificates, core.AgentFeatureCaddyCertificates, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare)
 	if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: features}); err != nil {
 		t.Fatal(err)
 	}
 	grantConfigScopeAPIAgent(t, ctx, db, node, alice, 21001, 8443)
 	grantConfigScopeAPIAgent(t, ctx, db, node, bob, 21002, 8444)
+	setAPIProxyIngresses(t, owner, alice, node.ID, []core.ProxyIngress{{Mode: "caddy"}})
+	setAPIProxyIngresses(t, owner, bob, node.ID, []core.ProxyIngress{{Mode: "caddy"}})
 	deploy := func(client configScopeAPIClient, domain string, port, public int) {
 		t.Helper()
 		base := "/agents/" + node.ID + "/configs/sing-box"

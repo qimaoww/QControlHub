@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 
@@ -80,7 +81,7 @@ func sharedQuotaID(quota *core.SharedTrafficQuota) string {
 
 func sameSharedQuota(left, right *core.SharedTrafficQuota) bool {
 	return left == nil && right == nil || left != nil && right != nil &&
-		left.ProxyIngressRevision == right.ProxyIngressRevision && slices.Equal(left.ProxyIngresses, right.ProxyIngresses) && left.ID == right.ID && left.LimitBytes == right.LimitBytes && left.UsedBytes == right.UsedBytes &&
+		left.ProxyIngressRevision == right.ProxyIngressRevision && reflect.DeepEqual(left.ProxyIngresses, right.ProxyIngresses) && left.ID == right.ID && left.LimitBytes == right.LimitBytes && left.UsedBytes == right.UsedBytes &&
 		left.PortUsedBytes == right.PortUsedBytes && left.CounterEpoch == right.CounterEpoch &&
 		left.LifetimeReceivedBytes == right.LifetimeReceivedBytes && left.LifetimeSentBytes == right.LifetimeSentBytes && left.Revoked == right.Revoked && slices.Equal(left.Engines, right.Engines)
 }
