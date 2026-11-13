@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -89,6 +90,20 @@ func TestProxyIngressRevocationWaitsForLifecycleAndRetriesCleanup(t *testing.T) 
 	old[0].SharedIngressGeneration = 4
 	if err := manager.authorizeProxyIngresses(revokedShare, old); err != nil {
 		t.Fatal(err)
+	}
+	for _, p := range policies {
+		if p.SharedQuota.ID == revokedShare {
+			p.SharedQuota.ProxyIngressRevision = 2
+			p.SharedQuota.ProxyIngresses = []core.ProxyIngress{grant}
+		}
+	}
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err == nil {
+		t.Fatal("delayed policy replaced renewed authority")
+	}
+	restarted := NewTrafficManager(filepath.Join(filepath.Dir(manager.statePath), "agent.json"))
+	restarted.now = manager.now
+	if err := restarted.SetPolicies(ctx, policies, "agt_shared"); err == nil {
+		t.Fatal("restart lost authorization policy ordering")
 	}
 }
 
