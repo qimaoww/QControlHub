@@ -36,6 +36,9 @@ func TestSharedXHTTPRecipientLifecycleAndExports(t *testing.T) {
 			for _, key := range []string{serverconfig.ProtocolXHTTPTLS, serverconfig.ProtocolXHTTPTLSReality, serverconfig.ProtocolXHTTPRealityTLS, serverconfig.ProtocolXHTTPFive} {
 				var plan serverconfig.Input
 				recipient.call("POST", base+"/plans", map[string]string{"protocol": key}, http.StatusCreated, &plan)
+				if key == serverconfig.ProtocolXHTTPTLS && (plan.TLSMode != "native" || plan.TLSPublicPort != 0) {
+					t.Fatal("ungranted shared TLS plan required a proxy", plan.TLSMode, plan.TLSPublicPort)
+				}
 				plan.Port, plan.ClientPort = 24443, 24443
 				plan.ClientAddress = "upload.example.test"
 				plan.TLSMode = "native"

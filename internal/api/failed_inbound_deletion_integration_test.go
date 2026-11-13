@@ -17,15 +17,16 @@ func TestFailedSingBoxInboundDeletion(t *testing.T) {
 				name = "shared/" + intent
 			}
 			t.Run(name, func(t *testing.T) {
-				db, ctx, _, owner, cdn := newConfigScopeAPIFixture(t)
+				db, ctx, admin, owner, cdn := newConfigScopeAPIFixture(t)
 				agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "failed-inbound-delete", core.EngineSingBox)
-				agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances)
+				agent.Features = append(agent.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureSharedCoreInstances)
 				if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 					t.Fatal(err)
 				}
 				client := owner
 				if shared {
 					grantConfigScopeAPIAgent(t, ctx, db, agent, cdn, 443, 21001)
+					setAPIProxyIngresses(t, admin, cdn, agent.ID, []core.ProxyIngress{{Mode: "caddy"}})
 					client = cdn
 				}
 				base := "/agents/" + agent.ID + "/configs/sing-box"

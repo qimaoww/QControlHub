@@ -108,7 +108,7 @@ func (s *Server) sharedXHTTPGroupPlan(ctx context.Context, owner, agentID string
 }
 
 // Default only from the chosen provider's real configuration, otherwise HTTPS
-// uses 443. Backend allocations and former grant ports are never suggestions.
+// uses 443. Without a provider grant, retain ordinary native TLS planning.
 func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID string, engine core.Engine, plan *serverconfig.Input) (int, error) {
 	access, err := s.store.UserAgentAccess(ctx, owner)
 	if err != nil {
@@ -159,5 +159,6 @@ func (s *Server) sharedManagedTLSPublicPort(ctx context.Context, owner, agentID 
 		}
 		return 443, nil
 	}
-	return 0, fmt.Errorf("%w: 未获授权使用 Nginx/Caddy，请联系节点所有者", store.ErrInvalid)
+	plan.TLSMode, plan.Listen, plan.TLSPublicPort = "native", "0.0.0.0", 0
+	return 0, nil
 }

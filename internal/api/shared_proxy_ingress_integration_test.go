@@ -78,6 +78,11 @@ func TestSharedProxyIngressAuthorizationAndRevocationAPI(t *testing.T) {
 			guest := plan
 			guest.Tag, guest.Port, guest.TLSServerName, guest.TransportPath = "guest", 21001, "alice.example.test", "/alice"
 			mutate(alice, guest, 0, http.StatusConflict)
+			var ungranted serverconfig.Input
+			alice.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &ungranted)
+			if ungranted.TLSMode != "native" || ungranted.TLSPublicPort != 0 || ungranted.Port != 21001 {
+				t.Fatal("ungranted user lost ordinary native TLS planning", ungranted.TLSMode, ungranted.TLSPublicPort, ungranted.Port)
+			}
 			alice.call("PUT", "/users/"+alice.userID+"/agent-access", map[string]any{"revision": 1, "isolated": true, "shares": []any{}}, http.StatusForbidden, nil)
 			alice.call("PUT", "/agents/"+agent.ID+"/sharing", map[string]any{"revision": 1, "shares": []any{}}, http.StatusForbidden, nil)
 			grants := []core.ProxyIngress{{Mode: mode, Scope: core.ProxyIngressTypeScope, Generation: 999999, Legacy: []core.ProxyIngressLease{{Port: 9443, Generation: 999999}}}}
