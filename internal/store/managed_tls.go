@@ -72,17 +72,13 @@ func (s *Store) prepareTLSFrontendPortsTx(ctx context.Context, tx pgx.Tx, task *
 		if err != nil {
 			return err
 		}
+		if !f.LocalOnly && task.SharedTrafficID != "" && !allowed {
+			return &PortConflictError{Port: f.PublicPort, Field: "tls_public_port", Reason: "ingress_unauthorized", Cause: fmt.Errorf("%w: 未获授权使用 %s 反代", ErrConflict, f.Mode)}
+		}
 		if f.SharedIngressGeneration > 0 && (!allowed || generation != f.SharedIngressGeneration) {
 			return &PortConflictError{Port: f.PublicPort, Field: "tls_public_port", Reason: "ingress_unauthorized", Cause: fmt.Errorf("%w: 托管入口授权已撤销或变更，请重新部署", ErrConflict)}
 		}
 		if generation > 0 && allowed {
-			var supported bool
-			if err := tx.QueryRow(ctx, `SELECT features ? $2 FROM agents WHERE id=$1`, task.AgentID, core.AgentFeatureSharedProxyIngress).Scan(&supported); err != nil {
-				return err
-			}
-			if !supported {
-				return fmt.Errorf("%w: 请先升级 Agent（%s）再共用入口", ErrConflict, core.AgentFeatureSharedProxyIngress)
-			}
 			f.SharedIngressGeneration = generation
 			granted[f.PublicPort] = true
 		}

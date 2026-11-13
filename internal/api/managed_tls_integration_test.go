@@ -167,35 +167,45 @@ func TestManagedTLSPlanSaveAndEditedRetryAPI(t *testing.T) {
 }
 
 func TestManagedTLSSharedDomainOnlyPortsAPI(t *testing.T) {
-	db, ctx, _, owner, recipient := newConfigScopeAPIFixture(t)
-	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-domain-only", core.EngineSingBox)
-	agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
-		t.Fatal(err)
-	}
-	grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 443, 23456, 23457)
-	base := "/agents/" + agent.ID + "/configs/sing-box"
-	var plan serverconfig.Input
-	for index, wantPort := range []int{23456, 23457} {
-		recipient.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plan)
-		if plan.Port != wantPort || plan.TLSPublicPort != 443 {
-			t.Fatalf("plan ignored the caller's free allocated ports: %+v", plan)
-		}
-		plan.TLSServerName = "shared.example.test"
-		var saved configMutationResult
-		recipient.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": index, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
-		claimed, err := db.ClaimTask(ctx, agent.ID)
-		if err != nil || claimed == nil || !claimed.SharedInstance || len(claimed.TLSFrontends) != index+1 {
-			t.Fatalf("incorrect shared deployment: %+v %v", claimed, err)
-		}
-		if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	recipient.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusBadRequest, nil)
-	var regenerated serverconfig.Input
-	recipient.call("POST", base+"/plans", map[string]any{"protocol": "vless-ws-tls", "input": plan}, http.StatusCreated, &regenerated)
-	if regenerated.Port != plan.Port || regenerated.Credential == plan.Credential || regenerated.TLSServerName != plan.TLSServerName {
-		t.Fatal("full allocation prevented existing credentials from regenerating")
+	for _, mode := range []string{"nginx", "caddy"} {
+		t.Run(mode, func(t *testing.T) {
+			db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "shared-domain-only", core.EngineSingBox)
+			agent.Features = append(agent.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances, core.AgentFeatureManagedTLSCertificates)
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 23456, 23457)
+			setAPIProxyIngresses(t, admin, recipient, agent.ID, []core.ProxyIngress{{Mode: mode}})
+			base := "/agents/" + agent.ID + "/configs/sing-box"
+			var plan serverconfig.Input
+			for index, wantPort := range []int{23456, 23457} {
+				recipient.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusCreated, &plan)
+				expectedPublic := 443
+				if index > 0 {
+					expectedPublic = 8443
+				}
+				if plan.Port != wantPort || plan.TLSPublicPort != expectedPublic || plan.TLSMode != mode {
+					t.Fatalf("plan ignored the caller's free allocated ports: %+v", plan)
+				}
+				plan.TLSServerName = "shared.example.test"
+				plan.TLSPublicPort = 8443
+				var saved configMutationResult
+				recipient.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": index, "intent": "deploy", "input": plan}, http.StatusOK, &saved)
+				claimed, err := db.ClaimTask(ctx, agent.ID)
+				if err != nil || claimed == nil || !claimed.SharedInstance || len(claimed.TLSFrontends) != index+1 {
+					t.Fatalf("incorrect shared deployment: %+v %v", claimed, err)
+				}
+				if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			recipient.call("POST", base+"/plans", map[string]string{"protocol": "vless-ws-tls"}, http.StatusBadRequest, nil)
+			var regenerated serverconfig.Input
+			recipient.call("POST", base+"/plans", map[string]any{"protocol": "vless-ws-tls", "input": plan}, http.StatusCreated, &regenerated)
+			if regenerated.Port != plan.Port || regenerated.Credential == plan.Credential || regenerated.TLSServerName != plan.TLSServerName {
+				t.Fatal("full allocation prevented existing credentials from regenerating")
+			}
+		})
 	}
 }

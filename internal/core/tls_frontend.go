@@ -11,7 +11,8 @@ import (
 	"time"
 )
 
-const AgentFeatureSharedProxyIngress = "shared-proxy-ingress-v1"
+const AgentFeatureSharedProxyIngressLegacy = "shared-proxy-ingress-v1"
+const AgentFeatureSharedProxyIngress = "shared-proxy-ingress-v2"
 
 const AgentFeatureManagedTLS = "managed-tls-v1"
 const AgentFeatureXHTTPTLS = "managed-xhttp-tls-v1"

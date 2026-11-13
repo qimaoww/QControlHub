@@ -119,6 +119,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeatureManagedTLS,
 		core.AgentFeatureSharedProxyIngress,
+		core.AgentFeatureSharedProxyIngressLegacy,
 		core.AgentFeatureManagedTLSCertificates,
 		core.AgentFeatureCertificates,
 		core.AgentFeatureCaddyCertificates,

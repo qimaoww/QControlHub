@@ -165,6 +165,10 @@ func (e *Executor) executeTLSFrontendOperation(ctx context.Context, spec EngineS
 	if stage && !certificates || handoff != "" {
 		request.ConfigContent = task.ConfigContent
 	}
+	return e.runTLSFrontendRequest(ctx, request, reports...)
+}
+
+func (e *Executor) runTLSFrontendRequest(ctx context.Context, request tlsFrontendRequest, reports ...*strings.Builder) error {
 	name, err := writeTLSFrontendRequest(request)
 	if err != nil {
 		return err

@@ -100,6 +100,21 @@ func TestManagedTLSProxyLiveMatrix(t *testing.T) {
 						outbound, _ = json.Marshal(out)
 					}
 					f.Mode, f.AutomaticCertificate = mode, false // isolated certificate fixture; automatic issuance has its own sandbox test
+					f.SharedIngressGeneration = 9
+					grant := core.ProxyIngress{Mode: mode, Scope: core.ProxyIngressTypeScope, Generation: 9}
+					policy := core.PortTrafficPolicy{SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000001", ProxyIngresses: []core.ProxyIngress{grant}}}
+					manager := &TrafficManager{records: map[string]*trafficRecord{"backend": {Policy: policy}}}
+					if err := manager.authorizeProxyIngresses(policy.SharedQuota.ID, []core.TLSFrontend{f}); err != nil {
+						t.Fatal("type grant rejected real listener", err)
+					}
+					wrong := f
+					wrong.Mode = "caddy"
+					if mode == "caddy" {
+						wrong.Mode = "nginx"
+					}
+					if manager.authorizeProxyIngresses(policy.SharedQuota.ID, []core.TLSFrontend{wrong}) == nil {
+						t.Fatal("type grant allowed another provider")
+					}
 					cert := filepath.Join(dir, frontendKey(f)+".crt")
 					key := filepath.Join(dir, frontendKey(f)+".key")
 					_ = os.WriteFile(cert, []byte(f.Certificate), 0600)

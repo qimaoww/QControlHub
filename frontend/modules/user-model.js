@@ -101,7 +101,7 @@ export function mergeUserAllocation(shares, allocation) {
     agent_id: share.agent_id, enabled: share.enabled,
     engines: [...(share.engines || [])], ports: [...(share.ports || [])],
     limit_bytes: share.limit_bytes || 0,
-    ...(share.proxy_ingresses ? { proxy_ingresses: share.proxy_ingresses.map(({mode,port}) => ({mode,port})) } : {}),
+    ...(share.proxy_ingresses ? { proxy_ingresses: [...new Set(share.proxy_ingresses.map(({mode}) => mode))].map(mode => ({mode,scope:'type'})) } : {}),
   }));
   const index = rows.findIndex(row => row.agent_id === allocation.agent_id);
   if (index < 0) rows.push(allocation);

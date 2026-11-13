@@ -11,6 +11,8 @@ import (
 // exclusively from registrations and the capability registry.
 func (g *generator) annotateField(name string, field object) {
 	switch name {
+	case "proxy_ingresses":
+		field["description"] = "按 Nginx/Caddy 类型共享反代，每种类型一项，使用 scope=type 且不填写 port。省略/null 保留，空数组撤销；旧 mode+port 请求按类型归并。代次及升级兼容凭据由服务端生成，客户端值不授予执行权限。新增授权要求 shared-proxy-ingress-v2 Agent。"
 	case "page_size":
 		field["enum"] = []int{30, 50, 100, 200}
 		field["default"] = 30
@@ -41,6 +43,20 @@ func (g *generator) annotateField(name string, field object) {
 		field["default"] = false
 		field["description"] = "仅配置专用任务入口允许；须指定当前配置和目标实例，并满足安装权限。"
 	}
+}
+
+func (g *generator) annotateModel(name string, schema object) {
+	if name != "core.ProxyIngress" {
+		return
+	}
+	fields := schema["properties"].(object)
+	fields["mode"] = object{"type": "string", "enum": []string{"nginx", "caddy"}, "description": "共享的反代类型；同一共享关系每种类型至多一项。"}
+	fields["scope"] = object{"type": "string", "enum": []string{"type"}, "description": "类型授权，不分配监听端口；mode-only 请求也按此语义保存。"}
+	fields["port"] = object{"type": "integer", "minimum": 1, "maximum": 65535, "description": "仅兼容旧请求或旧 Agent 策略；新共享响应省略。scope=type 时不得填写，不接受 0 或保留端口。"}
+	fields["generation"].(object)["readOnly"] = true
+	fields["legacy"].(object)["readOnly"] = true
+	fields["legacy"].(object)["description"] = "服务端生成的精确旧租约，仅发送给 Agent；共享详情不返回，客户端提交不生效。"
+	schema["required"] = []string{"mode"}
 }
 func (g *generator) resolve(s object) object {
 	if ref, ok := s["$ref"].(string); ok {

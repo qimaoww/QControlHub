@@ -57,7 +57,7 @@ func TestSharedProxyIngressAuthorizationAndRevocationAPI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan.TLSMode, plan.TLSPublicPort, plan.Port, plan.TLSServerName, plan.TransportPath = mode, 443, 22001, "owner.example.test", "/owner"
+			plan.TLSMode, plan.TLSPublicPort, plan.Port, plan.TLSServerName, plan.TransportPath = mode, 8443, 22001, "owner.example.test", "/owner"
 			mutate := func(client configScopeAPIClient, p serverconfig.Input, version int, status int) configMutationResult {
 				t.Helper()
 				operation := "add"
@@ -80,9 +80,9 @@ func TestSharedProxyIngressAuthorizationAndRevocationAPI(t *testing.T) {
 			mutate(alice, guest, 0, http.StatusConflict)
 			alice.call("PUT", "/users/"+alice.userID+"/agent-access", map[string]any{"revision": 1, "isolated": true, "shares": []any{}}, http.StatusForbidden, nil)
 			alice.call("PUT", "/agents/"+agent.ID+"/sharing", map[string]any{"revision": 1, "shares": []any{}}, http.StatusForbidden, nil)
-			grants := []core.ProxyIngress{{Mode: mode, Port: 443, Generation: 999999}}
+			grants := []core.ProxyIngress{{Mode: mode, Scope: core.ProxyIngressTypeScope, Generation: 999999, Legacy: []core.ProxyIngressLease{{Port: 9443, Generation: 999999}}}}
 			share := setAPIProxyIngresses(t, admin, alice, agent.ID, grants)
-			if len(share.ProxyIngresses) != 1 || share.ProxyIngresses[0].Generation == 999999 {
+			if len(share.ProxyIngresses) != 1 || share.ProxyIngresses[0].Generation == 999999 || share.ProxyIngresses[0].Port != 0 || share.ProxyIngresses[0].Scope != core.ProxyIngressTypeScope || len(share.ProxyIngresses[0].Legacy) != 0 {
 				t.Fatal("trusted client generation")
 			}
 			first := mutate(alice, guest, 0, http.StatusOK)
@@ -101,13 +101,13 @@ func TestSharedProxyIngressAuthorizationAndRevocationAPI(t *testing.T) {
 			second.Tag, second.Port, second.TLSServerName, second.TransportPath = "bob", 21002, "bob.example.test", "/bob"
 			other := mutate(bob, second, 0, http.StatusOK)
 			completeConfigScopeAPITask(t, ctx, db, other.Task)
-			// Public entry authorization must not reserve or bill port 443.
+			// Public entry authorization must not reserve or bill the actual listener.
 			policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, p := range policies {
-				if p.Port == 443 {
+				if p.Port == plan.TLSPublicPort {
 					t.Fatal("public entry was metered")
 				}
 			}
@@ -130,6 +130,7 @@ func TestSharedProxyIngressAuthorizationAndRevocationAPI(t *testing.T) {
 			} else {
 				mixed.TLSMode = "nginx"
 			}
+			mixed.TLSPublicPort = 9443 // A free listener still requires the matching provider grant.
 			mutate(alice, mixed, first.Config.Version, http.StatusConflict)
 			// An allocation still cannot claim another user's loopback backend.
 			badBackend := guest

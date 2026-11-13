@@ -8,6 +8,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 COPY qagent tls.test /usr/local/lib/qagent/
 COPY cores/bin/ /usr/local/lib/qagent/cores/
 COPY xhttp.crt xhttp.key /etc/qcontrolhub/tls/
+COPY xhttp.crt /etc/qcontrolhub/panel-certificates/crt_0000000000000001/cert.pem
+COPY xhttp.key /etc/qcontrolhub/panel-certificates/crt_0000000000000001/key.pem
+RUN chown -R root:qcontrolhub-core /etc/qcontrolhub/panel-certificates && chmod -R g+rX,o-rwx /etc/qcontrolhub/panel-certificates
 RUN chown -R root:qcontrolhub-core /etc/qcontrolhub/tls && chmod 0750 /etc/qcontrolhub/tls && chmod 0640 /etc/qcontrolhub/tls/*
 COPY qagent.service /etc/systemd/system/qagent.service
 STOPSIGNAL SIGRTMIN+3

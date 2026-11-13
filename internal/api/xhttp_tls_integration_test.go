@@ -20,13 +20,14 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/shared=%t/panel=%t", engine, shared, panelCertificate), func(t *testing.T) {
 					db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
 					agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "xhttp-tls-modes", engine)
-					agent.Features = append(agent.Features, core.AgentFeatureManagedTLS, core.AgentFeatureManagedTLSCertificates, core.AgentFeatureCertificates, core.AgentFeatureXHTTP, core.AgentFeatureXHTTPTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances)
+					agent.Features = append(agent.Features, core.AgentFeatureSharedProxyIngress, core.AgentFeatureManagedTLS, core.AgentFeatureManagedTLSCertificates, core.AgentFeatureCertificates, core.AgentFeatureXHTTP, core.AgentFeatureXHTTPTLS, core.AgentFeatureNginxACME, core.AgentFeatureSharedCoreInstances)
 					if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
 						t.Fatal(err)
 					}
 					actor := owner
 					if shared {
-						grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 24443, 35001)
+						grantConfigScopeAPIAgent(t, ctx, db, agent, recipient, 35001)
+						setAPIProxyIngresses(t, admin, recipient, agent.ID, []core.ProxyIngress{{Mode: "nginx"}, {Mode: "caddy"}})
 						actor = recipient
 					}
 					base := "/agents/" + agent.ID + "/configs/" + string(engine)
@@ -35,8 +36,8 @@ func TestXHTTPTLSModesOwnershipAndSnapshotsAPI(t *testing.T) {
 					if plan.TLSMode != "caddy" || plan.TLSServerName != "" || plan.CertificatePath != "" || plan.Transport != "xhttp" {
 						t.Fatal("dishonest or wrong defaults")
 					}
-					if shared && (plan.TLSPublicPort != 24443 || plan.Port != 35001) {
-						t.Fatal("shared defaults ignored allocation", plan.Port, plan.TLSPublicPort)
+					if shared && (plan.TLSPublicPort != 443 || plan.Port != 35001) {
+						t.Fatal("shared defaults ignored type grant and backend allocation", plan.Port, plan.TLSPublicPort)
 					}
 					plan.TLSServerName = "proxy.example.test"
 					var certificate core.Certificate

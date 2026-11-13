@@ -255,6 +255,12 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 				return err
 			}
 		}
+		if !d.pending {
+			frontends, err = synchronizedProxyFrontendsTx(ctx, tx, agentID, d.id, d.version, frontends, d.appliedIngresses)
+			if err != nil {
+				return err
+			}
+		}
 		conflict := func(port int) error {
 			if d.pending {
 				return portConflict(port, fmt.Errorf("%w: 端口 %d 有部署任务处理中，请等待任务结束后重试", ErrConflict, port))
@@ -290,7 +296,9 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 										return e
 									}
 									authorized = allowed && otherAllowed && (generation > 0 || otherGeneration > 0)
-									if authorized && otherGeneration > 0 && f.SharedIngressGeneration != otherGeneration && !slices.Contains(d.appliedIngresses, core.ProxyIngress{Mode: f.Mode, Port: f.PublicPort, Generation: otherGeneration}) {
+									if authorized && otherGeneration > 0 && f.SharedIngressGeneration != otherGeneration && !slices.ContainsFunc(d.appliedIngresses, func(g core.ProxyIngress) bool {
+										return g.Mode == f.Mode && g.Port == f.PublicPort && g.Generation == otherGeneration
+									}) {
 										return &PortConflictError{Port: port, Field: taskPortConflictField(candidate, port), Reason: "state_unverified", Cause: fmt.Errorf("%w: 入口已有部署需同步授权，请联系节点所有者核对部署状态", ErrConflict)}
 									}
 								}

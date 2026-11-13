@@ -594,6 +594,7 @@ func (g *generator) named(name string) object {
 	}
 	g.schemas[key] = object{}
 	g.schemas[key] = g.schema(m.expr, m.pkg)
+	g.annotateModel(name, g.schemas[key].(object))
 	if s, ok := g.schemas[key].(object); ok && s["type"] == "string" {
 		enums := []string{}
 		prefix := strings.Split(name, ".")[0] + "."
