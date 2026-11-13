@@ -36,7 +36,7 @@ func TestProxyIngressTypeAndLegacyLeases(t *testing.T) {
 	if !legacy.Valid() || legacy.Authorizes(TLSFrontend{Mode: "nginx", PublicPort: 8443, SharedIngressGeneration: 2}) {
 		t.Fatal("legacy grant widened")
 	}
-	for _, raw := range []string{`{"mode":"nginx","port":0}`, `{"mode":"nginx","port":10085}`} {
+	for _, raw := range []string{`{"mode":"nginx","port":0}`, `{"mode":"nginx","port":10085}`, `{"mode":"nginx","scope":"type","owner_id":"other"}`} {
 		var parsed ProxyIngress
 		if json.Unmarshal([]byte(raw), &parsed) == nil {
 			t.Fatal("invalid legacy port accepted", raw)

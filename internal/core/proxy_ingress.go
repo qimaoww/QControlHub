@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -32,7 +33,9 @@ func (g *ProxyIngress) UnmarshalJSON(data []byte) error {
 	}
 	next := wire{}
 	value.wire = &next
-	if err := json.Unmarshal(data, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
 		return err
 	}
 	if value.Port != nil {
