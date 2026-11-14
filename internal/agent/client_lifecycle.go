@@ -478,6 +478,14 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			if !ok {
 				return
 			}
+			if compactEnabled.Load() {
+				switch message.Type {
+				case core.WireHeartbeat:
+					telemetryBaseline.RecordHeartbeat(message)
+				case core.WireMetrics:
+					message = telemetryBaseline.CompactMetrics(message)
+				}
+			}
 			writeContext, writeCancel := context.WithTimeout(sessionContext, 15*time.Second)
 			err := wsjson.Write(writeContext, connection, message)
 			writeCancel()
@@ -559,7 +567,6 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				if sessionContext.Err() != nil {
 					return
 				}
-				telemetryBaseline.RecordHeartbeat(heartbeatMsg)
 				outbox.EnqueueHeartbeat(heartbeatMsg)
 			}
 		}
@@ -580,11 +587,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			case <-sessionContext.Done():
 				return
 			case <-metricsTrigger:
-				var compact *compactTelemetryState
-				if compactEnabled.Load() {
-					compact = telemetryBaseline
-				}
-				if msg, ok := c.buildMetricsMessage(sessionContext, true, compact); ok {
+				if msg, ok := c.buildMetricsMessage(sessionContext, true, nil); ok {
 					outbox.EnqueueMetric(msg)
 				}
 			}
@@ -670,6 +673,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				if err := c.receiveTrafficPolicies(sessionContext, message.TrafficPolicies); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
 				}
+				continue
+			case core.WireTelemetryResync:
+				telemetryBaseline.Invalidate()
 				continue
 			case core.WirePublicIPProbe:
 				if message.PublicIPProbe == nil {

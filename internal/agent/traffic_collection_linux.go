@@ -89,6 +89,13 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			desired[id] = &next
 			continue
 		}
+		if !tableExists && record.CounterEpoch != "" &&
+			(len(record.KernelCounters) > 0 || record.LastKernelReceived > 0 || record.LastKernelSent > 0) {
+			if err := rotateLostTrafficEpoch(record); err != nil {
+				return manager.setUnavailableLocked(err)
+			}
+			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
+		}
 		hasSource := manager.nativeSource != nil && !shared || shared && manager.sharedSource != nil
 		nativeAllowed := hasSource && nativeAccountingScopeAllowed(record.Policy, snapshot)
 		// A transient source failure must freeze an established native baseline,

@@ -171,6 +171,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSystemBBR,
 		core.AgentFeatureIPQuality,
 		core.AgentFeatureInstanceStatus,
+		core.AgentFeatureCompactTelemetry,
 	}
 	if hostPortObservationSupported() {
 		features = append(features, core.AgentFeatureHostPorts)

@@ -50,6 +50,7 @@ const (
 	WireAgentTimeZoneResult       = "agent_time_zone_result"
 	WireHeartbeat                 = "heartbeat"
 	WireMetrics                   = "metrics"
+	WireTelemetryResync           = "telemetry_resync"
 	WireTask                      = "task"
 	WireResult                    = "result"
 	WireResultAck                 = "result_ack"
@@ -83,6 +84,7 @@ type WireMessage struct {
 	// preserves omitted static host snapshots (network_interfaces, bbr,
 	// clock_sync) across incremental WireMetrics frames.
 	CompactTelemetry    bool                  `json:"compact_telemetry,omitempty"`
+	TelemetryFullSync   bool                  `json:"telemetry_full_sync,omitempty"`
 	PublicIPProbe       *PublicIPProbeConfig  `json:"public_ip_probe,omitempty"`
 	AgentPolicy         *AgentPolicy          `json:"agent_policy,omitempty"`
 	AgentTimeZone       *AgentTimeZoneCommand `json:"agent_time_zone,omitempty"`

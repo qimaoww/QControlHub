@@ -48,6 +48,7 @@ type trafficRecord struct {
 	LifetimeReceivedBytes uint64                  `json:"lifetime_received_bytes,omitempty"`
 	LifetimeSentBytes     uint64                  `json:"lifetime_sent_bytes,omitempty"`
 	QuotaBaselineBytes    uint64                  `json:"quota_baseline_bytes,omitempty"`
+	NeedsServerQuotaSync  bool                    `json:"needs_server_quota_sync,omitempty"`
 	KernelCounters        map[string]uint64       `json:"kernel_counters,omitempty"`
 }
 
@@ -87,6 +88,24 @@ func NewTrafficManager(agentStatePath string) *TrafficManager {
 	return NewTrafficManagerForServiceManager(agentStatePath, defaultSystemdServiceManager())
 }
 
+var trafficBootIDReader = readKernelBootID
+
+func rotateLostTrafficEpoch(record *trafficRecord) error {
+	epoch, err := randomSuffix(16)
+	if err != nil {
+		return err
+	}
+	record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
+	record.CounterEpoch = epoch
+	record.ReceivedBytes, record.SentBytes = 0, 0
+	record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0
+	record.LastKernelReceived, record.LastKernelSent = 0, 0
+	record.KernelCounters = make(map[string]uint64)
+	record.Accounting = nil
+	record.NeedsServerQuotaSync = true
+	return nil
+}
+
 func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *ServiceManager) *TrafficManager {
 	manager := &TrafficManager{
 		statePath:       filepath.Join(filepath.Dir(agentStatePath), "traffic-state.json"),
@@ -97,7 +116,7 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 		metricsInterval: trafficCollectionEvery,
 		wakeCh:          make(chan struct{}, 1),
 	}
-	if bootID, err := readKernelBootID(); err == nil {
+	if bootID, err := trafficBootIDReader(); err == nil {
 		manager.bootID = bootID
 	}
 	state, err := loadTrafficState(manager.statePath)
@@ -107,10 +126,14 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 			validState = true
 			manager.records = state.Records
 			if state.BootID != "" && state.BootID != manager.bootID {
-				for _, record := range manager.records {
-					record.LastKernelReceived, record.LastKernelSent = 0, 0
-					record.KernelCounters = nil
+				for _, id := range sortedTrafficRecordIDs(manager.records) {
+					if err := rotateLostTrafficEpoch(manager.records[id]); err != nil {
+						slog.Warn("rotate port traffic epoch after boot change", "policy_id", id, "error", err)
+					}
 				}
+				manager.dirty = true
+				manager.urgentDirty = true
+				manager.rulesDirty = true
 			}
 		} else {
 			slog.Warn("ignore invalid port traffic state", "error", err)
@@ -360,7 +383,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 	unchanged := len(policies) == len(manager.records)
 	for _, policy := range policies {
 		record := manager.records[policy.ID]
-		if record == nil || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
+		if record == nil || record.NeedsServerQuotaSync || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
 			record.Policy.Name != policy.Name || record.Policy.Engine != policy.Engine ||
 			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock ||
 			!sameSharedQuota(record.Policy.SharedQuota, policy.SharedQuota) {
@@ -394,6 +417,21 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			copy := *record
 			record = &copy
 		}
+		needsQuotaSync := record.NeedsServerQuotaSync
+		sameServerPeriod := false
+		if needsQuotaSync {
+			start, end, periodErr := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
+			if periodErr == nil && policy.PeriodStart != nil && policy.PeriodEnd != nil &&
+				policy.PeriodStart.Equal(start) && policy.PeriodEnd.Equal(end) {
+				sameServerPeriod = true
+				serverUsed := saturatedTrafficAdd(policy.ReceivedBytes, policy.SentBytes)
+				if serverUsed > record.QuotaBaselineBytes {
+					record.QuotaBaselineBytes = serverUsed
+				}
+				record.PeriodStart, record.PeriodEnd = start, end
+			}
+			record.NeedsServerQuotaSync = false
+		}
 		if policy.SharedQuota != nil {
 			record.ShareUsedBytes = max(sharedUsed, policy.SharedQuota.PortUsedBytes)
 			quota := policy.SharedQuota
@@ -406,6 +444,8 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 					pendingTX = record.LifetimeSentBytes - quota.LifetimeSentBytes
 				}
 				record.ShareUsedBytes = saturatedTrafficAdd(quota.PortUsedBytes, saturatedTrafficAdd(pendingRX, pendingTX))
+			} else if needsQuotaSync && sameServerPeriod {
+				record.ShareUsedBytes = max(sharedUsed, saturatedTrafficAdd(quota.PortUsedBytes, trafficUsed(record)))
 			}
 		} else {
 			record.ShareUsedBytes = 0

@@ -111,6 +111,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	allInboundBucket := newWSRateBucket(wsInboundGlobalRatePerSec, wsInboundGlobalBurst, nowInit)
 	telemetryBucket := newWSRateBucket(wsInboundTelemetryRatePerSec, wsInboundTelemetryBurst, nowInit)
 	var droppedTelemetry int
+	var compactTelemetryCapable bool
+	var telemetryResyncNeeded bool
 	var inFlightTask string
 	var inFlightAction core.Action
 	// Dispatch is deferred until this connection has supplied a heartbeat that
@@ -366,9 +368,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 						_ = connection.Close(websocket.StatusPolicyViolation, "telemetry frame rate limit exceeded")
 						return
 					}
+					if compactTelemetryCapable && !telemetryResyncNeeded {
+						telemetryResyncNeeded = true
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTelemetryResync}); err != nil {
+							return
+						}
+					}
 					continue
 				}
 				droppedTelemetry = 0
+				telemetryResyncNeeded = false
+				compactTelemetryCapable = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCompactTelemetry)
 				networkDiagnostics = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureNetworkDiagnostics)
 				if err := s.store.UpdateDiagnosticCapabilities(ctx, id, message.Heartbeat.Diagnostics); err != nil {
 					return
@@ -393,6 +403,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if err := s.store.HeartbeatWithPublicIPProbeTrust(ctx, id, *message.Heartbeat, trust); err != nil {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
 					return
+				}
+				if len(message.Heartbeat.TrafficUsage) > 0 {
+					lastTrafficUsage = clonePortTrafficUsageSlice(message.Heartbeat.TrafficUsage)
 				}
 				if message.Heartbeat.Metrics != nil {
 					lastStoredMetrics = mergeCompactHostMetrics(lastStoredMetrics, *message.Heartbeat.Metrics)
@@ -481,13 +494,23 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 						_ = connection.Close(websocket.StatusPolicyViolation, "telemetry frame rate limit exceeded")
 						return
 					}
+					if compactTelemetryCapable && (!telemetryResyncNeeded || message.TelemetryFullSync) {
+						telemetryResyncNeeded = true
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTelemetryResync}); err != nil {
+							return
+						}
+					}
 					continue
 				}
 				droppedTelemetry = 0
+				if message.TelemetryFullSync {
+					telemetryResyncNeeded = false
+				}
 				message.Metrics.ObservedPublicIP = observedPublicIP
 				trust := publicIPProbeTrust()
 				keepaliveMax := min(wsMaxUnchangedMetricsKeepalive, max(time.Second, time.Duration(panelSettings.AgentOfflineThresholdSeconds)*time.Second/2))
 				shouldPersistMetrics := lastStoredMetrics == nil ||
+					message.TelemetryFullSync ||
 					!sameHostMetricsSnapshot(*lastStoredMetrics, *message.Metrics) ||
 					lastMetricsTrust != trust ||
 					now.Sub(lastMetricsStoredAt) >= keepaliveMax
@@ -503,7 +526,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if err := reconcileTimeZoneMetrics(message.Metrics); err != nil {
 					return
 				}
-				if len(message.TrafficUsage) > 0 && !samePortTrafficUsageSlice(lastTrafficUsage, message.TrafficUsage) {
+				if len(message.TrafficUsage) > 0 && (message.TelemetryFullSync || !samePortTrafficUsageSlice(lastTrafficUsage, message.TrafficUsage)) {
 					if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, now.UTC()); err != nil {
 						slog.Error("store agent traffic metrics", "agent_id", id, "error", err)
 						return

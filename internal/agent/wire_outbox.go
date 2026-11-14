@@ -149,6 +149,7 @@ func (o *wireOutbox) stats() (heartbeatsCoalesced, metricsCoalesced uint64) {
 type compactTelemetryState struct {
 	mu              sync.Mutex
 	hasBaseline     bool
+	resyncPending   bool
 	interfacesKnown bool
 	interfaces      []core.HostNetworkInterface
 	bbrKnown        bool
@@ -201,6 +202,21 @@ func cloneSystemBBRStatus(src *core.SystemBBRStatus) *core.SystemBBRStatus {
 	return &out
 }
 
+func (s *compactTelemetryState) Invalidate() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hasBaseline = false
+	s.resyncPending = true
+	s.interfacesKnown = false
+	s.interfaces = nil
+	s.bbrKnown = false
+	s.bbr = nil
+	s.clockKnown = false
+	s.clockSync = nil
+	s.trafficKnown = false
+	clear(s.traffic)
+}
+
 func (s *compactTelemetryState) RecordHeartbeat(msg core.WireMessage) {
 	if msg.Heartbeat == nil {
 		return
@@ -208,6 +224,7 @@ func (s *compactTelemetryState) RecordHeartbeat(msg core.WireMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hasBaseline = true
+	s.resyncPending = false
 	if m := msg.Heartbeat.Metrics; m != nil {
 		if m.NetworkInterfaces != nil {
 			s.interfaces = cloneNetworkInterfaces(m.NetworkInterfaces)
@@ -232,6 +249,24 @@ func (s *compactTelemetryState) CompactMetrics(msg core.WireMessage) core.WireMe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.hasBaseline {
+		s.hasBaseline = true
+		if msg.Metrics.NetworkInterfaces != nil {
+			s.interfaces = cloneNetworkInterfaces(msg.Metrics.NetworkInterfaces)
+			s.interfacesKnown = true
+		}
+		if msg.Metrics.BBR != nil {
+			s.bbr = cloneSystemBBRStatus(msg.Metrics.BBR)
+			s.bbrKnown = true
+		}
+		if msg.Metrics.ClockSync != nil {
+			s.clockSync = cloneClockSync(msg.Metrics.ClockSync)
+			s.clockKnown = true
+		}
+		s.recordTrafficLocked(msg.TrafficUsage)
+		if s.resyncPending {
+			msg.TelemetryFullSync = true
+			s.resyncPending = false
+		}
 		return msg
 	}
 	mCopy := *msg.Metrics

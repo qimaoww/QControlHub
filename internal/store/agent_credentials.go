@@ -19,6 +19,10 @@ type cachedAgentPublicKey struct {
 func (s *Store) invalidateAgentPublicKeyAfterCommit(ctx context.Context, id string) {
 	runAfterCommit(ctx, func() {
 		s.pubKeyCacheMu.Lock()
+		if s.pubKeyCacheGen == nil {
+			s.pubKeyCacheGen = make(map[string]uint64)
+		}
+		s.pubKeyCacheGen[id]++
 		delete(s.pubKeyCache, id)
 		s.pubKeyCacheMu.Unlock()
 	})
@@ -26,10 +30,12 @@ func (s *Store) invalidateAgentPublicKeyAfterCommit(ctx context.Context, id stri
 
 func (s *Store) AgentPublicKey(ctx context.Context, id string) ([]byte, error) {
 	useCache := !HasRequestTransaction(ctx)
+	var loadGen uint64
 	if useCache {
 		now := time.Now()
 		s.pubKeyCacheMu.RLock()
 		entry, ok := s.pubKeyCache[id]
+		loadGen = s.pubKeyCacheGen[id]
 		s.pubKeyCacheMu.RUnlock()
 		if ok && now.Before(entry.expiresAt) {
 			return bytes.Clone(entry.key), nil
@@ -37,6 +43,9 @@ func (s *Store) AgentPublicKey(ctx context.Context, id string) ([]byte, error) {
 	}
 	var publicKey []byte
 	err := s.pool.QueryRow(ctx, `SELECT public_key FROM agents WHERE id=$1 AND revoked_at IS NULL`, id).Scan(&publicKey)
+	if hook := s.afterAgentPublicKeyQuery; hook != nil {
+		hook(ctx, id)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if useCache {
 			s.pubKeyCacheMu.Lock()
@@ -50,12 +59,14 @@ func (s *Store) AgentPublicKey(ctx context.Context, id string) ([]byte, error) {
 	}
 	if useCache {
 		s.pubKeyCacheMu.Lock()
-		if s.pubKeyCache == nil {
-			s.pubKeyCache = make(map[string]cachedAgentPublicKey)
-		}
-		s.pubKeyCache[id] = cachedAgentPublicKey{
-			key:       bytes.Clone(publicKey),
-			expiresAt: time.Now().Add(agentPublicKeyCacheTTL),
+		if s.pubKeyCacheGen[id] == loadGen {
+			if s.pubKeyCache == nil {
+				s.pubKeyCache = make(map[string]cachedAgentPublicKey)
+			}
+			s.pubKeyCache[id] = cachedAgentPublicKey{
+				key:       bytes.Clone(publicKey),
+				expiresAt: time.Now().Add(agentPublicKeyCacheTTL),
+			}
 		}
 		s.pubKeyCacheMu.Unlock()
 	}

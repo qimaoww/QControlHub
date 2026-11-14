@@ -550,3 +550,382 @@ func TestWSSChallengeSignalCompactTelemetryAndDuplicateSuppressionWithPostgreSQL
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func signedAgentBinaryRequestStatus(t *testing.T, ctx context.Context, base, agentID string, priv ed25519.PrivateKey) int {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/agent/v1/binary", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := authn.SignRequest(req, nil, agentID, priv, time.Now().UTC()); err != nil {
+		t.Fatalf("SignRequest: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do GET /agent/v1/binary: %v", err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestAgentHTTPAuthPostCommitInvalidationConcurrentReadAndRollbackWithPostgreSQL(t *testing.T) {
+	database := os.Getenv("QCH_TEST_DATABASE_URL")
+	if database == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	databaseURL, closeDatabase, fixtureUsers, err := configScopeFixtureDatabase(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, done := context.WithTimeout(context.Background(), 10*time.Second)
+		defer done()
+		_ = closeDatabase(cleanupCtx)
+	})
+	db, err := store.OpenWithConfigKey(ctx, databaseURL, true, strings.Repeat("s", 32))
+	if err != nil {
+		t.Fatalf("open isolated PostgreSQL: %v", err)
+	}
+	defer db.Close()
+
+	server := New(db, configScopeFixtureConfig())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	var alice core.User
+	if fixtureUsers != nil {
+		alice = fixtureUsers["alice"]
+	} else {
+		admin := configScopeAPIClient{t: t, handler: server.Handler(), token: configScopeFixtureAdminToken}
+		admin.call("POST", "/users", configScopeFixtureUser("alice"), http.StatusCreated, &alice)
+	}
+	aliceScope := store.WithConfigScope(ctx, alice.ID, false)
+	token, err := db.CreateEnrollmentToken(aliceScope, core.EnrollmentTokenRequest{Name: "auth-race-agent", TTLMinutes: 5, Reusable: true})
+	if err != nil {
+		t.Fatalf("CreateEnrollmentToken: %v", err)
+	}
+	pub1, priv1, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub2, priv2, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrolled, err := db.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "auth-race-agent", OS: "linux", Arch: "amd64", PublicKey: authn.EncodePublicKey(pub1),
+	}, token.Token)
+	if err != nil {
+		t.Fatalf("EnrollAgent pub1: %v", err)
+	}
+
+	// Warm pubKeyCache via authenticated HTTP request.
+	if status := signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv1); status == http.StatusUnauthorized {
+		t.Fatalf("initial priv1 HTTP auth = 401; want accepted")
+	}
+
+	// Uncommitted transaction rollback must keep pub1 valid and pub2 rejected.
+	pgConn, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("pgx.Connect: %v", err)
+	}
+	defer pgConn.Close(ctx)
+	tx, err := pgConn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("pgx Begin: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agents SET public_key=$2 WHERE id=$1`, enrolled.ID, []byte(pub2)); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatal(err)
+	}
+	if status := signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv2); status != http.StatusUnauthorized {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("priv2 accepted before commit: status=%d", status)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("tx.Rollback: %v", err)
+	}
+	if status := signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv1); status == http.StatusUnauthorized {
+		t.Fatalf("priv1 rejected after rollback: status=401")
+	}
+
+	// Concurrent slow AgentPublicKey in HTTP middleware must NOT refill pub1 after reinstall commit.
+	db.InvalidateAgentPublicKeyCacheForTesting(enrolled.ID)
+	_ = token
+	// Use a one-shot DB query stall during first priv1 request while EnrollAgent commits pub2.
+	reinstalledCh := make(chan struct{})
+	releaseQuery := make(chan struct{})
+	db.SetAgentPublicKeyQueryHookForTesting(func(_ context.Context, targetID string) {
+		if targetID != enrolled.ID {
+			return
+		}
+		select {
+		case reinstalledCh <- struct{}{}:
+		default:
+		}
+		<-releaseQuery
+	})
+	firstStatus := make(chan int, 1)
+	go func() {
+		firstStatus <- signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv1)
+	}()
+	select {
+	case <-reinstalledCh:
+	case <-time.After(5 * time.Second):
+		close(releaseQuery)
+		t.Fatal("timed out waiting for HTTP auth AgentPublicKey query hook")
+	}
+	if _, err := db.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "auth-race-agent", OS: "linux", Arch: "amd64", PublicKey: authn.EncodePublicKey(pub2),
+	}, token.Token); err != nil {
+		close(releaseQuery)
+		t.Fatalf("EnrollAgent reinstall pub2: %v", err)
+	}
+	close(releaseQuery)
+	db.SetAgentPublicKeyQueryHookForTesting(nil)
+	<-firstStatus
+
+	if status := signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv1); status != http.StatusUnauthorized {
+		t.Fatalf("old priv1 accepted after reinstall commit + concurrent query: status=%d, want 401", status)
+	}
+	if status := signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv2); status == http.StatusUnauthorized {
+		t.Fatalf("new priv2 rejected after reinstall commit: status=401")
+	}
+
+	// DeleteAgent invalidates HTTP auth immediately even after cache warm-up.
+	if err := db.DeleteAgent(aliceScope, enrolled.ID); err != nil {
+		t.Fatalf("DeleteAgent: %v", err)
+	}
+	if status := signedAgentBinaryRequestStatus(t, ctx, httpServer.URL, enrolled.ID, priv2); status != http.StatusUnauthorized {
+		t.Fatalf("priv2 accepted after DeleteAgent: status=%d, want 401", status)
+	}
+}
+
+func TestWSSTelemetryConvergenceAcrossRateDropAndCompactResyncWithPostgreSQL(t *testing.T) {
+	database := os.Getenv("QCH_TEST_DATABASE_URL")
+	if database == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	databaseURL, closeDatabase, fixtureUsers, err := configScopeFixtureDatabase(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, done := context.WithTimeout(context.Background(), 10*time.Second)
+		defer done()
+		_ = closeDatabase(cleanupCtx)
+	})
+	db, err := store.OpenWithConfigKey(ctx, databaseURL, true, strings.Repeat("s", 32))
+	if err != nil {
+		t.Fatalf("open isolated PostgreSQL: %v", err)
+	}
+	defer db.Close()
+
+	server := New(db, configScopeFixtureConfig())
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	var alice core.User
+	if fixtureUsers != nil {
+		alice = fixtureUsers["alice"]
+	} else {
+		admin := configScopeAPIClient{t: t, handler: server.Handler(), token: configScopeFixtureAdminToken}
+		admin.call("POST", "/users", configScopeFixtureUser("alice"), http.StatusCreated, &alice)
+	}
+	aliceScope := store.WithConfigScope(ctx, alice.ID, false)
+	token, err := db.CreateEnrollmentToken(aliceScope, core.EnrollmentTokenRequest{Name: "wss-resync-agent", TTLMinutes: 5, MaxUses: 1})
+	if err != nil {
+		t.Fatalf("CreateEnrollmentToken: %v", err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features := []string{core.AgentFeaturePortTraffic, core.AgentFeatureCompactTelemetry}
+	enrolled, err := db.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "wss-resync-agent", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineXray}, Features: features, PublicKey: authn.EncodePublicKey(pub),
+	}, token.Token)
+	if err != nil {
+		t.Fatalf("EnrollAgent: %v", err)
+	}
+	t0 := time.Now().UTC().Truncate(time.Second)
+	pStart, pEnd, err := core.TrafficPeriodAt(t0, core.TrafficCycleMonthly, t0)
+	if err != nil {
+		t.Fatalf("TrafficPeriodAt: %v", err)
+	}
+	policy, err := db.CreatePortTrafficPolicy(aliceScope, core.PortTrafficPolicyRequest{
+		AgentID: enrolled.ID, Name: "wss-resync-port", Engine: core.EngineXray, Port: 443,
+		Protocol: core.TrafficProtocolBoth, Cycle: core.TrafficCycleMonthly, CycleAnchor: pStart, LimitBytes: 10000,
+	})
+	if err != nil {
+		t.Fatalf("CreatePortTrafficPolicy: %v", err)
+	}
+	savedCfg, err := db.SaveAgentConfig(aliceScope, core.Config{
+		AgentID: enrolled.ID, Engine: core.EngineXray, Name: "wss-resync-listener",
+		Content: `{"inbounds":[{"tag":"wss-resync","port":443,"protocol":"vless"}],"outbounds":[{"protocol":"freedom"}]}`,
+	}, 0)
+	if err != nil {
+		t.Fatalf("SaveAgentConfig: %v", err)
+	}
+	pgConn, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("pgx.Connect: %v", err)
+	}
+	defer pgConn.Close(ctx)
+	if _, err := pgConn.Exec(ctx, `
+		INSERT INTO agent_engine_ownership (agent_id,engine,owner_id,config_id,config_version,running,traffic_config_confirmed,updated_at)
+		VALUES ($1,'xray',$2,$3,$4,true,true,now())`,
+		enrolled.ID, alice.ID, savedCfg.ID, savedCfg.Version); err != nil {
+		t.Fatalf("mark config applied: %v", err)
+	}
+
+	conn := dialPublicIPProbeWSS(t, ctx, httpServer.URL, enrolled.ID, priv)
+	defer conn.Close(websocket.StatusNormalClosure, "test complete")
+	frames := startWSSFrameReader(ctx, conn)
+	hello := readWSSFrameType(t, frames, core.WireHello, 3*time.Second)
+	if !hello.CompactTelemetry {
+		t.Fatalf("expected WireHello.CompactTelemetry=true, got %+v", hello)
+	}
+
+	clock1 := &core.ClockSyncStatus{Status: "synchronized", CheckedAt: t0}
+	bbr1 := &core.SystemBBRStatus{CollectedAt: t0, Available: true, CongestionControl: "bbr", DefaultQdisc: "fq"}
+	iface1 := []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"10.0.0.1"}}}
+	const testEpoch = "11111111111111111111111111111111"
+	usage1 := []core.PortTrafficUsage{{
+		PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration, CounterEpoch: testEpoch,
+		CollectedAt: t0, PeriodStart: pStart, PeriodEnd: pEnd, EnforcementAvailable: true,
+		ReceivedBytes: 100, UsedBytes: 100, LifetimeReceivedBytes: 100,
+	}}
+	if err := wsjson.Write(ctx, conn, core.WireMessage{
+		Type: core.WireHeartbeat,
+		Heartbeat: &core.HeartbeatRequest{
+			Version: "resync-v1", Features: features,
+			Metrics: &core.HostMetrics{
+				CollectedAt: t0, CPUAvailable: true, CPUPercent: 10,
+				MemoryAvailable: true, MemoryUsedBytes: 1024, MemoryTotalBytes: 8192,
+				NetworkInterfaces: iface1, BBR: bbr1, ClockSync: clock1,
+			},
+			TrafficUsage: usage1,
+		},
+	}); err != nil {
+		t.Fatalf("write initial heartbeat: %v", err)
+	}
+
+	// Exhaust telemetryBucket burst (10.0), then send a diff frame carrying 10.0.0.2/cubic/rx=250 that gets dropped!
+	for i := 0; i < int(wsInboundTelemetryBurst); i++ {
+		if err := wsjson.Write(ctx, conn, core.WireMessage{
+			Type: core.WireMetrics,
+			Metrics: &core.HostMetrics{
+				CollectedAt:  t0.Add(time.Duration(i+1) * time.Millisecond),
+				CPUAvailable: true, CPUPercent: float64(20 + i),
+				MemoryAvailable: true, MemoryUsedBytes: 1024, MemoryTotalBytes: 8192,
+			},
+		}); err != nil {
+			t.Fatalf("drain burst frame %d: %v", i, err)
+		}
+	}
+	iface2 := []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"10.0.0.2"}}}
+	bbr2 := &core.SystemBBRStatus{CollectedAt: t0.Add(2 * time.Second), Available: true, CongestionControl: "cubic", DefaultQdisc: "fq_codel"}
+	clock2 := &core.ClockSyncStatus{Status: "unsynchronized", CheckedAt: t0.Add(2 * time.Second)}
+	usage2 := []core.PortTrafficUsage{{
+		PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration, CounterEpoch: testEpoch,
+		CollectedAt: t0.Add(2 * time.Second), PeriodStart: pStart, PeriodEnd: pEnd, EnforcementAvailable: true,
+		ReceivedBytes: 250, UsedBytes: 250, LifetimeReceivedBytes: 250,
+	}}
+	// This frame is dropped by telemetryBucket and must trigger WireTelemetryResync.
+	if err := wsjson.Write(ctx, conn, core.WireMessage{
+		Type: core.WireMetrics,
+		Metrics: &core.HostMetrics{
+			CollectedAt:  t0.Add(2 * time.Second),
+			CPUAvailable: true, CPUPercent: 45,
+			MemoryAvailable: true, MemoryUsedBytes: 2048, MemoryTotalBytes: 8192,
+			NetworkInterfaces: iface2, BBR: bbr2, ClockSync: clock2,
+		},
+		TrafficUsage: usage2,
+	}); err != nil {
+		t.Fatalf("write rate-dropped diff frame: %v", err)
+	}
+	_ = readWSSFrameType(t, frames, core.WireTelemetryResync, 3*time.Second)
+
+	// Wait for token refill (~450ms for >1 token), then send stale compact frame (nil fields)
+	// followed by TelemetryFullSync frame — verify server converges completely to 10.0.0.2/cubic/rx=250.
+	time.Sleep(500 * time.Millisecond)
+	if err := wsjson.Write(ctx, conn, core.WireMessage{
+		Type: core.WireMetrics,
+		Metrics: &core.HostMetrics{
+			CollectedAt:  t0.Add(3 * time.Second),
+			CPUAvailable: true, CPUPercent: 46,
+			MemoryAvailable: true, MemoryUsedBytes: 2048, MemoryTotalBytes: 8192,
+		},
+	}); err != nil {
+		t.Fatalf("write stale in-flight compact frame: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := wsjson.Write(ctx, conn, core.WireMessage{
+		Type: core.WireMetrics, TelemetryFullSync: true,
+		Metrics: &core.HostMetrics{
+			CollectedAt:  t0.Add(4 * time.Second),
+			CPUAvailable: true, CPUPercent: 50,
+			MemoryAvailable: true, MemoryUsedBytes: 4096, MemoryTotalBytes: 8192,
+			NetworkInterfaces: iface2, BBR: bbr2, ClockSync: clock2,
+		},
+		TrafficUsage: usage2,
+	}); err != nil {
+		t.Fatalf("write TelemetryFullSync frame: %v", err)
+	}
+
+	// Interleave a heartbeat carrying newer interface/traffic (10.0.0.3, rx=320) followed by compact metrics.
+	time.Sleep(500 * time.Millisecond)
+	iface3 := []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"10.0.0.3"}}}
+	usage3 := []core.PortTrafficUsage{{
+		PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration, CounterEpoch: testEpoch,
+		CollectedAt: t0.Add(5 * time.Second), PeriodStart: pStart, PeriodEnd: pEnd, EnforcementAvailable: true,
+		ReceivedBytes: 320, UsedBytes: 320, LifetimeReceivedBytes: 320,
+	}}
+	if err := wsjson.Write(ctx, conn, core.WireMessage{
+		Type: core.WireHeartbeat,
+		Heartbeat: &core.HeartbeatRequest{
+			Version: "resync-v1", Features: features,
+			Metrics: &core.HostMetrics{
+				CollectedAt: t0.Add(5 * time.Second), CPUAvailable: true, CPUPercent: 55,
+				MemoryAvailable: true, MemoryUsedBytes: 4096, MemoryTotalBytes: 8192,
+				NetworkInterfaces: iface3, BBR: bbr2, ClockSync: clock2,
+			},
+			TrafficUsage: usage3,
+		},
+	}); err != nil {
+		t.Fatalf("write interleaved heartbeat: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := wsjson.Write(ctx, conn, core.WireMessage{
+		Type: core.WireMetrics,
+		Metrics: &core.HostMetrics{
+			CollectedAt: t0.Add(6 * time.Second), CPUAvailable: true, CPUPercent: 60,
+			MemoryAvailable: true, MemoryUsedBytes: 4096, MemoryTotalBytes: 8192,
+		},
+	}); err != nil {
+		t.Fatalf("write trailing compact metrics: %v", err)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		stored, getErr := db.GetAgent(aliceScope, enrolled.ID)
+		policies, polErr := db.AgentPortTrafficPolicies(aliceScope, enrolled.ID)
+		if getErr == nil && polErr == nil && len(policies) == 1 &&
+			stored.Metrics.CPUPercent == 60 &&
+			len(stored.Metrics.NetworkInterfaces) == 1 && stored.Metrics.NetworkInterfaces[0].Addresses[0] == "10.0.0.3" &&
+			stored.Metrics.BBR != nil && stored.Metrics.BBR.CongestionControl == "cubic" &&
+			stored.Metrics.ClockSync != nil && stored.Metrics.ClockSync.Status == "unsynchronized" &&
+			policies[0].ReceivedBytes == 320 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("DB did not converge: agent=%+v policies=%+v (errs=%v/%v)", stored.Metrics, policies, getErr, polErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}

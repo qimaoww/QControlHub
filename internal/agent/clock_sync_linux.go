@@ -15,6 +15,8 @@ import (
 
 var chronyOffsetPattern = regexp.MustCompile(`(?m)^Last offset\s*:\s*([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))\s+seconds\b`)
 
+var clockSyncCollector = collectClockSync
+
 func collectClockSync(ctx context.Context) *core.ClockSyncStatus {
 	checkedAt := time.Now().UTC()
 	if path, err := exec.LookPath("chronyc"); err == nil {
@@ -82,10 +84,11 @@ func (c *Client) cachedClockSyncSnapshot(ctx context.Context) *core.ClockSyncSta
 		c.clockSyncRefreshing = true
 		go func() {
 			refreshCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			fresh := collectClockSync(refreshCtx)
-			cancel()
+			defer cancel()
+			fresh := clockSyncCollector(refreshCtx)
+			timedOutOrCanceled := refreshCtx.Err() != nil
 			c.clockSyncMu.Lock()
-			if refreshCtx.Err() == nil && (c.clockSync == nil || !fresh.CheckedAt.Before(c.clockSync.CheckedAt)) {
+			if !timedOutOrCanceled && fresh != nil && (c.clockSync == nil || !fresh.CheckedAt.Before(c.clockSync.CheckedAt)) {
 				c.clockSync = fresh
 			}
 			c.clockSyncRefreshing = false

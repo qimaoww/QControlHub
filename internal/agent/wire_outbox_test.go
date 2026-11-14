@@ -165,6 +165,84 @@ func TestCompactTelemetryStateDiffing(t *testing.T) {
 	if len(changed.Metrics.NetworkInterfaces) != 1 || changed.Metrics.ClockSync == nil || len(changed.TrafficUsage) != 1 {
 		t.Fatalf("changed snapshots or newer usage missing: %+v", changed)
 	}
+
+	// Outbox overwrite of uncompacted frames followed by send-time CompactMetrics preserves B->C transitions.
+	outbox := newWireOutbox(8)
+	baseIface := []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"10.0.0.1"}}}
+	newIface := []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"10.0.0.2"}}}
+	newBBR := &core.SystemBBRStatus{CollectedAt: nextNow.Add(time.Second), Available: true, CongestionControl: "cubic", DefaultQdisc: "fq_codel"}
+	outboxState := newCompactTelemetryState()
+	outboxState.RecordHeartbeat(core.WireMessage{
+		Type: core.WireHeartbeat,
+		Heartbeat: &core.HeartbeatRequest{
+			Metrics: &core.HostMetrics{
+				CollectedAt:       now,
+				CPUAvailable:      true,
+				NetworkInterfaces: baseIface,
+				BBR:               bbr,
+				ClockSync:         clock,
+			},
+			TrafficUsage: usage,
+		},
+	})
+	firstUncompacted := core.WireMessage{
+		Type: core.WireMetrics,
+		Metrics: &core.HostMetrics{
+			CollectedAt:       nextNow,
+			CPUAvailable:      true,
+			CPUPercent:        30,
+			NetworkInterfaces: newIface,
+			BBR:               newBBR,
+			ClockSync:         changedClock,
+		},
+		TrafficUsage: changedUsage,
+	}
+	secondUncompacted := core.WireMessage{
+		Type: core.WireMetrics,
+		Metrics: &core.HostMetrics{
+			CollectedAt:       nextNow.Add(time.Second),
+			CPUAvailable:      true,
+			CPUPercent:        35,
+			NetworkInterfaces: newIface,
+			BBR:               newBBR,
+			ClockSync:         changedClock,
+		},
+		TrafficUsage: changedUsage,
+	}
+	outbox.EnqueueMetric(firstUncompacted)
+	outbox.EnqueueMetric(secondUncompacted) // Overwrites firstUncompacted in outbox.
+	popped, ok := outbox.Pop(context.Background())
+	if !ok {
+		t.Fatal("expected metric frame from outbox")
+	}
+	emitted := outboxState.CompactMetrics(popped)
+	if len(emitted.Metrics.NetworkInterfaces) != 1 || emitted.Metrics.NetworkInterfaces[0].Addresses[0] != "10.0.0.2" {
+		t.Fatalf("emitted frame lost overwritten interface change: %+v", emitted.Metrics.NetworkInterfaces)
+	}
+	if emitted.Metrics.BBR == nil || emitted.Metrics.BBR.CongestionControl != "cubic" {
+		t.Fatalf("emitted frame lost overwritten BBR change: %+v", emitted.Metrics.BBR)
+	}
+	if emitted.Metrics.ClockSync == nil || len(emitted.TrafficUsage) != 1 || emitted.TrafficUsage[0].ReceivedBytes != 2048 {
+		t.Fatalf("emitted frame lost overwritten clock or traffic change: clock=%+v traffic=%+v", emitted.Metrics.ClockSync, emitted.TrafficUsage)
+	}
+
+	// Invalidate forces next CompactMetrics frame to carry full state with TelemetryFullSync=true.
+	outboxState.Invalidate()
+	resynced := outboxState.CompactMetrics(core.WireMessage{
+		Type: core.WireMetrics,
+		Metrics: &core.HostMetrics{
+			CollectedAt:       nextNow.Add(2 * time.Second),
+			CPUAvailable:      true,
+			CPUPercent:        40,
+			NetworkInterfaces: newIface,
+			BBR:               newBBR,
+			ClockSync:         changedClock,
+		},
+		TrafficUsage: changedUsage,
+	})
+	if !resynced.TelemetryFullSync || len(resynced.Metrics.NetworkInterfaces) != 1 || resynced.Metrics.BBR == nil || resynced.Metrics.ClockSync == nil || len(resynced.TrafficUsage) != 1 {
+		t.Fatalf("invalidated CompactMetrics did not emit full resync frame: %+v", resynced)
+	}
 }
 
 func TestCachedPrivateKeyReusesDecodedKeyAndUpdatesOnChange(t *testing.T) {
