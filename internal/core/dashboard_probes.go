@@ -90,7 +90,7 @@ type DashboardProbeAvailability struct {
 type DashboardProbePair struct {
 	ID                  string                     `json:"id"`
 	Name                string                     `json:"name"`
-	GroupName           string                     `json:"group_name,omitempty"`
+	GroupName           string                     `json:"group_name"`
 	TargetMode          string                     `json:"target_mode"`
 	Node1               DiagnosticEndpoint         `json:"node1"`
 	Node2               DiagnosticEndpoint         `json:"node2"`

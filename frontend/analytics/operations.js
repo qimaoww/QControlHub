@@ -214,15 +214,16 @@ function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, 
       onLoading?.(key);
     }
     const requestedMonth = getMonth();
+    const timeout = AbortSignal.timeout(10000);
     try {
-      const value = await ctx.api(path, { signal: AbortSignal.any([ctx.signal, controller.signal]) });
+      const value = await ctx.api(path, { signal: AbortSignal.any([ctx.signal, controller.signal, timeout]) });
       if (!ctx.current() || requests.get(key) !== controller) return;
       if (key === "traffic" && value.month !== requestedMonth) throw new Error("流量月份不匹配");
       readings.set(key, value);
       states.set(key, "ready");
       onSuccess?.(key, value);
     } catch (error) {
-      if (!ctx.current() || requests.get(key) !== controller || error.name === "AbortError") return;
+      if (!ctx.current() || requests.get(key) !== controller || (error.name === "AbortError" && !timeout.aborted)) return;
       if (error.status === 403) { readings.delete(key); states.set(key, "denied"); }
       else states.set(key, "failed");
     } finally {
@@ -453,9 +454,11 @@ export async function dashboardPage(ctx) {
     getProbes: () => readings.get("probes"),
     getProbesState: () => states.get("probes"),
     reloadProbes: () => read("probes", "/dashboard/probes", true),
+    onChange: () => topologySection.schedulePaint(),
   });
 
   const topologySection = createDashboardTopologySection(ctx, {
+    probeController: probesSection,
     bytes,
     getAgents: () => list(readings.get("agents")),
     getOrderIDs: () => readings.get("order")?.ids || [],
@@ -707,9 +710,11 @@ export async function topologyPage(ctx) {
     getProbes: () => readings.get("probes"),
     getProbesState: () => states.get("probes"),
     reloadProbes: () => read("probes", "/dashboard/probes", true),
+    onChange: () => topologySection.schedulePaint(),
   });
 
   topologySection = createDashboardTopologySection(ctx, {
+    probeController: probesSection,
     bytes,
     getAgents: () => list(readings.get("agents")),
     getOrderIDs: () => readings.get("order")?.ids || [],

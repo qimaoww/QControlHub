@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 104
+const currentSchemaVersion = 105
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1308,6 +1308,39 @@ CREATE TABLE IF NOT EXISTS dashboard_probe_pairs (
 );
 ALTER TABLE dashboard_probe_pairs ADD COLUMN IF NOT EXISTS group_name varchar(40) NOT NULL DEFAULT '';
 ALTER TABLE dashboard_probe_pairs ADD COLUMN IF NOT EXISTS nodes jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- Keep the oldest named chain in its group. Split duplicates and ungrouped
+-- chains without changing IDs, endpoints, sessions or historical samples.
+DO $dashboard_groups$
+DECLARE
+ probe record;
+ candidate text;
+ stem text;
+ suffix integer;
+BEGIN
+ FOR probe IN
+  SELECT id, owner_id, name, group_name FROM (
+   SELECT *, row_number() OVER (PARTITION BY owner_id, btrim(group_name) ORDER BY created_at,id) AS group_rank
+   FROM dashboard_probe_pairs
+  ) p WHERE btrim(group_name)='' OR group_rank>1 OR group_name<>btrim(group_name)
+  ORDER BY owner_id,created_at,id
+ LOOP
+  stem := left(COALESCE(NULLIF(btrim(probe.group_name),''),NULLIF(btrim(probe.name),''),'监测分组'),32);
+  candidate := stem;
+  suffix := 1;
+  WHILE EXISTS (SELECT 1 FROM dashboard_probe_pairs WHERE owner_id=probe.owner_id AND group_name=candidate AND id<>probe.id) LOOP
+   suffix := suffix+1;
+   candidate := stem || ' (' || suffix || ')';
+  END LOOP;
+  UPDATE dashboard_probe_pairs SET group_name=candidate, revision=revision+1 WHERE id=probe.id;
+ END LOOP;
+END $dashboard_groups$;
+CREATE UNIQUE INDEX IF NOT EXISTS dashboard_probe_pairs_owner_group_idx ON dashboard_probe_pairs(owner_id,group_name);
+DO $dashboard_group_check$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='dashboard_probe_pairs'::regclass AND conname='dashboard_probe_group_required') THEN
+  ALTER TABLE dashboard_probe_pairs ADD CONSTRAINT dashboard_probe_group_required CHECK (btrim(group_name)<>'');
+ END IF;
+END $dashboard_group_check$;
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_owner_idx ON dashboard_probe_pairs(owner_id, created_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_due_idx ON dashboard_probe_pairs(next_run_at) WHERE auto_enabled;
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_session_idx ON dashboard_probe_pairs(last_session_id) WHERE last_session_id <> '';

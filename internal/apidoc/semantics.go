@@ -74,6 +74,8 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["x-resource-scope"] = "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
 	}
 	switch path {
+	case "/api/v1/dashboard/probes", "/api/v1/dashboard/probes/{id}":
+		op["description"] = "每个监测分组对应一条两点或多跳链路，按认证所有者隔离。同一所有者的 group_name 唯一，创建或改组冲突返回 409；并发写入同样校验。省略分组名时，创建自动生成独立名称，编辑保留原名称。分组 ID 使用链路 id；节点管理权限不授予其他所有者链路的操作权。"
 	case "/api/v1/preferences/ui":
 		op["summary"] = "查询界面偏好"
 		if method == "patch" {

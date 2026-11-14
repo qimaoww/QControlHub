@@ -77,13 +77,26 @@ func (s *Store) uiPreferences(ctx context.Context, patch map[string]map[string]j
 		if current.Revision != revision {
 			return current, ErrUIPreferencesConflict
 		}
+		changed := false
 		for page, fields := range patch {
 			if current.Values[page] == nil {
 				current.Values[page] = map[string]json.RawMessage{}
 			}
 			for key, value := range fields {
+				// All allowed choices are scalar strings or booleans. Compare
+				// decoded values so JSON whitespace/escaping cannot cause writes.
+				var before, after any
+				_ = json.Unmarshal(current.Values[page][key], &before)
+				_ = json.Unmarshal(value, &after)
+				if before == after {
+					continue
+				}
+				changed = true
 				current.Values[page][key] = value
 			}
+		}
+		if !changed {
+			return current, tx.Commit(ctx)
 		}
 		raw, err = json.Marshal(current.Values)
 		if err != nil {

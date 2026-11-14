@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,5 +249,87 @@ func TestDashboardProbeChainABCDExtension(t *testing.T) {
 	}
 	if sample.Forward.LossPercent != 10 {
 		t.Fatalf("expected combined forward chain loss 10%%, got %+v", sample.Forward)
+	}
+}
+
+func TestDashboardProbeGroupUniquenessConcurrentAndOwners(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	a, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "group-source")
+	caps := core.DiagnosticCapabilities{Tools: map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}}, Addresses: []string{"192.0.2.10"}}
+	if err := db.Heartbeat(ctx, a.ID, core.HeartbeatRequest{Features: append(a.Features, core.AgentFeatureNetworkDiagnostics)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateDiagnosticCapabilities(ctx, a.ID, &caps); err != nil {
+		t.Fatal(err)
+	}
+	grantConfigScopeAPIAgent(t, ctx, db, a, alice, 5201)
+	access := acceptConfigScopeAPIInvitations(alice)
+	for _, sh := range access.Shares {
+		admin.call("PUT", "/agents/"+sh.AgentID+"/diagnostic-grants/"+sh.ID, map[string]bool{"enabled": true}, 204, nil)
+	}
+	var nodes []core.DiagnosticNode
+	alice.call("GET", "/network-diagnostics/nodes", nil, 200, &nodes)
+	req := core.DashboardProbePairRequest{GroupName: "专线", TargetMode: "ip", Node1: core.DiagnosticEndpoint{AgentID: a.ID, Address: "192.0.2.10"}, Node2: core.DiagnosticEndpoint{Address: "1.1.1.1"}}
+	var ownerPair core.DashboardProbePair
+	admin.call("POST", "/dashboard/probes", req, 201, &ownerPair)
+	req.Node1.InstanceID = nodes[0].InstanceID
+	// Real API handlers race on one owner namespace. Exactly one commit wins.
+	race := func(method string, paths []string, payload core.DashboardProbePairRequest, success int) {
+		t.Helper()
+		results := make(chan *httptest.ResponseRecorder, len(paths))
+		start := make(chan struct{})
+		for _, path := range paths {
+			go func(path string) {
+				<-start
+				raw, _ := json.Marshal(payload)
+				request := httptest.NewRequest(method, "/api/v1"+path, bytes.NewReader(raw))
+				request.AddCookie(alice.cookie)
+				request.Header.Set(csrfHeader, alice.csrf)
+				request.Header.Set("Content-Type", "application/json")
+				response := httptest.NewRecorder()
+				alice.handler.ServeHTTP(response, request)
+				results <- response
+			}(path)
+		}
+		close(start)
+		won := 0
+		for range paths {
+			response := <-results
+			if response.Code == success {
+				won++
+			} else if response.Code != 409 || !strings.Contains(response.Body.String(), "分组已有链路") {
+				t.Fatalf("race: %d %s", response.Code, response.Body.String())
+			}
+		}
+		if won != 1 {
+			t.Fatalf("race winners=%d", won)
+		}
+	}
+	race("POST", []string{"/dashboard/probes", "/dashboard/probes", "/dashboard/probes", "/dashboard/probes"}, req, 201)
+	var listed core.DashboardProbeListResponse
+	alice.call("GET", "/dashboard/probes", nil, 200, &listed)
+	if len(listed.Pairs) != 1 || listed.Pairs[0].GroupName != "专线" {
+		t.Fatalf("groups: %+v", listed)
+	}
+	alice.call("POST", "/dashboard/probes", req, 409, nil)
+	// Node administrators cannot operate a shared user's chain by its ID.
+	admin.call("DELETE", "/dashboard/probes/"+listed.Pairs[0].ID, nil, 404, nil)
+	bob.call("GET", "/dashboard/probes", nil, 200, &listed)
+	if len(listed.Pairs) != 0 {
+		t.Fatal("cross-owner group leak")
+	}
+	var one, two core.DashboardProbePair
+	req.GroupName = "候选一"
+	alice.call("POST", "/dashboard/probes", req, 201, &one)
+	req.GroupName = "候选二"
+	alice.call("POST", "/dashboard/probes", req, 201, &two)
+	req.GroupName = "并发改组"
+	race("PUT", []string{"/dashboard/probes/" + one.ID, "/dashboard/probes/" + two.ID}, req, 200)
+	// Omitted names remain API-compatible and get distinct server-side groups.
+	req.GroupName = ""
+	alice.call("POST", "/dashboard/probes", req, 201, &one)
+	alice.call("POST", "/dashboard/probes", req, 201, &two)
+	if one.GroupName == "" || one.GroupName == two.GroupName {
+		t.Fatal("unnamed compatibility merged groups")
 	}
 }

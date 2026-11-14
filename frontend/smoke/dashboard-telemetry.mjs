@@ -1,15 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  buildTopologySelectionIndex,
-  clusterTopologyNodes,
-  findSameCityMembers,
-  matchesActiveSelection,
-  reconcileSelectionKey,
-  resolveNodeGeoPoint,
-} from "../analytics/dashboard-topo-shared.js";
-import { projectPacificGeo } from "../analytics/pacific-map-data.js";
-
-import {
   aggregateDashboardTrafficDays,
   isClockSyncAbnormal,
   isValidProbeIPAddress,
@@ -334,59 +324,9 @@ export async function run() {
   assert.equal(topo.ingress.clientIPs, 12);
   assert.equal(topo.egress.panelRxBPS, 8000);
 
-  const berlin = resolveNodeGeoPoint({ id: "berlin-01", name: "berlin-01", regionCode: "DE" }, 0);
-  const berlinExpected = projectPacificGeo(52.52, 13.405);
-  assert.equal(berlin.matched, true);
-  assert.equal(berlin.country, "DE");
-  assert.ok(Math.hypot(berlin.x - berlinExpected.x, berlin.y - berlinExpected.y) < 12, "berlin-01 should resolve to Berlin");
-
-  const canada = resolveNodeGeoPoint({ id: "canada-01", name: "canada-01", regionCode: "CA" }, 1);
-  assert.equal(canada.matched, true);
-  assert.equal(canada.country, "CA");
-
-  const helsinki = resolveNodeGeoPoint({ id: "helsinki-01", name: "helsinki-01", regionCode: "FI" }, 2);
-  assert.equal(helsinki.matched, true);
-  assert.equal(helsinki.country, "FI");
-
-  const mainNode = resolveNodeGeoPoint({ id: "main-01", name: "main-01", regionCode: "" }, 3);
-  assert.notEqual(mainNode.country, "IN");
-
-  assert.equal(matchesActiveSelection(["probe:p1", "node:b"], "cluster:a,b,c"), true);
-  assert.equal(matchesActiveSelection(["probe:p1", "node:z"], "cluster:a,b,c"), false);
-
-  const selIdx = buildTopologySelectionIndex(topo);
-  assert.ok(selIdx.probePeers(topo.probeLinks[0]).includes("node:hk"), "internal probe.to peers must carry node: prefix");
-  assert.equal(matchesActiveSelection(selIdx.probePeers(topo.probeLinks[0]), "node:hk"), true);
-
-  const uncapped = buildDashboardTopology({
-    now: Date.parse("2026-08-03T12:00:00Z"),
-    month: "2026-08",
-    today: "2026-08-03",
-    agents: Array.from({ length: 30 }, (_, i) => ({ id: `n-${i}`, name: `n-${i}`, status: "online" })),
-    maxNodes: null,
-  });
+  const uncapped = buildDashboardTopology({ agents: Array.from({ length: 30 }, (_, i) => ({ id: `n-${i}`, name: `n-${i}`, status: "online" })), maxNodes: null });
   assert.equal(uncapped.nodes.length, 30);
   assert.equal(uncapped.hiddenNodeCount, 0);
-
-  const unordered = [
-    { id: "hk-b", name: "香港节点-B", regionCode: "HK", isOnline: true, rxBPS: 10 },
-    { id: "unk-2", name: "custom-2", regionCode: "", isOnline: true, rxBPS: 10 },
-    { id: "hk-a", name: "香港节点-A", regionCode: "HK", isOnline: true, rxBPS: 20 },
-    { id: "unk-1", name: "custom-1", regionCode: "", isOnline: true, rxBPS: 10 },
-  ];
-  const clustersA = clusterTopologyNodes(unordered);
-  const clustersB = clusterTopologyNodes([...unordered].reverse());
-  assert.deepEqual(
-    clustersA.map((c) => c.key).sort(),
-    clustersB.map((c) => c.key).sort(),
-    "clustering must be order-independent",
-  );
-  assert.deepEqual(
-    findSameCityMembers(unordered, "hk-a").map((m) => m.id).sort(),
-    ["hk-a", "hk-b"],
-  );
-  assert.equal(findSameCityMembers(unordered, "unk-2").length, 0, "unmatched geo nodes should not merge into one city cluster");
-
   // Multi-hop A-B-C-D bidirectional full-chain monitoring & grouped display assertions
   const chainTopo = buildDashboardTopology({
     now: Date.parse("2026-08-03T12:00:00Z"),
@@ -430,13 +370,9 @@ export async function run() {
   assert.equal(chainTopo.probeChains[0].isMultiHop, true);
   assert.equal(chainTopo.probeChains[0].hops.length, 3);
   assert.equal(chainTopo.probeLinks.length, 3);
-  assert.equal(chainTopo.probeGroups[0].kind, "named");
+  assert.equal(chainTopo.probeGroups[0].kind, "chain");
+  assert.equal(chainTopo.probeGroups[0].chains.length, 1);
   assert.equal(chainTopo.probeGroups[0].title, "核心专线");
-  assert.equal(chainTopo.probeGroups[1].kind, "nodes");
-  assert.equal(chainTopo.probeGroups[1].nodes.length, 1);
-  const chainIdx = buildTopologySelectionIndex(chainTopo);
-  assert.ok(chainIdx.chainPeers("chain_abcd").includes("node:c"), "intermediate hop node must belong to chain peers");
-  assert.equal(reconcileSelectionKey("probe:chain_abcd", chainTopo, { allowCluster: false }), "probe:chain_abcd");
-
+  assert.equal(chainTopo.probeGroups.length, 1);
   console.log("Dashboard telemetry model smoke passed");
 }

@@ -965,36 +965,6 @@ export function buildDashboardTopology({
     });
   }
 
-  // Group topology into coherent monitoring groups for grouped display.
-  const namedGroupMap = new Map();
-  const multiHopChains = [];
-  const regionalBuckets = {
-    APAC: [],
-    EMEA: [],
-    AMER: [],
-    CROSS: [],
-  };
-  const externalChains = [];
-
-  for (const ch of probeChains) {
-    if (ch.groupName) {
-      if (!namedGroupMap.has(ch.groupName)) namedGroupMap.set(ch.groupName, []);
-      namedGroupMap.get(ch.groupName).push(ch);
-    } else if (ch.isMultiHop) {
-      multiHopChains.push(ch);
-    } else if (ch.isExternal) {
-      externalChains.push(ch);
-    } else {
-      const nodeEps = (ch.endpoints || []).filter((ep) => ep.kind !== "ext");
-      const regions = nodeEps.map((ep) => macroRegionForNode(ep));
-      if (nodeEps.length >= 2 && regions[0] && regions.every((r) => r === regions[0])) {
-        regionalBuckets[regions[0]].push(ch);
-      } else {
-        regionalBuckets.CROSS.push(ch);
-      }
-    }
-  }
-
   const summarizeGroupStats = (chains, nodes = [], extTargets = [], links = []) => {
     const okCount = chains.filter((c) => c.tone === "ok").length;
     const badCount = chains.filter((c) => c.tone === "bad" || c.tone === "warn").length;
@@ -1072,59 +1042,12 @@ export function buildDashboardTopology({
     };
   };
 
-  const probeGroups = [];
-  for (const [gTitle, chains] of namedGroupMap.entries()) {
-    probeGroups.push(finalizeGroup({
-      id: `named:${gTitle}`,
-      title: gTitle,
-      kind: "named",
-      chains,
-    }));
-  }
-  if (multiHopChains.length) {
-    probeGroups.push(finalizeGroup({
-      id: "chains",
-      title: "全程多跳专线",
-      kind: "chain",
-      chains: multiHopChains,
-    }));
-  }
-  const regionDefs = [
-    { key: "APAC", id: "region:apac", title: "亚太节点分组", kind: "region" },
-    { key: "EMEA", id: "region:emea", title: "欧非中东分组", kind: "region" },
-    { key: "AMER", id: "region:amer", title: "美洲节点分组", kind: "region" },
-    { key: "CROSS", id: "cross-region", title: "跨区骨干分组", kind: "mesh" },
-  ];
-  for (const def of regionDefs) {
-    const bucket = regionalBuckets[def.key];
-    if (bucket.length) {
-      probeGroups.push(finalizeGroup({
-        id: def.id,
-        title: def.title,
-        kind: def.kind,
-        region: def.key,
-        chains: bucket,
-      }));
-    }
-  }
-  if (externalChains.length) {
-    probeGroups.push(finalizeGroup({
-      id: "external",
-      title: "公网出口延迟监测",
-      kind: "external",
-      chains: externalChains,
-    }));
-  }
-  const unmonitoredNodes = visibleNodes.filter((n) => !monitoredNodeIDs.has(n.id));
-  if (unmonitoredNodes.length) {
-    probeGroups.push(finalizeGroup({
-      id: "unmonitored",
-      title: "待纳入监测节点",
-      kind: "nodes",
-      chains: [],
-      explicitNodes: unmonitoredNodes,
-    }));
-  }
+  const probeGroups = probeChains.map(chain => finalizeGroup({
+    id: chain.id,
+    title: chain.groupName || chain.name,
+    kind: "chain",
+    chains: [chain],
+  }));
 
   return {
     nodes: visibleNodes,

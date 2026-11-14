@@ -86,7 +86,7 @@ export function createUIPreferences({ request, isCurrent = () => true, report = 
     return saving;
   }
   return {
-    get: snapshot, patch, flush,
+    get: snapshot, patch, flush, isLoaded: () => loaded && active(),
     ready: () => load().catch(error => failed(error, true)),
     refresh: () => load(true).catch(error => failed(error, true)),
     subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },

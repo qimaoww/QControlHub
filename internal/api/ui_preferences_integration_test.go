@@ -262,3 +262,27 @@ func runUIPreferencesBrowserFixture(t *testing.T, mode string) {
 		}
 	}
 }
+
+func TestTopologySelectionPreferencesAccountsAndPages(t *testing.T) {
+	_, _, _, alice, bob := newConfigScopeAPIFixture(t)
+	var saved store.UIPreferences
+	patch := map[string]any{"values": map[string]any{"dashboard": map[string]any{"topo_group": "dpb-home"}, "topology": map[string]any{"topo_group": "dpb-detail"}}, "revision": 0}
+	alice.call("PATCH", "/preferences/ui", patch, 200, &saved)
+	revision := saved.Revision
+	// A no-op PATCH retains the revision and current-only preference document.
+	patch["revision"] = revision
+	alice.call("PATCH", "/preferences/ui", patch, 200, &saved)
+	if saved.Revision != revision {
+		t.Fatal("unchanged choices caused a write")
+	}
+	device, _ := managementLogin(t, alice.handler, "alice", configScopeFixturePassword, 200)
+	device.call("GET", "/preferences/ui", nil, 200, &saved)
+	if string(saved.Values["dashboard"]["topo_group"]) != `"dpb-home"` || string(saved.Values["topology"]["topo_group"]) != `"dpb-detail"` {
+		t.Fatalf("selection restore: %+v", saved)
+	}
+	saved = store.UIPreferences{}
+	bob.call("GET", "/preferences/ui", nil, 200, &saved)
+	if len(saved.Values) != 0 {
+		t.Fatal("another account inherited topology selection")
+	}
+}

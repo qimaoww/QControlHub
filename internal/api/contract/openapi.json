@@ -18496,6 +18496,7 @@
     },
     "/api/v1/dashboard/probes": {
       "get": {
+        "description": "每个监测分组对应一条两点或多跳链路，按认证所有者隔离。同一所有者的 group_name 唯一，创建或改组冲突返回 409；并发写入同样校验。省略分组名时，创建自动生成独立名称，编辑保留原名称。分组 ID 使用链路 id；节点管理权限不授予其他所有者链路的操作权。",
         "operationId": "listDashboardProbePairs_api_v1_dashboard_probes",
         "responses": {
           "200": {
@@ -18631,6 +18632,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "post": {
+        "description": "每个监测分组对应一条两点或多跳链路，按认证所有者隔离。同一所有者的 group_name 唯一，创建或改组冲突返回 409；并发写入同样校验。省略分组名时，创建自动生成独立名称，编辑保留原名称。分组 ID 使用链路 id；节点管理权限不授予其他所有者链路的操作权。",
         "operationId": "createDashboardProbePair_api_v1_dashboard_probes",
         "requestBody": {
           "content": {
@@ -18895,6 +18897,7 @@
     },
     "/api/v1/dashboard/probes/{id}": {
       "delete": {
+        "description": "每个监测分组对应一条两点或多跳链路，按认证所有者隔离。同一所有者的 group_name 唯一，创建或改组冲突返回 409；并发写入同样校验。省略分组名时，创建自动生成独立名称，编辑保留原名称。分组 ID 使用链路 id；节点管理权限不授予其他所有者链路的操作权。",
         "operationId": "deleteDashboardProbePair_api_v1_dashboard_probes_{id}",
         "parameters": [
           {
@@ -18965,6 +18968,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "put": {
+        "description": "每个监测分组对应一条两点或多跳链路，按认证所有者隔离。同一所有者的 group_name 唯一，创建或改组冲突返回 409；并发写入同样校验。省略分组名时，创建自动生成独立名称，编辑保留原名称。分组 ID 使用链路 id；节点管理权限不授予其他所有者链路的操作权。",
         "operationId": "updateDashboardProbePair_api_v1_dashboard_probes_{id}",
         "parameters": [
           {
@@ -22436,6 +22440,9 @@
                   "tcp": {
                     "agent": "example"
                   },
+                  "topology": {
+                    "topo_group": "example"
+                  },
                   "traffic": {
                     "advanced": false,
                     "agent": "example",
@@ -22460,7 +22467,7 @@
                   },
                   "values": {
                     "additionalProperties": false,
-                    "maxProperties": 17,
+                    "maxProperties": 18,
                     "minProperties": 1,
                     "properties": {
                       "api": {
@@ -22873,6 +22880,18 @@
                           "agent": {
                             "maxLength": 20,
                             "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "topology": {
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "minProperties": 1,
+                        "properties": {
+                          "topo_group": {
+                            "maxLength": 64,
                             "type": "string"
                           }
                         },

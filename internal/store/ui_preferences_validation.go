@@ -111,6 +111,7 @@ var uiPreferenceRules = map[string]map[string]preferenceRule{
 		"topo_group":          preferenceText(64),
 		"probe_filter":        preferenceEnum("all", "abnormal"),
 	},
+	"topology":      {"topo_group": preferenceText(64)},
 	"node-region":   {"region_search": preferenceText(200)},
 	"notifications": {"template_event": preferenceEnum("task.failed", "agent.offline", "agent.online", "traffic.quota", "traffic.warning", "speed.high", "speed.low", "speed.recovered", "panel.update")},
 	"shell":         {"collapsed": preferenceBool},

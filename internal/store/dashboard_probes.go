@@ -17,6 +17,46 @@ import (
 
 const dashboardProbeMaxRetainedSamples = 30
 
+// Serialize the owner's group namespace, including legacy/token administrators
+// for whom lockAgentUser does not acquire an exclusive row lock.
+func lockDashboardProbeGroups(ctx context.Context, tx pgx.Tx, ownerID string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('dashboard-probes:' || $1, 0))`, ownerID)
+	return err
+}
+
+func dashboardProbeGroup(ctx context.Context, tx pgx.Tx, ownerID, id, requested, name string) (string, error) {
+	group := strings.TrimSpace(requested)
+	if group == "" && id != "" {
+		if err := tx.QueryRow(ctx, `SELECT group_name FROM dashboard_probe_pairs WHERE owner_id=$1 AND id=$2`, ownerID, id).Scan(&group); err != nil {
+			return "", mapError(err)
+		}
+	}
+	base := []rune(strings.TrimSpace(name))
+	if len(base) == 0 {
+		base = []rune("监测分组")
+	}
+	base = base[:min(len(base), 32)]
+	for attempt := 1; ; attempt++ {
+		candidate := group
+		if candidate == "" {
+			candidate = string(base)
+			if attempt > 1 {
+				candidate += fmt.Sprintf(" (%d)", attempt)
+			}
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM dashboard_probe_pairs WHERE owner_id=$1 AND group_name=$2 AND id<>$3)`, ownerID, candidate, id).Scan(&exists); err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+		if group != "" {
+			return "", fmt.Errorf("%w: 该监测分组已有链路，请使用其他分组名称", ErrConflict)
+		}
+	}
+}
+
 func dashboardProbeDeadline(now time.Time, params core.DiagnosticParameters, hopCount int) time.Time {
 	count := max(1, params.Count)
 	perProbeMS := max(100, params.IntervalMS) + max(100, params.TimeoutMS)
@@ -274,6 +314,13 @@ func (s *Store) CreateDashboardProbePair(ctx context.Context, req core.Dashboard
 		return core.DashboardProbePair{}, err
 	}
 	ownerID := scopeForConfig(ctx).OwnerID
+	if err := lockDashboardProbeGroups(ctx, tx, ownerID); err != nil {
+		return core.DashboardProbePair{}, err
+	}
+	req.GroupName, err = dashboardProbeGroup(ctx, tx, ownerID, "", req.GroupName, req.Name)
+	if err != nil {
+		return core.DashboardProbePair{}, err
+	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM dashboard_probe_pairs WHERE owner_id=$1`, ownerID).Scan(&count); err != nil {
 		return core.DashboardProbePair{}, err
@@ -343,6 +390,9 @@ func (s *Store) UpdateDashboardProbePair(ctx context.Context, id string, req cor
 		return core.DashboardProbePair{}, err
 	}
 	ownerID := scopeForConfig(ctx).OwnerID
+	if err := lockDashboardProbeGroups(ctx, tx, ownerID); err != nil {
+		return core.DashboardProbePair{}, err
+	}
 	var curRevision int64
 	var curTargetMode, curN1ID, curN1Inst, curN1Addr, curN2ID, curN2Inst, curN2Addr string
 	var curNodesJSON []byte
@@ -362,6 +412,10 @@ func (s *Store) UpdateDashboardProbePair(ctx context.Context, id string, req cor
 	}
 	if req.Revision > 0 && req.Revision != curRevision {
 		return core.DashboardProbePair{}, fmt.Errorf("%w: 探测配置已更新，请刷新后重试", ErrConflict)
+	}
+	req.GroupName, err = dashboardProbeGroup(ctx, tx, ownerID, id, req.GroupName, req.Name)
+	if err != nil {
+		return core.DashboardProbePair{}, err
 	}
 	var curNodes []core.DiagnosticEndpoint
 	if len(curNodesJSON) > 0 {
