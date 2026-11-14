@@ -10,6 +10,7 @@ import {
   probeDirectionStatus,
   probeHistorySeries,
   rankDashboardTrafficView,
+  buildDashboardTopology,
   sanitizePanelSample,
   selectMostActiveNodes,
   summarizeClientConnectionsPulse,
@@ -260,6 +261,69 @@ export async function run() {
     activeDays: 2,
     elapsedDays: 3,
   });
+
+  const topo = buildDashboardTopology({
+    now: Date.parse("2026-08-03T12:00:00Z"),
+    month: "2026-08",
+    today: "2026-08-03",
+    orderIDs: ["de", "tokyo", "hk", "sg", "us", "uk", "nl"],
+    agents: [
+      { id: "de", name: "德国", region_code: "DE", status: "offline", runtime: { "sing-box": { installed: true, service_status: "inactive" } } },
+      { id: "tokyo", name: "东京", region_code: "JP", status: "online", runtime: { xray: { installed: true, service_status: "active" } }, metrics: { network_available: true, network_rx_bps: 4000, network_tx_bps: 2000, collected_at: "2026-08-03T11:59:55Z" } },
+      { id: "hk", name: "香港", region_code: "HK", status: "online", runtime: { mihomo: { installed: true, service_status: "active" } }, metrics: { network_available: true, network_rx_bps: 2000, network_tx_bps: 1000, collected_at: "2026-08-03T11:59:56Z" } },
+      { id: "sg", name: "新加坡", region_code: "SG", status: "online", runtime: {} },
+      { id: "us", name: "美国", region_code: "US", status: "online", runtime: { xray: { installed: true, service_status: "active" } } },
+      { id: "uk", name: "英国", region_code: "GB", status: "online", runtime: { xray: { installed: true, service_status: "active" } } },
+      { id: "nl", name: "荷兰", region_code: "NL", status: "online", runtime: { xray: { installed: true, service_status: "active" } } },
+    ],
+    usageRows: [
+      { agent_id: "tokyo", day: "2026-08-01", received_bytes: 500, sent_bytes: 200 },
+      { agent_id: "hk", day: "2026-08-02", received_bytes: 300, sent_bytes: 100 },
+    ],
+    policies: [
+      { agent_id: "sg", blocked: true, receive_bps: 0, send_bps: 0, port: 443 },
+    ],
+    probes: [
+      {
+        id: "p1",
+        name: "东京 ↔ 香港",
+        target_mode: "",
+        node1: { agent_id: "tokyo", address: "1.1.1.1" },
+        node2: { agent_id: "hk", address: "2.2.2.2" },
+        bidirectional: true,
+        availability: { ready: true, running: false },
+        latest: {
+          forward: { state: "succeeded", avg_ms: 42.5, loss_percent: 0, reached: true },
+          reverse: { state: "succeeded", avg_ms: 44.1, loss_percent: 20, reached: true },
+        },
+      },
+      {
+        id: "p2",
+        name: "新加坡 → Cloudflare",
+        target_mode: "ip",
+        node1: { agent_id: "sg", address: "3.3.3.3" },
+        node2: { name: "1.1.1.1", address: "1.1.1.1" },
+        bidirectional: false,
+        availability: { ready: true, running: false },
+        latest: { forward: { state: "succeeded", avg_ms: 2.3, loss_percent: 0, reached: true } },
+      },
+    ],
+    metrics: { network_available: true, network_rate_available: true, network_rx_bps: 8000, network_tx_bps: 6000 },
+    connections: { ips: 12, flows: 88, sources: [{ agent_id: "tokyo", status: "ok" }] },
+    maxNodes: 6,
+  });
+  assert.equal(topo.nodes.length, 6);
+  assert.equal(topo.hiddenNodeCount, 1);
+  assert.equal(topo.hiddenNodeCount === 1 && topo.nodes.some((n) => n.id === "de"), false, "offline node should yield to online active nodes");
+  assert.equal(topo.externalTargets.length, 1);
+  assert.equal(topo.probeLinks.length, 2);
+  assert.equal(topo.probeLinks[0].tone, "bad");
+  assert.equal(topo.probeLinks[0].metricLabel, "42.5ms · 丢包20%");
+  assert.equal(topo.probeLinks[1].isExternal, true);
+  assert.equal(topo.ingress.rateBPS, 6000);
+  assert.equal(topo.egress.rateBPS, 3000);
+  assert.equal(topo.ingress.clientIPs, 12);
+  assert.equal(topo.egress.panelRxBPS, 8000);
 
   console.log("Dashboard telemetry model smoke passed");
 }

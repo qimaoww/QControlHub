@@ -149,7 +149,7 @@ function directionBlock({ key = "fwd", title, fromName, fromAddress, toName, toA
     ),
     node("dl", { className: "a-dash-probe-stats" },
       node("div", { "data-refresh-key": "avg" }, node("dt", {}, "平均延迟"), node("dd", { className: "is-primary" }, dir ? fmtMS(dir.avg_ms) : "—")),
-      node("div", { "data-refresh-key": "minmax" }, node("dt", {}, "最小 / 最大"), node("dd", {}, dir ? `${fmtMS(dir.min_ms)} / ${fmtMS(dir.max_ms)}` : "—")),
+      node("div", { "data-refresh-key": "minmax" }, node("dt", {}, "最小 / 最大"), node("dd", {}, dir && typeof dir.min_ms === "number" && typeof dir.max_ms === "number" ? `${dir.min_ms.toFixed(1)} / ${dir.max_ms.toFixed(1)} ms` : "—")),
       node("div", { "data-refresh-key": "jitter" }, node("dt", {}, "抖动"), node("dd", {}, dir ? fmtMS(dir.stdev_ms) : "—")),
       node("div", { "data-refresh-key": "loss" }, node("dt", {}, "丢包率"), node("dd", { className: lossClass }, dir ? fmtLoss(lossVal) : "—")),
     ),
@@ -197,24 +197,24 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     const modeField = field("目标模式", "target_mode", initialMode, {
       options: [["node", "托管节点"], ["ip", "自定义 IP"]],
     });
-    const node1Field = field("源节点 A", "node1_key", pair ? nodeKey(pair.node1) : "", {
+    const node1Field = field("起点节点", "node1_key", pair ? nodeKey(pair.node1) : "", {
       options: [["", "读取中…"]],
       required: true,
     });
-    const addr1Field = field("源地址 A", "node1_addr", pair?.node1?.address || "", {
+    const addr1Field = field("起点地址", "node1_addr", pair?.node1?.address || "", {
       options: pair?.node1?.address ? [[pair.node1.address, pair.node1.address]] : [["", "请选择"]],
       required: true,
     });
-    const node2Field = field("目标节点 B", "node2_key", pair && initialMode === "node" ? nodeKey(pair.node2) : "", {
+    const node2Field = field("对端节点", "node2_key", pair && initialMode === "node" ? nodeKey(pair.node2) : "", {
       options: [["", "读取中…"]],
     });
-    const addr2Field = field("目标地址 B", "node2_addr", pair && initialMode === "node" ? pair?.node2?.address || "" : "", {
+    const addr2Field = field("对端地址", "node2_addr", pair && initialMode === "node" ? pair?.node2?.address || "" : "", {
       options: pair?.node2?.address ? [[pair.node2.address, pair.node2.address]] : [["", "请选择"]],
     });
-    const customIPField = field("目标 IP", "node2_ip", pair && initialMode === "ip" ? pair?.node2?.address || "" : "", {
+    const customIPField = field("对端 IP", "node2_ip", pair && initialMode === "ip" ? pair?.node2?.address || "" : "", {
       placeholder: "IPv4 / IPv6",
     });
-    const bidirField = field("双向 (A ↔ B)", "bidirectional", Boolean(pair?.bidirectional), {
+    const bidirField = field("双向链路测量", "bidirectional", Boolean(pair?.bidirectional), {
       type: "checkbox",
     });
 
@@ -325,21 +325,21 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         autoSecField,
       ),
       autoEnabledField,
-    ], isEdit ? "保存修改" : "添加探测对", async (values, formEl) => {
+    ], isEdit ? "保存修改" : "添加链路", async (values, formEl) => {
       const n1 = nodeByKey.get(values.node1_key);
-      if (!n1) throw new Error("请选择有效的源节点 A。");
-      if (!values.node1_addr) throw new Error("请选择源节点 A 的探测地址。");
+      if (!n1) throw new Error("请选择有效的起点节点。");
+      if (!values.node1_addr) throw new Error("请选择起点节点的探测地址。");
       const custom = values.target_mode === "ip";
       let n2Endpoint;
       if (custom) {
         const ip = String(values.node2_ip || "").trim();
         if (!isValidProbeIPAddress(ip)) throw new Error("请输入有效的 IPv4 或 IPv6 单播目标地址。");
-        if (isIPv6(ip) !== isIPv6(values.node1_addr)) throw new Error("目标 IP 须与源地址使用相同 IP 地址族。");
+        if (isIPv6(ip) !== isIPv6(values.node1_addr)) throw new Error("对端 IP 须与起点地址使用相同 IP 地址族。");
         n2Endpoint = { address: ip, name: ip };
       } else {
         const n2 = nodeByKey.get(values.node2_key);
-        if (!n2) throw new Error("请选择有效的目标节点 B。");
-        if (!values.node2_addr) throw new Error("目标节点缺少匹配协议族的可用地址。");
+        if (!n2) throw new Error("请选择有效的对端节点。");
+        if (!values.node2_addr) throw new Error("对端节点缺少匹配协议族的可用地址。");
         n2Endpoint = {
           agent_id: n2.agent_id,
           instance_id: n2.instance_id || "",
@@ -377,10 +377,10 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       if (!ctx.current() || !box?.open) return;
       box.close();
       await reloadProbes();
-      ctx.announce(isEdit ? "探测对已更新" : "探测对已添加");
+      ctx.announce(isEdit ? "探测链路已更新" : "探测链路已添加");
     });
 
-    box = ctx.dialog(isEdit ? "编辑 A/B 探测对" : "添加 A/B 探测对", form, { wide: true });
+    box = ctx.dialog(isEdit ? "编辑探测链路" : "添加探测链路", form, { wide: true });
 
     const populateNodes = (nodes) => {
       if (!ctx.current() || !box.open) return;
@@ -414,7 +414,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   async function mutatePair(pair, btn, action) {
     if (!canExecute() || inFlightOps.has(pair.id)) return;
     if (action === "delete") {
-      if (!await ctx.confirm(`删除探测对“${pair.name || pair.node1?.name}”及其历史采样？`, "删除探测对")) return;
+      if (!await ctx.confirm(`删除探测链路“${pair.name || pair.node1?.name}”及其历史采样？`, "删除链路")) return;
     }
     inFlightOps.add(pair.id);
     try {
@@ -443,7 +443,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
           ctx.announce(!pair.auto_enabled ? "已启用自动探测" : "已暂停自动探测");
         } else if (action === "delete") {
           await ctx.api(`/dashboard/probes/${pathID(pair.id)}`, { method: "DELETE" });
-          ctx.announce("探测对已删除");
+          ctx.announce("探测链路已删除");
         }
         await reloadProbes();
       });
@@ -470,7 +470,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       summary.bad > 0 ? keyed("abnormal", badge(`异常 ${summary.bad}`, "bad")) : null,
       probeState === "failed" ? keyed("failed", badge("读取失败 · 保留上次数据", "warn")) : null,
       probeState === "denied" ? keyed("denied", badge("无诊断读取权限", "warn")) : null,
-      exec ? button("添加探测对", () => openProbeDialog(), { tone: "primary", "data-refresh-key": "add-probe" }) : null,
+      exec ? button("添加链路", () => openProbeDialog(), { tone: "primary", "data-refresh-key": "add-probe" }) : null,
     ));
 
     if (!pairs.length) {
@@ -478,7 +478,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         ? "读取中…"
         : probeState === "failed"
           ? "读取失败"
-          : "暂无探测对";
+          : "暂无探测链路";
       patch(gridHost, node("div", { className: "a-dash-probe-grid" }, empty(message)));
       return;
     }
@@ -506,7 +506,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       const specText = `${pair.bidirectional ? "双向" : "单向"} · ICMP ×${pair.parameters?.count || 5} · ${pair.auto_enabled ? `${pair.auto_interval_seconds}s` : "暂停"}`;
       const trendLabel = trend
         ? (pair.bidirectional
-            ? "实线 A→B · 虚线 B→A"
+            ? "实线 去程 · 虚线 回程"
             : trend.peakMS != null
               ? `近 ${fwdSeries.length} 次 · 峰值 ${fmtMS(trend.peakMS)}`
               : `近 ${fwdSeries.length} 次 · 丢包`)
@@ -523,7 +523,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         node("div", { className: "a-dash-probe-lanes" },
           directionBlock({
             key: "fwd",
-            title: "A → B",
+            title: "去程",
             fromName: aName,
             fromAddress: pair.node1?.address || "—",
             toName: bName,
@@ -535,7 +535,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
           }),
           pair.bidirectional ? directionBlock({
             key: "rev",
-            title: "B → A",
+            title: "回程",
             fromName: bName,
             fromAddress: pair.node2?.address || "—",
             toName: aName,
@@ -569,7 +569,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   }
 
   const card = canView() && section(
-    "A/B 节点延迟与丢包",
+    "节点链路监控",
     node("div", { className: "a-card-body" }, gridHost),
     summaryNode,
   );

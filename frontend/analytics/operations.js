@@ -194,6 +194,7 @@ function chart(days, width, selectedDay, selectDay, onInspect) {
 import { createPanelHostController } from "./dashboard-panel.js";
 import { createTrafficRankingCard, trafficSplitBar } from "./dashboard-ranking.js";
 import { createDashboardProbesSection } from "./dashboard-probes.js";
+import { createDashboardTopologySection } from "./dashboard-topology.js";
 import { createEdgeTelemetryController, paintNodeTelemetryMatrix } from "./dashboard-telemetry.js";
 
 export async function dashboardPage(ctx) {
@@ -366,6 +367,19 @@ export async function dashboardPage(ctx) {
   ), trafficState);
   trafficCard?.classList?.add("a-dash-traffic-card");
 
+  const topologySection = createDashboardTopologySection(ctx, {
+    bytes,
+    getAgents: () => list(readings.get("agents")),
+    getOrderIDs: () => readings.get("order")?.ids || [],
+    getUsage: () => readings.get("traffic"),
+    getPolicies: () => readings.get("trafficPolicies"),
+    getProbes: () => readings.get("probes"),
+    getMetrics: () => readings.get("metrics"),
+    getConnections: () => readings.get("connections"),
+    getStates: () => states,
+    getMonth: () => month,
+  });
+
   const probesSection = createDashboardProbesSection(ctx, {
     date,
     getOrderIDs: () => readings.get("order")?.ids || [],
@@ -389,6 +403,7 @@ export async function dashboardPage(ctx) {
         if (ctx.current()) {
           paintBusiness();
           rankingCard?.paint();
+          topologySection.paint();
           probesSection.paint();
           edgeTelemetry.paint();
         }
@@ -580,11 +595,14 @@ export async function dashboardPage(ctx) {
     } finally {
       if (ctx.current() && requests.get(key) === controller) {
         requests.delete(key);
-        if (key === "metrics") paintMetrics();
-        else if (key === "traffic") paintTraffic();
-        else if (key === "trafficPolicies") rankingCard?.paint();
-        else if (key === "probes") probesSection.paint();
-        else if (key === "connections" || key === "certificates" || key === "ipQuality") edgeTelemetry.paint();
+        if (key === "metrics") { paintMetrics(); topologySection.paint(); }
+        else if (key === "traffic") { paintTraffic(); topologySection.paint(); }
+        else if (key === "trafficPolicies") { rankingCard?.paint(); topologySection.paint(); }
+        else if (key === "probes") { probesSection.paint(); topologySection.paint(); }
+        else if (key === "connections" || key === "certificates" || key === "ipQuality") {
+          edgeTelemetry.paint();
+          if (key === "connections") topologySection.paint();
+        }
         else await queueBusiness();
       }
     }
@@ -613,7 +631,7 @@ export async function dashboardPage(ctx) {
   ctx.onRefresh(() => refresh(true));
   ctx.signal.addEventListener("abort", () => { requests.forEach(controller => controller.abort()); trafficDialog?.close(); }, { once: true });
   paintMetrics(); paintTraffic(); paintBusiness();
-  probesSection.paint(); edgeTelemetry.paint();
+  topologySection.paint(); probesSection.paint(); edgeTelemetry.paint();
   void refresh(true);
   poll(ctx, () => refresh(false), () => {
     const pairs = readings.get("probes")?.pairs;
@@ -629,6 +647,7 @@ export async function dashboardPage(ctx) {
   return node("div", { className: "a-dash-deck" },
     overviewCard,
     bentoRow("a-dash-bento-primary", host, trafficCard),
+    topologySection.visible && topologySection.element,
     probesSection.element,
     rankingCard?.element,
     nodes,

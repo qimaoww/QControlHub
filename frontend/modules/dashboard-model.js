@@ -541,3 +541,293 @@ export function summarizeDashboardTrafficBreakdown(days, month, now = new Date()
     elapsedDays: elapsed.length,
   };
 }
+
+/**
+ * Projects existing dashboard datasets into a three-tier end-to-end data flow
+ * topology without fabricating proxy/tunnel rates that the API does not provide.
+ */
+export function buildDashboardTopology({
+  agents = [],
+  pageAgents = [],
+  orderIDs = [],
+  usageRows = [],
+  policies = [],
+  probes = [],
+  metrics = null,
+  connections = null,
+  month = utcMonth(),
+  today = new Date().toISOString().slice(0, 10),
+  now = Date.now(),
+  maxNodes = 6,
+} = {}) {
+  const agentMeta = buildAgentMetaMap(agents, pageAgents);
+  const { byAgent: policyMap } = buildPolicyAgentRollup(policies, agentMeta, "all");
+  const monthlyByAgent = new Map();
+  let monthlyRxTotal = 0;
+  let monthlyTxTotal = 0;
+
+  for (const row of usageRows || []) {
+    if (!row?.agent_id || !row.day?.startsWith(`${month}-`) || row.day > today) continue;
+    const rx = finiteNonNegative(Number(row.received_bytes)) ? Number(row.received_bytes) : 0;
+    const tx = finiteNonNegative(Number(row.sent_bytes)) ? Number(row.sent_bytes) : 0;
+    monthlyRxTotal += rx;
+    monthlyTxTotal += tx;
+    const prev = monthlyByAgent.get(row.agent_id) || { rx: 0, tx: 0, used: 0 };
+    prev.rx += rx;
+    prev.tx += tx;
+    prev.used += rx + tx;
+    monthlyByAgent.set(row.agent_id, prev);
+  }
+
+  const allIDs = new Set([...agentMeta.keys(), ...policyMap.keys(), ...monthlyByAgent.keys()]);
+  const connSources = new Set(
+    (connections?.sources || [])
+      .filter((src) => src?.agent_id && src.status === "ok")
+      .map((src) => src.agent_id),
+  );
+  const probeEndpointSet = new Set();
+  for (const pair of probes || []) {
+    if (pair?.node1?.agent_id) probeEndpointSet.add(pair.node1.agent_id);
+    if (pair?.target_mode !== "ip" && pair?.node2?.agent_id) probeEndpointSet.add(pair.node2.agent_id);
+  }
+
+  const orderIndex = new Map((orderIDs || []).map((id, idx) => [id, idx]));
+  const allNodes = [];
+  let fleetRxBPS = 0;
+  let fleetTxBPS = 0;
+  let onlineCount = 0;
+  let runningEngines = 0;
+
+  for (const id of allIDs) {
+    const agent = agentMeta.get(id) || { id, name: id, status: "unknown" };
+    const policy = policyMap.get(id) || null;
+    const usage = monthlyByAgent.get(id) || { rx: 0, tx: 0, used: 0 };
+    const status = agent.status || "unknown";
+    const isOnline = status === "online";
+    if (isOnline) onlineCount += 1;
+
+    const runtimeEntries = Object.entries(agent.runtime || {});
+    const installedEngines = runtimeEntries.filter(([, rt]) => rt?.installed).map(([name]) => name);
+    const activeEngines = runtimeEntries
+      .filter(([, rt]) => rt?.installed && isOnline && rt?.service_status === "active")
+      .map(([name]) => name);
+    runningEngines += activeEngines.length;
+
+    const sampledAt = Date.parse(agent.metrics?.collected_at);
+    const metricRateValid = Boolean(
+      isOnline &&
+      agent.metrics?.network_available &&
+      Number.isFinite(sampledAt) &&
+      Math.abs(now - sampledAt) <= 15000 &&
+      finiteNonNegative(Number(agent.metrics.network_rx_bps)) &&
+      finiteNonNegative(Number(agent.metrics.network_tx_bps)),
+    );
+    const rxBPS = metricRateValid
+      ? Number(agent.metrics.network_rx_bps)
+      : (isOnline && policy ? policy.receiveBPS : 0);
+    const txBPS = metricRateValid
+      ? Number(agent.metrics.network_tx_bps)
+      : (isOnline && policy ? policy.sendBPS : 0);
+
+    fleetRxBPS += rxBPS;
+    fleetTxBPS += txBPS;
+
+    allNodes.push({
+      id,
+      name: agent.name || id,
+      regionCode: agent.region_code || "",
+      status,
+      isOnline,
+      ip: agent.public_ipv4 || agent.metrics?.public_ipv4 || agent.public_ipv6 || agent.metrics?.public_ipv6 || "",
+      installedEngines,
+      activeEngines,
+      rxBPS,
+      txBPS,
+      monthlyRxBytes: usage.rx,
+      monthlyTxBytes: usage.tx,
+      monthlyUsedBytes: usage.used,
+      portCount: policy?.portCount || 0,
+      blocked: Boolean(policy?.blocked),
+      reportingConnections: connSources.has(id),
+      inProbe: probeEndpointSet.has(id),
+    });
+  }
+
+  allNodes.sort((a, b) => {
+    const aOnline = a.isOnline ? 0 : 1;
+    const bOnline = b.isOnline ? 0 : 1;
+    if (aOnline !== bOnline) return aOnline - bOnline;
+
+    const aProbe = a.inProbe ? 0 : 1;
+    const bProbe = b.inProbe ? 0 : 1;
+    if (aProbe !== bProbe) return aProbe - bProbe;
+
+    const aActive = (a.rxBPS + a.txBPS > 0 || a.activeEngines.length > 0 || a.reportingConnections) ? 0 : 1;
+    const bActive = (b.rxBPS + b.txBPS > 0 || b.activeEngines.length > 0 || b.reportingConnections) ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+
+    const oa = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER;
+    const ob = orderIndex.has(b.id) ? orderIndex.get(b.id) : Number.MAX_SAFE_INTEGER;
+    if (oa !== ob) return oa - ob;
+
+    const aVol = a.rxBPS + a.txBPS + a.monthlyUsedBytes;
+    const bVol = b.rxBPS + b.txBPS + b.monthlyUsedBytes;
+    if (bVol !== aVol) return bVol - aVol;
+    return a.id.localeCompare(b.id);
+  });
+
+  const cap = Math.max(1, Number(maxNodes) || 6);
+  const visibleNodes = allNodes.slice(0, cap);
+  const visibleSet = new Set(visibleNodes.map((n) => n.id));
+  const hiddenNodes = allNodes.slice(cap);
+
+  const maxRxSignal = Math.max(
+    0,
+    ...visibleNodes.map((n) => (n.rxBPS > 0 ? n.rxBPS : n.monthlyRxBytes)),
+  );
+  const maxTxSignal = Math.max(
+    0,
+    ...visibleNodes.map((n) => (n.txBPS > 0 ? n.txBPS : n.monthlyTxBytes)),
+  );
+
+  const weightFor = (live, monthly, maxSignal) => {
+    const sig = live > 0 ? live : monthly;
+    if (!maxSignal || sig <= 0) return 0.25;
+    return Math.max(0.28, Math.min(1, 0.28 + 0.72 * (sig / maxSignal)));
+  };
+
+  const ingressLinks = visibleNodes.map((node) => ({
+    id: `in:${node.id}`,
+    from: "ingress",
+    to: node.id,
+    bytesPerSec: node.rxBPS,
+    monthlyBytes: node.monthlyRxBytes,
+    active: node.isOnline && (node.rxBPS > 0 || node.activeEngines.length > 0 || node.reportingConnections),
+    reportingConnections: node.reportingConnections,
+    weight: weightFor(node.rxBPS, node.monthlyRxBytes, maxRxSignal),
+  }));
+
+  const egressLinks = visibleNodes.map((node) => ({
+    id: `out:${node.id}`,
+    from: node.id,
+    to: "egress",
+    bytesPerSec: node.txBPS,
+    monthlyBytes: node.monthlyTxBytes,
+    active: node.isOnline && (node.txBPS > 0 || node.activeEngines.length > 0),
+    blocked: node.blocked,
+    weight: weightFor(node.txBPS, node.monthlyTxBytes, maxTxSignal),
+  }));
+
+  const externalTargetMap = new Map();
+  const probeLinks = [];
+  let omittedProbeCount = 0;
+  let abnormalLinks = 0;
+
+  for (const pair of probes || []) {
+    const fromID = pair?.node1?.agent_id || "";
+    const isExternal = pair?.target_mode === "ip";
+    const extAddr = String(pair?.node2?.address || pair?.node2?.name || "").trim();
+    const toID = isExternal ? `ext:${extAddr}` : (pair?.node2?.agent_id || "");
+
+    const fwdDir = pair?.latest?.forward || null;
+    const revDir = pair?.bidirectional ? (pair?.latest?.reverse || null) : null;
+    const fwdStatus = probeDirectionStatus(fwdDir, pair?.availability, pair?.active_state);
+    const revStatus = pair?.bidirectional
+      ? probeDirectionStatus(revDir, pair?.availability, pair?.active_state)
+      : null;
+
+    const tone = [fwdStatus.tone, revStatus?.tone].includes("bad")
+      ? "bad"
+      : [fwdStatus.tone, revStatus?.tone].includes("warn")
+        ? "warn"
+        : fwdStatus.tone === "ok"
+          ? "ok"
+          : "";
+    if (tone === "bad" || tone === "warn") abnormalLinks += 1;
+
+    if (!fromID || !visibleSet.has(fromID) || (!isExternal && !visibleSet.has(toID)) || (isExternal && !extAddr)) {
+      omittedProbeCount += 1;
+      continue;
+    }
+
+    if (isExternal && !externalTargetMap.has(toID)) {
+      externalTargetMap.set(toID, {
+        id: toID,
+        name: pair?.node2?.name && pair.node2.name !== extAddr ? pair.node2.name : extAddr,
+        address: extAddr,
+        linkCount: 0,
+      });
+    }
+    if (isExternal) {
+      externalTargetMap.get(toID).linkCount += 1;
+    }
+
+    const fwdLatency = fwdDir?.reached && finiteNonNegative(Number(fwdDir.avg_ms)) ? Number(fwdDir.avg_ms) : null;
+    const revLatency = revDir?.reached && finiteNonNegative(Number(revDir.avg_ms)) ? Number(revDir.avg_ms) : null;
+    const lossValues = [fwdDir?.loss_percent, revDir?.loss_percent]
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v) && v >= 0);
+    const maxLoss = lossValues.length ? Math.max(...lossValues) : null;
+    const running = Boolean(pair?.availability?.running || ["preparing", "running", "stopping"].includes(pair?.active_state));
+
+    let metricLabel = fwdStatus.label;
+    if (running || fwdDir?.state === "running" || fwdDir?.state === "preparing") {
+      metricLabel = "探测中";
+    } else if (pair?.availability?.ready === false) {
+      metricLabel = "暂不可用";
+    } else if (fwdStatus.tone === "bad" && (!fwdDir?.reached || Number(fwdDir?.loss_percent) >= 100)) {
+      metricLabel = "不可达";
+    } else if (fwdLatency != null) {
+      const rtt = `${fwdLatency.toFixed(fwdLatency >= 100 ? 0 : 1)}ms`;
+      metricLabel = maxLoss != null && maxLoss > 0 ? `${rtt} · 丢包${Math.round(maxLoss)}%` : rtt;
+    }
+
+    probeLinks.push({
+      id: pair.id,
+      name: pair.name || `${pair.node1?.name || fromID} → ${pair.node2?.name || extAddr}`,
+      from: fromID,
+      to: toID,
+      isExternal,
+      bidirectional: Boolean(pair?.bidirectional),
+      running,
+      tone,
+      statusLabel: tone === "bad" ? (fwdStatus.tone === "bad" ? fwdStatus.label : revStatus.label) : fwdStatus.label,
+      metricLabel,
+      latencyMS: fwdLatency,
+      revLatencyMS: revLatency,
+      lossPercent: maxLoss,
+      sourceAddr: pair?.node1?.address || "",
+      targetAddr: pair?.node2?.address || extAddr,
+      sampledAt: pair?.latest?.sampled_at || "",
+    });
+  }
+
+  return {
+    nodes: visibleNodes,
+    hiddenNodeCount: hiddenNodes.length,
+    hiddenOnlineCount: hiddenNodes.filter((n) => n.isOnline).length,
+    totalNodes: allNodes.length,
+    onlineNodes: onlineCount,
+    runningEngines,
+    externalTargets: [...externalTargetMap.values()],
+    ingressLinks,
+    egressLinks,
+    probeLinks,
+    omittedProbeCount,
+    abnormalLinks,
+    totalProbeLinks: (probes || []).length,
+    ingress: {
+      rateBPS: fleetRxBPS,
+      monthlyBytes: monthlyRxTotal,
+      clientIPs: connections ? Number(connections.ips || 0) : null,
+      clientFlows: connections ? Number(connections.flows || 0) : null,
+      activeSources: connections ? connSources.size : null,
+    },
+    egress: {
+      rateBPS: fleetTxBPS,
+      monthlyBytes: monthlyTxTotal,
+      panelRxBPS: panelNetworkRatesValid(metrics) ? Number(metrics.network_rx_bps) : null,
+      panelTxBPS: panelNetworkRatesValid(metrics) ? Number(metrics.network_tx_bps) : null,
+    },
+  };
+}

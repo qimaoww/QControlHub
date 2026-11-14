@@ -322,7 +322,8 @@ export async function testDashboardRuntime(mode, preview = false) {
   const panel = () => card("面板运行资源");
   const traffic = () => card("流量概况");
   const ranking = () => card("流量累计排行");
-  const probes = () => card("A/B 节点延迟与丢包");
+  const topology = () => card("全网数据流拓扑");
+  const probes = () => card("节点链路监控");
   const nodes = () => card("节点运行状态");
   const activity = () => card("最近任务");
   const metric = (label) => panel()?.querySelector(`[data-refresh-key="${label}"] strong`);
@@ -347,12 +348,12 @@ export async function testDashboardRuntime(mode, preview = false) {
       for (const path of ["/agents", "/tasks", "/traffic-usage", "/traffic-policies", "/dashboard/probes", "/network-diagnostics/nodes", "/client-connections", "/ip-quality", "/settings", "/preferences/node-order"]) {
         assert(reads(path) === 0, `overview-only user requested ${path}`);
       }
-      assert(!nodes() && !activity() && !traffic() && !ranking() && !probes(), "inaccessible shortcuts exposed");
+      assert(!nodes() && !activity() && !traffic() && !ranking() && !topology() && !probes(), "inaccessible shortcuts exposed");
       await waitFor(() => document.querySelector(".a-main").textContent.includes("3/4") && document.querySelector(".a-main").textContent.includes("在线率 75%"), "overview-only user lost allowed summary");
     } else {
       assert(traffic() && ranking(), "readonly user lost own traffic");
-      await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]'), "readonly user with agents.read+tasks.read should view probes");
-      assert(![...probes().querySelectorAll("button")].some((b) => ["添加探测对", "立即探测", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
+      await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && probes()?.querySelector('[data-refresh-key="prb_1"]'), "readonly user with agents.read+tasks.read should view topology and probes");
+      assert(![...probes().querySelectorAll("button")].some((b) => ["添加链路", "立即探测", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
       assert(reads("/network-diagnostics/nodes") === 0, "readonly user fetched diagnostic node write metadata");
     }
     return;
@@ -399,21 +400,25 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(nodes().textContent.includes("时钟异常") && nodes().textContent.includes("IPv6"), "matrix omitted clock_sync or IPv6 capability badges");
   assert(!activity() && reads("/tasks") === 0, "retired recent-task area still renders or polls");
 
-  await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]') && probes()?.textContent.includes("20%"), "A/B probes card did not render pair stats");
+  await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector('[data-topo-entity="node:tokyo"]') && (topology()?.textContent.includes("43.8ms") || topology()?.querySelector(".a-dash-topo-chip")?.textContent.includes("43.8ms")), "topology card did not render nodes and live probe links");
+  topology().querySelector('[data-topo-entity="node:tokyo"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => topology()?.querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector(".a-dash-topo-inspect")?.textContent.includes("东京 · JP-03"), "topology node selection did not update inspect bar");
+
+  await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]') && probes()?.textContent.includes("20%"), "link probes card did not render stats");
   assert(!panel().querySelector(".a-dash-chip-pill") && !/\d+\/\d+\s*样本|协程/.test(panel().textContent), "panel still renders removed sample/goroutine pills");
-  const stableAddProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加探测对");
-  assert(stableAddProbeBtn, "add A/B probe button missing for authorized operator");
+  const stableAddProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加链路");
+  assert(stableAddProbeBtn, "add probe link button missing for authorized operator");
   const runBtn = [...probes().querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "立即探测");
   runBtn.click();
   await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("停止"), "run action did not enter running/stop state");
   const stopBtn = [...probes().querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "停止");
   stopBtn.click();
   await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("立即探测"), "stop action did not settle");
-  assert([...probes().querySelectorAll("button")].find((b) => b.textContent === "添加探测对") === stableAddProbeBtn, "conditional status badge replaced add probe button");
+  assert([...probes().querySelectorAll("button")].find((b) => b.textContent === "添加链路") === stableAddProbeBtn, "conditional status badge replaced add probe button");
 
-  // Add, toggle, and delete a custom A/B probe pair through the UI form & confirmation dialog.
-  const addProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加探测对");
-  assert(addProbeBtn, "add A/B probe button missing for authorized operator");
+  // Add, toggle, and delete a custom probe link through the UI form & confirmation dialog.
+  const addProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加链路");
+  assert(addProbeBtn, "add probe link button missing for authorized operator");
   addProbeBtn.click();
   const addDialog = document.querySelector("dialog[open]");
   assert(addDialog?.matches(":modal"), "add probe dialog missing");
@@ -422,14 +427,14 @@ export async function testDashboardRuntime(mode, preview = false) {
   addDialog.querySelector('select[name="node2_key"]').value = "singapore/main";
   addDialog.querySelector('select[name="node2_key"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('button[type="submit"]').click();
-  await waitFor(() => !addDialog.open && probes().textContent.includes("东京 → 新加坡测试"), "created A/B probe pair not rendered");
+  await waitFor(() => !addDialog.open && probes().textContent.includes("东京 → 新加坡测试"), "created probe link not rendered");
   const createdCard = [...probes().querySelectorAll('[data-refresh-key]')].find((el) => el.textContent.includes("东京 → 新加坡测试"));
   [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "暂停自动").click();
   await waitFor(() => createdCard.textContent.includes("开启自动"), "toggling auto probe state failed");
   [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "删除").click();
   const delConfirm = document.querySelector("dialog[open]");
-  [...delConfirm.querySelectorAll("button")].find((b) => b.textContent === "删除探测对").click();
-  await waitFor(() => !probes().textContent.includes("东京 → 新加坡测试"), "deleted A/B probe pair stayed rendered");
+  [...delConfirm.querySelectorAll("button")].find((b) => b.textContent === "删除链路").click();
+  await waitFor(() => !probes().textContent.includes("东京 → 新加坡测试"), "deleted probe link stayed rendered");
 
   // Verify node telemetry matrix 24h dialog opens and renders metrics without interfering with polling.
   const trendBtn = [...nodes().querySelector(".a-dash-matrix-row").querySelectorAll("button")].find((b) => b.textContent === "24h 趋势");
@@ -469,7 +474,7 @@ export async function testDashboardRuntime(mode, preview = false) {
 
   const assertLayout = () => {
     assert(document.documentElement.scrollWidth <= innerWidth + 1, `viewport overflow ${innerWidth}`);
-    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-dash-topo-canvas,.a-dash-topo-inspect,.a-dash-topo-mobile-links,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
       assert(element.scrollWidth <= element.clientWidth + 1, `content overflow ${element.className}`);
     }
     for (const element of document.querySelectorAll('[aria-label="节点运行状态"]')) {
@@ -497,11 +502,13 @@ export async function testDashboardRuntime(mode, preview = false) {
   const stablePanel = panel(), stableCPU = cpu(), stableNode = nodes().querySelector(".a-dash-matrix-row"), stableSVG = traffic().querySelector("svg.a-chart");
   const stableNodeAction = nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a");
   const stableProbesSVG = probes().querySelector("svg"), stableRankRow = ranking().querySelector(".a-dash-rank-row");
+  const stableTopoSVG = topology().querySelector("svg.a-dash-topo-svg");
   const stablePanelSVGs = [...panel().querySelectorAll("svg")];
   const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
   const stableProbeGrads = [...probes().querySelectorAll("linearGradient")].map((g) => g.id);
   await refresh();
   assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
+  assert(topology().querySelector("svg.a-dash-topo-svg") === stableTopoSVG && topology().querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh rebuilt topology SVG or lost selected node");
   assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
   assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
   assert(JSON.stringify([...probes().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stableProbeGrads), "probe gradient IDs churned across refresh");
