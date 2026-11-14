@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { resolveNodeGeoPoint, matchesActiveSelection } from "../analytics/dashboard-topo-shared.js";
+import {
+  buildTopologySelectionIndex,
+  clusterTopologyNodes,
+  findSameCityMembers,
+  matchesActiveSelection,
+  resolveNodeGeoPoint,
+} from "../analytics/dashboard-topo-shared.js";
 import { projectPacificGeo } from "../analytics/pacific-map-data.js";
 
 import {
@@ -346,6 +352,39 @@ export async function run() {
 
   assert.equal(matchesActiveSelection(["probe:p1", "node:b"], "cluster:a,b,c"), true);
   assert.equal(matchesActiveSelection(["probe:p1", "node:z"], "cluster:a,b,c"), false);
+
+  const selIdx = buildTopologySelectionIndex(topo);
+  assert.ok(selIdx.probePeers(topo.probeLinks[0]).includes("node:hk"), "internal probe.to peers must carry node: prefix");
+  assert.equal(matchesActiveSelection(selIdx.probePeers(topo.probeLinks[0]), "node:hk"), true);
+
+  const uncapped = buildDashboardTopology({
+    now: Date.parse("2026-08-03T12:00:00Z"),
+    month: "2026-08",
+    today: "2026-08-03",
+    agents: Array.from({ length: 30 }, (_, i) => ({ id: `n-${i}`, name: `n-${i}`, status: "online" })),
+    maxNodes: null,
+  });
+  assert.equal(uncapped.nodes.length, 30);
+  assert.equal(uncapped.hiddenNodeCount, 0);
+
+  const unordered = [
+    { id: "hk-b", name: "香港节点-B", regionCode: "HK", isOnline: true, rxBPS: 10 },
+    { id: "unk-2", name: "custom-2", regionCode: "", isOnline: true, rxBPS: 10 },
+    { id: "hk-a", name: "香港节点-A", regionCode: "HK", isOnline: true, rxBPS: 20 },
+    { id: "unk-1", name: "custom-1", regionCode: "", isOnline: true, rxBPS: 10 },
+  ];
+  const clustersA = clusterTopologyNodes(unordered);
+  const clustersB = clusterTopologyNodes([...unordered].reverse());
+  assert.deepEqual(
+    clustersA.map((c) => c.key).sort(),
+    clustersB.map((c) => c.key).sort(),
+    "clustering must be order-independent",
+  );
+  assert.deepEqual(
+    findSameCityMembers(unordered, "hk-a").map((m) => m.id).sort(),
+    ["hk-a", "hk-b"],
+  );
+  assert.equal(findSameCityMembers(unordered, "unk-2").length, 0, "unmatched geo nodes should not merge into one city cluster");
 
   console.log("Dashboard telemetry model smoke passed");
 }

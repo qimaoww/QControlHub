@@ -21,7 +21,7 @@ import { createRouteWarmup } from "../modules/route-warmup.js";
 const destinations = [
   ["概览", [
     ["dashboard", "仪表盘", "grid", "overview.read"],
-    ["topology", "网络拓扑", "activity", "agents.read"],
+    ["topology", "网络拓扑", "activity", ["agents.read", "traffic.read"]],
   ]],
   ["节点与配置", [
     ["node-settings", "节点", "server", "agents.read"],
@@ -294,7 +294,7 @@ export function startAnalytics({ app, session }) {
       node("a", { className: "a-brand", href: "#dashboard" }, bindSiteLogo(node("span", { className: "a-mark" }, icon("brand"))), "QControlHub"),
       mobile && button("", () => drawer.close(), { glyph: "close", title: "关闭导航", className: "a-icon-button a-drawer-close" }),
       node("nav", { "aria-label": "主导航" }, destinations.map(([group, entries]) => {
-        const allowed = entries.filter(([id, , , permission]) => id === "themes" || can(permission));
+        const allowed = entries.filter(([id, , , permission]) => id === "themes" || (Array.isArray(permission) ? permission.some((item) => can(item)) : can(permission)));
         if (!allowed.length) return null;
         return node("div", { className: "a-nav-group" }, node("p", { className: "a-nav-label" }, group),
           allowed.map(([id, title, glyph]) => node("a", {
@@ -479,7 +479,7 @@ export function startAnalytics({ app, session }) {
       if (typeof value === 'boolean') { layout.classList.toggle('a-collapsed', value); navigationToggle?.setAttribute('aria-expanded', String(!matchMedia('(max-width: 56rem)').matches && !value)); }
     });
     try {
-      if (entry && route !== "themes" && !can(entry[3])) { stage.replaceChildren(notice("没有访问此页面的权限。")); return; }
+      if (entry && route !== "themes" && !(Array.isArray(entry[3]) ? entry[3].some((item) => can(item)) : can(entry[3]))) { stage.replaceChildren(notice("没有访问此页面的权限。")); return; }
       const descriptor = pageModules[route];
       if (!descriptor) {
         stage.replaceChildren(notice("页面不存在。"));

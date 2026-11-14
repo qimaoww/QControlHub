@@ -1,5 +1,6 @@
 import { createSVGEl } from "./dashboard-panel.js";
 import { renderPacificMapSVG } from "./dashboard-map.js";
+import { PACIFIC_MAP_BOUNDS } from "./pacific-map-data.js";
 import { listen, patch } from "./live-dom.js";
 import { badge, button, link, muted, node, section } from "./ui.js";
 import { buildDashboardTopology, utcMonth } from "../modules/dashboard-model.js";
@@ -13,24 +14,50 @@ import {
   assignProbeLanes,
   bridgeArchPath,
   bridgePointAt,
-  buildPeerProbeTags,
   buildProbePillLabel,
   buildProbeShortAlertLabel,
-  clipLabel,
+  buildTopologySelectionIndex,
+  clusterTopologyNodes,
   createTopologyDefs,
   cubicPath,
+  entityKey,
   extendedCubicPath,
-  flowDur,
-  formatMapCityLabel,
+  extractCityClusterLabel,
+  findSameCityMembers,
+  flowSpeedClass,
   formatMs,
   isProbeUnreachable,
   matchesActiveSelection,
   placeCollisionFreePill,
-  resolveNodeGeoPoint,
+  reconcileSelectionKey,
+  rectsOverlap,
   selectTopAmbientBadProbeIDs,
   tonePalette,
   visualUnits,
 } from "./dashboard-topo-shared.js";
+
+/** SVG traffic split bar obeying strict CSP (no inline CSS styles). */
+function createCompactTrafficBarSVG(rxRatio, blocked) {
+  const rxPct = Math.max(0, Math.min(100, Math.round((Number(rxRatio) || 0) * 100)));
+  const svg = createSVGEl("svg", {
+    class: "a-dash-topo-meter-svg",
+    viewBox: "0 0 100 4",
+    preserveAspectRatio: "none",
+    "aria-hidden": "true",
+  });
+  svg.append(createSVGEl("rect", { x: 0, y: 0, width: 100, height: 4, rx: 2, class: "a-dash-topo-meter-track" }));
+  if (rxPct > 0) {
+    svg.append(createSVGEl("rect", {
+      x: 0,
+      y: 0,
+      width: rxPct,
+      height: 4,
+      rx: 2,
+      fill: blocked ? BLOCKED_COLOR : INGRESS_COLOR,
+    }));
+  }
+  return svg;
+}
 
 export function createDashboardTopologySection(ctx, {
   bytes,
@@ -61,15 +88,54 @@ export function createDashboardTopologySection(ctx, {
   let probeFilterTouched = false;
   let observedWidth = 0;
   let lastPaintSignature = "";
+  let lastFlowGeomSignature = "";
   let lastModel = null;
+  let lastClusters = [];
+  let lastTrafficMeta = { readable: true, state: "ready", hasData: true, label: "" };
   let paintScheduled = false;
   let paintForced = false;
+  let flowEdgeFrame = 0;
   let disposed = false;
+
+  // Bounded viewport pan/zoom state exclusively for the Pacific map stage.
+  let mapZoom = { scale: 1, tx: 0, ty: 0 };
+  let suppressNextCanvasClearClick = false;
 
   ctx.signal.addEventListener("abort", () => {
     disposed = true;
     paintScheduled = false;
+    cancelAnimationFrame(flowEdgeFrame);
+    lastModel = null;
+    lastClusters = [];
   }, { once: true });
+
+  const clampZoomTransform = ({ scale, tx, ty }) => {
+    const nextScale = Math.max(1, Math.min(3.2, Number(scale) || 1));
+    if (nextScale <= 1.001) return { scale: 1, tx: 0, ty: 0 };
+    const vw = PACIFIC_MAP_BOUNDS.width;
+    const mh = PACIFIC_MAP_BOUNDS.height;
+    const minTx = vw * (1 - nextScale);
+    const minTy = mh * (1 - nextScale);
+    return {
+      scale: nextScale,
+      tx: Math.max(minTx, Math.min(0, Number(tx) || 0)),
+      ty: Math.max(minTy, Math.min(0, Number(ty) || 0)),
+    };
+  };
+
+  const resetMapZoom = (shouldRepaint = false) => {
+    const changed = mapZoom.scale !== 1 || mapZoom.tx !== 0 || mapZoom.ty !== 0;
+    mapZoom = { scale: 1, tx: 0, ty: 0 };
+    if (changed && shouldRepaint && viewMode === "map") paint(true);
+  };
+
+  const clearSelection = () => {
+    if (!pinnedKey && !hoveredKey) return;
+    pinnedKey = "";
+    hoveredKey = "";
+    syncHighlight();
+    syncInspect();
+  };
 
   const statusNode = muted("读取中…");
   statusNode.setAttribute("role", "status");
@@ -92,29 +158,35 @@ export function createDashboardTopologySection(ctx, {
     role: "group",
     "aria-label": "拓扑视图模式",
   }, flowModeBtn, mapModeBtn);
+
   const applyViewModeButtons = () => {
     flowModeBtn.classList.toggle("is-active", viewMode === "flow");
     mapModeBtn.classList.toggle("is-active", viewMode === "map");
     flowModeBtn.setAttribute("aria-pressed", viewMode === "flow" ? "true" : "false");
     mapModeBtn.setAttribute("aria-pressed", viewMode === "map" ? "true" : "false");
   };
+
   const setViewMode = (nextMode, { persist = true, repaint = true } = {}) => {
     const normalized = nextMode === "map" ? "map" : "flow";
-    if (persist) {
-      viewModeTouched = true;
+    const changed = viewMode !== normalized;
+    viewModeTouched = true;
+    if (persist && changed) {
       ctx.preferences?.patch?.("dashboard", { topo_view_mode: normalized });
     }
-    if (viewMode === normalized) return;
+    if (!changed) return;
     viewMode = normalized;
+    if (normalized !== "map") resetMapZoom(false);
     applyViewModeButtons();
     if (repaint) paint(true);
   };
+
   const syncSavedTopologyPreferences = ({ repaint = false } = {}) => {
     if (disposed || !ctx.preferences?.get) return;
     const saved = ctx.preferences.get("dashboard");
     let changed = false;
     if (!viewModeTouched && VALID_VIEW_MODES.has(saved?.topo_view_mode) && saved.topo_view_mode !== viewMode) {
       viewMode = saved.topo_view_mode;
+      if (viewMode !== "map") resetMapZoom(false);
       applyViewModeButtons();
       changed = true;
     }
@@ -134,7 +206,8 @@ export function createDashboardTopologySection(ctx, {
     }
     void ctx.preferences.ready?.().then(() => syncSavedTopologyPreferences({ repaint: true }));
   }
-  const detailPageLink = !isStandalonePage && ctx.can("agents.read")
+
+  const detailPageLink = !isStandalonePage && canView()
     ? Object.assign(link("拓扑详情", "#topology"), {
         className: "a-button a-dash-topo-page-btn",
         "data-refresh-key": "open-topology-page",
@@ -146,6 +219,7 @@ export function createDashboardTopologySection(ctx, {
         "data-refresh-key": "open-probes",
       })
     : null;
+
   const canvasHost = node("div", { className: "a-dash-topo-canvas" });
   const inspectPrimary = node("div", { className: "a-dash-topo-inspect-main" });
   const inspectDetail = node("div", { className: "a-dash-topo-inspect-detail" });
@@ -165,80 +239,103 @@ export function createDashboardTopologySection(ctx, {
     return [...links].sort((a, b) => (score[b.tone] || 0) - (score[a.tone] || 0))[0] || null;
   };
 
-  const findSameCityMembers = (targetNode, model) => {
-    if (!targetNode) return [];
-    const targetGeo = resolveNodeGeoPoint(targetNode, 0);
-    if (!targetGeo.matched) return [];
-    return (model?.nodes || []).filter((candidate) => {
-      const geo = resolveNodeGeoPoint(candidate, 0);
-      return geo.matched && Math.hypot(geo.x - targetGeo.x, geo.y - targetGeo.y) < 4.5;
-    });
-  };
-
-  const selectPinnedEntity = (entityKey) => {
-    pinnedKey = entityKey;
+  const selectPinnedEntity = (key) => {
+    pinnedKey = key;
     hoveredKey = "";
     syncHighlight();
     syncInspect();
   };
 
-  /** Appends consistent same-city cluster + member switcher pills with active-state highlight. */
+  /** Appends consistent same-city cluster + full-name member switcher pills with active highlight. */
   const appendSameCitySwitchers = (chips, members, currentKey) => {
     if (!Array.isArray(members) || members.length <= 1) return;
-    const clusterKey = `cluster:${members.map((m) => m.id).join(",")}`;
+    const cKey = entityKey.cluster(members.map((m) => m.id));
     chips.push(button(
       `同城聚合 (${members.length})`,
-      () => selectPinnedEntity(clusterKey),
+      () => selectPinnedEntity(cKey),
       {
-        className: `a-dash-topo-cluster-btn ${currentKey === clusterKey ? "is-active" : ""}`,
-        "data-cluster-key": clusterKey,
+        className: `a-dash-topo-cluster-btn ${currentKey === cKey ? "is-active" : ""}`,
+        "data-cluster-key": cKey,
       },
     ));
     members.forEach((member) => {
-      const memberKey = `node:${member.id}`;
+      const memberKey = entityKey.node(member.id);
+      const memberName = member.name || member.id;
       chips.push(button(
-        member.name || member.id,
+        memberName,
         () => selectPinnedEntity(memberKey),
         {
           className: `a-dash-topo-cluster-btn ${currentKey === memberKey ? "is-active" : ""}`,
           "data-cluster-member": member.id,
           "data-cluster-key": memberKey,
-          title: `切换聚焦到 ${member.name || member.id}`,
+          title: `切换聚焦到 ${memberName}`,
         },
       ));
     });
   };
 
-  const resolveKeyDescription = (key, model) => {
+  const formatHubTrafficChips = (direction, model, tMeta) => {
+    if (!tMeta.readable) return [badge("无流量权限", "warn")];
+    if (!tMeta.hasData && tMeta.state === "loading") return [muted("流量读取中…")];
+    if (!tMeta.hasData && tMeta.state === "failed") return [badge("流量读取失败", "warn")];
+    if (direction === "ingress") {
+      const out = [
+        muted(`实时入站 ↓ ${bytes(model.ingress.rateBPS)}/s`),
+        muted(`本月接收 ${bytes(model.ingress.monthlyBytes)}`),
+      ];
+      if (model.ingress.clientIPs != null) {
+        out.push(muted(`24h ${model.ingress.clientIPs} IP · ${model.ingress.clientFlows} 流`));
+      }
+      if (tMeta.state === "partial-failed") out.push(badge("刷新失败 · 保留已有记录", "warn"));
+      return out;
+    }
+    const out = [
+      muted(`实时出站 ↑ ${bytes(model.egress.rateBPS)}/s`),
+      muted(`本月发送 ${bytes(model.egress.monthlyBytes)}`),
+      muted(`${model.onlineNodes}/${model.totalNodes} 节点在线`),
+    ];
+    if (tMeta.state === "partial-failed") out.push(badge("刷新失败 · 保留已有记录", "warn"));
+    return out;
+  };
+
+  const formatNodeTrafficChips = (item, tMeta) => {
+    if (!tMeta.readable) return [muted("无流量权限")];
+    if (!tMeta.hasData && tMeta.state === "loading") return [muted("流量读取中…")];
+    if (!tMeta.hasData && tMeta.state === "failed") return [muted("流量读取失败")];
+    return [
+      muted(`↓ ${bytes(item.rxBPS)}/s · ↑ ${bytes(item.txBPS)}/s`),
+      muted(`本月 ${bytes(item.monthlyUsedBytes)}`),
+    ];
+  };
+
+  const formatClusterTrafficChip = (members, tMeta) => {
+    if (!tMeta.readable) return muted("无流量权限");
+    if (!tMeta.hasData && tMeta.state === "loading") return muted("流量读取中…");
+    if (!tMeta.hasData && tMeta.state === "failed") return muted("流量读取失败");
+    const totalRx = members.reduce((s, m) => s + (m.rxBPS || 0), 0);
+    const totalTx = members.reduce((s, m) => s + (m.txBPS || 0), 0);
+    return muted(`合计 ↓ ${bytes(totalRx)}/s · ↑ ${bytes(totalTx)}/s`);
+  };
+
+  const resolveKeyDescription = (key, model, tMeta = lastTrafficMeta) => {
     if (!model || !model.nodes.length) {
       return {
-        primary: [node("span", { className: "a-dash-topo-inspect-title" }, "全网数据流拓扑"), muted("等待节点与流量样本…")],
+        primary: [node("span", { className: "a-dash-topo-inspect-title" }, "全网数据流拓扑"), muted(statusNode.textContent || "等待节点与流量样本…")],
         detail: [],
       };
     }
 
     if (key === "hub:ingress") {
-      const chips = [
-        muted(`实时入站 ↓ ${bytes(model.ingress.rateBPS)}/s`),
-        muted(`本月接收 ${bytes(model.ingress.monthlyBytes)}`),
-      ];
-      if (model.ingress.clientIPs != null) {
-        chips.push(muted(`24h ${model.ingress.clientIPs} IP · ${model.ingress.clientFlows} 流`));
-      }
       return {
         primary: [node("span", { className: "a-dash-topo-inspect-title" }, "入站流量")],
-        detail: chips,
+        detail: formatHubTrafficChips("ingress", model, tMeta),
       };
     }
 
     if (key === "hub:egress") {
       return {
         primary: [node("span", { className: "a-dash-topo-inspect-title" }, "出站流量")],
-        detail: [
-          muted(`实时出站 ↑ ${bytes(model.egress.rateBPS)}/s`),
-          muted(`本月发送 ${bytes(model.egress.monthlyBytes)}`),
-          muted(`${model.onlineNodes}/${model.totalNodes} 节点在线`),
-        ],
+        detail: formatHubTrafficChips("egress", model, tMeta),
       };
     }
 
@@ -256,6 +353,7 @@ export function createDashboardTopologySection(ctx, {
         if (canOpenProbes && onOpenProbes) {
           chips.push(button("链路监控", () => onOpenProbes(item.id), { className: "a-button" }));
         }
+        chips.push(button("取消聚焦", clearSelection, { className: "a-button", "data-refresh-key": "topo-unpin" }));
         return {
           primary: [node("span", { className: "a-dash-topo-inspect-title" }, item.name)],
           detail: chips,
@@ -268,12 +366,14 @@ export function createDashboardTopologySection(ctx, {
       const related = model.probeLinks.filter((p) => p.isExternal && p.to === ext.id);
       const chips = [
         muted("公网目标"),
+        ext.address && ext.address !== ext.name ? node("code", { className: "a-dash-topo-code" }, ext.address) : null,
         muted(`${related.length} 条探测链路`),
-      ];
+      ].filter(Boolean);
       const priority = pickPriorityProbe(related);
       if (canOpenProbes && onOpenProbes && priority) {
         chips.push(button("链路监控", () => onOpenProbes(priority.id), { className: "a-button" }));
       }
+      chips.push(button("取消聚焦", clearSelection, { className: "a-button", "data-refresh-key": "topo-unpin" }));
       return {
         primary: [node("span", { className: "a-dash-topo-inspect-title" }, ext.name)],
         detail: chips,
@@ -286,23 +386,21 @@ export function createDashboardTopologySection(ctx, {
       if (members.length) {
         const primaryNode = members[0];
         const region = geoRegionDetails(primaryNode.regionCode);
-        const rawCity = formatMapCityLabel(primaryNode.name, primaryNode);
-        const cityName = /[·|]/.test(String(primaryNode.name || "")) ? rawCity : (region?.name || rawCity.replace(/-[a-z0-9]{1,3}$/i, ""));
+        const cityName = extractCityClusterLabel(members);
         const onlineCount = members.filter((m) => m.isOnline).length;
-        const totalRx = members.reduce((s, m) => s + (m.rxBPS || 0), 0);
-        const totalTx = members.reduce((s, m) => s + (m.txBPS || 0), 0);
         const memberSet = new Set(memberIDs);
         const relatedProbes = model.probeLinks.filter((p) => memberSet.has(p.from) || (!p.isExternal && memberSet.has(p.to)));
         const priorityProbe = pickPriorityProbe(relatedProbes);
 
         const chips = [
           badge(`${onlineCount}/${members.length} 在线`, onlineCount === members.length ? "ok" : onlineCount > 0 ? "warn" : "bad"),
-          muted(`合计 ↓ ${bytes(totalRx)}/s · ↑ ${bytes(totalTx)}/s`),
+          formatClusterTrafficChip(members, tMeta),
         ];
         appendSameCitySwitchers(chips, members, key);
         if (canOpenProbes && onOpenProbes && relatedProbes.length) {
           chips.push(button(`关联链路 (${relatedProbes.length})`, () => onOpenProbes(priorityProbe?.id || "")));
         }
+        chips.push(button("取消聚焦", clearSelection, { className: "a-button", "data-refresh-key": "topo-unpin" }));
         return {
           primary: [
             node("span", { className: "a-dash-topo-inspect-title" }, `${region ? `${region.code} · ` : ""}${cityName} 同城聚合 (${members.length} 节点)`),
@@ -321,13 +419,12 @@ export function createDashboardTopologySection(ctx, {
         const priorityProbe = pickPriorityProbe(relatedProbes);
         const chips = [
           badge(item.isOnline ? "在线" : "离线", item.isOnline ? "ok" : "bad"),
-          muted(`↓ ${bytes(item.rxBPS)}/s · ↑ ${bytes(item.txBPS)}/s`),
-          muted(`本月 ${bytes(item.monthlyUsedBytes)}`),
+          ...formatNodeTrafficChips(item, tMeta),
         ];
         if (item.activeEngines.length) chips.push(muted(`内核 ${item.activeEngines.join(" / ")}`));
         if (item.blocked) chips.push(badge("已超限阻断", "bad"));
         if (viewMode === "map") {
-          appendSameCitySwitchers(chips, findSameCityMembers(item, model), key);
+          appendSameCitySwitchers(chips, findSameCityMembers(model.nodes, item.id), key);
         }
         if (canOpenProbes && onOpenProbes && relatedProbes.length) {
           chips.push(button(`关联链路 (${relatedProbes.length})`, () => onOpenProbes(priorityProbe?.id || "")));
@@ -335,6 +432,7 @@ export function createDashboardTopologySection(ctx, {
         if (ctx.can("traffic.read")) {
           chips.push(link("流量明细", `#traffic?agent=${encodeURIComponent(item.id)}`));
         }
+        chips.push(button("取消聚焦", clearSelection, { className: "a-button", "data-refresh-key": "topo-unpin" }));
         return {
           primary: [
             node("span", { className: "a-dash-topo-inspect-title" }, `${region ? `${region.code} · ` : ""}${item.name}`),
@@ -345,14 +443,18 @@ export function createDashboardTopologySection(ctx, {
       }
     }
 
-    const parts = [
-      muted(`↓ ${bytes(model.ingress.rateBPS)}/s · ↑ ${bytes(model.egress.rateBPS)}/s`),
-      model.hiddenNodeCount > 0 ? muted(`显示前 ${model.nodes.length}/${model.totalNodes} 节点`) : null,
-      model.totalProbeLinks > 0 ? muted(`探测链路 ${model.totalProbeLinks}`) : null,
-    ].filter(Boolean);
+    const summaryDetail = !tMeta.readable
+      ? [badge("无流量权限", "warn")]
+      : (!tMeta.hasData && tMeta.state === "loading")
+        ? [muted("流量读取中…")]
+        : (!tMeta.hasData && tMeta.state === "failed")
+          ? [badge("流量读取失败", "warn")]
+          : [muted(`↓ ${bytes(model.ingress.rateBPS)}/s · ↑ ${bytes(model.egress.rateBPS)}/s`)];
+    if (model.hiddenNodeCount > 0) summaryDetail.push(muted(`概览展示 ${model.nodes.length}/${model.totalNodes} 节点`));
+    if (model.totalProbeLinks > 0) summaryDetail.push(muted(`探测链路 ${model.totalProbeLinks}`));
     return {
       primary: [node("span", { className: "a-dash-topo-inspect-title" }, "实时流量汇总")],
-      detail: parts,
+      detail: summaryDetail,
     };
   };
 
@@ -360,7 +462,7 @@ export function createDashboardTopologySection(ctx, {
     const focusedClusterKey = inspectDetail.contains(document.activeElement)
       ? document.activeElement?.getAttribute?.("data-cluster-key") || ""
       : "";
-    const { primary, detail } = resolveKeyDescription(activeKey(), lastModel);
+    const { primary, detail } = resolveKeyDescription(activeKey(), lastModel, lastTrafficMeta);
     inspectPrimary.replaceChildren(...primary);
     inspectDetail.replaceChildren(...detail);
     if (focusedClusterKey) {
@@ -369,53 +471,25 @@ export function createDashboardTopologySection(ctx, {
     }
   };
 
-  const syncAmbientPillGeometry = (el, expanded) => {
-    const want = expanded ? "true" : "false";
-    if (el.getAttribute("data-expanded") === want) return;
-    el.setAttribute("data-expanded", want);
-    const cx = Number(el.getAttribute("data-cx") || 0);
-    const cy = Number(el.getAttribute("data-cy") || 0);
-    const compact = el.getAttribute("data-compact") === "1";
-    const w = Number(el.getAttribute(expanded ? "data-full-w" : "data-short-w") || 64);
-    const nextLabel = el.getAttribute(expanded ? "data-full-label" : "data-short-label") || "";
-    const rectEl = el.querySelector("rect.a-dash-topo-probe-pill");
-    if (rectEl) {
-      rectEl.setAttribute("x", (cx - w / 2).toFixed(1));
-      rectEl.setAttribute("width", w.toFixed(1));
-    }
-    const dotX = cx - w / 2 + (compact ? 8 : 10);
-    const dotEl = el.querySelector(".a-dash-topo-pill-dot");
-    if (dotEl) {
-      if (dotEl.tagName.toLowerCase() === "circle") {
-        dotEl.setAttribute("cx", dotX.toFixed(1));
-      } else {
-        dotEl.setAttribute("d", `M ${(dotX - 2.3).toFixed(1)} ${(cy - 2.3).toFixed(1)} L ${(dotX + 2.3).toFixed(1)} ${(cy + 2.3).toFixed(1)} M ${(dotX + 2.3).toFixed(1)} ${(cy - 2.3).toFixed(1)} L ${(dotX - 2.3).toFixed(1)} ${(cy + 2.3).toFixed(1)}`);
-      }
-    }
-    const textEl = el.querySelector("text.a-dash-topo-pill-text");
-    if (textEl) {
-      textEl.setAttribute("x", (dotX + (compact ? 6.5 : 7.5)).toFixed(1));
-      if (textEl.textContent !== nextLabel) textEl.textContent = nextLabel;
-    }
-  };
-
   const syncHighlight = () => {
     const sel = activeKey();
-    const svg = canvasHost.querySelector("svg.a-dash-topo-svg");
-    if (svg) {
-      svg.querySelectorAll("[data-topo-peers]").forEach((el) => {
+    const roots = [canvasHost.querySelector(".a-dash-topo-flow-board"), canvasHost.querySelector("svg.a-dash-topo-svg")].filter(Boolean);
+    for (const root of roots) {
+      root.querySelectorAll("[data-topo-peers]").forEach((el) => {
         const peers = (el.getAttribute("data-topo-peers") || "").split(" ").filter(Boolean);
-        const base = el.getAttribute("data-base-opacity") || "1";
         const match = matchesActiveSelection(peers, sel);
-        const dimOpacity = el.getAttribute("data-dim-opacity") ?? (el.classList.contains("a-dash-topo-card-node") ? "0.35" : "0.14");
-        const next = match === true ? "1" : match === false ? dimOpacity : base;
-        if (el.getAttribute("opacity") !== next) el.setAttribute("opacity", next);
-        el.classList.toggle("is-highlighted", match === true);
-        if (el.getAttribute("data-ambient-alert") === "true") {
-          syncAmbientPillGeometry(el, match === true);
+        if (el.namespaceURI === "http://www.w3.org/2000/svg") {
+          const base = el.getAttribute("data-base-opacity") || "1";
+          const dimOpacity = el.getAttribute("data-dim-opacity") ?? (el.classList.contains("a-dash-topo-card-node") ? "0.35" : "0.14");
+          const next = match === true ? "1" : match === false ? dimOpacity : base;
+          if (el.getAttribute("opacity") !== next) el.setAttribute("opacity", next);
+          el.classList.toggle("is-highlighted", match === true);
+        } else {
+          el.classList.toggle("is-highlighted", match === true);
+          el.classList.toggle("is-dimmed", match === false);
         }
       });
-      svg.querySelectorAll("[data-topo-entity]").forEach((el) => {
+      root.querySelectorAll("[data-topo-entity]").forEach((el) => {
         const key = el.getAttribute("data-topo-entity") || "";
         const isClusterMemberPinned = key.startsWith("cluster:") && pinnedKey.startsWith("node:") && key.slice(8).split(",").includes(pinnedKey.slice(5));
         const isNodeInPinnedCluster = key.startsWith("node:") && pinnedKey.startsWith("cluster:") && pinnedKey.slice(8).split(",").includes(key.slice(5));
@@ -463,6 +537,7 @@ export function createDashboardTopologySection(ctx, {
     const activate = (event) => {
       if (event.type === "keydown" && event.key !== "Enter" && event.key !== " ") return;
       if (event.type === "keydown") event.preventDefault();
+      event.stopPropagation();
       if (openProbeID && canOpenProbes && onOpenProbes) {
         hoveredKey = "";
         syncHighlight();
@@ -475,6 +550,39 @@ export function createDashboardTopologySection(ctx, {
     listen(el, "click", activate);
     listen(el, "keydown", activate);
   };
+
+  // Clear focus cleanly on canvas blank clicks, Escape, or mouse leaving hosts.
+  listen(canvasHost, "pointerleave", () => {
+    if (hoveredKey) {
+      hoveredKey = "";
+      syncHighlight();
+      syncInspect();
+    }
+  });
+  probeMatrixHost && listen(probeMatrixHost, "pointerleave", () => {
+    if (hoveredKey) {
+      hoveredKey = "";
+      syncHighlight();
+      syncInspect();
+    }
+  });
+  listen(canvasHost, "click", (event) => {
+    if (suppressNextCanvasClearClick) {
+      suppressNextCanvasClearClick = false;
+      return;
+    }
+    if (event.target.closest?.("[data-topo-entity], .a-dash-topo-map-tools")) return;
+    clearSelection();
+  });
+  listen(document, "keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (document.querySelector("dialog[open]")) return;
+    if (pinnedKey || hoveredKey) {
+      clearSelection();
+    } else if (viewMode === "map" && mapZoom.scale > 1.001) {
+      resetMapZoom(true);
+    }
+  });
 
   const isHighlightedEdge = (peers) => matchesActiveSelection(peers, activeKey());
 
@@ -493,14 +601,24 @@ export function createDashboardTopologySection(ctx, {
   const syncLedger = () => {
     if (!showLedger || !probeMatrixHost) return;
     const model = lastModel;
+    const probesStatus = getStates()?.get?.("probes") || "";
     const links = model?.probeLinks || [];
+
     if (!links.length) {
+      if (probesStatus === "failed") {
+        probeMatrixHost.hidden = false;
+        patchChildren(probeMatrixHost, [
+          node("div", { className: "a-dash-topo-ledger-empty", "data-refresh-key": "ledger-failed" }, "探测链路读取失败，请刷新重试。"),
+        ]);
+        return;
+      }
       probeMatrixHost.hidden = true;
       if (probeMatrixHost.childElementCount) probeMatrixHost.replaceChildren();
       return;
     }
     probeMatrixHost.hidden = false;
 
+    const selIndex = buildTopologySelectionIndex(model);
     const nodeNameByID = new Map((model.nodes || []).map((n) => [n.id, n.name || n.id]));
     const extNameByID = new Map((model.externalTargets || []).map((e) => [e.id, e.name || e.address || e.id]));
     const fullNameOf = (id) => {
@@ -508,13 +626,11 @@ export function createDashboardTopologySection(ctx, {
       if (s.startsWith("ext:")) return extNameByID.get(s) || s.slice(4);
       return nodeNameByID.get(s) || s;
     };
-    const shortCardName = (id) => fullNameOf(id).replace(/^qch-tools-installed-/, "tools-");
 
     const badCount = links.filter((p) => p.tone === "bad" || p.tone === "warn").length;
     const meshCount = links.filter((p) => !p.isExternal).length;
     const extCount = links.length - meshCount;
 
-    // Preserve saved "bad" preference while probes are empty/healthy so async loading never overwrites account state.
     const effectiveFilter = (probeFilter === "bad" && !badCount) ? "all" : probeFilter;
     const filterDefs = [
       { id: "all", label: `全部 (${links.length})` },
@@ -536,9 +652,10 @@ export function createDashboardTopologySection(ctx, {
         "div",
         { className: "a-dash-topo-filter-group", role: "group", "aria-label": "探测链路筛选", "data-refresh-key": "ledger-filters" },
         ...filterDefs.map((f) => button(f.label, () => {
+          const changed = probeFilter !== f.id;
           probeFilterTouched = true;
-          ctx.preferences?.patch?.("dashboard", { topo_probe_filter: f.id });
-          if (probeFilter === f.id && effectiveFilter === f.id) return;
+          if (changed) ctx.preferences?.patch?.("dashboard", { topo_probe_filter: f.id });
+          if (!changed && effectiveFilter === f.id) return;
           probeFilter = f.id;
           syncLedger();
           syncHighlight();
@@ -587,11 +704,10 @@ export function createDashboardTopologySection(ctx, {
           "div",
           { className: "a-dash-topo-ledger-grid", "data-refresh-key": "ledger-grid" },
           ...sorted.map((probe) => {
-            const entityKey = `probe:${probe.id}`;
-            const peers = [entityKey, `node:${probe.from}`, probe.isExternal ? probe.to : `node:${probe.to}`];
+            const eKey = entityKey.probe(probe.id);
+            const peers = selIndex.probePeers(probe);
             const arrow = probe.bidirectional ? "↔" : "→";
-            const routeTitle = `${shortCardName(probe.from)} ${arrow} ${shortCardName(probe.to)}`;
-            const fullRouteTip = `${fullNameOf(probe.from)} ${arrow} ${fullNameOf(probe.to)}`;
+            const routeTitle = `${fullNameOf(probe.from)} ${arrow} ${fullNameOf(probe.to)}`;
             const cardEl = node(
               "button",
               {
@@ -600,7 +716,7 @@ export function createDashboardTopologySection(ctx, {
                 "data-refresh-key": `ledger-card-${probe.id}`,
                 "data-tone": probe.tone || "idle",
                 "data-topo-peers": peers.join(" "),
-                title: `${fullRouteTip} · ${formatRttText(probe)} · ${formatLossBadge(probe)}`,
+                title: `${routeTitle} · ${formatRttText(probe)} · ${formatLossBadge(probe)}`,
               },
               node(
                 "div",
@@ -615,7 +731,7 @@ export function createDashboardTopologySection(ctx, {
                 node("span", { className: "a-dash-topo-link-kind", "data-refresh-key": "kind" }, probe.isExternal ? "公网目标" : (probe.bidirectional ? "双向探测" : "单向探测")),
               ),
             );
-            bindInteractive(cardEl, entityKey, { openProbeID: probe.id });
+            bindInteractive(cardEl, eKey, { openProbeID: probe.id });
             return cardEl;
           }),
         );
@@ -629,7 +745,7 @@ export function createDashboardTopologySection(ctx, {
     return el;
   };
 
-  const renderFlowCurve = ({ d, peers, baseOpacity, glowColor, glowWidth, stroke, strokeWidth, dash, markerEnd, pulseColor, pulseOpacity, pulseDur, photonColor, rateLabel, rateColor, labelPos, labelAnchor = "middle", labelLayer = null, labelOffsetY = -5, refreshKey }) => {
+  const renderFlowCurve = ({ d, peers, baseOpacity, glowColor, glowWidth, stroke, strokeWidth, dash, markerEnd, pulseColor, pulseOpacity, pulseWeight = 0.5, photonColor, rateLabel, rateColor, labelPos, labelAnchor = "middle", labelLayer = null, labelOffsetY = -5, refreshKey }) => {
     const hl = isHighlightedEdge(peers);
     const opacity = hl === true ? 1 : hl === false ? 0.14 : baseOpacity;
     const g = createSVGEl("g", {
@@ -667,23 +783,22 @@ export function createDashboardTopologySection(ctx, {
         "stroke-dasharray": "4 14",
         "stroke-linecap": "round",
         opacity: pulseOpacity.toFixed(2),
-        style: pulseDur ? `--topo-dur: ${pulseDur}` : null,
-        class: "a-dash-topo-flow-pulse",
+        class: `a-dash-topo-flow-pulse ${flowSpeedClass(pulseWeight)}`,
       }));
     }
     if (photonColor && allowMotion()) {
       const photon = createSVGEl("circle", {
         "data-refresh-key": `${refreshKey}-photon`,
-        r: "2.3",
+        r: "2.2",
         fill: "#ffffff",
         stroke: photonColor,
-        "stroke-width": "1.35",
+        "stroke-width": "1.3",
         opacity: "0.95",
       });
       photon.append(createSVGEl("animateMotion", {
         "data-refresh-key": `${refreshKey}-motion`,
         path: d,
-        dur: pulseDur || "1.9s",
+        dur: `${Math.max(1.0, 2.55 - (Number(pulseWeight) || 0) * 1.45).toFixed(2)}s`,
         repeatCount: "indefinite",
       }));
       g.append(photon);
@@ -708,15 +823,12 @@ export function createDashboardTopologySection(ctx, {
     return g;
   };
 
-  const createProbePillGroup = ({ probe, cx, cy, pillW, fullW = pillW, pillH, label, shortLabel = label, pal, compact = false, peers, focusOnly = false, ambientAlert = false }) => {
-    const entityKey = `probe:${probe.id}`;
+  const createProbePillGroup = ({ probe, cx, cy, pillW, fullW = pillW, pillH, label, shortLabel = label, pal, compact = false, peers, focusOnly = false }) => {
+    const eKey = entityKey.probe(probe.id);
     const hl = isHighlightedEdge(peers);
-    const selected = activeKey() === entityKey;
-    const expanded = !ambientAlert || hl === true || selected;
-    const curW = expanded ? fullW : pillW;
-    const curLabel = expanded ? label : shortLabel;
+    const selected = activeKey() === eKey;
     const baseStr = focusOnly ? "0" : "1";
-    const dimStr = focusOnly ? "0" : ambientAlert ? "0.18" : "0.22";
+    const dimStr = focusOnly ? "0" : "0.22";
     const op = focusOnly ? (hl === true ? "1" : "0") : (hl === false ? dimStr : "1");
     const g = createSVGEl("g", {
       class: `a-dash-topo-probe-item ${focusOnly ? "a-dash-topo-focus-only" : ""} ${selected ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
@@ -725,24 +837,13 @@ export function createDashboardTopologySection(ctx, {
       "data-topo-peers": peers.join(" "),
       "data-base-opacity": baseStr,
       "data-dim-opacity": dimStr,
-      ...(ambientAlert ? {
-        "data-ambient-alert": "true",
-        "data-expanded": expanded ? "true" : "false",
-        "data-cx": cx.toFixed(1),
-        "data-cy": cy.toFixed(1),
-        "data-compact": compact ? "1" : "0",
-        "data-short-w": pillW.toFixed(1),
-        "data-full-w": fullW.toFixed(1),
-        "data-short-label": shortLabel,
-        "data-full-label": label,
-      } : {}),
       opacity: op,
     });
     g.append(createSVGEl("title", {}, `${probe.name}: ${probe.metricLabel} (${probe.statusLabel}) — 点击打开链路监控`));
     g.append(createSVGEl("rect", {
-      x: (cx - curW / 2).toFixed(1),
+      x: (cx - pillW / 2).toFixed(1),
       y: (cy - pillH / 2).toFixed(1),
-      width: curW.toFixed(1),
+      width: pillW.toFixed(1),
       height: pillH,
       rx: (pillH / 2).toFixed(1),
       fill: pal.fill,
@@ -751,7 +852,7 @@ export function createDashboardTopologySection(ctx, {
       class: "a-dash-topo-probe-pill",
     }));
 
-    const dotX = cx - curW / 2 + (compact ? 8 : 10);
+    const dotX = cx - pillW / 2 + (compact ? 8 : 10);
     if (isProbeUnreachable(probe) && probe.tone === "bad") {
       g.append(createSVGEl("path", {
         class: "a-dash-topo-pill-dot",
@@ -770,9 +871,9 @@ export function createDashboardTopologySection(ctx, {
       y: (cy + (compact ? 3.2 : 3.6)).toFixed(1),
       class: "a-dash-topo-pill-text",
       fill: pal.ink,
-    }, curLabel));
+    }, label));
 
-    bindInteractive(g, entityKey, { openProbeID: probe.id });
+    bindInteractive(g, eKey, { openProbeID: probe.id });
     return g;
   };
 
@@ -809,1005 +910,566 @@ export function createDashboardTopologySection(ctx, {
     );
   };
 
-  const renderDesktopSVG = (width, model) => {
-    const nodesCount = model.nodes.length;
-    const isDense = nodesCount > 8 || model.probeLinks.length >= 10 || model.externalTargets.length >= 4;
-    const vw = Math.max(isDense ? 1280 : 1080, Math.round(width));
-    const padX = 14;
-    const padTop = 32;
-    const padBottom = 16;
-    const nodeH = nodesCount > 12 ? 34 : nodesCount > 8 ? 44 : 52;
-    const nodeGap = nodesCount > 12 ? 6 : nodesCount > 8 ? 11 : 18;
-    const sideW = Math.round(Math.max(162, Math.min(184, vw * 0.142)));
-    const nodeW = Math.round(Math.max(236, Math.min(278, vw * 0.215)));
-    const leftX = padX;
-    const rightX = vw - padX - sideW;
-    const interior = Math.max(nodeW + 320, rightX - (leftX + sideW));
-    const remaining = interior - nodeW;
-    const leftGap = isDense
-      ? Math.max(84, Math.min(114, Math.round(remaining * 0.165)))
-      : Math.max(88, Math.min(116, Math.round(remaining * 0.175)));
-    const nodeX = leftX + sideW + leftGap;
-    const rightGap = Math.max(240, rightX - (nodeX + nodeW));
+  /** Renders semantic HTML flow board (guaranteed untruncated wrapped names) + underlying SVG edge layer. */
+  const buildFlowBoardElement = (model, isMobile, tMeta) => {
+    const selIndex = buildTopologySelectionIndex(model);
 
-    const nodesStackH = nodesCount ? nodesCount * nodeH + (nodesCount - 1) * nodeGap : nodeH;
-
-    const ingressCardH = model.ingress.clientIPs != null ? 108 : 88;
-    const egressCardH = 82;
-    const extItems = [...model.externalTargets];
-    const extCardH = extItems.length >= 4 ? 44 : 52;
-    const extGap = extItems.length >= 4 ? 10 : 12;
-    const rightGapV = extItems.length >= 4 ? 22 : 20;
-    const rightStackH = egressCardH + (extItems.length ? rightGapV + extItems.length * extCardH + (extItems.length - 1) * extGap : 0);
-
-    const bodyH = Math.max(210, nodesStackH, rightStackH, ingressCardH);
-    const totalH = padTop + bodyH + padBottom;
-    const ingressY = Math.round(padTop + (bodyH - ingressCardH) / 2);
-    const nodesStartY = Math.round(padTop + (bodyH - nodesStackH) / 2);
-
-    const svg = createSVGEl("svg", {
-      class: "a-dash-topo-svg",
-      "data-refresh-key": "topo-svg",
-      viewBox: `0 0 ${vw} ${totalH}`,
+    const svgEl = createSVGEl("svg", {
+      class: `a-dash-topo-svg a-dash-topo-flow-svg ${isMobile ? "is-mobile" : ""}`,
+      viewBox: "0 0 600 320",
       role: "img",
-      "aria-label": "全网节点数据流与链路延迟拓扑图",
+      "aria-label": "服务与节点实时流量探测拓扑图",
+      "data-refresh-key": "flow-edge-svg",
     });
-    svg.append(createTopologyDefs());
+    // Keep the SVG DOM identity stable across edge re-measurements on resize/data updates.
+    svgEl.reconcileTable = () => true;
 
-    const probeTagsByNode = buildPeerProbeTags(model);
-    const nodeGeom = new Map();
-    const rowByID = new Map();
-    model.nodes.forEach((item, index) => {
-      const y = nodesStartY + index * (nodeH + nodeGap);
-      nodeGeom.set(item.id, { x: nodeX, y, w: nodeW, h: nodeH, cy: y + nodeH / 2, index, item });
-      rowByID.set(item.id, index);
+    const ingressMetricsText = !tMeta.readable
+      ? "无流量权限"
+      : (!tMeta.hasData && tMeta.state === "loading")
+        ? "读取中…"
+        : (!tMeta.hasData && tMeta.state === "failed")
+          ? "读取失败"
+          : `↓ ${bytes(model.ingress.rateBPS)}/s`;
+    const ingressSubText = !tMeta.readable
+      ? "权限受限"
+      : (!tMeta.hasData && (tMeta.state === "loading" || tMeta.state === "failed"))
+        ? (model.ingress.clientIPs != null ? `24h ${model.ingress.clientIPs} IP` : "等待样本")
+        : `本月 ${bytes(model.ingress.monthlyBytes)}${model.ingress.clientIPs != null ? ` · ${model.ingress.clientIPs} IP` : ""}`;
+
+    const ingressCard = node(
+      "button",
+      {
+        type: "button",
+        className: "a-dash-topo-flow-card is-hub",
+        "data-refresh-key": "flow-hub-ingress",
+        "data-flow-port": "hub:ingress",
+        "data-topo-peers": selIndex.hubPeers.ingress.join(" "),
+      },
+      node("span", { className: "a-dash-topo-flow-kicker" }, "入站流量"),
+      node("strong", { className: "a-dash-topo-flow-metric" }, ingressMetricsText),
+      node("span", { className: "a-dash-topo-flow-sub" }, ingressSubText),
+    );
+    bindInteractive(ingressCard, "hub:ingress");
+
+    const egressMetricsText = !tMeta.readable
+      ? "无流量权限"
+      : (!tMeta.hasData && tMeta.state === "loading")
+        ? "读取中…"
+        : (!tMeta.hasData && tMeta.state === "failed")
+          ? "读取失败"
+          : `↑ ${bytes(model.egress.rateBPS)}/s`;
+    const egressSubText = !tMeta.readable
+      ? `${model.onlineNodes}/${model.totalNodes} 节点在线`
+      : (!tMeta.hasData && (tMeta.state === "loading" || tMeta.state === "failed"))
+        ? `${model.onlineNodes}/${model.totalNodes} 节点在线`
+        : `本月 ${bytes(model.egress.monthlyBytes)} · ${model.onlineNodes}/${model.totalNodes} 在线`;
+
+    const egressCard = node(
+      "button",
+      {
+        type: "button",
+        className: "a-dash-topo-flow-card is-hub",
+        "data-refresh-key": "flow-hub-egress",
+        "data-flow-port": "hub:egress",
+        "data-topo-peers": selIndex.hubPeers.egress.join(" "),
+      },
+      node("span", { className: "a-dash-topo-flow-kicker" }, "出站流量"),
+      node("strong", { className: "a-dash-topo-flow-metric" }, egressMetricsText),
+      node("span", { className: "a-dash-topo-flow-sub" }, egressSubText),
+    );
+    bindInteractive(egressCard, "hub:egress");
+
+    const nodeCards = model.nodes.map((item) => {
+      const eKey = entityKey.node(item.id);
+      const peers = selIndex.nodePeers(item.id);
+      const region = geoRegionDetails(item.regionCode);
+      const totalRate = (item.rxBPS || 0) + (item.txBPS || 0);
+      const totalMonthly = (item.monthlyRxBytes || 0) + (item.monthlyTxBytes || 0);
+      const rxRatio = totalRate > 0 ? item.rxBPS / totalRate : totalMonthly > 0 ? item.monthlyRxBytes / totalMonthly : 0.5;
+      const trafficLine = !tMeta.readable
+        ? "无流量权限"
+        : (!tMeta.hasData && tMeta.state === "loading")
+          ? "读取中…"
+          : (!tMeta.hasData && tMeta.state === "failed")
+            ? "读取失败"
+            : `↓ ${bytes(item.rxBPS)}/s · ↑ ${bytes(item.txBPS)}/s`;
+      const monthLine = (!tMeta.readable || (!tMeta.hasData && (tMeta.state === "loading" || tMeta.state === "failed")))
+        ? (item.ip || "")
+        : `本月 ${bytes(item.monthlyUsedBytes)}`;
+
+      const statusBadge = item.blocked
+        ? badge("超限阻断", "bad")
+        : badge(item.isOnline ? "在线" : "离线", item.isOnline ? "ok" : "bad");
+      const engineChip = item.activeEngines.length
+        ? node("span", { className: "a-dash-topo-flow-tag" }, item.activeEngines[0])
+        : null;
+
+      const cardEl = node(
+        "button",
+        {
+          type: "button",
+          className: `a-dash-topo-flow-card is-node ${item.blocked ? "is-blocked" : ""} ${!item.isOnline ? "is-offline" : ""}`,
+          "data-refresh-key": `flow-node-${item.id}`,
+          "data-flow-port": eKey,
+          "data-topo-peers": peers.join(" "),
+          title: `${item.name}${item.ip ? ` (${item.ip})` : ""}`,
+        },
+        node(
+          "div",
+          { className: "a-dash-topo-flow-node-head" },
+          region ? node("span", { className: "a-dash-topo-flow-region" }, region.code) : null,
+          node("strong", { className: "a-dash-topo-flow-node-name" }, item.name || item.id),
+          statusBadge,
+          engineChip,
+        ),
+        node(
+          "div",
+          { className: "a-dash-topo-flow-node-foot" },
+          node("span", { className: "a-dash-topo-flow-rate" }, trafficLine),
+          monthLine ? node("span", { className: "a-dash-topo-flow-month" }, monthLine) : null,
+        ),
+        tMeta.readable && tMeta.hasData ? createCompactTrafficBarSVG(rxRatio, item.blocked) : null,
+      );
+      bindInteractive(cardEl, eKey);
+      return cardEl;
     });
 
-    extItems.sort((a, b) => {
-      const avgRow = (ext) => {
-        const linked = model.probeLinks.filter((p) => p.isExternal && p.to === ext.id && rowByID.has(p.from));
-        return linked.length ? linked.reduce((s, p) => s + rowByID.get(p.from), 0) / linked.length : 999;
-      };
-      return avgRow(a) - avgRow(b);
+    const extCards = model.externalTargets.map((ext) => {
+      const eKey = entityKey.external(ext.id);
+      const peers = selIndex.extPeers(ext.id);
+      const showAddr = ext.address && ext.address !== ext.name;
+      const cardEl = node(
+        "button",
+        {
+          type: "button",
+          className: "a-dash-topo-flow-card is-ext",
+          "data-refresh-key": `flow-ext-${ext.id}`,
+          "data-flow-port": eKey,
+          "data-topo-peers": peers.join(" "),
+          title: `${ext.name}${showAddr ? ` (${ext.address})` : ""} · ${ext.linkCount} 条链路`,
+        },
+        node("span", { className: "a-dash-topo-flow-kicker" }, `公网目标 · ${ext.linkCount} 链路`),
+        node("strong", { className: "a-dash-topo-flow-node-name" }, ext.name || ext.address || ext.id),
+        showAddr ? node("span", { className: "a-dash-topo-flow-sub" }, ext.address) : null,
+      );
+      bindInteractive(cardEl, eKey);
+      return cardEl;
     });
 
-    const ingressBox = { x: leftX, y: ingressY, w: sideW, h: ingressCardH, cy: ingressY + ingressCardH / 2 };
+    const nodesColTitle = model.hiddenNodeCount > 0
+      ? `节点 (${model.nodes.length}/${model.totalNodes})`
+      : `节点 (${model.nodes.length})`;
 
-    const egressTop = extItems.length
-      ? Math.max(padTop + 6, Math.round(padTop + Math.max(0, bodyH - rightStackH) * 0.36))
-      : Math.round(padTop + (bodyH - egressCardH) / 2);
-    const egressBox = { x: rightX, y: egressTop, w: sideW, h: egressCardH, cy: egressTop + egressCardH / 2 };
-
-    const extGeom = new Map();
-    const extAreaTop = egressBox.y + egressBox.h + rightGapV;
-    const extAreaBottom = totalH - padBottom - 8;
-    const extAvailH = Math.min(extItems.length * (extCardH + 24), Math.max(extItems.length * (extCardH + extGap), extAreaBottom - extAreaTop));
-    let extCursorY = extAreaTop;
-    extItems.forEach((ext, idx) => {
-      const linked = model.probeLinks.filter((p) => p.isExternal && p.to === ext.id && nodeGeom.has(p.from));
-      const targetAvgCY = linked.length
-        ? linked.reduce((s, p) => s + nodeGeom.get(p.from).cy, 0) / linked.length
-        : extCursorY + extCardH / 2;
-      const evenCY = extItems.length > 1
-        ? extAreaTop + extCardH / 2 + (idx / (extItems.length - 1)) * Math.max(0, extAvailH - extCardH)
-        : targetAvgCY;
-      const desiredCY = extItems.length >= 4 ? evenCY * 0.68 + targetAvgCY * 0.32 : targetAvgCY;
-      const remain = extItems.length - idx;
-      const maxAllowedY = totalH - padBottom - remain * extCardH - (remain - 1) * extGap;
-      const y = Math.round(Math.max(extCursorY, Math.min(maxAllowedY, desiredCY - extCardH / 2)));
-      extGeom.set(ext.id, { x: rightX, y, w: sideW, h: extCardH, cy: y + extCardH / 2, idx, item: ext });
-      extCursorY = y + extCardH + extGap;
-    });
-
-    const occupiedRects = [
-      { x: ingressBox.x, y: ingressBox.y, w: ingressBox.w, h: ingressBox.h },
-      { x: egressBox.x, y: egressBox.y, w: egressBox.w, h: egressBox.h },
-      ...[...nodeGeom.values()].map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
-      ...[...extGeom.values()].map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h })),
-    ];
-
-    const backdropLayer = createSVGEl("g", { "data-refresh-key": "backdrop-layer" });
-    const flowLayer = createSVGEl("g", { "data-refresh-key": "flow-layer" });
-    const probeLayer = createSVGEl("g", { "data-refresh-key": "probe-layer" });
-    const entityLayer = createSVGEl("g", { "data-refresh-key": "entity-layer" });
-    const rateLabelLayer = createSVGEl("g", { "data-refresh-key": "rate-label-layer" });
-    const probeLabelLayer = createSVGEl("g", { "data-refresh-key": "probe-label-layer" });
-
-    const inRailX = Math.round((ingressBox.x + ingressBox.w + nodeX) / 2);
-    const outRailX = Math.round(nodeX + nodeW + rightGap * 0.16);
-    const addStageHeader = (cx, label) => createSVGEl("text", {
-      x: cx.toFixed(1),
-      y: 17,
-      "text-anchor": "middle",
-      class: "a-dash-topo-stage-label",
-    }, label);
-    backdropLayer.append(
-      createSVGEl("line", { x1: inRailX, y1: padTop - 4, x2: inRailX, y2: totalH - padBottom, class: "a-dash-topo-guide-rail" }),
-      createSVGEl("line", { x1: outRailX, y1: padTop - 4, x2: outRailX, y2: totalH - padBottom, class: "a-dash-topo-guide-rail" }),
-      addStageHeader(leftX + sideW / 2, "入站汇总"),
-      addStageHeader(nodeX + nodeW / 2, "转发节点"),
-      addStageHeader(rightX + sideW / 2, "出站与公网目标"),
+    const gridEl = node(
+      "div",
+      { className: "a-dash-topo-flow-grid", "data-refresh-key": "flow-grid" },
+      node("div", { className: "a-dash-topo-flow-col is-ingress", "data-refresh-key": "col-ingress" },
+        node("span", { className: "a-dash-topo-flow-stage" }, "入站入口"),
+        ingressCard,
+      ),
+      node("div", { className: "a-dash-topo-flow-col is-nodes", "data-refresh-key": "col-nodes" },
+        node("span", { className: "a-dash-topo-flow-stage" }, nodesColTitle),
+        node("div", { className: "a-dash-topo-flow-list", "data-refresh-key": "node-list" }, ...nodeCards),
+      ),
+      node("div", { className: "a-dash-topo-flow-col is-egress", "data-refresh-key": "col-egress" },
+        node("span", { className: "a-dash-topo-flow-stage" }, model.externalTargets.length ? `出口 · 公网 (${model.externalTargets.length})` : "出站出口"),
+        node("div", { className: "a-dash-topo-flow-list", "data-refresh-key": "egress-list" }, egressCard, ...extCards),
+      ),
     );
 
-    // 1. Ingress -> Nodes smooth optical streams
-    model.ingressLinks.forEach((edge, idx) => {
-      const target = nodeGeom.get(edge.to);
-      if (!target) return;
-      const spreadY = model.ingressLinks.length > 1
-        ? ingressBox.y + 20 + (idx / (model.ingressLinks.length - 1)) * (ingressBox.h - 40)
-        : ingressBox.cy;
-      const x1 = ingressBox.x + ingressBox.w;
-      const x2 = target.x - 2;
-      const landX = isDense && leftGap >= 80 ? x2 - 28 : x2;
-      const d = landX < x2
-        ? `${cubicPath(x1, spreadY, landX, target.cy)} L ${x2.toFixed(1)} ${target.cy.toFixed(1)}`
-        : cubicPath(x1, spreadY, x2, target.cy);
-      const peers = ["hub:ingress", `node:${edge.to}`, `edge:${edge.id}`, ...(probeTagsByNode.get(edge.to) || [])];
-      const strokeW = edge.active ? 1.5 + edge.weight * 2.2 : 1.05;
-      const baseOpacity = edge.active ? 0.62 : 0.28;
-      flowLayer.append(renderFlowCurve({
-        d,
-        peers,
-        baseOpacity,
-        glowColor: "",
-        glowWidth: 0,
-        stroke: edge.active ? "url(#a-topo-grad-rx)" : IDLE_FLOW_COLOR,
-        strokeWidth: edge.active ? Math.min(2.6, strokeW) : Math.min(1.6, strokeW),
-        dash: edge.active ? null : "3 4",
-        markerEnd: edge.active ? "url(#a-topo-arrow-rx)" : "url(#a-topo-arrow-idle)",
-        pulseColor: edge.active ? INGRESS_COLOR : "",
-        pulseOpacity: 0.72,
-        pulseDur: flowDur(edge.weight),
-        photonColor: edge.active ? INGRESS_COLOR : "",
-        refreshKey: `edge-${edge.id}`,
-      }));
-    });
-
-    // 2. Nodes -> Outbound Hub optical streams
-    const activeEgressList = model.egressLinks.filter((e) => !e.blocked);
-    const activeEgressIdxByFrom = new Map(activeEgressList.map((e, i) => [e.from, i]));
-    const useCollectorBus = nodesCount > 7;
-    const txBusX = Math.round(nodeX + nodeW + 34);
-    const probeRailX = useCollectorBus ? txBusX + 12 : nodeX + nodeW;
-    const busPoints = [];
-
-    model.egressLinks.forEach((edge) => {
-      const src = nodeGeom.get(edge.from);
-      if (!src) return;
-      const peers = [`node:${edge.from}`, "hub:egress", `edge:${edge.id}`, ...(probeTagsByNode.get(edge.from) || [])];
-      const startX = src.x + src.w + 2;
-      const startY = src.cy + (nodeH < 42 ? 7 : nodeH < 48 ? 8 : 10);
-
-      if (edge.blocked) {
-        const hl = isHighlightedEdge(peers);
-        const endX = startX + 20;
-        const opacity = hl === true ? 1 : hl === false ? 0.14 : 0.78;
-        const g = createSVGEl("g", {
-          "data-refresh-key": `edge-${edge.id}`,
-          "data-topo-peers": peers.join(" "),
-          "data-base-opacity": "0.78",
-          opacity: opacity.toFixed(2),
-        });
-        g.append(
-          createSVGEl("path", {
-            d: `M ${startX.toFixed(1)} ${startY.toFixed(1)} L ${endX.toFixed(1)} ${startY.toFixed(1)}`,
-            fill: "none",
-            stroke: BLOCKED_COLOR,
-            "stroke-width": "1.6",
-            "stroke-dasharray": "3 3",
-          }),
-          createSVGEl("circle", { cx: (endX + 4).toFixed(1), cy: startY.toFixed(1), r: 5.0, fill: "#fff2f3", stroke: "#f2cdd2", "stroke-width": "1" }),
-          createSVGEl("path", {
-            d: `M ${(endX + 2.2).toFixed(1)} ${(startY - 1.8).toFixed(1)} L ${(endX + 5.8).toFixed(1)} ${(startY + 1.8).toFixed(1)} M ${(endX + 5.8).toFixed(1)} ${(startY - 1.8).toFixed(1)} L ${(endX + 2.2).toFixed(1)} ${(startY + 1.8).toFixed(1)}`,
-            fill: "none",
-            stroke: BLOCKED_COLOR,
-            "stroke-width": "1.2",
-            "stroke-linecap": "round",
-          }),
-        );
-        flowLayer.append(g);
-        return;
-      }
-
-      const activeIdx = activeEgressIdxByFrom.get(edge.from) || 0;
-      const spreadY = activeEgressList.length > 1
-        ? egressBox.y + 18 + (activeIdx / (activeEgressList.length - 1)) * (egressBox.h - 36)
-        : egressBox.cy;
-      const endX = useCollectorBus ? txBusX : egressBox.x - 2;
-      const endY = useCollectorBus ? startY : spreadY;
-      if (useCollectorBus) busPoints.push({ y: startY, peers, active: edge.active, weight: edge.weight });
-      const d = useCollectorBus
-        ? `M ${startX.toFixed(1)} ${startY.toFixed(1)} L ${endX.toFixed(1)} ${startY.toFixed(1)}`
-        : cubicPath(startX, startY, endX, endY);
-      const strokeW = edge.active ? 1.4 + edge.weight * 2.0 : 1.0;
-      const baseOpacity = edge.active ? 0.48 : 0.22;
-      flowLayer.append(renderFlowCurve({
-        d,
-        peers,
-        baseOpacity,
-        glowColor: "",
-        glowWidth: strokeW + 3,
-        stroke: edge.active ? "url(#a-topo-grad-tx)" : IDLE_FLOW_COLOR,
-        strokeWidth: strokeW,
-        dash: edge.active ? "5 3" : "3 5",
-        markerEnd: !useCollectorBus ? (edge.active ? "url(#a-topo-arrow-tx)" : "url(#a-topo-arrow-idle)") : null,
-        pulseColor: edge.active && !useCollectorBus ? "#ffffff" : "",
-        pulseOpacity: 0.72,
-        pulseDur: flowDur(edge.weight),
-        photonColor: edge.active ? EGRESS_COLOR : "",
-        refreshKey: `edge-${edge.id}`,
-      }));
-    });
-
-    if (useCollectorBus && busPoints.length) {
-      const minBusY = Math.min(...busPoints.map((b) => b.y), egressBox.cy);
-      const maxBusY = Math.max(...busPoints.map((b) => b.y));
-      const allBusPeers = ["hub:egress", ...new Set(busPoints.flatMap((b) => b.peers))];
-      flowLayer.append(createSVGEl("path", {
-        d: `M ${txBusX} ${minBusY.toFixed(1)} L ${txBusX} ${maxBusY.toFixed(1)}`,
-        fill: "none",
-        stroke: EGRESS_COLOR,
-        "stroke-width": "2.0",
-        "stroke-linecap": "round",
-        "data-refresh-key": "tx-collector-bus",
-        "data-topo-peers": allBusPeers.join(" "),
-        "data-base-opacity": "0.42",
-        opacity: isHighlightedEdge(allBusPeers) === false ? "0.14" : "0.42",
-      }));
-      const trunkStartY = Math.max(minBusY, Math.min(maxBusY, egressBox.cy));
-      const trunkD = cubicPath(txBusX, trunkStartY, egressBox.x - 2, egressBox.cy);
-      flowLayer.append(renderFlowCurve({
-        d: trunkD,
-        peers: allBusPeers,
-        baseOpacity: 0.68,
-        glowColor: "",
-        glowWidth: 0,
-        stroke: "url(#a-topo-grad-tx)",
-        strokeWidth: 2.2,
-        dash: "5 3",
-        markerEnd: "url(#a-topo-arrow-tx)",
-        pulseColor: EGRESS_COLOR,
-        pulseOpacity: 0.72,
-        pulseDur: "1.45s",
-        photonColor: EGRESS_COLOR,
-        refreshKey: "tx-collector-trunk",
-      }));
-    }
-
-    // 3. Topological Probe Links (Ambient Top-5 Bad Alert Pills + Focus-Only Route Pills)
-    const laneInfo = assignProbeLanes(model.probeLinks, rowByID);
-    const pillBounds = {
-      minX: useCollectorBus ? probeRailX + 6 : nodeX + nodeW + 46,
-      maxX: rightX - 8,
-      minY: padTop + 4,
-      maxY: totalH - padBottom - 4,
-    };
-
-    const nodeByID = new Map(model.nodes.map((n) => [n.id, n]));
-    const flowNodeShort = (id) => {
-      const s = String(id || "");
-      if (s.startsWith("ext:")) return s.slice(4);
-      const item = nodeByID.get(s);
-      return formatMapCityLabel(item?.name || s, item);
-    };
-
-    const maxAmbient = width < 760 ? 3 : 5;
-    const ambientBadIDs = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: maxAmbient });
-
-    const probeRenderItems = [];
-    model.probeLinks.forEach((probe) => {
-      const src = nodeGeom.get(probe.from);
-      if (!src) return;
-      const entityKey = `probe:${probe.id}`;
-      const pal = tonePalette(probe.tone);
-      const unreachable = isProbeUnreachable(probe);
-      const marker = probe.tone === "ok"
-        ? "url(#a-topo-arrow-ok)"
-        : probe.tone === "warn"
-          ? "url(#a-topo-arrow-warn)"
-          : probe.tone === "bad"
-            ? "url(#a-topo-arrow-bad)"
-            : "url(#a-topo-arrow-idle)";
-
-      const peers = [
-        entityKey,
-        `node:${probe.from}`,
-        probe.isExternal ? probe.to : `node:${probe.to}`,
-      ];
-      const hl = isHighlightedEdge(peers);
-
-      let d = "";
-      let idealX = 0;
-      let idealY = 0;
-      let anchors = [];
-      let leaderPoints = [];
-      let placeRank = 1;
-      let startPort = null;
-      let endPort = null;
-      const portOffY = nodeH < 42 ? 7 : nodeH < 48 ? 8 : 10;
-
-      if (probe.isExternal) {
-        const ext = extGeom.get(probe.to);
-        if (!ext) return;
-        const x1 = src.x + src.w;
-        const y1 = src.cy - portOffY;
-        const x2 = ext.x - 2;
-        const y2 = ext.cy;
-        const curve = extendedCubicPath(x1, useCollectorBus ? probeRailX : x1, y1, x2, y2);
-        d = curve.d;
-        anchors = [0.76, 0.64, 0.86, 0.52, 0.40].map((t) => curve.pointAt(t));
-        leaderPoints = [0.40, 0.55, 0.68, 0.78, 0.86, 0.92].map((t) => curve.pointAt(t));
-        idealX = anchors[0].x;
-        idealY = anchors[0].y;
-        placeRank = 90 + (ext.idx || 0);
-        startPort = { x: x1, y: y1 };
-        endPort = { x: ext.x, y: y2 };
-      } else {
-        const dst = nodeGeom.get(probe.to);
-        if (!dst) return;
-        const info = laneInfo.get(probe.id) || { lane: 0, count: 1 };
-        const span = Math.abs((rowByID.get(probe.to) ?? 0) - (rowByID.get(probe.from) ?? 0));
-        const anchorX = src.x + src.w;
-        const railOffset = useCollectorBus ? Math.max(0, probeRailX - anchorX) : 0;
-        const minBow = useCollectorBus ? 26 : Math.min(Math.round(rightGap * 0.28), 148);
-        const extReserve = extItems.length ? Math.min(156, Math.max(118, Math.round((rightX - probeRailX) * 0.34))) : 48;
-        const maxBow = Math.max(minBow + 64, rightX - probeRailX - extReserve);
-        const laneStep = info.count > 1 ? Math.min(120, (maxBow - minBow) / (info.count - 1)) : 0;
-        const bow = Math.min(maxBow, minBow + info.lane * laneStep);
-        const yA = src.cy - portOffY + (src.cy < dst.cy ? 2 : -2);
-        const yB = dst.cy - portOffY + (src.cy < dst.cy ? -2 : 2);
-        const geom = bridgeArchPath(anchorX, yA, yB, bow, railOffset);
-        d = geom.d;
-        const tList = span >= 3 ? [0.50, 0.62, 0.38, 0.74, 0.26, 0.82, 0.18] : [0.50, 0.66, 0.34, 0.78, 0.22];
-        anchors = tList.map((t) => bridgePointAt(anchorX, yA, yB, bow, t, railOffset));
-        leaderPoints = [0.20, 0.32, 0.42, 0.50, 0.58, 0.68, 0.80].map((t) => bridgePointAt(anchorX, yA, yB, bow, t, railOffset));
-        idealX = anchors[0].x;
-        idealY = anchors[0].y;
-        placeRank = span;
-        startPort = { x: anchorX, y: yA };
-        endPort = { x: dst.x + dst.w, y: yB };
-      }
-
-      const metricPart = buildProbePillLabel(probe, false, true).replace(/(\d+(?:\.\d+)?)ms\//, "$1/");
-      const routeArrow = probe.bidirectional ? "↔" : "→";
-      const routePrefix = `${clipLabel(flowNodeShort(probe.from), 12)}${routeArrow}${clipLabel(flowNodeShort(probe.to), 16)}`;
-      const label = clipLabel(`${routePrefix} · ${metricPart}`, 38);
-      const shortLabel = buildProbeShortAlertLabel(probe);
-      const pillH = 19;
-      const fullW = Math.max(82, Math.round(visualUnits(label) * 6.0 + 22));
-      const shortW = Math.max(58, Math.round(visualUnits(shortLabel) * 6.0 + 22));
-      const isAmbient = ambientBadIDs.has(probe.id);
-
-      probeRenderItems.push({
-        probe,
-        entityKey,
-        pal,
-        unreachable,
-        marker,
-        peers,
-        hl,
-        d,
-        idealX,
-        idealY,
-        anchors,
-        leaderPoints,
-        placeRank,
-        pillW: isAmbient ? shortW : fullW,
-        fullW,
-        pillH,
-        label,
-        shortLabel,
-        isAmbient,
-        startPort,
-        endPort,
-      });
-    });
-
-    probeRenderItems.forEach((item) => {
-      const { probe, entityKey, pal, unreachable, marker, peers, hl, d, startPort, endPort } = item;
-      const defBase = probe.tone === "bad" ? (probe.isExternal ? 0.74 : 0.82)
-        : probe.tone === "warn" ? (probe.isExternal ? 0.62 : 0.70)
-          : (probe.isExternal ? 0.24 : 0.30);
-      const g = createSVGEl("g", {
-        class: "a-dash-topo-probe-item",
-        "data-refresh-key": `probe-edge-${probe.id}`,
-        "data-topo-peers": peers.join(" "),
-        "data-base-opacity": defBase.toFixed(2),
-        "data-dim-opacity": "0.08",
-        opacity: hl === true ? "1" : hl === false ? "0.08" : defBase.toFixed(2),
-      });
-      g.append(createSVGEl("title", {}, `${probe.name}: ${probe.metricLabel} (${probe.statusLabel}) — 点击打开链路监控`));
-      g.append(
-        createSVGEl("path", {
-          d,
-          fill: "none",
-          stroke: "#fafafa",
-          "stroke-width": isDense ? "3.8" : "5.2",
-          "stroke-linecap": "round",
-          opacity: "0.88",
-        }),
-        createSVGEl("path", {
-          d,
-          fill: "none",
-          stroke: pal.stroke,
-          "stroke-width": activeKey() === entityKey || hl === true ? "2.4" : isDense ? "1.5" : "1.8",
-          "stroke-dasharray": unreachable ? "4 3" : null,
-          "marker-end": marker,
-          "marker-start": probe.bidirectional && !probe.isExternal ? marker : null,
-        }),
-      );
-      if (!unreachable && (probe.running || probe.tone === "ok" || probe.tone === "warn" || probe.tone === "bad")) {
-        g.append(createSVGEl("path", {
-          d,
-          fill: "none",
-          stroke: "#ffffff",
-          "stroke-width": "1.2",
-          "stroke-dasharray": "4 14",
-          "stroke-linecap": "round",
-          opacity: "0.82",
-          class: "a-dash-topo-probe-running",
-        }));
-      }
-      if (startPort) {
-        g.append(createSVGEl("circle", { cx: startPort.x.toFixed(1), cy: startPort.y.toFixed(1), r: 2.3, fill: "#ffffff", stroke: pal.stroke, "stroke-width": "1.3" }));
-      }
-      if (endPort) {
-        g.append(createSVGEl("circle", { cx: endPort.x.toFixed(1), cy: endPort.y.toFixed(1), r: 2.3, fill: "#ffffff", stroke: pal.stroke, "stroke-width": "1.3" }));
-      }
-      bindInteractive(g, entityKey, { openProbeID: probe.id });
-      probeLayer.append(g);
-    });
-
-    const flowCohortBoxes = new Map();
-    const occupiedForFlowCohort = (keys) => {
-      const merged = [...occupiedRects];
-      for (const k of keys) {
-        const arr = flowCohortBoxes.get(k);
-        if (arr) merged.push(...arr);
-      }
-      return merged;
-    };
-    const recordFlowCohortBox = (keys, box) => {
-      for (const k of keys) {
-        if (!flowCohortBoxes.has(k)) flowCohortBoxes.set(k, []);
-        flowCohortBoxes.get(k).push(box);
-      }
-    };
-
-    [...probeRenderItems]
-      .sort((a, b) => (a.isAmbient ? 0 : 1) - (b.isAmbient ? 0 : 1) || a.placeRank - b.placeRank)
-      .forEach((item) => {
-        const { probe, pal, peers, hl, idealX, idealY, anchors, leaderPoints, pillW, fullW, pillH, label, shortLabel, isAmbient } = item;
-        const endKeys = [`node:${probe.from}`, probe.isExternal ? probe.to : `node:${probe.to}`];
-        if (isAmbient) {
-          const placed = placeCollisionFreePill(idealX, idealY, pillW, pillH, occupiedRects, pillBounds, anchors, {
-            padX: 3,
-            padY: 3,
-            leaderPoints,
-            reserveW: fullW,
-            reserveH: pillH,
-          });
-          appendProbeLeader(probeLayer, placed, pal, peers, hl, true, false);
-          probeLabelLayer.append(createProbePillGroup({
-            probe,
-            cx: placed.cx,
-            cy: placed.cy,
-            pillW,
-            fullW,
-            pillH,
-            label,
-            shortLabel,
-            pal,
-            compact: true,
-            peers,
-            focusOnly: false,
-            ambientAlert: true,
-          }));
-        } else {
-          const placed = placeCollisionFreePill(idealX, idealY, pillW, pillH, occupiedForFlowCohort(endKeys), pillBounds, anchors, {
-            padX: 3,
-            padY: 3,
-            leaderPoints,
-          });
-          recordFlowCohortBox(endKeys, { x: placed.cx - pillW / 2, y: placed.cy - pillH / 2, w: pillW, h: pillH });
-          appendProbeLeader(probeLayer, placed, pal, peers, hl, true, true);
-          probeLabelLayer.append(createProbePillGroup({
-            probe,
-            cx: placed.cx,
-            cy: placed.cy,
-            pillW,
-            pillH,
-            label,
-            pal,
-            compact: true,
-            peers,
-            focusOnly: true,
-          }));
-        }
-      });
-
-    // 4. Entity: Ingress Hub
-    {
-      const key = "hub:ingress";
-      const g = createSVGEl("g", {
-        class: `a-dash-topo-card-node ${activeKey() === key ? "is-active" : ""}`,
-        "data-refresh-key": "hub-ingress",
-      });
-      g.append(
-        createSVGEl("rect", { x: ingressBox.x, y: ingressBox.y, width: ingressBox.w, height: ingressBox.h, rx: 10, class: "a-dash-topo-hub-box" }),
-        createSVGEl("rect", { x: ingressBox.x, y: ingressBox.y + 10, width: 3.5, height: ingressBox.h - 20, rx: 1.75, fill: INGRESS_COLOR }),
-        createSVGEl("circle", { cx: ingressBox.x + ingressBox.w, cy: ingressBox.cy, r: 3.1, fill: "#ffffff", stroke: INGRESS_COLOR, "stroke-width": "1.6" }),
-        createSVGEl("text", { x: ingressBox.x + 14, y: ingressBox.y + 23, class: "a-dash-topo-hub-kicker" }, "入站流量"),
-        createSVGEl("text", { x: ingressBox.x + 14, y: ingressBox.y + 47, class: "a-dash-topo-hub-metric" }, `↓ ${bytes(model.ingress.rateBPS)}/s`),
-        createSVGEl("text", { x: ingressBox.x + 14, y: ingressBox.y + 68, class: "a-dash-topo-hub-sub" }, `月接收 ${bytes(model.ingress.monthlyBytes)}`),
-      );
-      if (model.ingress.clientIPs != null) {
-        g.append(createSVGEl("text", { x: ingressBox.x + 14, y: ingressBox.y + 88, class: "a-dash-topo-hub-sub" }, `24h ${model.ingress.clientIPs} IP · ${model.ingress.clientFlows} 流`));
-      }
-      bindInteractive(g, key);
-      entityLayer.append(g);
-    }
-
-    // 5. Entities: Active Nodes
-    const maxPeakRate = Math.max(1, ...model.nodes.map((n) => n.rxBPS + n.txBPS));
-    model.nodes.forEach((item) => {
-      const box = nodeGeom.get(item.id);
-      if (!box) return;
-      const key = `node:${item.id}`;
-      const nodePeers = [key, ...(probeTagsByNode.get(item.id) || [])];
-      const hl = isHighlightedEdge(nodePeers);
-      const selected = activeKey() === key;
-      const activeTraffic = item.isOnline && (item.rxBPS + item.txBPS > 0 || item.activeEngines.length > 0);
-      const statusColor = item.blocked ? BLOCKED_COLOR : item.isOnline ? OK_COLOR : IDLE_FLOW_COLOR;
-      const opacity = hl === false ? 0.35 : 1;
-
-      const g = createSVGEl("g", {
-        class: `a-dash-topo-card-node ${selected || hl === true ? "is-active" : ""} ${item.isOnline ? "is-online" : "is-offline"} ${item.blocked ? "is-blocked" : ""}`,
-        "data-refresh-key": `node-${item.id}`,
-        "data-topo-peers": nodePeers.join(" "),
-        "data-base-opacity": "1",
-        opacity: opacity.toFixed(2),
-      });
-      g.append(createSVGEl("title", {}, `${item.name} · ↓ ${bytes(item.rxBPS)}/s · ↑ ${bytes(item.txBPS)}/s`));
-      g.append(
-        createSVGEl("rect", {
-          x: box.x,
-          y: box.y,
-          width: box.w,
-          height: box.h,
-          rx: 9,
-          class: `a-dash-topo-node-box ${selected || hl === true ? "is-active" : ""} ${item.blocked ? "is-blocked" : ""}`,
-        }),
-      );
-      const superCompactRow = box.h < 42;
-      const compactRow = box.h < 48;
-      const dotY = superCompactRow ? box.y + 11.5 : compactRow ? box.y + 14.5 : box.y + 18;
-      const badgeY = superCompactRow ? box.y + 4.5 : compactRow ? box.y + 6.5 : box.y + 9;
-      const badgeH = superCompactRow ? 14 : 16;
-      const badgeTextY = superCompactRow ? box.y + 14 : compactRow ? box.y + 17.5 : box.y + 20;
-      const nameY = superCompactRow ? box.y + 14.5 : compactRow ? box.y + 18 : box.y + 21;
-      const subY = superCompactRow ? box.y + 27.5 : compactRow ? box.y + 33.5 : box.y + 38.5;
-
-      if (activeTraffic && !item.blocked) {
-        g.append(createSVGEl("circle", {
-          cx: box.x + 15,
-          cy: dotY,
-          r: 4,
-          fill: "none",
-          stroke: statusColor,
-          "stroke-width": "1.2",
-          class: "a-dash-topo-beacon-ring",
-        }));
-      }
-      g.append(createSVGEl("circle", {
-        cx: box.x + 15,
-        cy: dotY,
-        r: superCompactRow ? 3.0 : 3.4,
-        fill: statusColor,
-        class: activeTraffic && !item.blocked ? "a-dash-topo-beacon-live" : null,
-      }));
-
-      let rightBadgeW = 0;
-      if (item.blocked) {
-        rightBadgeW = 46;
-        g.append(
-          createSVGEl("rect", { x: box.x + box.w - rightBadgeW - 9, y: badgeY, width: rightBadgeW, height: badgeH, rx: 4, class: "a-dash-topo-blocked-pill" }),
-          createSVGEl("text", { x: box.x + box.w - rightBadgeW / 2 - 9, y: badgeTextY, "text-anchor": "middle", class: "a-dash-topo-blocked-text" }, "已封禁"),
-        );
-      } else if (item.activeEngines.length && box.w >= 190) {
-        const engineLabel = item.activeEngines.length > 1
-          ? `${clipLabel(item.activeEngines[0], 9)} +${item.activeEngines.length - 1}`
-          : clipLabel(item.activeEngines[0], 10);
-        rightBadgeW = Math.max(38, Math.round(visualUnits(engineLabel) * 5.7 + 10));
-        g.append(
-          createSVGEl("rect", { x: box.x + box.w - rightBadgeW - 9, y: badgeY, width: rightBadgeW, height: badgeH, rx: 4, class: "a-dash-topo-engine-pill" }),
-          createSVGEl("text", { x: box.x + box.w - rightBadgeW / 2 - 9, y: badgeTextY, "text-anchor": "middle", class: "a-dash-topo-engine-text" }, engineLabel),
-        );
-      }
-
-      const maxNameUnits = Math.max(9, Math.floor((box.w - rightBadgeW - 36) / 6.6));
-      const rxText = createSVGEl("text", { x: box.x + 14, y: subY, class: "a-dash-topo-node-sub" });
-      rxText.append(
-        createSVGEl("tspan", { fill: INGRESS_COLOR, "font-weight": "700" }, "↓"),
-        ` ${bytes(item.rxBPS)}/s`,
-      );
-      const txText = createSVGEl("text", { x: box.x + Math.round(box.w * 0.50), y: subY, class: "a-dash-topo-node-sub" });
-      txText.append(
-        createSVGEl("tspan", { fill: item.blocked ? BLOCKED_COLOR : EGRESS_COLOR, "font-weight": "700" }, "↑"),
-        ` ${bytes(item.txBPS)}/s`,
-      );
-
-      g.append(
-        createSVGEl("text", { x: box.x + 26, y: nameY, class: "a-dash-topo-node-name" }, clipLabel(item.name, maxNameUnits)),
-        rxText,
-        txText,
-      );
-
-      const trackW = box.w - 24;
-      const trackY = superCompactRow ? box.y + box.h - 3.5 : box.y + box.h - 4.5;
-      const ratio = item.isOnline && (item.rxBPS + item.txBPS > 0)
-        ? Math.max(0.08, Math.min(1, (item.rxBPS + item.txBPS) / maxPeakRate))
-        : 0;
-      g.append(createSVGEl("rect", { x: box.x + 12, y: trackY, width: trackW, height: 2, rx: 1, class: "a-dash-topo-meter-track" }));
-      if (ratio > 0) {
-        g.append(createSVGEl("rect", {
-          x: box.x + 12,
-          y: trackY,
-          width: (trackW * ratio).toFixed(1),
-          height: 2,
-          rx: 1,
-          fill: item.blocked ? BLOCKED_COLOR : "url(#a-topo-grad-bar)",
-        }));
-      }
-
-      g.append(
-        createSVGEl("circle", { cx: box.x, cy: box.cy, r: 2.8, fill: "#ffffff", stroke: item.isOnline ? INGRESS_COLOR : IDLE_FLOW_COLOR, "stroke-width": "1.5" }),
-        createSVGEl("circle", { cx: box.x + box.w, cy: box.cy + (superCompactRow ? 7 : compactRow ? 8 : 10), r: 2.6, fill: "#ffffff", stroke: item.blocked ? BLOCKED_COLOR : item.isOnline ? EGRESS_COLOR : IDLE_FLOW_COLOR, "stroke-width": "1.4" }),
-      );
-
-      bindInteractive(g, key);
-      entityLayer.append(g);
-    });
-
-    // 6. Entities: Outbound Hub & External Probe Targets
-    {
-      const key = "hub:egress";
-      const g = createSVGEl("g", {
-        class: `a-dash-topo-card-node ${activeKey() === key ? "is-active" : ""}`,
-        "data-refresh-key": "hub-egress",
-      });
-      g.append(
-        createSVGEl("rect", { x: egressBox.x, y: egressBox.y, width: egressBox.w, height: egressBox.h, rx: 10, class: "a-dash-topo-hub-box" }),
-        createSVGEl("rect", { x: egressBox.x + egressBox.w - 3.5, y: egressBox.y + 10, width: 3.5, height: egressBox.h - 20, rx: 1.75, fill: EGRESS_COLOR }),
-        createSVGEl("circle", { cx: egressBox.x, cy: egressBox.cy, r: 3.1, fill: "#ffffff", stroke: EGRESS_COLOR, "stroke-width": "1.6" }),
-        createSVGEl("text", { x: egressBox.x + 14, y: egressBox.y + 23, class: "a-dash-topo-hub-kicker" }, "出站流量"),
-        createSVGEl("text", { x: egressBox.x + 14, y: egressBox.y + 47, class: "a-dash-topo-hub-metric" }, `↑ ${bytes(model.egress.rateBPS)}/s`),
-        createSVGEl("text", { x: egressBox.x + 14, y: egressBox.y + 68, class: "a-dash-topo-hub-sub" }, `月发送 ${bytes(model.egress.monthlyBytes)}`),
-      );
-      bindInteractive(g, key);
-      entityLayer.append(g);
-    }
-
-    for (const [extID, box] of extGeom.entries()) {
-      const extPeers = [extID, ...(probeTagsByNode.get(extID) || [])];
-      const hl = isHighlightedEdge(extPeers);
-      const selected = activeKey() === extID;
-      const extCompact = box.h < 48;
-      const g = createSVGEl("g", {
-        class: `a-dash-topo-card-node ${selected ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-        "data-refresh-key": `ext-${extID}`,
-        "data-topo-peers": extPeers.join(" "),
-        "data-base-opacity": "1",
-        opacity: hl === false ? "0.35" : "1",
-      });
-      g.append(
-        createSVGEl("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 9, class: `a-dash-topo-ext-box ${selected ? "is-active" : ""}` }),
-        createSVGEl("circle", { cx: box.x, cy: box.cy, r: 2.8, fill: "#ffffff", stroke: EGRESS_COLOR, "stroke-width": "1.4" }),
-        createSVGEl("text", { x: box.x + 13, y: box.y + (extCompact ? 16 : 21), class: "a-dash-topo-ext-kicker" }, "公网目标"),
-        createSVGEl("text", { x: box.x + 13, y: box.y + (extCompact ? 33.5 : 41), class: "a-dash-topo-node-name" }, clipLabel(box.item.name, Math.max(12, Math.floor((box.w - 26) / 7)))),
-      );
-      bindInteractive(g, extID);
-      entityLayer.append(g);
-    }
-
-    svg.append(backdropLayer, flowLayer, probeLayer, entityLayer, rateLabelLayer, probeLabelLayer);
-    return svg;
+    return node("div", {
+      className: `a-dash-topo-flow-board ${isMobile ? "is-mobile" : ""}`,
+      "data-topo-mode": "flow",
+      "data-refresh-key": "topo-flow-board",
+    }, svgEl, gridEl);
   };
 
-  const renderMobileSVG = (width, model) => {
-    const padX = 8;
-    const padY = 10;
-    const w = Math.max(280, width);
-    const inBusX = padX + 6;
-    const nodeX = padX + 18;
-    const hasProbes = model.probeLinks.length > 0;
-    const probeWingW = hasProbes ? Math.max(58, Math.round(w * 0.22)) : 12;
-    const outBusX = w - padX - probeWingW;
-    const nodeW = Math.max(150, outBusX - nodeX - 10);
-    const headerH = 52;
-    const nodesCount = model.nodes.length;
-    const nodeH = nodesCount > 12 ? 34 : nodesCount > 8 ? 40 : 48;
-    const nodeGap = nodesCount > 12 ? 7 : 10;
-    const nodesTop = padY + headerH + 18;
-    const nodesTotalH = nodesCount ? nodesCount * nodeH + (nodesCount - 1) * nodeGap : nodeH;
+  /** Measures real HTML card rects relative to `.a-dash-topo-flow-board` and draws crisp aligned Bezier edges & pills. */
+  const syncFlowEdges = (forceRedraw = false) => {
+    if (disposed || viewMode !== "flow") return;
+    const model = lastModel;
+    const board = canvasHost.querySelector(".a-dash-topo-flow-board");
+    const svg = board?.querySelector("svg.a-dash-topo-flow-svg");
+    if (!board || !svg || !model || !model.nodes.length) return;
 
-    const mRowByID = new Map(model.nodes.map((n, idx) => [n.id, idx]));
-    const extItems = [...model.externalTargets].sort((a, b) => {
-      const avgR = (ext) => {
-        const linked = model.probeLinks.filter((p) => p.isExternal && p.to === ext.id && mRowByID.has(p.from));
-        return linked.length ? linked.reduce((s, p) => s + mRowByID.get(p.from), 0) / linked.length : 999;
-      };
-      return avgR(a) - avgR(b);
-    });
-    const extH = extItems.length >= 4 ? 34 : 38;
-    const extGap = extItems.length >= 4 ? 6 : 8;
-    const extBlockTop = nodesTop + nodesTotalH + 16;
-    const extBlockH = extItems.length ? extItems.length * extH + (extItems.length - 1) * extGap + 12 : 0;
-    const footerTop = extBlockTop + extBlockH + 8;
-    const footerH = 52;
-    const totalH = footerTop + footerH + padY;
+    const bRect = board.getBoundingClientRect();
+    const w = Math.round(bRect.width || board.clientWidth || 0);
+    const h = Math.round(bRect.height || board.clientHeight || 0);
+    if (w < 120 || h < 60) return;
 
-    const svg = createSVGEl("svg", {
-      class: "a-dash-topo-svg is-mobile",
-      "data-refresh-key": "topo-svg",
-      viewBox: `0 0 ${w} ${totalH}`,
-      role: "img",
-      "aria-label": "全网节点数据流与链路延迟拓扑图",
-    });
-    svg.append(createTopologyDefs());
-
-    const probeTagsByNode = buildPeerProbeTags(model);
-    const flowLayer = createSVGEl("g", { "data-refresh-key": "m-flow-layer" });
-    const probeLayer = createSVGEl("g", { "data-refresh-key": "m-probe-layer" });
-    const entityLayer = createSVGEl("g", { "data-refresh-key": "m-entity-layer" });
-    const probeLabelLayer = createSVGEl("g", { "data-refresh-key": "m-probe-label-layer" });
-
-    const nodeGeom = new Map();
-    const rowByID = new Map();
-    model.nodes.forEach((item, index) => {
-      const y = nodesTop + index * (nodeH + nodeGap);
-      nodeGeom.set(item.id, { x: nodeX, y, w: nodeW, h: nodeH, cy: y + nodeH / 2, item });
-      rowByID.set(item.id, index);
+    const isMobile = w < 760;
+    const ports = new Map();
+    board.querySelectorAll("[data-flow-port]").forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      ports.set(el.getAttribute("data-flow-port"), {
+        left: r.left - bRect.left,
+        right: r.right - bRect.left,
+        top: r.top - bRect.top,
+        bottom: r.bottom - bRect.top,
+        cx: (r.left + r.right) / 2 - bRect.left,
+        cy: (r.top + r.bottom) / 2 - bRect.top,
+      });
     });
 
-    const firstCY = nodesTop + nodeH / 2;
-    const lastCY = nodesTop + (Math.max(1, nodesCount) - 1) * (nodeH + nodeGap) + nodeH / 2;
+    const portSig = [...ports.entries()].map(([k, v]) => `${k}:${Math.round(v.left)},${Math.round(v.top)},${Math.round(v.right)},${Math.round(v.bottom)}`).join("|");
+    const edgeSig = JSON.stringify([w, h, isMobile, portSig, model.ingressLinks, model.egressLinks, model.probeLinks, lastTrafficMeta.readable, lastTrafficMeta.hasData]);
+    if (!forceRedraw && edgeSig === lastFlowGeomSignature) return;
+    lastFlowGeomSignature = edgeSig;
 
-    flowLayer.append(
-      createSVGEl("path", {
-        d: `M ${inBusX} ${padY + headerH} L ${inBusX} ${lastCY.toFixed(1)}`,
-        fill: "none",
-        stroke: INGRESS_COLOR,
-        "stroke-width": "2.1",
-        opacity: "0.7",
-      }),
-      createSVGEl("path", {
-        d: `M ${outBusX} ${firstCY.toFixed(1)} L ${outBusX} ${footerTop}`,
-        fill: "none",
-        stroke: EGRESS_COLOR,
-        "stroke-width": "2.1",
-        opacity: "0.62",
-      }),
-    );
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.setAttribute("width", String(w));
+    svg.setAttribute("height", String(h));
 
-    const extGeom = new Map();
-    extItems.forEach((ext, i) => {
-      const ey = extBlockTop + i * (extH + extGap);
-      extGeom.set(ext.id, { x: nodeX, y: ey, w: nodeW, h: extH, cy: ey + extH / 2, idx: i, item: ext });
-    });
+    const defs = createTopologyDefs("a-topo");
+    const flowLayer = createSVGEl("g", { class: "a-dash-topo-flow-conduits" });
+    const probeLayer = createSVGEl("g", { class: "a-dash-topo-flow-probes" });
+    const labelLayer = createSVGEl("g", { class: "a-dash-topo-flow-labels" });
+    const pillLayer = createSVGEl("g", { class: "a-dash-topo-flow-pills" });
 
-    {
-      const g = createSVGEl("g", { "data-refresh-key": "m-hub-ingress", class: "a-dash-topo-card-node" });
-      const info = model.ingress.clientIPs != null
-        ? `月收 ${bytes(model.ingress.monthlyBytes)} · ${model.ingress.clientIPs} IP`
-        : `月收 ${bytes(model.ingress.monthlyBytes)}`;
-      g.append(
-        createSVGEl("rect", { x: padX, y: padY, width: w - padX * 2, height: headerH, rx: 9, class: "a-dash-topo-hub-box" }),
-        createSVGEl("text", { x: padX + 12, y: padY + 19, class: "a-dash-topo-hub-kicker" }, "入站流量"),
-        createSVGEl("text", { x: padX + 12, y: padY + 39, class: "a-dash-topo-hub-metric" }, `↓ ${bytes(model.ingress.rateBPS)}/s`),
-        createSVGEl("text", { x: w - padX - 12, y: padY + 39, "text-anchor": "end", class: "a-dash-topo-hub-sub" }, info),
-      );
-      bindInteractive(g, "hub:ingress");
-      entityLayer.append(g);
+    const selIndex = buildTopologySelectionIndex(model);
+    const inHub = ports.get("hub:ingress");
+    const outHub = ports.get("hub:egress");
+    const occupiedFlowLabels = [];
+    const reserveFlowLabel = (pos, label, anchor = "middle", bounds = null) => {
+      if (!pos || !label) return false;
+      const lw = Math.max(40, visualUnits(label) * 6.0 + 10);
+      const lx = anchor === "end" ? pos.x - lw : anchor === "start" ? pos.x : pos.x - lw / 2;
+      const box = { x: lx, y: pos.y - 13, w: lw, h: 16 };
+      if (bounds && (box.x < bounds.minX || box.x + box.w > bounds.maxX)) return false;
+      if (occupiedFlowLabels.some((o) => rectsOverlap(box, o, 4, 4))) return false;
+      occupiedFlowLabels.push(box);
+      return true;
+    };
+    const slotY = (port, idx, total) => {
+      if (!port) return 0;
+      const span = Math.max(0, (port.bottom - port.top) - 20);
+      if (total <= 1 || span <= 4) return port.cy;
+      return port.top + 10 + (span * idx) / (total - 1);
+    };
+
+    // 1. Ingress & Egress traffic conduits
+    if (!isMobile) {
+      model.ingressLinks.forEach((edge, idx) => {
+        const nPort = ports.get(entityKey.node(edge.to));
+        if (!inHub || !nPort) return;
+        const peers = selIndex.ingressEdgePeers(edge.to);
+        const startY = slotY(inHub, idx, model.ingressLinks.length);
+        const d = cubicPath(inHub.right + 2, startY, nPort.left - 2, nPort.cy);
+        const rawRateLabel = (lastTrafficMeta.readable && lastTrafficMeta.hasData && edge.bytesPerSec > 0)
+          ? `↓ ${bytes(edge.bytesPerSec)}/s`
+          : "";
+        const labelCandidate = rawRateLabel ? {
+          x: nPort.left - 8,
+          y: startY + (nPort.cy - startY) * 0.85,
+        } : null;
+        const inBounds = { minX: inHub.right + 6, maxX: nPort.left - 6 };
+        const rateLabel = reserveFlowLabel(labelCandidate, rawRateLabel, "end", inBounds) ? rawRateLabel : "";
+        flowLayer.append(renderFlowCurve({
+          d,
+          peers,
+          baseOpacity: edge.active ? 0.78 : 0.34,
+          glowColor: edge.active ? INGRESS_COLOR : null,
+          glowWidth: 5.5,
+          stroke: edge.active ? "url(#a-topo-grad-rx)" : IDLE_FLOW_COLOR,
+          strokeWidth: edge.active ? 1.5 + edge.weight * 1.4 : 1.1,
+          dash: edge.active ? "" : "3 3",
+          markerEnd: edge.active ? "url(#a-topo-arrow-rx)" : "url(#a-topo-arrow-idle)",
+          pulseColor: edge.active ? INGRESS_COLOR : null,
+          pulseOpacity: edge.active ? 0.42 : 0,
+          pulseWeight: edge.weight,
+          photonColor: edge.active && edge.bytesPerSec > 0 ? INGRESS_COLOR : null,
+          rateLabel,
+          labelAnchor: "end",
+          rateColor: INGRESS_COLOR,
+          labelPos: rateLabel ? labelCandidate : null,
+          labelOffsetY: -4,
+          labelLayer,
+          refreshKey: `flow-in-${edge.to}`,
+        }));
+      });
+
+      model.egressLinks.forEach((edge, idx) => {
+        const nPort = ports.get(entityKey.node(edge.from));
+        if (!outHub || !nPort) return;
+        const peers = selIndex.egressEdgePeers(edge.from);
+        const railOffset = edge.blocked ? 0 : 12;
+        const endY = slotY(outHub, idx, model.egressLinks.length);
+        const pathObj = extendedCubicPath(nPort.right + 2, nPort.right + railOffset, nPort.cy, outHub.left - 2, endY);
+        const rawRateLabel = (lastTrafficMeta.readable && lastTrafficMeta.hasData && edge.bytesPerSec > 0)
+          ? `↑ ${bytes(edge.bytesPerSec)}/s`
+          : "";
+        const labelCandidate = rawRateLabel ? {
+          x: nPort.right + 14,
+          y: nPort.cy - 4,
+        } : null;
+        const outBounds = { minX: nPort.right + 12, maxX: outHub.left - 12 };
+        const canDrawAmbientRate = model.nodes.length <= 8 || idx < 3;
+        const rateLabel = (canDrawAmbientRate && reserveFlowLabel(labelCandidate, rawRateLabel, "start", outBounds)) ? rawRateLabel : "";
+        flowLayer.append(renderFlowCurve({
+          d: pathObj.d,
+          peers,
+          baseOpacity: edge.blocked ? 0.85 : edge.active ? 0.72 : 0.32,
+          glowColor: edge.blocked ? BLOCKED_COLOR : null,
+          glowWidth: 5,
+          stroke: edge.blocked ? BLOCKED_COLOR : edge.active ? "url(#a-topo-grad-tx)" : IDLE_FLOW_COLOR,
+          strokeWidth: edge.blocked ? 1.8 : edge.active ? 1.3 + edge.weight * 1.2 : 1.05,
+          dash: edge.blocked || !edge.active ? "4 3" : "",
+          markerEnd: edge.blocked ? "url(#a-topo-arrow-bad)" : edge.active ? "url(#a-topo-arrow-tx)" : "url(#a-topo-arrow-idle)",
+          pulseColor: !edge.blocked && edge.active ? EGRESS_COLOR : null,
+          pulseOpacity: !edge.blocked && edge.active ? 0.36 : 0,
+          pulseWeight: edge.weight,
+          photonColor: !edge.blocked && edge.active && edge.bytesPerSec > 0 ? EGRESS_COLOR : null,
+          rateLabel,
+          labelAnchor: "start",
+          rateColor: edge.blocked ? BLOCKED_COLOR : EGRESS_COLOR,
+          labelPos: rateLabel ? labelCandidate : null,
+          labelOffsetY: 0,
+          labelLayer,
+          refreshKey: `flow-out-${edge.from}`,
+        }));
+      });
+    } else {
+      // Mobile stacked spine lines down the right gutter connecting Ingress -> Nodes -> Egress
+      const gutterRight = w - 12;
+      model.ingressLinks.forEach((edge, idx) => {
+        const nPort = ports.get(entityKey.node(edge.to));
+        if (!inHub || !nPort) return;
+        const peers = selIndex.ingressEdgePeers(edge.to);
+        const railX = Math.max(nPort.right + 12, gutterRight - (idx % 3) * 6);
+        const d = `M ${inHub.right} ${inHub.cy.toFixed(1)} L ${railX.toFixed(1)} ${inHub.cy.toFixed(1)} L ${railX.toFixed(1)} ${nPort.cy.toFixed(1)} L ${nPort.right + 2} ${nPort.cy.toFixed(1)}`;
+        flowLayer.append(renderFlowCurve({
+          d,
+          peers,
+          baseOpacity: edge.active ? 0.55 : 0.25,
+          stroke: edge.active ? INGRESS_COLOR : IDLE_FLOW_COLOR,
+          strokeWidth: edge.active ? 1.4 : 1.0,
+          dash: edge.active ? "" : "3 3",
+          markerEnd: edge.active ? "url(#a-topo-arrow-rx)" : "url(#a-topo-arrow-idle)",
+          refreshKey: `m-flow-in-${edge.to}`,
+        }));
+      });
     }
 
-    const maxChars = Math.max(8, Math.floor((nodeW - 22) / 5.65));
-    model.nodes.forEach((item) => {
-      const box = nodeGeom.get(item.id);
-      const { y, cy } = box;
-      const pTags = probeTagsByNode.get(item.id) || [];
-      const tapPeers = `node:${item.id}`;
-      flowLayer.append(
-        createSVGEl("path", {
-          d: `M ${inBusX} ${cy.toFixed(1)} L ${nodeX - 2} ${cy.toFixed(1)}`,
-          fill: "none",
-          stroke: item.isOnline ? INGRESS_COLOR : IDLE_FLOW_COLOR,
-          "stroke-width": "1.7",
-          "data-topo-peers": ["hub:ingress", tapPeers, ...pTags].join(" "),
-          "data-base-opacity": item.isOnline ? "0.75" : "0.35",
-          opacity: item.isOnline ? "0.75" : "0.35",
-          "marker-end": item.isOnline ? "url(#a-topo-arrow-rx)" : "url(#a-topo-arrow-idle)",
-        }),
-      );
-      if (item.blocked) {
-        const stubX = nodeX + nodeW + 8;
-        const capG = createSVGEl("g", {
-          "data-topo-peers": [tapPeers, "hub:egress", ...pTags].join(" "),
-          "data-base-opacity": "0.85",
-          opacity: "0.85",
-        });
-        capG.append(
-          createSVGEl("path", {
-            d: `M ${nodeX + nodeW} ${(cy + 6).toFixed(1)} L ${stubX.toFixed(1)} ${(cy + 6).toFixed(1)}`,
-            fill: "none",
-            stroke: BLOCKED_COLOR,
-            "stroke-width": "1.4",
-            "stroke-dasharray": "2.5 2.5",
-          }),
-          createSVGEl("circle", { cx: (stubX + 3).toFixed(1), cy: (cy + 6).toFixed(1), r: 3.6, fill: "#fff2f3", stroke: "#f2cdd2", "stroke-width": "0.9" }),
-        );
-        flowLayer.append(capG);
-      } else {
-        flowLayer.append(
-          createSVGEl("path", {
-            d: `M ${nodeX + nodeW} ${(cy + 6).toFixed(1)} L ${outBusX - 2} ${(cy + 6).toFixed(1)}`,
-            fill: "none",
-            stroke: item.isOnline ? EGRESS_COLOR : IDLE_FLOW_COLOR,
-            "stroke-width": "1.7",
-            "stroke-dasharray": item.isOnline ? "5 3" : "3 5",
-            "data-topo-peers": [tapPeers, "hub:egress", ...pTags].join(" "),
-            "data-base-opacity": item.isOnline ? "0.68" : "0.35",
-            opacity: item.isOnline ? "0.68" : "0.35",
-            "marker-end": item.isOnline ? "url(#a-topo-arrow-tx)" : "url(#a-topo-arrow-idle)",
-          }),
-        );
-      }
-
-      const key = `node:${item.id}`;
-      const activeTraffic = item.isOnline && (item.rxBPS + item.txBPS > 0 || item.activeEngines.length > 0);
-      const dotColor = item.blocked ? BLOCKED_COLOR : item.isOnline ? OK_COLOR : IDLE_FLOW_COLOR;
-      const g = createSVGEl("g", {
-        class: `a-dash-topo-card-node ${activeKey() === key ? "is-active" : ""} ${item.blocked ? "is-blocked" : ""}`,
-        "data-refresh-key": `m-node-${item.id}`,
-        "data-topo-peers": [key, ...pTags].join(" "),
-        "data-base-opacity": "1",
-      });
-      const mSuperCompact = nodeH < 39;
-      const mCompact = nodeH < 46;
-      const mDotY = mSuperCompact ? y + 11.5 : mCompact ? y + 14 : y + 17;
-      const mNameY = mSuperCompact ? y + 14.5 : mCompact ? y + 17.5 : y + 20.5;
-      const mSubY = mSuperCompact ? y + 27.5 : mCompact ? y + 32 : y + 36;
-      g.append(createSVGEl("rect", { x: nodeX, y, width: nodeW, height: nodeH, rx: 8, class: `a-dash-topo-node-box ${activeKey() === key ? "is-active" : ""} ${item.blocked ? "is-blocked" : ""}` }));
-      if (activeTraffic && !item.blocked) {
-        g.append(createSVGEl("circle", { cx: nodeX + 12, cy: mDotY, r: 3.4, fill: "none", stroke: dotColor, "stroke-width": "1.1", class: "a-dash-topo-beacon-ring" }));
-      }
-      g.append(
-        createSVGEl("circle", { cx: nodeX + 12, cy: mDotY, r: 2.9, fill: dotColor }),
-        createSVGEl("text", { x: nodeX + 21, y: mNameY, class: "a-dash-topo-node-name" }, clipLabel(item.name, maxChars)),
-        createSVGEl("text", { x: nodeX + 11, y: mSubY, class: "a-dash-topo-node-sub" }, `↓ ${bytes(item.rxBPS)}/s · ↑ ${bytes(item.txBPS)}/s`),
-      );
-      bindInteractive(g, key);
-      entityLayer.append(g);
+    // 2. Internal Mesh & External Probe Curves + Collision-Free Pills
+    const rowByID = new Map(model.nodes.map((n, i) => [n.id, i]));
+    const laneInfo = assignProbeLanes(model.probeLinks, rowByID);
+    const ambientBad = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: isMobile ? 3 : 5 });
+    const occupiedPills = [...occupiedFlowLabels];
+    ports.forEach((r) => {
+      occupiedPills.push({ x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top });
     });
 
-    if (hasProbes) {
-      const mDense = nodesCount > 12 || model.probeLinks.length >= 10;
-      const laneInfo = assignProbeLanes(model.probeLinks, rowByID);
-      model.probeLinks.forEach((probe) => {
-        const src = nodeGeom.get(probe.from);
-        if (!src) return;
-        const entityKey = `probe:${probe.id}`;
-        const pal = tonePalette(probe.tone);
-        const unreachable = isProbeUnreachable(probe);
-        const marker = probe.tone === "ok"
-          ? "url(#a-topo-arrow-ok)"
-          : probe.tone === "warn"
-            ? "url(#a-topo-arrow-warn)"
-            : probe.tone === "bad"
-              ? "url(#a-topo-arrow-bad)"
-              : "url(#a-topo-arrow-idle)";
-        const peers = [entityKey, `node:${probe.from}`, probe.isExternal ? probe.to : `node:${probe.to}`];
-        const hl = isHighlightedEdge(peers);
+    const nodeRightX = Math.max(0, ...model.nodes.map((n) => ports.get(entityKey.node(n.id))?.right || 0));
+    const maxPillBounds = isMobile
+      ? { minX: Math.max(8, nodeRightX + 4), maxX: w - 6, minY: 6, maxY: h - 6 }
+      : { minX: Math.max(8, nodeRightX + 6), maxX: outHub ? Math.max(nodeRightX + 90, outHub.left - 6) : w - 12, minY: 6, maxY: h - 6 };
 
-        let d = "";
-        let startPort = null;
-        let endPort = null;
-        if (probe.isExternal) {
-          const ext = extGeom.get(probe.to);
-          if (!ext) return;
-          const x1 = src.x + src.w;
-          const y1 = src.cy - 5;
-          const baseBow = outBusX - x1 + 16;
-          const maxBow = w - padX - x1 - 8;
-          const extSpan = extItems.length > 1 ? (ext.idx || 0) / (extItems.length - 1) : 0.5;
-          const bow = Math.min(maxBow, baseBow + Math.round((maxBow - baseBow) * (0.35 + 0.6 * extSpan)));
-          const geom = bridgeArchPath(x1, y1, ext.cy, bow);
-          d = geom.d;
-          startPort = { x: x1, y: y1 };
-          endPort = { x: ext.x + ext.w, y: ext.cy };
+    const leaderSegments = [];
+    model.probeLinks.forEach((probe) => {
+      const fromPort = ports.get(entityKey.node(probe.from));
+      if (!fromPort) return;
+      const eKey = entityKey.probe(probe.id);
+      const peers = selIndex.probePeers(probe);
+      const pal = tonePalette(probe.tone);
+      const hl = isHighlightedEdge(peers);
+      const isBad = probe.tone === "bad";
+      const isWarn = probe.tone === "warn";
+
+      let d = "";
+      let mid = null;
+
+      if (probe.isExternal) {
+        const extPort = ports.get(entityKey.external(probe.to));
+        if (!extPort) return;
+        if (!isMobile) {
+          d = cubicPath(fromPort.right + 2, fromPort.cy, extPort.left - 2, extPort.cy);
+          mid = { x: (fromPort.right + extPort.left) / 2, y: (fromPort.cy + extPort.cy) / 2 };
         } else {
-          const dst = nodeGeom.get(probe.to);
-          if (!dst) return;
-          const info = laneInfo.get(probe.id) || { lane: 0, count: 1 };
-          const x1 = src.x + src.w;
-          const yA = src.cy - 5;
-          const yB = dst.cy - 5;
-          const baseBow = outBusX - x1 + 12;
-          const maxBow = w - padX - x1 - 10;
-          const step = info.count > 1 ? Math.min(18, (maxBow - baseBow) / (info.count - 1)) : 0;
-          const bow = Math.min(maxBow, baseBow + info.lane * step);
-          const geom = bridgeArchPath(x1, yA, yB, bow);
-          d = geom.d;
-          startPort = { x: x1, y: yA };
-          endPort = { x: dst.x + dst.w, y: yB };
+          const railW = Math.max(18, (w - Math.max(fromPort.right, extPort.right)) * 0.55);
+          const arch = bridgeArchPath(Math.max(fromPort.right, extPort.right) + 2, fromPort.cy, extPort.cy, railW, 0);
+          d = arch.d;
+          mid = bridgePointAt(Math.max(fromPort.right, extPort.right) + 2, fromPort.cy, extPort.cy, railW, 0.5, 0);
         }
+      } else {
+        const toPort = ports.get(entityKey.node(probe.to));
+        if (!toPort) return;
+        const info = laneInfo.get(probe.id) || { lane: 0, count: 1 };
+        const laneCount = Math.max(1, info.count);
+        const availRight = (isMobile ? w - 10 : (outHub ? outHub.left - 12 : w - 16)) - Math.max(fromPort.right, toPort.right);
+        const maxBow = Math.max(22, Math.min(isMobile ? 54 : 84, availRight * 0.65));
+        const bowStep = (maxBow - 16) / laneCount;
+        const bow = 16 + (info.lane + 0.5) * bowStep;
+        const baseX = Math.max(fromPort.right, toPort.right) + 2;
+        const arch = bridgeArchPath(baseX, fromPort.cy, toPort.cy, bow, 0);
+        d = arch.d;
+        mid = bridgePointAt(baseX, fromPort.cy, toPort.cy, bow, 0.5, 0);
+      }
 
-        const defBase = probe.tone === "bad" ? 0.82 : probe.tone === "warn" ? 0.72 : 0.36;
-        const g = createSVGEl("g", {
-          class: "a-dash-topo-probe-item",
-          "data-refresh-key": `m-probe-edge-${probe.id}`,
-          "data-topo-peers": peers.join(" "),
-          "data-base-opacity": defBase.toFixed(2),
-          "data-dim-opacity": "0.10",
-          opacity: hl === true ? "1" : hl === false ? "0.10" : defBase.toFixed(2),
-        });
-        g.append(createSVGEl("title", {}, `${probe.name}: ${probe.metricLabel} (${probe.statusLabel}) — 点击打开链路监控`));
-        g.append(
-          createSVGEl("path", { d, fill: "none", stroke: "#fafafa", "stroke-width": mDense ? "3.2" : "4.2", "stroke-linecap": "round", opacity: "0.9" }),
-          createSVGEl("path", {
-            d,
-            fill: "none",
-            stroke: pal.stroke,
-            "stroke-width": hl === true ? "2.0" : (mDense ? "1.35" : "1.6"),
-            "stroke-dasharray": unreachable ? "3 2.5" : null,
-            "marker-end": marker,
-            "marker-start": probe.bidirectional && !probe.isExternal ? marker : null,
-          }),
-        );
-        if (startPort) {
-          g.append(createSVGEl("circle", { cx: startPort.x.toFixed(1), cy: startPort.y.toFixed(1), r: 1.9, fill: "#ffffff", stroke: pal.stroke, "stroke-width": "1.1" }));
-        }
-        if (endPort) {
-          g.append(createSVGEl("circle", { cx: endPort.x.toFixed(1), cy: endPort.y.toFixed(1), r: 1.9, fill: "#ffffff", stroke: pal.stroke, "stroke-width": "1.1" }));
-        }
-        bindInteractive(g, entityKey, { openProbeID: probe.id });
-        probeLayer.append(g);
-      });
-    }
-
-    for (const [extID, box] of extGeom.entries()) {
-      const extPeers = [extID, ...(probeTagsByNode.get(extID) || [])];
-      const extCompact = box.h < 36;
+      const baseOpacity = isBad ? 0.92 : isWarn ? 0.8 : probe.isExternal ? 0.6 : 0.68;
       const g = createSVGEl("g", {
-        class: `a-dash-topo-card-node ${activeKey() === extID ? "is-active" : ""}`,
-        "data-refresh-key": `m-ext-${extID}`,
-        "data-topo-peers": extPeers.join(" "),
-        "data-base-opacity": "1",
+        "data-refresh-key": `flow-probe-${probe.id}`,
+        "data-topo-peers": peers.join(" "),
+        "data-base-opacity": String(baseOpacity),
+        opacity: (hl === true ? 1 : hl === false ? 0.14 : baseOpacity).toFixed(2),
       });
-      g.append(
-        createSVGEl("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 8, class: `a-dash-topo-ext-box ${activeKey() === extID ? "is-active" : ""}` }),
-        createSVGEl("circle", { cx: box.x + box.w, cy: box.cy, r: 2.5, fill: "#ffffff", stroke: EGRESS_COLOR, "stroke-width": "1.3" }),
-        createSVGEl("text", { x: box.x + 10, y: box.y + (extCompact ? 12.5 : 15), class: "a-dash-topo-ext-kicker" }, "公网目标"),
-        createSVGEl("text", { x: box.x + 10, y: box.y + (extCompact ? 26.5 : 30), class: "a-dash-topo-node-name" }, clipLabel(box.item.name, Math.max(12, Math.floor((box.w - 20) / 6.3)))),
-      );
-      bindInteractive(g, extID);
-      entityLayer.append(g);
-    }
+      g.append(createSVGEl("path", {
+        d,
+        fill: "none",
+        stroke: pal.stroke,
+        "stroke-width": hl === true ? "2.4" : isBad ? "2.0" : "1.5",
+        "stroke-dasharray": probe.running ? "6 4" : isBad ? "5 3" : probe.isExternal ? "2.5 3" : null,
+        "stroke-linecap": "round",
+        "marker-end": isBad ? "url(#a-topo-arrow-bad)" : isWarn ? "url(#a-topo-arrow-warn)" : probe.tone === "ok" ? "url(#a-topo-arrow-ok)" : "url(#a-topo-arrow-idle)",
+        class: probe.running ? "a-dash-topo-probe-running" : null,
+      }));
 
-    {
-      const g = createSVGEl("g", { "data-refresh-key": "m-hub-egress", class: "a-dash-topo-card-node" });
-      g.append(
-        createSVGEl("rect", { x: padX, y: footerTop, width: w - padX * 2, height: footerH, rx: 9, class: "a-dash-topo-hub-box" }),
-        createSVGEl("text", { x: padX + 12, y: footerTop + 19, class: "a-dash-topo-hub-kicker" }, "出站流量"),
-        createSVGEl("text", { x: padX + 12, y: footerTop + 39, class: "a-dash-topo-hub-metric" }, `↑ ${bytes(model.egress.rateBPS)}/s`),
-        createSVGEl("text", { x: w - padX - 12, y: footerTop + 39, "text-anchor": "end", class: "a-dash-topo-hub-sub" }, `月发 ${bytes(model.egress.monthlyBytes)} · ${model.onlineNodes}/${model.totalNodes} 在线`),
-      );
-      bindInteractive(g, "hub:egress");
-      entityLayer.append(g);
-    }
+      const hitPath = createSVGEl("path", {
+        d,
+        fill: "none",
+        stroke: "transparent",
+        "stroke-width": "12",
+        class: "a-dash-topo-probe-item",
+      });
+      bindInteractive(hitPath, eKey, { openProbeID: probe.id });
+      g.append(hitPath);
+      probeLayer.append(g);
 
-    svg.append(flowLayer, probeLayer, entityLayer, probeLabelLayer);
-    return svg;
+      // Pill labeling: show ambient alerts + allow hover/pin on all pills cleanly.
+      const isAmbientBad = ambientBad.has(probe.id);
+      const compactLabel = buildProbePillLabel(probe, isMobile, isMobile);
+      const labelText = isMobile && isAmbientBad ? buildProbeShortAlertLabel(probe) : compactLabel;
+      const pillH = isMobile ? 16 : 19;
+      const pillW = Math.max(isMobile ? 42 : 56, Math.min(isMobile ? 96 : 148, visualUnits(labelText) * (isMobile ? 5.6 : 6.2) + (isMobile ? 16 : 22)));
+      const focusOnly = model.probeLinks.length > (isMobile ? 3 : 6) && !isAmbientBad;
+      const placed = placeCollisionFreePill(mid.x, mid.y, pillW, pillH, occupiedPills, maxPillBounds, [mid], { leaderSegments });
+
+      if (placed.shifted) {
+        appendProbeLeader(pillLayer, placed, pal, peers, hl, isMobile, focusOnly);
+      }
+      pillLayer.append(createProbePillGroup({
+        probe,
+        cx: placed.cx,
+        cy: placed.cy,
+        pillW,
+        fullW: pillW,
+        pillH,
+        label: labelText,
+        shortLabel: labelText,
+        pal,
+        compact: isMobile,
+        peers,
+        focusOnly,
+      }));
+    });
+
+    svg.replaceChildren(defs, flowLayer, probeLayer, labelLayer, pillLayer);
+    syncHighlight();
+  };
+
+  const scheduleFlowEdgeSync = (force = false) => {
+    cancelAnimationFrame(flowEdgeFrame);
+    flowEdgeFrame = requestAnimationFrame(() => {
+      flowEdgeFrame = 0;
+      syncFlowEdges(force);
+    });
+  };
+
+  /** Builds optional zoom/pan control overlay for the Pacific map view. */
+  const attachMapViewportControls = (stageWrapper) => {
+    const svg = stageWrapper.querySelector("svg.a-dash-topo-map-svg");
+    if (!svg || svg.classList.contains("is-mobile")) return;
+
+    const zoomBy = (factor, anchorX = PACIFIC_MAP_BOUNDS.width / 2, anchorY = PACIFIC_MAP_BOUNDS.height / 2) => {
+      const nextScale = Math.max(1, Math.min(3.2, mapZoom.scale * factor));
+      if (Math.abs(nextScale - mapZoom.scale) < 0.01) return;
+      const ratio = nextScale / mapZoom.scale;
+      mapZoom = clampZoomTransform({
+        scale: nextScale,
+        tx: anchorX - (anchorX - mapZoom.tx) * ratio,
+        ty: anchorY - (anchorY - mapZoom.ty) * ratio,
+      });
+      paint(true);
+    };
+
+    const pctLabel = `${Math.round(mapZoom.scale * 100)}%`;
+    const toolsBar = node("div", { className: "a-dash-topo-map-tools", role: "group", "aria-label": "地图缩放控制" },
+      button("−", () => zoomBy(1 / 1.35), { className: "a-button", title: "缩小地图", disabled: mapZoom.scale <= 1.01, "data-refresh-key": "map-zoom-out" }),
+      button(mapZoom.scale > 1.01 ? `重置 (${pctLabel})` : "100%", () => {
+        clearSelection();
+        resetMapZoom(true);
+      }, { className: "a-button", title: "重置地图视角并清除聚焦", disabled: mapZoom.scale <= 1.01 && !pinnedKey, "data-refresh-key": "map-zoom-reset" }),
+      button("+", () => zoomBy(1.35), { className: "a-button", title: "放大地图", disabled: mapZoom.scale >= 3.18, "data-refresh-key": "map-zoom-in" }),
+    );
+    stageWrapper.append(toolsBar);
+
+    const clientToSvgPoint = (clientX, clientY) => {
+      const rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return { x: PACIFIC_MAP_BOUNDS.width / 2, y: PACIFIC_MAP_BOUNDS.height / 2 };
+      return {
+        x: ((clientX - rect.left) / rect.width) * PACIFIC_MAP_BOUNDS.width,
+        y: ((clientY - rect.top) / rect.height) * PACIFIC_MAP_BOUNDS.height,
+      };
+    };
+
+    let dragging = false;
+    let movedDist = 0;
+    let startClient = { x: 0, y: 0 };
+    let startTrans = { tx: 0, ty: 0 };
+
+    listen(svg, "pointerdown", (e) => {
+      if (e.button !== 0 || mapZoom.scale <= 1.01) return;
+      if (e.target.closest?.("[data-topo-entity]")) return;
+      dragging = true;
+      movedDist = 0;
+      startClient = { x: e.clientX, y: e.clientY };
+      startTrans = { tx: mapZoom.tx, ty: mapZoom.ty };
+      svg.setPointerCapture?.(e.pointerId);
+    });
+    listen(svg, "pointermove", (e) => {
+      if (!dragging) return;
+      const dxPx = e.clientX - startClient.x;
+      const dyPx = e.clientY - startClient.y;
+      movedDist = Math.max(movedDist, Math.hypot(dxPx, dyPx));
+      const rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const dxSvg = (dxPx / rect.width) * PACIFIC_MAP_BOUNDS.width;
+      const dySvg = (dyPx / rect.height) * PACIFIC_MAP_BOUNDS.height;
+      mapZoom = clampZoomTransform({
+        scale: mapZoom.scale,
+        tx: startTrans.tx + dxSvg,
+        ty: startTrans.ty + dySvg,
+      });
+      const vp = svg.querySelector(".a-dash-topo-map-viewport");
+      if (vp) {
+        vp.setAttribute("transform", `translate(${mapZoom.tx.toFixed(1)} ${mapZoom.ty.toFixed(1)}) scale(${mapZoom.scale.toFixed(3)})`);
+      }
+    });
+    listen(svg, "pointerup", (e) => {
+      if (!dragging) return;
+      dragging = false;
+      svg.releasePointerCapture?.(e.pointerId);
+      if (movedDist > 5) {
+        suppressNextCanvasClearClick = true;
+        paint(true);
+      }
+    });
+    listen(svg, "dblclick", (e) => {
+      if (e.target.closest?.("[data-topo-entity]")) return;
+      const pt = clientToSvgPoint(e.clientX, e.clientY);
+      if (mapZoom.scale >= 2.5) {
+        resetMapZoom(true);
+      } else {
+        zoomBy(1.6, pt.x, pt.y);
+      }
+    });
+    listen(svg, "wheel", (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const pt = clientToSvgPoint(e.clientX, e.clientY);
+      zoomBy(e.deltaY < 0 ? 1.18 : 1 / 1.18, pt.x, pt.y);
+    }, { passive: false });
   };
 
   const paint = (force = false) => {
@@ -1821,7 +1483,46 @@ export function createDashboardTopologySection(ctx, {
     const agents = getAgents();
     const probesData = getProbes();
 
-    const filterUnprobed = !isStandalonePage && ctx.can("agents.read") && ctx.can("tasks.read") && states.get("probes") !== "denied";
+    const canAgents = ctx.can("agents.read");
+    const canTraffic = ctx.can("traffic.read");
+    const canTasks = ctx.can("tasks.read");
+    const agentsState = states.get("agents") || "";
+    const probesState = states.get("probes") || "";
+    const trafficState = states.get("traffic") || "";
+    const policyState = states.get("trafficPolicies") || "";
+
+    const trafficReadable = canTraffic && trafficState !== "denied" && policyState !== "denied";
+    const hasTrafficData = Boolean(usage || policies);
+    const trafficEffectiveState = !trafficReadable
+      ? "denied"
+      : (!hasTrafficData && (trafficState === "loading" || policyState === "loading" || (!trafficState && !policyState)))
+        ? "loading"
+        : (!hasTrafficData && (trafficState === "failed" || policyState === "failed"))
+          ? "failed"
+          : (hasTrafficData && (trafficState === "failed" || policyState === "failed"))
+            ? "partial-failed"
+            : "ready";
+
+    const trafficLabel = trafficEffectiveState === "denied"
+      ? "无流量权限"
+      : trafficEffectiveState === "loading"
+        ? "流量读取中"
+        : trafficEffectiveState === "failed"
+          ? "流量读取失败"
+          : trafficEffectiveState === "partial-failed"
+            ? "流量刷新失败 · 保留已有记录"
+            : "";
+
+    lastTrafficMeta = {
+      readable: trafficReadable,
+      state: trafficEffectiveState,
+      hasData: hasTrafficData,
+      label: trafficLabel,
+    };
+
+    const hasProbePairs = Array.isArray(probesData?.pairs) && probesData.pairs.length > 0;
+    // Only narrow #dashboard to probed nodes once probes actually settled non-empty; never apply on failed/loading!
+    const filterUnprobed = !isStandalonePage && canAgents && canTasks && probesState === "ready" && hasProbePairs;
 
     const model = buildDashboardTopology({
       agents: Array.isArray(agents) ? agents : [],
@@ -1833,22 +1534,44 @@ export function createDashboardTopologySection(ctx, {
       metrics: getMetrics(),
       connections: getConnections(),
       month: getMonth(),
-      maxNodes: 24,
+      maxNodes: isStandalonePage ? null : 12,
       onlyProbedNodes: filterUnprobed,
     });
     lastModel = model;
+    lastClusters = viewMode === "map" ? clusterTopologyNodes(model.nodes) : [];
+
+    // Reconcile pinned/hovered keys cleanly against updated model & clusters so stale keys never dim canvas.
+    if (pinnedKey) {
+      pinnedKey = reconcileSelectionKey(pinnedKey, model, { clusters: lastClusters, allowCluster: viewMode === "map" });
+    }
+    if (hoveredKey) {
+      hoveredKey = reconcileSelectionKey(hoveredKey, model, { clusters: lastClusters, allowCluster: viewMode === "map" });
+    }
 
     const waitingKeys = [
-      ...(ctx.can("agents.read") ? ["agents"] : []),
-      ...(ctx.can("traffic.read") ? ["traffic", "trafficPolicies"] : []),
-      ...(filterUnprobed ? ["probes"] : []),
+      ...(canAgents ? ["agents"] : []),
+      ...(canTraffic ? ["traffic", "trafficPolicies"] : []),
+      ...(!isStandalonePage && canAgents && canTasks ? ["probes"] : []),
     ];
     const waiting = waitingKeys.some((key) => !states.has(key) || states.get(key) === "loading");
-    const nextStatus = waiting && !model.nodes.length
-      ? "读取中…"
-      : !model.nodes.length
-        ? (isStandalonePage ? "暂无可用拓扑数据" : "未设置检测目标")
-        : "";
+    const probesFailed = canAgents && canTasks && probesState === "failed";
+    const agentsFailed = canAgents && agentsState === "failed";
+
+    let nextStatus = "";
+    if (!model.nodes.length) {
+      if (waiting) nextStatus = "读取中…";
+      else if (agentsFailed || (probesFailed && !hasProbePairs)) nextStatus = probesFailed && !agentsFailed ? "探测链路读取失败" : "拓扑读取失败";
+      else if (canAgents && canTasks && probesState === "ready" && !hasProbePairs && !isStandalonePage) nextStatus = "未设置检测目标";
+      else if (!canAgents && trafficEffectiveState === "denied") nextStatus = "无权查看拓扑数据";
+      else nextStatus = isStandalonePage ? "暂无可用拓扑数据" : "暂无节点数据";
+    } else if (probesFailed) {
+      nextStatus = hasProbePairs ? "探测链路刷新失败 · 保留已有记录" : "探测链路读取失败";
+    } else if (trafficEffectiveState === "failed" || trafficEffectiveState === "partial-failed") {
+      nextStatus = trafficLabel;
+    } else if (canAgents && canTasks && probesState === "ready" && !hasProbePairs && !isStandalonePage) {
+      nextStatus = "未设置检测目标";
+    }
+
     if (statusNode.textContent !== nextStatus) statusNode.textContent = nextStatus;
 
     const measuredWidth = observedWidth >= 200 ? observedWidth : (canvasHost.clientWidth >= 200 ? canvasHost.clientWidth : 0);
@@ -1860,9 +1583,10 @@ export function createDashboardTopologySection(ctx, {
       ...model,
       egress: { ...model.egress, panelRxBPS: null, panelTxBPS: null },
     };
-    const sig = JSON.stringify([renderWidth, isMobile, viewMode, sigModel, nextStatus]);
+    const sig = JSON.stringify([renderWidth, isMobile, viewMode, mapZoom, sigModel, nextStatus, trafficEffectiveState]);
     if (!force && sig === lastPaintSignature) return;
     lastPaintSignature = sig;
+    lastFlowGeomSignature = "";
 
     const metaBadges = [
       keyedBadge(`${model.onlineNodes}/${model.totalNodes} 在线`, model.onlineNodes ? "ok" : "bad", "topo-nodes"),
@@ -1873,31 +1597,59 @@ export function createDashboardTopologySection(ctx, {
             "topo-links",
           )
         : null,
+      !isStandalonePage && (model.hiddenNodeCount > 0 || model.omittedProbeCount > 0)
+        ? keyedBadge(
+            `已省略 ${model.hiddenNodeCount} 节点${model.omittedProbeCount ? ` · ${model.omittedProbeCount} 链路` : ""}`,
+            "",
+            "topo-omitted",
+          )
+        : null,
     ].filter(Boolean);
     patchChildren(headerMeta, metaBadges);
     openProbesBtn?.classList?.toggle("is-alert", model.abnormalLinks > 0);
 
     if (model.nodes.length) {
-      const freshSvg = viewMode === "map"
-        ? renderPacificMapSVG({
-            width: renderWidth,
-            isMobile,
-            model,
-            bytes,
-            helpers: {
-              allowMotion,
-              activeKey,
-              isHighlightedEdge,
-              bindInteractive,
-              createProbePillGroup,
-              appendProbeLeader,
-            },
-          })
-        : (isMobile ? renderMobileSVG(renderWidth, model) : renderDesktopSVG(renderWidth, model));
-      if (canvasHost.firstChild && (canvasHost.firstChild.getAttribute("data-topo-mode") || "flow") === viewMode) {
-        patch(canvasHost.firstChild, freshSvg);
+      if (viewMode === "map") {
+        const freshSvg = renderPacificMapSVG({
+          width: renderWidth,
+          isMobile,
+          model,
+          bytes,
+          trafficMeta: lastTrafficMeta,
+          zoomTransform: isMobile ? null : mapZoom,
+          helpers: {
+            allowMotion,
+            activeKey,
+            isHighlightedEdge,
+            bindInteractive,
+            createProbePillGroup,
+            appendProbeLeader,
+          },
+        });
+        const stageWrap = node("div", { className: "a-dash-topo-map-stage", "data-topo-mode": "map" }, freshSvg);
+        attachMapViewportControls(stageWrap);
+        if (canvasHost.firstChild && canvasHost.firstChild.getAttribute("data-topo-mode") === "map") {
+          const existingTools = canvasHost.firstChild.querySelector(".a-dash-topo-map-tools");
+          const existingSvg = canvasHost.firstChild.querySelector("svg.a-dash-topo-map-svg");
+          const newTools = stageWrap.querySelector(".a-dash-topo-map-tools");
+          if (existingSvg) patch(existingSvg, freshSvg);
+          else canvasHost.replaceChildren(stageWrap);
+          if (existingTools && newTools) patch(existingTools, newTools);
+          else if (!existingTools && newTools) canvasHost.firstChild.append(newTools);
+          else if (existingTools && !newTools) existingTools.remove();
+        } else {
+          canvasHost.replaceChildren(stageWrap);
+        }
       } else {
-        canvasHost.replaceChildren(freshSvg);
+        const isStackedFlow = renderWidth < 760;
+        const freshBoard = buildFlowBoardElement(model, isStackedFlow, lastTrafficMeta);
+        if (canvasHost.firstChild && canvasHost.firstChild.getAttribute("data-topo-mode") === "flow") {
+          patch(canvasHost.firstChild, freshBoard);
+        } else {
+          canvasHost.replaceChildren(freshBoard);
+        }
+        syncFlowEdges(true);
+        scheduleFlowEdgeSync(false);
       }
     } else {
       canvasHost.replaceChildren();
@@ -1927,7 +1679,6 @@ export function createDashboardTopologySection(ctx, {
     const observer = new ResizeObserver((entries) => {
       if (!canView() || !ctx.current()) return;
       const next = Math.round(entries[0]?.contentRect?.width || 0);
-      // Ignore transient sub-200px collapse frames (e.g. compositor/screenshot passes) so desktop never flashes mobile SVG.
       if (next >= 200 && Math.abs(next - observedWidth) >= 2) {
         observedWidth = next;
         cancelAnimationFrame(resizeFrame);
@@ -1935,6 +1686,8 @@ export function createDashboardTopologySection(ctx, {
           resizeFrame = 0;
           if (canView() && ctx.current()) paint();
         });
+      } else if (viewMode === "flow" && lastModel?.nodes?.length) {
+        scheduleFlowEdgeSync(false);
       }
     });
     observer.observe(canvasHost);

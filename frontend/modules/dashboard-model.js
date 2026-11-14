@@ -683,10 +683,10 @@ export function buildDashboardTopology({
     return a.id.localeCompare(b.id);
   });
 
-  const cap = Math.max(1, Number(maxNodes) || 6);
-  const visibleNodes = allNodes.slice(0, cap);
+  const hasCap = maxNodes !== null && maxNodes !== undefined && Number.isFinite(Number(maxNodes)) && Number(maxNodes) > 0;
+  const visibleNodes = hasCap ? allNodes.slice(0, Number(maxNodes)) : allNodes;
   const visibleSet = new Set(visibleNodes.map((n) => n.id));
-  const hiddenNodes = allNodes.slice(cap);
+  const hiddenNodes = hasCap ? allNodes.slice(Number(maxNodes)) : [];
 
   const maxRxSignal = Math.max(
     0,

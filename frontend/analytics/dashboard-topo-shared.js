@@ -1,6 +1,6 @@
 import { createSVGEl } from "./dashboard-panel.js";
 import { geoRegionDetails } from "../modules/region-model.js";
-import { projectPacificGeo } from "./pacific-map-data.js";
+import { PACIFIC_MAP_BOUNDS, projectPacificGeo } from "./pacific-map-data.js";
 
 export const INGRESS_COLOR = "#18181b";
 export const EGRESS_COLOR = "#71717a";
@@ -8,6 +8,7 @@ export const BLOCKED_COLOR = "#a41a2b";
 export const IDLE_FLOW_COLOR = "#a1a1aa";
 export const OK_COLOR = "#155731";
 export const WARN_COLOR = "#b45309";
+export const CO_LOCATED_RADIUS_PX = 5.5;
 
 export function visualUnits(text) {
   let units = 0;
@@ -39,6 +40,14 @@ export function tonePalette(tone) {
 
 export function flowDur(weight) {
   return `${Math.max(1.0, 2.55 - (Number(weight) || 0) * 1.45).toFixed(2)}s`;
+}
+
+/** Discrete CSS animation speed class to satisfy strict CSP without inline style attributes. */
+export function flowSpeedClass(weight) {
+  const w = Number(weight) || 0;
+  if (w >= 0.72) return "is-speed-fast";
+  if (w >= 0.42) return "is-speed-med";
+  return "is-speed-slow";
 }
 
 export function formatMs(ms) {
@@ -127,7 +136,7 @@ export function bridgeArchPath(x0, yA, yB, bow, railOffset = 0) {
   const apexX = sx + bow;
   const yMid = (yA + yB) / 2;
   const dir = yB >= yA ? 1 : -1;
-  const c1 = Math.max(24, bow * 0.64);
+  const c1 = Math.max(20, bow * 0.64);
   const c2 = Math.max(12, Math.abs(yB - yA) * 0.24);
   const lead = railOffset > 0 ? [`M ${x0.toFixed(1)} ${yA.toFixed(1)}`, `L ${sx.toFixed(1)} ${yA.toFixed(1)}`] : [`M ${sx.toFixed(1)} ${yA.toFixed(1)}`];
   const tail = railOffset > 0 ? [`L ${x0.toFixed(1)} ${yB.toFixed(1)}`] : [`L ${sx.toFixed(1)} ${yB.toFixed(1)}`];
@@ -145,7 +154,7 @@ export function bridgePointAt(x0, yA, yB, bow, t = 0.5, railOffset = 0) {
   const apexX = sx + bow;
   const yMid = (yA + yB) / 2;
   const dir = yB >= yA ? 1 : -1;
-  const c1 = Math.max(24, bow * 0.64);
+  const c1 = Math.max(20, bow * 0.64);
   const c2 = Math.max(12, Math.abs(yB - yA) * 0.24);
   const evalSeg = (p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, u) => {
     const mu = 1 - u;
@@ -284,7 +293,7 @@ export function placeCollisionFreePill(targetX, targetY, w, h, occupied, bounds,
     if (singleLeaderOrigin && Math.hypot(picked.cx - singleLeaderOrigin.x, picked.cy - singleLeaderOrigin.y) > 4) {
       leaderSegments.push({ a: singleLeaderOrigin, b: { x: picked.cx, y: picked.cy } });
     }
-    return { cx: picked.cx, cy: picked.cy, anchorX: nearA.x, anchorY: nearA.y, shifted: dist > 18 };
+    return { cx: picked.cx, cy: picked.cy, anchorX: nearA.x, anchorY: nearA.y, anchorDist: dist, shifted: dist > 18 };
   };
 
   let fallback = null;
@@ -354,8 +363,8 @@ export function placeCollisionFreePill(targetX, targetY, w, h, occupied, bounds,
   return finalize(best || boxOnlyMatch, fallback);
 }
 
-export function createTopologyDefs() {
-  const defs = createSVGEl("defs", { "data-refresh-key": "topo-defs" });
+export function createTopologyDefs(prefix = "a-topo") {
+  const defs = createSVGEl("defs", { "data-refresh-key": `${prefix}-defs` });
 
   const addGrad = (id, coords, stops) => {
     const grad = createSVGEl("linearGradient", { id, "data-refresh-key": id, ...coords });
@@ -365,9 +374,9 @@ export function createTopologyDefs() {
     defs.append(grad);
   };
 
-  addGrad("a-topo-grad-rx", { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#18181b", 0.90], ["100%", "#3f3f46", 0.72]]);
-  addGrad("a-topo-grad-tx", { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#52525b", 0.82], ["100%", "#71717a", 0.65]]);
-  addGrad("a-topo-grad-bar", { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#18181b", 0.92], ["100%", "#52525b", 0.78]]);
+  addGrad(`${prefix}-grad-rx`, { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#18181b", 0.90], ["100%", "#3f3f46", 0.72]]);
+  addGrad(`${prefix}-grad-tx`, { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#52525b", 0.82], ["100%", "#71717a", 0.65]]);
+  addGrad(`${prefix}-grad-bar`, { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#18181b", 0.92], ["100%", "#52525b", 0.78]]);
 
   const addArrow = (id, color) => {
     const marker = createSVGEl("marker", {
@@ -384,30 +393,142 @@ export function createTopologyDefs() {
     defs.append(marker);
   };
 
-  addArrow("a-topo-arrow-rx", INGRESS_COLOR);
-  addArrow("a-topo-arrow-tx", EGRESS_COLOR);
-  addArrow("a-topo-arrow-ok", OK_COLOR);
-  addArrow("a-topo-arrow-warn", WARN_COLOR);
-  addArrow("a-topo-arrow-bad", BLOCKED_COLOR);
-  addArrow("a-topo-arrow-idle", IDLE_FLOW_COLOR);
+  addArrow(`${prefix}-arrow-rx`, INGRESS_COLOR);
+  addArrow(`${prefix}-arrow-tx`, EGRESS_COLOR);
+  addArrow(`${prefix}-arrow-ok`, OK_COLOR);
+  addArrow(`${prefix}-arrow-warn`, WARN_COLOR);
+  addArrow(`${prefix}-arrow-bad`, BLOCKED_COLOR);
+  addArrow(`${prefix}-arrow-idle`, IDLE_FLOW_COLOR);
 
   return defs;
 }
 
+/** Canonical graph entity key constructors so all views share identical identifiers. */
+export const entityKey = Object.freeze({
+  node: (id) => `node:${String(id || "")}`,
+  external: (id) => {
+    const s = String(id || "");
+    return s.startsWith("ext:") ? s : `ext:${s}`;
+  },
+  probe: (id) => `probe:${String(id || "")}`,
+  cluster: (memberIDs) => {
+    const uniqueSorted = [...new Set((memberIDs || []).map((id) => String(id || "")).filter(Boolean))].sort();
+    return `cluster:${uniqueSorted.join(",")}`;
+  },
+  hub: (kind) => `hub:${String(kind || "")}`,
+});
+
+export function parseEntityKey(key) {
+  const s = String(key || "");
+  if (!s) return { kind: "", id: "", memberIDs: [] };
+  if (s.startsWith("node:")) return { kind: "node", id: s.slice(5), memberIDs: [s.slice(5)] };
+  if (s.startsWith("ext:")) return { kind: "ext", id: s, memberIDs: [] };
+  if (s.startsWith("probe:")) return { kind: "probe", id: s.slice(6), memberIDs: [] };
+  if (s.startsWith("hub:")) return { kind: "hub", id: s.slice(4), memberIDs: [] };
+  if (s.startsWith("cluster:")) {
+    const memberIDs = s.slice(8).split(",").filter(Boolean);
+    return { kind: "cluster", id: s, memberIDs };
+  }
+  return { kind: "", id: s, memberIDs: [] };
+}
+
+/** Computes peer tag arrays for nodes and external targets (always prefixing internal nodes with `node:`). */
 export function buildPeerProbeTags(model) {
   const map = new Map();
-  for (const n of model.nodes) map.set(n.id, []);
-  for (const ext of (model.externalTargets || [])) map.set(ext.id, []);
-  for (const p of model.probeLinks) {
-    const tag = `probe:${p.id}`;
-    map.get(p.from)?.push(tag);
-    map.get(p.to)?.push(tag);
-    if (p.isExternal) {
-      map.get(p.from)?.push(p.to);
-      map.get(p.to)?.push(`node:${p.from}`);
-    }
+  for (const n of (model?.nodes || [])) map.set(n.id, new Set());
+  for (const ext of (model?.externalTargets || [])) map.set(ext.id, new Set());
+  for (const p of (model?.probeLinks || [])) {
+    const tag = entityKey.probe(p.id);
+    const fromKey = entityKey.node(p.from);
+    const toKey = p.isExternal ? entityKey.external(p.to) : entityKey.node(p.to);
+    map.get(p.from)?.add(tag);
+    map.get(p.from)?.add(toKey);
+    map.get(p.to)?.add(tag);
+    map.get(p.to)?.add(fromKey);
   }
-  return map;
+  const out = new Map();
+  map.forEach((set, k) => out.set(k, [...set]));
+  return out;
+}
+
+/**
+ * Single source of truth for entity identities, adjacency `peers` arrays, and valid active keys
+ * shared across desktop/mobile flow boards, Pacific maps, probe pills, inspect bar, and ledger cards.
+ */
+export function buildTopologySelectionIndex(model, clusters = []) {
+  const peerTags = buildPeerProbeTags(model);
+  const nodeMap = new Map();
+  const extMap = new Map();
+  const probeMap = new Map();
+  const clusterMap = new Map();
+  const validKeys = new Set();
+
+  const ingressNodes = [];
+  const egressNodes = [];
+  for (const link of (model?.ingressLinks || [])) ingressNodes.push(entityKey.node(link.to));
+  for (const link of (model?.egressLinks || [])) egressNodes.push(entityKey.node(link.from));
+
+  const ingressSet = new Set(ingressNodes);
+  const egressSet = new Set(egressNodes);
+
+  if ((model?.nodes || []).length) {
+    validKeys.add("hub:ingress");
+    validKeys.add("hub:egress");
+  }
+
+  for (const n of (model?.nodes || [])) {
+    const nKey = entityKey.node(n.id);
+    validKeys.add(nKey);
+    const peers = new Set([nKey, ...(peerTags.get(n.id) || [])]);
+    if (ingressSet.has(nKey)) peers.add("hub:ingress");
+    if (egressSet.has(nKey)) peers.add("hub:egress");
+    nodeMap.set(n.id, [...peers]);
+  }
+
+  for (const ext of (model?.externalTargets || [])) {
+    const extKey = entityKey.external(ext.id);
+    validKeys.add(extKey);
+    extMap.set(ext.id, [extKey, ...(peerTags.get(ext.id) || [])]);
+  }
+
+  for (const p of (model?.probeLinks || [])) {
+    const pKey = entityKey.probe(p.id);
+    const fromKey = entityKey.node(p.from);
+    const toKey = p.isExternal ? entityKey.external(p.to) : entityKey.node(p.to);
+    validKeys.add(pKey);
+    probeMap.set(p.id, [...new Set([pKey, fromKey, toKey])]);
+  }
+
+  for (const cl of (clusters || [])) {
+    if (!cl || (cl.members || []).length <= 1) continue;
+    const cKey = cl.key || entityKey.cluster(cl.members.map((m) => m.node.id));
+    validKeys.add(cKey);
+    const cPeers = new Set([cKey]);
+    for (const m of cl.members) {
+      const nKey = entityKey.node(m.node.id);
+      cPeers.add(nKey);
+      for (const tag of (nodeMap.get(m.node.id) || [])) cPeers.add(tag);
+    }
+    clusterMap.set(cKey, [...cPeers]);
+  }
+
+  return {
+    validKeys,
+    hubPeers: {
+      ingress: ["hub:ingress", ...ingressNodes],
+      egress: ["hub:egress", ...egressNodes],
+    },
+    nodePeers: (id) => nodeMap.get(id) || [entityKey.node(id)],
+    extPeers: (id) => extMap.get(id) || [entityKey.external(id)],
+    probePeers: (probe) => probeMap.get(probe.id) || [
+      entityKey.probe(probe.id),
+      entityKey.node(probe.from),
+      probe.isExternal ? entityKey.external(probe.to) : entityKey.node(probe.to),
+    ],
+    ingressEdgePeers: (nodeID) => ["hub:ingress", entityKey.node(nodeID)],
+    egressEdgePeers: (nodeID) => ["hub:egress", entityKey.node(nodeID)],
+    clusterPeers: (clusterKey) => clusterMap.get(clusterKey) || [clusterKey],
+  };
 }
 
 /** Matches an element's peer tags against a single entity key or a `cluster:id1,id2,...` composite key. */
@@ -419,6 +540,50 @@ export function matchesActiveSelection(peers, sel) {
     if (memberIDs.some((id) => peers.includes(`node:${id}`))) return true;
   }
   return false;
+}
+
+/**
+ * Reconciles a `pinnedKey` or `hoveredKey` against the current `model` and view `clusters`,
+ * clearing missing entities and smoothly remapping shifted cluster memberships so the UI
+ * never freezes with dimmed nodes and a mismatched fallback header.
+ */
+export function reconcileSelectionKey(key, model, { clusters = null, allowCluster = true } = {}) {
+  const s = String(key || "");
+  if (!s || !model || !Array.isArray(model.nodes) || !model.nodes.length) return "";
+  if (s === "hub:ingress" || s === "hub:egress") return s;
+
+  const nodeSet = new Set(model.nodes.map((n) => n.id));
+  const extSet = new Set((model.externalTargets || []).map((e) => e.id));
+  const probeSet = new Set((model.probeLinks || []).map((p) => p.id));
+
+  if (s.startsWith("node:")) {
+    return nodeSet.has(s.slice(5)) ? s : "";
+  }
+  if (s.startsWith("ext:")) {
+    return extSet.has(s) ? s : "";
+  }
+  if (s.startsWith("probe:")) {
+    return probeSet.has(s.slice(6)) ? s : "";
+  }
+  if (s.startsWith("cluster:")) {
+    const alive = s.slice(8).split(",").filter((id) => nodeSet.has(id));
+    if (!alive.length) return "";
+    if (!allowCluster || alive.length === 1) {
+      return entityKey.node(alive[0]);
+    }
+    const targetClusters = clusters || clusterTopologyNodes(model.nodes);
+    const aliveSet = new Set(alive);
+    const hitClusters = targetClusters.filter((cl) => cl.members.some((m) => aliveSet.has(m.node.id)));
+    if (hitClusters.length === 1) {
+      const target = hitClusters[0];
+      return target.members.length > 1 ? target.key : entityKey.node(target.members[0].node.id);
+    }
+    if (hitClusters.length > 1) {
+      return entityKey.node(alive[0]);
+    }
+    return "";
+  }
+  return "";
 }
 
 const HUB_GEO_KEYWORDS = Object.freeze([
@@ -565,7 +730,8 @@ const normCountryCode = (code) => {
  * Resolves a geographic point (projected onto the 1160x560 Pacific map) for an agent node.
  * Respects `regionCode` country boundaries when matching city/IATA keywords so short tokens
  * never misclassify nodes across countries, falling back to global keyword search only when
- * `regionCode` is absent or unmapped.
+ * `regionCode` is absent or unmapped. Unmatched fallback coordinates spread cleanly across open
+ * South Pacific ocean slots with generous separation so distinct unlocated nodes never merge.
  */
 export function resolveNodeGeoPoint(node, fallbackIndex = 0) {
   const haystack = `${node?.name || ""} ${node?.id || ""}`;
@@ -577,30 +743,37 @@ export function resolveNodeGeoPoint(node, fallbackIndex = 0) {
       if (!hub.countries.some((c) => normCountryCode(c) === normRC)) continue;
       if (hub.keys.some((kw) => matchesGeoKeyword(haystack, kw))) {
         const pt = projectPacificGeo(hub.lat, hub.lon);
-        return { x: pt.x, y: pt.y, matched: true, source: "city", label: hub.keys[0], country: hub.countries[0] };
+        return { x: pt.x, y: pt.y, lat: hub.lat, lon: hub.lon, matched: true, source: "city", label: hub.keys[0], country: hub.countries[0] };
       }
     }
     const centroid = REGION_CENTROIDS[rawRC] || REGION_CENTROIDS[normRC];
     if (centroid) {
       const region = geoRegionDetails(rawRC);
       const pt = projectPacificGeo(centroid[0], centroid[1]);
-      return { x: pt.x, y: pt.y, matched: true, source: "country", label: region?.name || rawRC, country: normRC };
+      return { x: pt.x, y: pt.y, lat: centroid[0], lon: centroid[1], matched: true, source: "country", label: region?.name || rawRC, country: normRC };
     }
   }
 
   for (const hub of HUB_GEO_KEYWORDS) {
     if (hub.keys.some((kw) => matchesGeoKeyword(haystack, kw))) {
       const pt = projectPacificGeo(hub.lat, hub.lon);
-      return { x: pt.x, y: pt.y, matched: true, source: "city", label: hub.keys[0], country: hub.countries[0] };
+      return { x: pt.x, y: pt.y, lat: hub.lat, lon: hub.lon, matched: true, source: "city", label: hub.keys[0], country: hub.countries[0] };
     }
   }
 
   const region = rawRC ? geoRegionDetails(rawRC) : null;
-  const col = fallbackIndex % 3;
-  const row = Math.floor(fallbackIndex / 3);
+  const idx = Math.max(0, Number(fallbackIndex) || 0);
+  const cols = 6;
+  const col = idx % cols;
+  const row = Math.floor(idx / cols);
+  const fallbackLon = 152 + col * 14;
+  const fallbackLat = -14 - row * 11;
+  const pt = projectPacificGeo(fallbackLat, fallbackLon);
   return {
-    x: 136 + col * 48,
-    y: 462 + row * 28,
+    x: Math.max(PACIFIC_MAP_BOUNDS.padX + 40, Math.min(PACIFIC_MAP_BOUNDS.width - PACIFIC_MAP_BOUNDS.padX - 40, pt.x)),
+    y: Math.max(120, Math.min(PACIFIC_MAP_BOUNDS.height - 46, pt.y)),
+    lat: fallbackLat,
+    lon: fallbackLon,
     matched: false,
     source: "fallback",
     label: region?.name || "待定位",
@@ -609,8 +782,8 @@ export function resolveNodeGeoPoint(node, fallbackIndex = 0) {
 }
 
 /**
- * Formats a concise map/pill label for an agent node, converting noisy machine hostnames
- * (e.g. `berlin-01` or `qch-tools-installed-a`) into readable Chinese city/country labels.
+ * Formats a concise geographic tag for space-constrained map beacons while preserving full hostnames
+ * when no known city/country centroid exists (never rewriting host prefixes like `qch-tools-installed-`).
  */
 export function formatMapCityLabel(name, node = null) {
   const raw = String(name || "").trim();
@@ -618,7 +791,6 @@ export function formatMapCityLabel(name, node = null) {
   const baseName = raw || String(node?.name || node?.id || "");
   const parts = baseName.split(/\s*[·|]\s*/);
   if (parts.length > 1) return parts[0].trim();
-  if (/[\u4e00-\u9fff]/.test(baseName)) return baseName;
 
   if (node) {
     const geo = resolveNodeGeoPoint(node, 0);
@@ -628,11 +800,111 @@ export function formatMapCityLabel(name, node = null) {
     const rc = String(node.regionCode || node.region_code || "").trim().toUpperCase();
     const region = rc ? geoRegionDetails(rc) : null;
     if (region?.name) {
-      const suffixMatch = baseName.match(/(?:^qch-tools-installed|[-_])([a-z0-9]{1,3})$/i);
-      const suffix = suffixMatch ? `-${suffixMatch[1]}` : "";
-      return `${region.name}${suffix}`;
+      return region.name;
     }
   }
 
-  return baseName.replace(/^qch-tools-installed-/, "节点-");
+  return baseName;
+}
+
+/** Shared city/region label extractor used identically by map tags and the inspect bar. */
+export function extractCityClusterLabel(members) {
+  if (!Array.isArray(members) || !members.length) return "同城节点";
+  const primaryNode = members[0]?.node || members[0];
+  const geo = members[0]?.geo || resolveNodeGeoPoint(primaryNode, 0);
+  if (geo?.source === "city" && /[\u4e00-\u9fff]/.test(geo.label || "")) {
+    return geo.label;
+  }
+  const region = geoRegionDetails(primaryNode?.regionCode || primaryNode?.region_code);
+  const rawCity = formatMapCityLabel(primaryNode?.name, primaryNode);
+  if (/[·|]/.test(String(primaryNode?.name || ""))) return rawCity;
+  return region?.name || rawCity;
+}
+
+/**
+ * Order-independent co-located clustering (Single-Linkage Connected Components over matched nodes).
+ * Eliminates chain-order dependence and guarantees zero divergence between map beacons and
+ * inspect-bar same-city member lists. Unmatched fallback nodes remain individual points.
+ */
+export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, scaleX = 1, scaleY = 1, offsetX = 0, offsetY = 0 } = {}) {
+  const items = [];
+  let unmatchedIdx = 0;
+  for (const node of (nodes || [])) {
+    const precheck = resolveNodeGeoPoint(node, 0);
+    const geo = precheck.matched ? precheck : resolveNodeGeoPoint(node, unmatchedIdx++);
+    const sx = offsetX + geo.x * scaleX;
+    const sy = offsetY + geo.y * scaleY;
+    const cityKey = geo.matched
+      ? (geo.source === "city" ? `city:${geo.label}` : `country:${geo.country}:${Math.round(geo.x)}:${Math.round(geo.y)}`)
+      : `unmatched:${node.id}`;
+    items.push({
+      node,
+      geo,
+      geoX: sx,
+      geoY: sy,
+      cityKey,
+    });
+  }
+
+  const n = items.length;
+  const visited = new Array(n).fill(false);
+  const components = [];
+  const sameCityEdge = (a, b) => {
+    if (!a.geo.matched || !b.geo.matched) return false;
+    if (a.cityKey === b.cityKey) return true;
+    return Math.hypot(a.geoX - b.geoX, a.geoY - b.geoY) < radiusPx;
+  };
+
+  for (let i = 0; i < n; i++) {
+    if (visited[i]) continue;
+    const queue = [i];
+    visited[i] = true;
+    const comp = [];
+    while (queue.length) {
+      const cur = queue.shift();
+      comp.push(items[cur]);
+      for (let j = 0; j < n; j++) {
+        if (!visited[j] && sameCityEdge(items[cur], items[j])) {
+          visited[j] = true;
+          queue.push(j);
+        }
+      }
+    }
+    components.push(comp);
+  }
+
+  // Keep member display order deterministic: online first, then id order; cluster key always sorted by IDs.
+  return components.map((comp) => {
+    const members = [...comp].sort((a, b) => {
+      const aOn = a.node.isOnline ? 0 : 1;
+      const bOn = b.node.isOnline ? 0 : 1;
+      if (aOn !== bOn) return aOn - bOn;
+      return String(a.node.id).localeCompare(String(b.node.id));
+    });
+    const avgX = members.reduce((s, m) => s + m.geoX, 0) / members.length;
+    const avgY = members.reduce((s, m) => s + m.geoY, 0) / members.length;
+    const key = members.length > 1
+      ? entityKey.cluster(members.map((m) => m.node.id))
+      : entityKey.node(members[0].node.id);
+    const label = extractCityClusterLabel(members);
+    return {
+      key,
+      isCluster: members.length > 1,
+      primary: members[0],
+      members,
+      label,
+      geoX: avgX,
+      geoY: avgY,
+      x: avgX,
+      y: avgY,
+    };
+  });
+}
+
+/** Single source of truth for finding same-city nodes matching an inspect-bar node ID. */
+export function findSameCityMembers(nodes, targetNodeID) {
+  if (!targetNodeID || !Array.isArray(nodes) || !nodes.length) return [];
+  const clusters = clusterTopologyNodes(nodes);
+  const hit = clusters.find((cl) => cl.isCluster && cl.members.some((m) => m.node.id === targetNodeID));
+  return hit ? hit.members.map((m) => m.node) : [];
 }

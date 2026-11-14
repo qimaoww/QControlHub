@@ -524,9 +524,11 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       summary.bad > 0 ? keyed("abnormal", badge(`异常 ${summary.bad}`, "bad")) : null,
       showFilter ? button(`全部 ${pairs.length}`, () => {
         filterModeTouched = true;
+        if (filterMode === "all" && !focusProbeID) return;
+        const changed = filterMode !== "all";
         filterMode = "all";
         focusProbeID = "";
-        ctx.preferences?.patch?.("dashboard", { probe_filter: "all" });
+        if (changed) ctx.preferences?.patch?.("dashboard", { probe_filter: "all" });
         paint(true);
       }, {
         className: "a-button a-dash-probe-filter",
@@ -535,9 +537,11 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       }) : null,
       showFilter ? button(`仅告警 ${abnormalPairs.length}`, () => {
         filterModeTouched = true;
+        if (filterMode === "abnormal" && !focusProbeID) return;
+        const changed = filterMode !== "abnormal";
         filterMode = "abnormal";
         focusProbeID = "";
-        ctx.preferences?.patch?.("dashboard", { probe_filter: "abnormal" });
+        if (changed) ctx.preferences?.patch?.("dashboard", { probe_filter: "abnormal" });
         paint(true);
       }, {
         className: "a-button a-dash-probe-filter",

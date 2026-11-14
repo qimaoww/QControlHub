@@ -1,10 +1,5 @@
 import { createSVGEl } from "./dashboard-panel.js";
-import { geoRegionDetails } from "../modules/region-model.js";
-import {
-  PACIFIC_GRATICULES,
-  PACIFIC_LAND_PATH,
-  PACIFIC_MAP_BOUNDS,
-} from "./pacific-map-data.js";
+import { PACIFIC_GRATICULES, PACIFIC_LAND_PATH, PACIFIC_MAP_BOUNDS } from "./pacific-map-data.js";
 import {
   BLOCKED_COLOR,
   EGRESS_COLOR,
@@ -12,1329 +7,1130 @@ import {
   INGRESS_COLOR,
   OK_COLOR,
   WARN_COLOR,
-  buildPeerProbeTags,
   buildProbePillLabel,
   buildProbeShortAlertLabel,
+  buildTopologySelectionIndex,
   clipLabel,
+  clusterTopologyNodes,
   createTopologyDefs,
+  flowDur,
+  flowSpeedClass,
   formatMapCityLabel,
-  formatMs,
+  isProbeUnreachable,
   placeCollisionFreePill,
   quadPointAt,
-  resolveNodeGeoPoint,
+  rectsOverlap,
   selectTopAmbientBadProbeIDs,
   tonePalette,
   visualUnits,
 } from "./dashboard-topo-shared.js";
 
-let lastBeaconSig = "";
-let lastBeaconCoords = [];
-const backdropCache = new Map();
+let mapClipInstanceSeq = 0;
 
-/**
- * Resolves and relaxes beacon coordinates tightly around real city locations, caching
- * converged coordinates by node ID/name/region signature so unchanged polls skip O(N^2) passes.
- */
-function resolveAndRelaxBeacons(nodes) {
-  const sig = (nodes || []).map((n) => `${n.id}\t${n.name || ""}\t${n.regionCode || ""}`).join("\n");
-  if (sig && sig === lastBeaconSig && lastBeaconCoords.length === nodes.length) {
-    return lastBeaconCoords.map((c, i) => ({
-      node: nodes[i],
-      geoX: c.geoX,
-      geoY: c.geoY,
-      x: c.x,
-      y: c.y,
-      matched: c.matched,
-      source: c.source,
-    }));
-  }
+/** Computes non-overlapping tag candidates ranked away from dense neighbor clusters using vector repulsion. */
+function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bounds) {
+  const ax = cluster.geoX;
+  const ay = cluster.geoY;
 
-  let unknownCounter = 0;
-  const raw = nodes.map((node, index) => {
-    const geo = resolveNodeGeoPoint(node, unknownCounter);
-    if (!geo.matched) unknownCounter += 1;
-    return { node, geoX: geo.x, geoY: geo.y, matched: geo.matched, source: geo.source, index };
-  });
-
-  const coordGroups = new Map();
-  for (const item of raw) {
-    const key = `${Math.round(item.geoX)}_${Math.round(item.geoY)}`;
-    if (!coordGroups.has(key)) coordGroups.set(key, []);
-    coordGroups.get(key).push(item);
-  }
-
-  const items = raw.map((item) => {
-    const key = `${Math.round(item.geoX)}_${Math.round(item.geoY)}`;
-    const group = coordGroups.get(key) || [item];
-    const idx = group.indexOf(item);
-    let seedX = item.geoX;
-    let seedY = item.geoY;
-    if (group.length > 1) {
-      const stepAngle = ((idx * 2 * Math.PI) / group.length) + Math.PI / 6;
-      const rad = Math.min(8.5, 5.2 + group.length * 0.8);
-      seedX += Math.cos(stepAngle) * rad;
-      seedY += Math.sin(stepAngle) * rad;
-    }
-    return {
-      node: item.node,
-      geoX: item.geoX,
-      geoY: item.geoY,
-      x: seedX,
-      y: seedY,
-      matched: item.matched,
-      source: item.source,
-    };
-  });
-
-  const minDist = 15.5;
-  const springPull = 0.36;
-  const maxDrift = 13.5;
-  for (let iter = 0; iter < 32; iter += 1) {
-    for (let i = 0; i < items.length; i += 1) {
-      for (let j = i + 1; j < items.length; j += 1) {
-        const a = items[i];
-        const b = items[j];
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let dist = Math.hypot(dx, dy);
-        if (dist < 0.01) {
-          dx = 1;
-          dy = 0.4;
-          dist = Math.hypot(dx, dy);
-        }
-        if (dist < minDist) {
-          const push = ((minDist - dist) / dist) * 0.48;
-          a.x -= dx * push;
-          a.y -= dy * push;
-          b.x += dx * push;
-          b.y += dy * push;
-        }
-      }
-    }
-    for (const item of items) {
-      item.x += (item.geoX - item.x) * springPull;
-      item.y += (item.geoY - item.y) * springPull;
-      const dx = item.x - item.geoX;
-      const dy = item.y - item.geoY;
-      const drift = Math.hypot(dx, dy);
-      if (drift > maxDrift) {
-        item.x = item.geoX + (dx / drift) * maxDrift;
-        item.y = item.geoY + (dy / drift) * maxDrift;
-      }
-      item.x = Math.max(46, Math.min(PACIFIC_MAP_BOUNDS.width - 46, item.x));
-      item.y = Math.max(44, Math.min(PACIFIC_MAP_BOUNDS.height - 26, item.y));
+  let repX = 0;
+  let repY = 0;
+  for (const other of allClusters) {
+    if (other.key === cluster.key) continue;
+    const dx = ax - other.geoX;
+    const dy = ay - other.geoY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0.1 && dist < 155) {
+      const weight = 1 / (dist * dist + 90);
+      repX += (dx / dist) * weight;
+      repY += (dy / dist) * weight;
     }
   }
 
-  lastBeaconSig = sig;
-  lastBeaconCoords = items.map((c) => ({
-    geoX: c.geoX,
-    geoY: c.geoY,
-    x: c.x,
-    y: c.y,
-    matched: c.matched,
-    source: c.source,
-  }));
-  return items;
-}
+  // Gentle inward push near map borders so labels steer inside the canvas.
+  if (ax - bounds.minX < 95) repX += 0.018;
+  if (bounds.maxX - ax < 95) repX -= 0.018;
+  if (ay - bounds.minY < 58) repY += 0.018;
+  if (bounds.maxY - ay < 58) repY -= 0.018;
 
-/**
- * Groups co-located map beacons (e.g. multiple instances inside Hong Kong) into a single
- * city cluster with a composite `cluster:id1,id2,...` entityKey so hovering/pinning illuminates all members.
- */
-function clusterCoLocatedBeacons(beacons, linkCountByNode) {
-  const sorted = [...beacons].sort((a, b) => a.geoX - b.geoX || a.geoY - b.geoY);
-  const clusters = [];
-  for (const item of sorted) {
-    const hostCluster = clusters.find((c) => Math.hypot(c.geoX - item.geoX, c.geoY - item.geoY) < 4.5);
-    if (hostCluster) {
-      hostCluster.members.push(item);
-      const n = hostCluster.members.length;
-      hostCluster.anchorX = ((hostCluster.anchorX * (n - 1)) + item.x) / n;
-      hostCluster.anchorY = ((hostCluster.anchorY * (n - 1)) + item.y) / n;
-    } else {
-      clusters.push({
-        geoX: item.geoX,
-        geoY: item.geoY,
-        anchorX: item.x,
-        anchorY: item.y,
-        members: [item],
-      });
-    }
-  }
+  // Bias default vector slightly northeast when isolated for crisp cartographic legibility.
+  const baseAngle = (Math.abs(repX) + Math.abs(repY)) > 0.0005
+    ? Math.atan2(repY, repX)
+    : -Math.PI * 0.22;
 
-  return clusters.map((cluster) => {
-    const scored = [...cluster.members].sort((a, b) => {
-      const aLinks = linkCountByNode.get(a.node.id) || 0;
-      const bLinks = linkCountByNode.get(b.node.id) || 0;
-      if (bLinks !== aLinks) return bLinks - aLinks;
-      const aHasSep = /[·|]/.test(String(a.node.name || "")) ? 1 : 0;
-      const bHasSep = /[·|]/.test(String(b.node.name || "")) ? 1 : 0;
-      if (bHasSep !== aHasSep) return bHasSep - aHasSep;
-      const aLoad = (a.node.rxBPS || 0) + (a.node.txBPS || 0);
-      const bLoad = (b.node.rxBPS || 0) + (b.node.txBPS || 0);
-      return bLoad - aLoad;
-    });
-    const primary = scored[0];
-    const cityFromSep = scored
-      .map((m) => formatMapCityLabel(m.node.name, m.node))
-      .find((lbl, idx) => /[·|]/.test(String(scored[idx].node.name || "")) && /[\u4e00-\u9fff]/.test(lbl));
-    let cityBase = cityFromSep || formatMapCityLabel(primary.node.name, primary.node);
-    if (cluster.members.length > 1 && !cityFromSep) {
-      const rc = String(primary.node.regionCode || "").trim().toUpperCase();
-      const region = rc ? geoRegionDetails(rc) : null;
-      if (primary.source === "country" && region?.name) {
-        cityBase = region.name;
-      } else {
-        cityBase = cityBase.replace(/-[a-z0-9]{1,3}$/i, "");
-      }
-    }
-    const shortCity = clipLabel(cityBase, cluster.members.length > 1 ? 10 : 14);
-    const label = cluster.members.length > 1 ? `${shortCity} ×${cluster.members.length}` : shortCity;
-    const entityKey = cluster.members.length > 1
-      ? `cluster:${cluster.members.map((m) => m.node.id).join(",")}`
-      : `node:${primary.node.id}`;
-    return {
-      ...cluster,
-      primary,
-      entityKey,
-      refreshID: cluster.members.length > 1 ? cluster.members.map((m) => m.node.id).join("-") : primary.node.id,
-      x: cluster.anchorX,
-      y: cluster.anchorY,
-      label,
-      isOnline: cluster.members.some((m) => m.node.isOnline),
-      blocked: cluster.members.some((m) => m.node.blocked),
-      engineCount: cluster.members.reduce((sum, m) => sum + (m.node.activeEngines?.length || 0), 0),
-    };
-  });
-}
-
-/**
- * Docks external public targets into a structured bottom rail (`公网目标`)
- * sorted horizontally by source node longitude so ocean views stay pristine while focus rays lock onto fixed ports.
- */
-function placeExternalDockTargets(externalTargets, probeLinks, nodePosMap, dockArea) {
-  const slots = new Map();
-  if (!externalTargets.length) return { dockBox: null, slots };
-
-  const ranked = externalTargets.map((ext) => {
-    const linked = probeLinks.filter((p) => p.isExternal && p.to === ext.id);
-    const pts = linked.map((p) => nodePosMap.get(p.from)).filter(Boolean);
-    const avgSrcX = pts.length ? pts.reduce((s, p) => s + p.x, 0) / pts.length : dockArea.x + dockArea.w / 2;
-    return { ext, linked, avgSrcX };
-  }).sort((a, b) => a.avgSrcX - b.avgSrcX || a.ext.address.localeCompare(b.ext.address));
-
-  const titleW = 84;
-  const padRight = 16;
-  const chipGap = 10;
-  const chipAreaX = dockArea.x + titleW;
-  const chipAreaW = Math.max(120, dockArea.w - titleW - padRight);
-  const chipW = Math.min(196, Math.max(76, Math.floor((chipAreaW - (ranked.length - 1) * chipGap) / ranked.length)));
-  const totalChipsW = ranked.length * chipW + Math.max(0, ranked.length - 1) * chipGap;
-  const startX = chipAreaX + Math.max(0, Math.round((chipAreaW - totalChipsW) / 2));
-  const chipH = 24;
-  const chipY = dockArea.y + Math.round((dockArea.h - chipH) / 2);
-
-  ranked.forEach((entry, idx) => {
-    const chipX = startX + idx * (chipW + chipGap);
-    const portX = chipX + chipW / 2;
-    const portY = chipY;
-    slots.set(entry.ext.id, {
-      ext: entry.ext,
-      linked: entry.linked,
-      x: portX,
-      y: portY,
-      chipX,
-      chipY,
-      chipW,
-      chipH,
-      portY,
-    });
-  });
-
-  return { dockBox: dockArea, slots };
-}
-
-/**
- * Classifies probes into corridor lanes so parallel pairs and trans-Pacific cables
- * separate cleanly across dedicated Pacific ocean altitudes instead of colliding.
- */
-function buildArcLanes(probeLinks, posLookup) {
-  const pairBuckets = new Map();
-  const transPacific = [];
-
-  for (const probe of probeLinks) {
-    const pA = posLookup.get(probe.from);
-    const pB = posLookup.get(probe.to);
-    if (!pA || !pB) continue;
-
-    const key = [probe.from, probe.to].sort().join("|");
-    if (!pairBuckets.has(key)) pairBuckets.set(key, []);
-    pairBuckets.get(key).push(probe);
-
-    const minX = Math.min(pA.x, pB.x);
-    const maxX = Math.max(pA.x, pB.x);
-    if (!probe.isExternal && minX >= 400 && minX <= 575 && maxX >= 750 && maxX <= 980) {
-      transPacific.push({ probe, midY: (pA.y + pB.y) / 2 });
-    }
-  }
-
-  transPacific.sort((a, b) => a.midY - b.midY || a.probe.id.localeCompare(b.probe.id));
-  const pacificSlotByID = new Map();
-  transPacific.forEach((entry, idx) => {
-    pacificSlotByID.set(entry.probe.id, { idx, count: transPacific.length });
-  });
-
-  const laneInfo = new Map();
-  pairBuckets.forEach((group) => {
-    group.forEach((probe, idx) => {
-      laneInfo.set(probe.id, {
-        lane: idx,
-        total: group.length,
-        pacificSlot: pacificSlotByID.get(probe.id) || null,
-      });
-    });
-  });
-  return laneInfo;
-}
-
-/**
- * Builds an organically bowed quadratic Bezier arc aligned to real Pacific ocean and Eurasia corridors.
- */
-function buildMapArcGeometry(pA, pB, laneMeta, isExternal = false) {
-  const dx = pB.x - pA.x;
-  const dy = pB.y - pA.y;
-  const len = Math.max(8, Math.hypot(dx, dy));
-  const nx = -dy / len;
-  const ny = dx / len;
-  const midX = (pA.x + pB.x) / 2;
-  const midY = (pA.y + pB.y) / 2;
-
-  const laneOffset = laneMeta?.lane || 0;
-  const totalLanes = laneMeta?.total || 1;
-  const centered = laneOffset - (totalLanes - 1) / 2;
-
-  let sag;
-  const pacificSlot = laneMeta?.pacificSlot;
-  if (isExternal) {
-    const baseCurve = Math.min(44, Math.max(14, len * 0.08)) + centered * 14;
-    const towardOceanSign = midX < 650 ? 1 : -1;
-    const sign = nx !== 0 ? (nx * towardOceanSign >= 0 ? 1 : -1) : 1;
-    sag = baseCurve * sign;
-  } else if (pacificSlot) {
-    const pattern = [-58, 22, -26, 48];
-    const chosen = pattern[pacificSlot.idx % pattern.length];
-    const upSign = ny < 0 ? 1 : -1;
-    sag = chosen * upSign + centered * 20;
-  } else if (len < 20) {
-    const seScore = nx * 0.58 + ny * 0.81;
-    const outSign = seScore >= 0 ? 1 : -1;
-    sag = outSign * (24 + Math.abs(centered) * 9);
-  } else if (pA.x >= 395 && pA.x <= 550 && pB.x >= 395 && pB.x <= 550 && pA.y >= 160 && pA.y <= 345 && pB.y >= 160 && pB.y <= 345) {
-    if (len > 125) {
-      sag = (nx >= 0 ? 34 : -34) + centered * 16;
-    } else if (len > 62) {
-      sag = (nx <= 0 ? 18 : -18) + centered * 14;
-    } else {
-      sag = (ny <= 0 ? 7 : -7) + centered * 10;
-    }
-  } else if (midX > 430 && midX < 540 && dy > 95 && dx > 95) {
-    sag = (nx < 0 ? 28 : -28) + centered * 18;
-  } else if (len < 36) {
-    sag = (ny <= 0 ? 1 : -1) * Math.max(5.5, len * 0.24) + centered * 9;
-  } else {
-    const baseArc = Math.min(62, Math.max(12, len * 0.14));
-    const poleSign = midY < 245 ? (ny <= 0 ? 1 : -1) : (ny >= 0 ? 1 : -1);
-    sag = baseArc * poleSign + centered * 22;
-  }
-
-  const cx = Math.max(32, Math.min(PACIFIC_MAP_BOUNDS.width - 32, midX + nx * sag));
-  const cy = Math.max(24, Math.min(isExternal ? 546 : 538, midY + ny * sag));
-
-  const trimA = len < 20 ? 4.2 : 7.4;
-  const trimB = isExternal ? 4.5 : (len < 20 ? 4.6 : 8.2);
-  const distA = Math.max(trimA + 1, Math.hypot(cx - pA.x, cy - pA.y));
-  const distB = Math.max(trimB + 1, Math.hypot(cx - pB.x, cy - pB.y));
-  const tStartX = pA.x + (cx - pA.x) * (trimA / distA);
-  const tStartY = pA.y + (cy - pA.y) * (trimA / distA);
-  const tEndX = pB.x + (cx - pB.x) * (trimB / distB);
-  const tEndY = pB.y + (cy - pB.y) * (trimB / distB);
-
-  const d = `M ${tStartX.toFixed(1)} ${tStartY.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)}, ${tEndX.toFixed(1)} ${tEndY.toFixed(1)}`;
-  return {
-    d,
-    pointAt: (t) => quadPointAt(tStartX, tStartY, cx, cy, tEndX, tEndY, t),
-  };
-}
-
-/** Draws a crisp SVG cluster/city tag pill beside its geographic beacon(s) with clean callout stem. */
-function buildNodeTagGroup({ entityKey, refreshID, cx, cy, tagW, tagH, label, isOnline, blocked, engineCount, active, hl, peers, anchorX, anchorY, tooltip, bindInteractive }) {
-  const g = createSVGEl("g", {
-    class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-    "data-refresh-key": `map-tag-${refreshID}`,
-    "data-topo-peers": (peers || [entityKey]).join(" "),
-    "data-base-opacity": "1",
-    opacity: hl === false ? "0.26" : "1",
-  });
-  if (tooltip) g.append(createSVGEl("title", {}, tooltip));
-
-  const vx = cx - anchorX;
-  const vy = cy - anchorY;
-  const centerDist = Math.hypot(vx, vy);
-  const halfW = tagW / 2;
-  const halfH = tagH / 2;
-  const edgeDx = Math.max(0, Math.abs(vx) - halfW);
-  const edgeDy = Math.max(0, Math.abs(vy) - halfH);
-  const gapDist = Math.hypot(edgeDx, edgeDy);
-  if (centerDist > 7.5 && gapDist > 2.5) {
-    const startX = anchorX + (vx / centerDist) * 6.6;
-    const startY = anchorY + (vy / centerDist) * 6.6;
-    g.append(createSVGEl("line", {
-      x1: startX.toFixed(1),
-      y1: startY.toFixed(1),
-      x2: cx.toFixed(1),
-      y2: cy.toFixed(1),
-      stroke: active ? INGRESS_COLOR : "#a1a1aa",
-      "stroke-width": active || hl === true ? "1.3" : "0.95",
-      opacity: "0.82",
-    }));
-  }
-
-  const fill = blocked ? "#fff2f3" : "#ffffff";
-  const border = active ? INGRESS_COLOR : blocked ? "#f2cdd2" : isOnline ? "#d4d4d8" : "#e4e4e7";
-  g.append(createSVGEl("rect", {
-    x: (cx - tagW / 2).toFixed(1),
-    y: (cy - tagH / 2).toFixed(1),
-    width: tagW.toFixed(1),
-    height: tagH,
-    rx: "6",
-    fill,
-    stroke: border,
-    "stroke-width": active || hl === true ? "1.6" : "1",
-    class: "a-dash-topo-card",
-  }));
-
-  const dotColor = blocked ? BLOCKED_COLOR : !isOnline ? IDLE_FLOW_COLOR : OK_COLOR;
-  g.append(createSVGEl("circle", {
-    cx: (cx - tagW / 2 + 8).toFixed(1),
-    cy: cy.toFixed(1),
-    r: "2.8",
-    fill: dotColor,
-  }));
-
-  g.append(createSVGEl("text", {
-    x: (cx - tagW / 2 + 14).toFixed(1),
-    y: (cy + 3.4).toFixed(1),
-    class: "a-dash-topo-map-tag-text",
-    fill: isOnline ? "#18181b" : "#71717a",
-  }, label));
-
-  bindInteractive(g, entityKey);
-  return g;
-}
-
-function buildStaticBackdropTemplates({ frameY = 0, viewH = 548 } = {}) {
-  const w = PACIFIC_MAP_BOUNDS.width;
-  const clip = createSVGEl("clipPath", { id: "a-topo-map-rect-clip", "data-refresh-key": "map-rect-clip" });
-  clip.append(createSVGEl("rect", { x: "0", y: "0", width: String(w), height: String(viewH) }));
-
-  const backdrop = createSVGEl("g", {
-    "data-refresh-key": "map-backdrop",
-    transform: frameY ? `translate(0 ${frameY})` : null,
-  });
-
-  backdrop.append(createSVGEl("rect", {
-    x: "0",
-    y: "0",
-    width: String(w),
-    height: String(viewH),
-    fill: "#fafafa",
-  }));
-
-  const graticuleG = createSVGEl("g", { "clip-path": "url(#a-topo-map-rect-clip)" });
-  PACIFIC_GRATICULES.parallels.forEach((p, idx) => {
-    graticuleG.append(createSVGEl("path", {
-      d: p.d,
-      fill: "none",
-      stroke: p.lat === 0 ? "#e4e4e7" : "#f0f0f2",
-      "stroke-width": p.lat === 0 ? "0.85" : "0.7",
-      "stroke-dasharray": p.lat === 0 ? "5 4" : "2.5 4.5",
-      opacity: p.lat === 0 ? "0.55" : "0.45",
-      "data-refresh-key": `lat-${idx}`,
-    }));
-  });
-  PACIFIC_GRATICULES.meridians.forEach((m, idx) => {
-    graticuleG.append(createSVGEl("path", {
-      d: m.d,
-      fill: "none",
-      stroke: m.lon === 180 ? "#e4e4e7" : "#f0f0f2",
-      "stroke-width": m.lon === 180 ? "0.85" : "0.7",
-      "stroke-dasharray": "2.5 4.5",
-      opacity: m.lon === 180 ? "0.55" : "0.45",
-      "data-refresh-key": `lon-${idx}`,
-    }));
-  });
-
-  graticuleG.append(createSVGEl("path", {
-    d: PACIFIC_LAND_PATH,
-    fill: "#e8e8ec",
-    stroke: "#d4d4d8",
-    "stroke-width": "0.8",
-    "stroke-linejoin": "round",
-  }));
-
-  backdrop.append(graticuleG);
-  return { clip, backdrop };
-}
-
-/** Reuses cached static Natural Earth Pacific backdrop clones and bypasses diff scans on unchanged subtrees. */
-function appendPacificBackdrop(svg, defs, { frameY = 0, viewH = 548 } = {}) {
-  const key = `${frameY}_${viewH}`;
-  let tpl = backdropCache.get(key);
-  if (!tpl) {
-    tpl = buildStaticBackdropTemplates({ frameY, viewH });
-    backdropCache.set(key, tpl);
-  }
-  const clip = tpl.clip.cloneNode(true);
-  const backdrop = tpl.backdrop.cloneNode(true);
-  clip.reconcileTable = () => true;
-  backdrop.reconcileTable = () => true;
-  defs.append(clip);
-  svg.append(backdrop);
-}
-
-/**
- * Generates latitude-ordered, sector-separated candidates around each city cluster so dense regions
- * (Europe, East Asia, North America) fan outward without crossing callout leader stems.
- */
-function buildCityTagCandidates(cluster, allClusters, tagW, tagH, bounds) {
-  const { x, y } = cluster;
-  const localClusters = allClusters.filter((c) => c !== cluster && Math.hypot(c.x - x, c.y - y) < 38);
-  const allLocal = [cluster, ...localClusters].sort((a, b) => a.y - b.y || a.x - b.x);
-  const clusterSize = allLocal.length;
-  const latRank = allLocal.indexOf(cluster);
-  const clusterCx = allLocal.reduce((s, c) => s + c.x, 0) / clusterSize;
-  const clusterCy = allLocal.reduce((s, c) => s + c.y, 0) / clusterSize;
-  const outDeg = localClusters.length > 0 ? (Math.atan2(y - clusterCy, x - clusterCx) * 180) / Math.PI : null;
-
-  let baseAngles;
-  if (clusterSize >= 2) {
-    const relX = x - clusterCx;
-    const relY = y - clusterCy;
-    if (latRank === 0 && (clusterSize === 2 || relY <= -1.5)) {
-      baseAngles = relX < -1 ? [-115, -145, -80, 175, -45] : [-85, -55, -120, 10, -155];
-    } else if (latRank === clusterSize - 1 && (clusterSize === 2 || relY >= 1.5)) {
-      baseAngles = relX < -1 ? [115, 145, 80, 175, 45] : [85, 55, 120, 10, 155];
-    } else if (relX <= 0) {
-      baseAngles = [175, -150, 145, -120, 110, 180];
-    } else {
-      baseAngles = [5, -30, 35, -65, 70, 0];
-    }
-  } else if (x < 235 && y < 220) {
-    baseAngles = [-145, 165, -75, 15, -110, 105, 180, -25];
-  } else if (x < 235 && y >= 360) {
-    baseAngles = [0, -40, 40, -90, 90, 180];
-  } else if (x >= 235 && x < 305) {
-    baseAngles = [180, -135, -90, 135, 0, 90];
-  } else if (x >= 305 && x < 385) {
-    baseAngles = [95, 145, 25, -85, 180, 55];
-  } else if (x >= 385 && x < 435 && y >= 285) {
-    baseAngles = [65, 110, 145, -140, 175];
-  } else if (x >= 435 && x < 484 && y >= 205 && y < 285) {
-    baseAngles = [15, 55, -20, -90, 125, 175];
-  } else if (x >= 480 && x < 514 && y >= 150 && y < 205) {
-    baseAngles = [-95, -60, -130, 170, 125, -20];
-  } else if (x >= 514 && x < 580 && y >= 155 && y < 225) {
-    baseAngles = [5, -30, 35, -70, 75, 145];
-  } else if (x >= 500 && x < 640 && y >= 390) {
-    baseAngles = [0, -45, -90, 180, -135, 30];
-  } else if (x >= 760 && x < 865 && y < 240) {
-    baseAngles = [-130, -90, 175, 85, 40, -45];
-  } else if (x >= 865 && y < 240) {
-    baseAngles = [0, -55, 45, -110, 180, 120];
-  } else if (x >= 940 && y >= 300) {
-    baseAngles = [175, -145, 140, -100, -175, 105];
-  } else {
-    baseAngles = [0, -90, 180, 90, -45, 45, -135, 135];
-  }
-
-  const normDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
-  const orderedAngles = clusterSize <= 1 && outDeg != null && (x < 225 || x >= 760)
-    ? [...baseAngles].sort((a, b) => normDiff(a, outDeg) - normDiff(b, outDeg))
-    : baseAngles;
-
-  const sweep = [-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150];
-  const allAngles = [...orderedAngles, ...sweep.filter((a) => !orderedAngles.includes(a))];
-  const gaps = [11, 17, 24, 33, 44];
-  const minCenterX = bounds.minX + tagW / 2;
-  const maxCenterX = bounds.maxX - tagW / 2;
-  const minCenterY = bounds.minY + tagH / 2;
-  const maxCenterY = bounds.maxY - tagH / 2;
-  const maxReach = Math.max(tagW / 2 + 46, 84);
+  const angleOffsets = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, Math.PI];
+  const rings = [r + 12, r + 26, r + 44, r + 66];
   const candidates = [];
 
-  for (const gap of gaps) {
-    for (const deg of allAngles) {
-      const rad = (deg * Math.PI) / 180;
-      const cx = Math.max(minCenterX, Math.min(maxCenterX, x + Math.cos(rad) * (tagW / 2 + gap)));
-      const cy = Math.max(minCenterY, Math.min(maxCenterY, y + Math.sin(rad) * (tagH / 2 + gap)));
-      if (Math.hypot(cx - x, cy - y) <= maxReach) {
-        candidates.push({ x: cx, y: cy });
-      }
+  for (let ringIdx = 0; ringIdx < rings.length; ringIdx++) {
+    const dist = rings[ringIdx];
+    for (let dirIdx = 0; dirIdx < angleOffsets.length; dirIdx++) {
+      const theta = baseAngle + angleOffsets[dirIdx];
+      const ux = Math.cos(theta);
+      const uy = Math.sin(theta);
+      const cx = ax + ux * (dist + boxW * 0.34);
+      const cy = ay + uy * (dist + boxH * 0.32);
+      const bx = Math.max(bounds.minX, Math.min(bounds.maxX - boxW, cx - boxW / 2));
+      const by = Math.max(bounds.minY, Math.min(bounds.maxY - boxH, cy - boxH / 2));
+      candidates.push({
+        x: bx,
+        y: by,
+        leader: ringIdx >= 2,
+        sectorPenalty: ringIdx * 18 + dirIdx * 1.4,
+      });
     }
   }
-  return candidates.length ? candidates : [{ x: Math.max(minCenterX, Math.min(maxCenterX, x)), y: Math.max(minCenterY, Math.min(maxCenterY, y)) }];
-}
-
-function selectMotionProbeIDs(probeLinks, maxCount) {
-  const candidates = probeLinks.filter((p) => !p.isExternal && p.tone !== "bad");
-  candidates.sort((a, b) => {
-    const score = (p) => (p.running ? 3 : p.tone === "warn" ? 2 : 1);
-    const diff = score(b) - score(a);
-    if (diff !== 0) return diff;
-    return String(a.id || "").localeCompare(String(b.id || ""));
-  });
-  return new Set(candidates.slice(0, maxCount).map((p) => p.id));
+  return candidates;
 }
 
 /**
- * Renders the Pacific-centered World Map topology SVG for both desktop and compact mobile views,
- * featuring cached globe backdrop, ambient fault callouts + focus-only full route pills, and 公网探测坞.
+ * Computes bounded multi-row dock chip positions inside `[padX, width - padX]`, guaranteeing zero
+ * horizontal overflow regardless of how many external targets exist.
  */
-export function renderPacificMapSVG({ isMobile, model, bytes, helpers }) {
-  const {
-    allowMotion,
-    activeKey,
-    isHighlightedEdge,
-    bindInteractive,
-    createProbePillGroup,
-    appendProbeLeader,
-  } = helpers;
+function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW = 128, maxChipW = 216, chipH = 32, chipGap = 8, rowGap = 8, maxUnits = 20 } = {}) {
+  const list = Array.isArray(targets) ? targets : [];
+  if (!list.length) return { chips: [], rowCount: 0, bottomY: startY };
 
-  const peerProbesByNode = buildPeerProbeTags(model);
-  const externalByNode = new Map();
-  const linkCountByNode = new Map();
-  for (const probe of model.probeLinks) {
-    linkCountByNode.set(probe.from, (linkCountByNode.get(probe.from) || 0) + 1);
-    if (!probe.isExternal) {
-      linkCountByNode.set(probe.to, (linkCountByNode.get(probe.to) || 0) + 1);
-    } else {
-      if (!externalByNode.has(probe.from)) externalByNode.set(probe.from, new Set());
-      externalByNode.get(probe.from).add(probe.to);
-    }
-  }
+  const ranked = [...list].sort((a, b) => (b.linkCount || 0) - (a.linkCount || 0) || String(a.id).localeCompare(String(b.id)));
+  const availW = Math.max(minChipW, dockWidth - padX * 2);
+  const cols = Math.max(1, Math.min(ranked.length, Math.floor((availW + chipGap) / (minChipW + chipGap))));
+  const chipW = Math.min(maxChipW, Math.max(96, Math.floor((availW - chipGap * (cols - 1)) / cols)));
+  const rowCount = Math.ceil(ranked.length / cols);
+  const chips = [];
 
-  const beacons = resolveAndRelaxBeacons(model.nodes);
-  const posLookup = new Map();
-  beacons.forEach((b) => posLookup.set(b.node.id, { x: b.x, y: b.y, type: "node", data: b }));
-
-  const width = PACIFIC_MAP_BOUNDS.width;
-  const mapOffsetY = 34;
-  const mapViewH = 548;
-  const dockArea = { x: 0, y: mapViewH, w: width, h: 42 };
-  const dock = placeExternalDockTargets(model.externalTargets, model.probeLinks, posLookup, dockArea);
-  dock.slots.forEach((slot, id) => posLookup.set(id, { x: slot.x, y: slot.y, type: "ext", data: slot }));
-  const height = mapOffsetY + mapViewH + (dock.dockBox ? dockArea.h : 0);
-
-  if (isMobile) {
-    return renderMobilePacificMap({
-      model,
-      beacons,
-      dock,
-      posLookup,
-      peerProbesByNode,
-      externalByNode,
-      bytes,
-      helpers,
-    });
-  }
-
-  const svg = createSVGEl("svg", {
-    viewBox: `0 0 ${width} ${height}`,
-    width: "100%",
-    class: "a-dash-topo-svg a-dash-topo-map-svg",
-    "data-refresh-key": "topo-svg-map",
-    "data-topo-mode": "map",
-    role: "img",
-    "aria-label": "太平洋中心全网节点与探测拓扑地图",
-  });
-
-  const defs = createTopologyDefs();
-  svg.append(defs);
-
-  const staticOccupied = [];
-  const totalRateRX = bytes(model.ingress.rateBPS);
-  const totalRateTX = bytes(model.egress.rateBPS);
-  const hudG = createSVGEl("g", { "data-refresh-key": "map-hud" });
-  hudG.append(
-    createSVGEl("rect", { x: "0", y: "0", width: String(width), height: String(mapOffsetY), fill: "#f4f4f5" }),
-    createSVGEl("line", { x1: "0", y1: String(mapOffsetY), x2: String(width), y2: String(mapOffsetY), stroke: "#e4e4e7", "stroke-width": "1" }),
-    createSVGEl("circle", { cx: "20", cy: "17", r: "3", fill: INGRESS_COLOR }),
-    createSVGEl("text", { x: "28", y: "20.5", "font-size": "10.5", class: "a-dash-topo-micro", fill: "#18181b" }, `入站接收 ↓ ${totalRateRX}/s · 本月 ${bytes(model.ingress.monthlyBytes)}`),
-    createSVGEl("line", { x1: "252", y1: "10", x2: "252", y2: "24", stroke: "#e4e4e7", "stroke-width": "1" }),
-    createSVGEl("circle", { cx: "268", cy: "17", r: "3", fill: EGRESS_COLOR }),
-    createSVGEl("text", { x: "276", y: "20.5", "font-size": "10.5", class: "a-dash-topo-micro", fill: "#52525b" }, `出站发送 ↑ ${totalRateTX}/s · 本月 ${bytes(model.egress.monthlyBytes)}`),
-    createSVGEl("circle", { cx: String(width - 180), cy: "17", r: "3", fill: OK_COLOR }),
-    createSVGEl("text", { x: String(width - 173), y: "20.5", "font-size": "10.5", class: "a-dash-topo-micro", fill: "#52525b" }, "正常"),
-    createSVGEl("circle", { cx: String(width - 134), cy: "17", r: "3", fill: WARN_COLOR }),
-    createSVGEl("text", { x: String(width - 127), y: "20.5", "font-size": "10.5", class: "a-dash-topo-micro", fill: "#52525b" }, "波动"),
-    createSVGEl("circle", { cx: String(width - 88), cy: "17", r: "3", fill: BLOCKED_COLOR }),
-    createSVGEl("text", { x: String(width - 81), y: "20.5", "font-size": "10.5", class: "a-dash-topo-micro", fill: "#52525b" }, "异常"),
-    createSVGEl("circle", { cx: String(width - 42), cy: "17", r: "3", fill: IDLE_FLOW_COLOR }),
-    createSVGEl("text", { x: String(width - 35), y: "20.5", "font-size": "10.5", class: "a-dash-topo-micro", fill: "#71717a" }, "离线"),
-  );
-
-  const mapViewportG = createSVGEl("g", {
-    "data-refresh-key": "map-viewport",
-    transform: `translate(0 ${mapOffsetY})`,
-  });
-  appendPacificBackdrop(mapViewportG, defs, { viewH: mapViewH });
-
-  if (dock.dockBox) staticOccupied.push(dock.dockBox);
-  beacons.forEach((b) => {
-    staticOccupied.push({ x: b.x - 6.8, y: b.y - 6.8, w: 13.6, h: 13.6 });
-  });
-
-  const geoTetherLayer = createSVGEl("g", { "data-refresh-key": "map-tethers" });
-  const arcLayer = createSVGEl("g", { "data-refresh-key": "map-arcs" });
-  const beaconLayer = createSVGEl("g", { "data-refresh-key": "map-beacons" });
-  const dockLayer = createSVGEl("g", { "data-refresh-key": "map-dock" });
-  const tagLayer = createSVGEl("g", { "data-refresh-key": "map-tags" });
-  const leaderLayer = createSVGEl("g", { "data-refresh-key": "map-leaders" });
-  const pillLayer = createSVGEl("g", { "data-refresh-key": "map-pills" });
-
-  // 1. Cross-ocean mesh arcs (visible in overview) + focus-only public target rays
-  const laneInfo = buildArcLanes(model.probeLinks, posLookup);
-  const arcGeometry = new Map();
-  const motionProbeIDs = allowMotion() ? selectMotionProbeIDs(model.probeLinks, 6) : new Set();
-
-  for (const probe of model.probeLinks) {
-    const pA = posLookup.get(probe.from);
-    const pB = posLookup.get(probe.to);
-    if (!pA || !pB) continue;
-
-    const laneMeta = laneInfo.get(probe.id) || { lane: 0, total: 1 };
-    const geom = buildMapArcGeometry(pA, pB, laneMeta, probe.isExternal);
-    arcGeometry.set(probe.id, geom);
-
-    const peers = [`probe:${probe.id}`, `node:${probe.from}`, probe.to];
-    const hl = isHighlightedEdge(peers);
-    const pal = tonePalette(probe.tone);
-    const isWarnOrBad = probe.tone === "warn" || probe.tone === "bad";
-
-    let baseStr;
-    let dimStr;
-    let curOpacity;
-    if (probe.isExternal) {
-      baseStr = "0";
-      dimStr = "0";
-      curOpacity = hl === true ? "1" : "0";
-    } else {
-      const defOp = probe.tone === "bad" ? 0.86 : probe.tone === "warn" ? 0.78 : 0.42;
-      baseStr = defOp.toFixed(2);
-      dimStr = "0.14";
-      curOpacity = hl === true ? "1" : hl === false ? "0.14" : baseStr;
-    }
-    const edgeW = hl === true ? 2.4 : isWarnOrBad ? 1.75 : 1.25;
-
-    const g = createSVGEl("g", {
-      class: probe.isExternal ? "a-dash-topo-focus-only" : null,
-      "data-refresh-key": `map-arc-${probe.id}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": baseStr,
-      "data-dim-opacity": dimStr,
-      opacity: curOpacity,
-    });
-    g.append(createSVGEl("title", {}, `${probe.name}: ${probe.metricLabel} (${probe.statusLabel}) — 点击打开链路监控`));
-
-    g.append(createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: "#fafafa",
-      "stroke-width": (edgeW + 2.0).toFixed(1),
-      "stroke-linecap": "round",
-      opacity: "0.72",
-    }));
-
-    const markerName = probe.tone === "ok"
-      ? "url(#a-topo-arrow-ok)"
-      : probe.tone === "warn"
-        ? "url(#a-topo-arrow-warn)"
-        : probe.tone === "bad"
-          ? "url(#a-topo-arrow-bad)"
-          : "url(#a-topo-arrow-idle)";
-
-    g.append(createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: pal.stroke,
-      "stroke-width": edgeW.toFixed(2),
-      "stroke-linecap": "round",
-      "stroke-dasharray": probe.tone === "bad" ? "5 4" : probe.running ? "4 4" : null,
-      "marker-end": markerName,
-      "marker-start": probe.bidirectional && probe.tone !== "bad" ? markerName : null,
-    }));
-
-    if (motionProbeIDs.has(probe.id)) {
-      const dur = probe.tone === "ok" ? "2.5s" : "3.2s";
-      const photon = createSVGEl("circle", {
-        r: hl === true ? "2.5" : "2.0",
-        fill: "#ffffff",
-        stroke: pal.stroke,
-        "stroke-width": "1.25",
-        opacity: "0.95",
+  for (let row = 0; row < rowCount; row++) {
+    const rowItems = ranked.slice(row * cols, (row + 1) * cols);
+    const totalRowW = rowItems.length * chipW + Math.max(0, rowItems.length - 1) * chipGap;
+    const rowStartX = Math.max(padX, (dockWidth - totalRowW) / 2);
+    const y = startY + row * (chipH + rowGap);
+    rowItems.forEach((ext, colIdx) => {
+      const x = rowStartX + colIdx * (chipW + chipGap);
+      const rawTitle = String(ext.name || ext.address || ext.id || "");
+      const subText = ext.address && ext.address !== rawTitle ? ext.address : "";
+      chips.push({
+        ext,
+        x,
+        y,
+        w: chipW,
+        h: chipH,
+        cx: x + chipW / 2,
+        cy: y + chipH / 2,
+        title: clipLabel(rawTitle, maxUnits),
+        fullTitle: rawTitle,
+        subText: subText ? clipLabel(subText, Math.max(12, maxUnits - 2)) : `${ext.linkCount} 链路`,
       });
-      photon.append(createSVGEl("animateMotion", { path: geom.d, dur, repeatCount: "indefinite" }));
-      g.append(photon);
-    }
-
-    bindInteractive(g, `probe:${probe.id}`, { openProbeID: probe.id });
-    arcLayer.append(g);
-  }
-
-  // 2. Individual geographic node beacons
-  for (const item of beacons) {
-    const { node, x, y, geoX, geoY } = item;
-    const entityKey = `node:${node.id}`;
-    const probePeers = peerProbesByNode.get(node.id) || [];
-    const extPeers = Array.from(externalByNode.get(node.id) || []);
-    const peers = [entityKey, ...probePeers, ...extPeers];
-    const hl = isHighlightedEdge(peers);
-    const active = activeKey() === entityKey;
-    const engineCount = node.activeEngines.length;
-    const coreColor = node.blocked ? BLOCKED_COLOR : !node.isOnline ? IDLE_FLOW_COLOR : OK_COLOR;
-
-    if (Math.hypot(x - geoX, y - geoY) > 4) {
-      geoTetherLayer.append(
-        createSVGEl("line", {
-          x1: geoX.toFixed(1),
-          y1: geoY.toFixed(1),
-          x2: x.toFixed(1),
-          y2: y.toFixed(1),
-          stroke: "#a1a1aa",
-          "stroke-width": "0.85",
-          "stroke-dasharray": "1.5 1.5",
-          opacity: "0.65",
-        }),
-        createSVGEl("circle", { cx: geoX.toFixed(1), cy: geoY.toFixed(1), r: "1.5", fill: "#71717a", opacity: "0.7" }),
-      );
-    }
-
-    const g = createSVGEl("g", {
-      class: `a-dash-topo-node a-dash-topo-beacon ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-      "data-refresh-key": `map-beacon-${node.id}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "1",
-      opacity: hl === false ? "0.24" : "1",
     });
-    const tipParts = [node.name, node.isOnline ? "在线" : "离线"];
-    if (node.rxBPS || node.txBPS) tipParts.push(`↓${bytes(node.rxBPS)}/s ↑${bytes(node.txBPS)}/s`);
-    g.append(createSVGEl("title", {}, tipParts.join(" · ")));
-
-    if ((active || hl === true || node.blocked) && allowMotion()) {
-      g.append(createSVGEl("circle", {
-        cx: x.toFixed(1),
-        cy: y.toFixed(1),
-        r: "6.4",
-        fill: "none",
-        stroke: coreColor,
-        "stroke-width": "0.85",
-        class: "a-dash-topo-beacon-pulse",
-      }));
-    }
-
-    g.append(createSVGEl("circle", {
-      cx: x.toFixed(1),
-      cy: y.toFixed(1),
-      r: active || hl === true ? "8.0" : "5.8",
-      fill: coreColor,
-      opacity: active || hl === true ? "0.22" : "0.14",
-    }));
-
-    g.append(createSVGEl("circle", {
-      cx: x.toFixed(1),
-      cy: y.toFixed(1),
-      r: active || hl === true ? "4.4" : "3.5",
-      fill: coreColor,
-      stroke: active ? INGRESS_COLOR : "#ffffff",
-      "stroke-width": active ? "1.8" : "1.5",
-    }));
-
-    bindInteractive(g, entityKey);
-    beaconLayer.append(g);
   }
 
-  // 3. Docked Public Target Rail (`公网目标`) across full-width footer bar
-  if (dock.dockBox) {
-    const db = dock.dockBox;
-    dockLayer.append(
-      createSVGEl("rect", {
-        x: db.x,
-        y: db.y,
-        width: db.w,
-        height: db.h,
-        fill: "#f4f4f5",
-      }),
-      createSVGEl("line", {
-        x1: db.x,
-        y1: db.y,
-        x2: db.x + db.w,
-        y2: db.y,
-        stroke: "#e4e4e7",
-        "stroke-width": "1",
-      }),
-      createSVGEl("text", {
-        x: db.x + 16,
-        y: db.y + 25,
-        class: "a-dash-topo-ext-kicker",
-        fill: "#52525b",
-      }, "公网目标"),
-    );
-
-    for (const [extID, slot] of dock.slots.entries()) {
-      const linkedProbes = slot.linked;
-      const hasBad = linkedProbes.some((p) => p.tone === "bad");
-      const hasWarn = linkedProbes.some((p) => p.tone === "warn");
-      const statusColor = hasBad ? BLOCKED_COLOR : hasWarn ? WARN_COLOR : OK_COLOR;
-      const peers = [
-        extID,
-        ...linkedProbes.map((p) => `probe:${p.id}`),
-        ...linkedProbes.map((p) => `node:${p.from}`),
-      ];
-      const hl = isHighlightedEdge(peers);
-      const active = activeKey() === extID;
-
-      const reachedLatencies = linkedProbes
-        .filter((p) => p.latencyMS != null && !(p.lossPercent >= 100 && p.latencyMS === 0))
-        .map((p) => p.latencyMS);
-      const bestLatency = reachedLatencies.length ? Math.min(...reachedLatencies) : null;
-      const summaryText = hasBad && bestLatency == null
-        ? "不可达"
-        : bestLatency != null
-          ? formatMs(bestLatency)
-          : `${linkedProbes.length} 链路`;
-      const summaryColor = hasBad ? BLOCKED_COLOR : hasWarn ? WARN_COLOR : "#71717a";
-      const summaryW = slot.chipW >= 136 ? Math.round(visualUnits(summaryText) * 5.8 + 8) : 0;
-      const ipAvailW = slot.chipW - 22 - summaryW - (summaryW ? 6 : 4);
-
-      const g = createSVGEl("g", {
-        class: `a-dash-topo-node a-dash-topo-dock-chip ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-        "data-refresh-key": `map-dock-${extID}`,
-        "data-topo-peers": peers.join(" "),
-        "data-base-opacity": "1",
-        opacity: hl === false ? "0.28" : "1",
-      });
-      g.append(createSVGEl("title", {}, `公网目标 · ${slot.ext.address} (${linkedProbes.length} 条探测链路)`));
-
-      g.append(
-        createSVGEl("rect", {
-          x: slot.chipX,
-          y: slot.chipY,
-          width: slot.chipW,
-          height: slot.chipH,
-          rx: "6",
-          fill: "#ffffff",
-          stroke: active ? INGRESS_COLOR : "#d4d4d8",
-          "stroke-width": active || hl === true ? "1.6" : "1",
-          class: "a-dash-topo-card",
-        }),
-        createSVGEl("circle", {
-          cx: (slot.chipX + 10).toFixed(1),
-          cy: (slot.chipY + 12).toFixed(1),
-          r: "2.8",
-          fill: statusColor,
-        }),
-        createSVGEl("text", {
-          x: slot.chipX + 17,
-          y: slot.chipY + 15.5,
-          "font-size": "10.5",
-          class: "a-dash-topo-ext-sub",
-          fill: "#18181b",
-        }, clipLabel(slot.ext.address, Math.max(8, Math.floor(ipAvailW / 6.3)))),
-      );
-      if (summaryW > 0) {
-        g.append(createSVGEl("text", {
-          x: slot.chipX + slot.chipW - 8,
-          y: slot.chipY + 15.2,
-          "text-anchor": "end",
-          class: "a-dash-topo-micro",
-          "font-size": "9.8",
-          fill: summaryColor,
-        }, summaryText));
-      }
-
-      bindInteractive(g, extID);
-      dockLayer.append(g);
-    }
-  }
-
-  // 4. Clustered compact city tags (`香港 ×3` with non-crossing latitude-ordered callout stems)
-  const clusters = clusterCoLocatedBeacons(beacons, linkCountByNode);
-  const clusterKeyByNodeID = new Map();
-  for (const cluster of clusters) {
-    if (cluster.members.length > 1) {
-      cluster.members.forEach((m) => clusterKeyByNodeID.set(m.node.id, cluster.entityKey));
-    }
-  }
-
-  const tagBounds = { minX: 16, maxX: width - 16, minY: 14, maxY: 534 };
-  const placedTagLeaders = [];
-  const sortedClusters = [...clusters].sort((a, b) => a.y - b.y || visualUnits(a.label) - visualUnits(b.label));
-
-  for (const cluster of sortedClusters) {
-    const tagW = Math.max(50, Math.round(visualUnits(cluster.label) * 6.3 + 20));
-    const tagH = 19;
-    const candidates = buildCityTagCandidates(cluster, clusters, tagW, tagH, tagBounds);
-
-    const placed = placeCollisionFreePill(
-      candidates[0].x,
-      candidates[0].y,
-      tagW,
-      tagH,
-      staticOccupied,
-      tagBounds,
-      candidates,
-      { padX: 3, padY: 2.5, leaderPoints: [{ x: cluster.x, y: cluster.y }], leaderSegments: placedTagLeaders },
-    );
-
-    const peerSet = new Set([cluster.entityKey]);
-    const tipLines = [];
-    for (const member of cluster.members) {
-      const m = member.node;
-      peerSet.add(`node:${m.id}`);
-      (peerProbesByNode.get(m.id) || []).forEach((p) => peerSet.add(p));
-      (externalByNode.get(m.id) || []).forEach((extID) => peerSet.add(extID));
-      tipLines.push(`${m.name} (${m.isOnline ? "在线" : "离线"}) · ↓${bytes(m.rxBPS)}/s ↑${bytes(m.txBPS)}/s`);
-    }
-    const peers = Array.from(peerSet);
-    const hl = isHighlightedEdge(peers);
-    const sel = activeKey();
-    const active = sel === cluster.entityKey || cluster.members.some((m) => sel === `node:${m.node.id}`);
-
-    tagLayer.append(buildNodeTagGroup({
-      entityKey: cluster.entityKey,
-      refreshID: cluster.refreshID,
-      cx: placed.cx,
-      cy: placed.cy,
-      tagW,
-      tagH,
-      label: cluster.label,
-      isOnline: cluster.isOnline,
-      blocked: cluster.blocked,
-      engineCount: cluster.engineCount,
-      active,
-      hl,
-      anchorX: cluster.x,
-      anchorY: cluster.y,
-      peers,
-      tooltip: tipLines.join("\n"),
-      bindInteractive,
-    }));
-  }
-
-  // 5. Tiered probe pills: Top-5 severe internal `bad` faults stay ambient (short badge -> full on hover), others focusOnly
-  const nodeLabelByID = new Map(model.nodes.map((n) => [n.id, formatMapCityLabel(n.name, n) || n.id]));
-  const shortNodeLabel = (id) => {
-    const s = String(id || "");
-    if (s.startsWith("ext:")) return s.slice(4);
-    return nodeLabelByID.get(s) || formatMapCityLabel(s);
+  return {
+    chips,
+    rowCount,
+    bottomY: startY + rowCount * chipH + Math.max(0, rowCount - 1) * rowGap,
   };
-
-  const ambientBadIDs = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: false, maxCount: 5 });
-  const pillBounds = { minX: 16, maxX: width - 16, minY: 14, maxY: 536 };
-  const cohortBoxes = new Map();
-  const occupiedForCohort = (keys) => {
-    const merged = [...staticOccupied];
-    for (const k of keys) {
-      const arr = cohortBoxes.get(k);
-      if (arr) merged.push(...arr);
-    }
-    return merged;
-  };
-  const recordCohortBox = (keys, box) => {
-    for (const k of keys) {
-      if (!cohortBoxes.has(k)) cohortBoxes.set(k, []);
-      cohortBoxes.get(k).push(box);
-    }
-  };
-
-  const orderedProbes = [...model.probeLinks].sort((a, b) => {
-    const aAmb = ambientBadIDs.has(a.id) ? 0 : 1;
-    const bAmb = ambientBadIDs.has(b.id) ? 0 : 1;
-    if (aAmb !== bAmb) return aAmb - bAmb;
-    const rank = (tone) => (tone === "bad" ? 0 : tone === "warn" ? 1 : 2);
-    return rank(a.tone) - rank(b.tone);
-  });
-
-  for (const probe of orderedProbes) {
-    const geom = arcGeometry.get(probe.id);
-    if (!geom) continue;
-    const peers = [`probe:${probe.id}`, `node:${probe.from}`, probe.to];
-    const hl = isHighlightedEdge(peers);
-    const pal = tonePalette(probe.tone);
-
-    const pA = posLookup.get(probe.from);
-    const pB = posLookup.get(probe.to);
-    const arcChordLen = pA && pB ? Math.hypot(pB.x - pA.x, pB.y - pA.y) : 0;
-
-    const metricPart = buildProbePillLabel(probe, false, true).replace(/(\d+(?:\.\d+)?)ms\//, "$1/");
-    const routeArrow = probe.bidirectional ? "↔" : "→";
-    const routePrefix = `${clipLabel(shortNodeLabel(probe.from), 12)}${routeArrow}${clipLabel(shortNodeLabel(probe.to), 16)}`;
-    const fullLabel = clipLabel(`${routePrefix} · ${metricPart}`, 38);
-    const compactRoute = `${clipLabel(shortNodeLabel(probe.from), 10)}${routeArrow}${clipLabel(shortNodeLabel(probe.to), 10)}`;
-    const shortLabel = `${compactRoute} · ${buildProbeShortAlertLabel(probe)}`;
-    const pillH = 17;
-    const fullW = Math.max(76, Math.round(visualUnits(fullLabel) * 5.8 + 20));
-    const shortW = Math.max(66, Math.round(visualUnits(shortLabel) * 5.8 + 20));
-    const isAmbientCandidate = ambientBadIDs.has(probe.id) && arcChordLen >= 62;
-
-    const endKeys = [`node:${probe.from}`, probe.to.startsWith("ext:") ? probe.to : `node:${probe.to}`];
-    if (clusterKeyByNodeID.has(probe.from)) endKeys.push(clusterKeyByNodeID.get(probe.from));
-    if (!probe.isExternal && clusterKeyByNodeID.has(probe.to)) endKeys.push(clusterKeyByNodeID.get(probe.to));
-
-    const midPt = geom.pointAt(0.5);
-    const anchors = [0.5, 0.36, 0.64, 0.24, 0.76].map((t) => geom.pointAt(t));
-    const ambientAnchors = [0.5, 0.42, 0.58, 0.34, 0.66].map((t) => geom.pointAt(t));
-
-    let renderedAmbient = false;
-    if (isAmbientCandidate) {
-      const occupiedLenBefore = staticOccupied.length;
-      const placed = placeCollisionFreePill(
-        midPt.x,
-        midPt.y,
-        shortW,
-        pillH,
-        staticOccupied,
-        pillBounds,
-        ambientAnchors,
-        { padX: 3, padY: 3 },
-      );
-      const anchorDist = Math.hypot(placed.cx - placed.anchorX, placed.cy - placed.anchorY);
-      if (anchorDist <= 28) {
-        renderedAmbient = true;
-        appendProbeLeader(leaderLayer, placed, pal, peers, hl, true, false);
-        pillLayer.append(createProbePillGroup({
-          probe,
-          cx: placed.cx,
-          cy: placed.cy,
-          pillW: shortW,
-          fullW: Math.max(shortW, fullW),
-          pillH,
-          label: fullLabel,
-          shortLabel,
-          pal,
-          compact: true,
-          peers,
-          focusOnly: false,
-          ambientAlert: true,
-        }));
-      } else {
-        staticOccupied.length = occupiedLenBefore;
-      }
-    }
-
-    if (!renderedAmbient) {
-      const placed = placeCollisionFreePill(
-        midPt.x,
-        midPt.y,
-        fullW,
-        pillH,
-        occupiedForCohort(endKeys),
-        pillBounds,
-        anchors,
-        { padX: 3, padY: 3 },
-      );
-      recordCohortBox(endKeys, { x: placed.cx - fullW / 2, y: placed.cy - pillH / 2, w: fullW, h: pillH });
-      appendProbeLeader(leaderLayer, placed, pal, peers, hl, true, true);
-      pillLayer.append(createProbePillGroup({
-        probe,
-        cx: placed.cx,
-        cy: placed.cy,
-        pillW: fullW,
-        pillH,
-        label: fullLabel,
-        pal,
-        compact: true,
-        peers,
-        focusOnly: true,
-      }));
-    }
-  }
-
-  mapViewportG.append(geoTetherLayer, arcLayer, beaconLayer, dockLayer, tagLayer, leaderLayer, pillLayer);
-  svg.append(hudG, mapViewportG);
-  return svg;
 }
 
 /**
- * Renders the compact Mobile Pacific Map SVG (summary strip + clipped Pacific map + bottom public dock strip),
- * delegating full probe telemetry details cleanly to the standalone topology page link list.
+ * Evaluates shortest geodesic curvature (including cross-seam edge wrapping when `|dx| > span/2`
+ * between Eurasia and Eastern Americas) using purely coordinate geometry instead of pixel boxes.
  */
-function renderMobilePacificMap({ model, beacons, dock, posLookup, peerProbesByNode, externalByNode, bytes, helpers }) {
-  const {
-    allowMotion,
-    activeKey,
-    isHighlightedEdge,
-    bindInteractive,
-  } = helpers;
-
-  const mapScale = 342 / PACIFIC_MAP_BOUNDS.width;
-  const mapTop = 24;
-  const mapViewH = 548;
-  const mapHeightPx = Math.round(mapViewH * mapScale);
-  const dockSlots = Array.from(dock.slots.values());
-  const dockRowTop = mapTop + mapHeightPx;
-  const totalHeight = dockSlots.length ? dockRowTop + 30 : mapTop + mapHeightPx;
-
-  const svg = createSVGEl("svg", {
-    viewBox: `0 0 342 ${totalHeight}`,
-    width: "100%",
-    class: "a-dash-topo-svg a-dash-topo-map-svg",
-    "data-refresh-key": "topo-svg-map",
-    "data-topo-mode": "map",
-    role: "img",
-    "aria-label": "太平洋中心全网节点与探测拓扑地图",
+function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBounds, scaleX = 1, scaleY = 1, zoomTransform = null) {
+  const pairGroups = new Map();
+  probeLinks.forEach((p) => {
+    const k = p.isExternal ? `${p.from}=>${p.to}` : [p.from, p.to].sort().join("--");
+    if (!pairGroups.has(k)) pairGroups.set(k, []);
+    pairGroups.get(k).push(p);
   });
 
-  const defs = createTopologyDefs();
-  svg.append(defs);
+  const leftEdge = PACIFIC_MAP_BOUNDS.padX * scaleX;
+  const rightEdge = (PACIFIC_MAP_BOUNDS.width - PACIFIC_MAP_BOUNDS.padX) * scaleX;
+  const cylSpan = Math.max(120, rightEdge - leftEdge);
+  const topBound = 32 * scaleY;
+  const bottomBound = (PACIFIC_MAP_BOUNDS.height - 20) * scaleY;
+  const minY = 28 * scaleY;
+  const maxY = (PACIFIC_MAP_BOUNDS.height - 16) * scaleY;
 
-  svg.append(
-    createSVGEl("rect", { x: "0", y: "0", width: "342", height: String(mapTop), fill: "#f4f4f5" }),
-    createSVGEl("line", { x1: "0", y1: String(mapTop), x2: "342", y2: String(mapTop), stroke: "#e4e4e7", "stroke-width": "1" }),
-    createSVGEl("text", { x: "10", y: "15.5", class: "a-dash-topo-micro", fill: "#52525b" },
-      `入站 ↓ ${bytes(model.ingress.rateBPS)}/s · 出站 ↑ ${bytes(model.egress.rateBPS)}/s`),
-  );
-
-  const mapGroup = createSVGEl("g", {
-    "data-refresh-key": "mob-map-viewport",
-    transform: `translate(0 ${mapTop}) scale(${mapScale.toFixed(5)})`,
+  const zScale = zoomTransform && zoomTransform.scale > 1.001 ? zoomTransform.scale : 1;
+  const zTx = zScale > 1 ? (zoomTransform.tx || 0) : 0;
+  const zTy = zScale > 1 ? (zoomTransform.ty || 0) : 0;
+  const toLocalPort = (sx, sy) => ({
+    x: zScale > 1 ? (sx - zTx) / zScale : sx,
+    y: zScale > 1 ? (sy - zTy) / zScale : sy,
   });
-  appendPacificBackdrop(mapGroup, defs, { viewH: mapViewH });
 
-  const laneInfo = buildArcLanes(model.probeLinks, posLookup);
-  const motionProbeIDs = allowMotion() ? selectMotionProbeIDs(model.probeLinks, 4) : new Set();
+  const placedMids = [];
+  const geomByProbeID = new Map();
 
-  for (const probe of model.probeLinks) {
-    const pA = posLookup.get(probe.from);
-    const pB = posLookup.get(probe.to);
-    if (!pA || !pB) continue;
-    const laneMeta = laneInfo.get(probe.id) || { lane: 0, total: 1 };
-    const geom = buildMapArcGeometry(pA, pB, laneMeta, probe.isExternal);
-    const peers = [`probe:${probe.id}`, `node:${probe.from}`, probe.to];
-    const hl = isHighlightedEdge(peers);
-    const pal = tonePalette(probe.tone);
+  for (const [groupKey, groupProbes] of pairGroups.entries()) {
+    const first = groupProbes[0];
+    const pA = coordByID.get(first.from);
+    if (!pA) continue;
 
-    const baseStr = probe.isExternal ? "0" : (probe.tone === "bad" ? "0.86" : probe.tone === "warn" ? "0.80" : "0.48");
-    const dimStr = probe.isExternal ? "0" : "0.14";
-    const curOpacity = probe.isExternal
-      ? (hl === true ? "1" : "0")
-      : (hl === true ? "1" : hl === false ? "0.14" : baseStr);
-
-    const g = createSVGEl("g", {
-      class: probe.isExternal ? "a-dash-topo-focus-only" : null,
-      "data-refresh-key": `mob-map-arc-${probe.id}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": baseStr,
-      "data-dim-opacity": dimStr,
-      opacity: curOpacity,
-    });
-    g.append(createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: pal.stroke,
-      "stroke-width": hl === true ? "5.6" : "3.8",
-      "stroke-linecap": "round",
-      "stroke-dasharray": probe.tone === "bad" ? "10 8" : null,
-    }));
-    if (motionProbeIDs.has(probe.id)) {
-      const dot = createSVGEl("circle", { r: "5.0", fill: "#ffffff", stroke: pal.stroke, "stroke-width": "2.4" });
-      dot.append(createSVGEl("animateMotion", { path: geom.d, dur: "2.5s", repeatCount: "indefinite" }));
-      g.append(dot);
+    if (first.isExternal) {
+      const chip = chipByID.get(first.to);
+      if (!chip) continue;
+      const targetScreenY = zScale > 1 ? PACIFIC_MAP_BOUNDS.height * scaleY : chip.y;
+      const port = toLocalPort(chip.cx, targetScreenY);
+      const dx = port.x - pA.x;
+      const dy = port.y - pA.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      groupProbes.forEach((probe, idx) => {
+        const sign = idx === 0 ? 1 : (idx % 2 === 1 ? -1 : 1);
+        const mag = (16 + Math.floor((idx + 1) / 2) * 14) / zScale;
+        const cx = (pA.x + port.x) / 2 + nx * mag * sign;
+        const cy = Math.max(minY, Math.min(port.y - 6 / zScale, (pA.y + port.y) / 2 + ny * mag * sign));
+        const d = `M ${pA.x.toFixed(1)} ${pA.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)}, ${port.x.toFixed(1)} ${port.y.toFixed(1)}`;
+        const mid = quadPointAt(pA.x, pA.y, cx, cy, port.x, port.y, 0.5);
+        geomByProbeID.set(probe.id, { d, segments: [{ x1: pA.x, y1: pA.y, cx, cy, x2: port.x, y2: port.y }], mid, wrapped: false });
+      });
+      continue;
     }
-    bindInteractive(g, `probe:${probe.id}`, { openProbeID: probe.id });
-    mapGroup.append(g);
+
+    const pB = coordByID.get(first.to);
+    if (!pB) continue;
+
+    const rawDx = pB.x - pA.x;
+    const useWrap = Math.abs(rawDx) > cylSpan * 0.52;
+
+    if (useWrap) {
+      // Split across the 22°W seam so Europe <-> North America arcs do not slash across Eurasia/Pacific.
+      const wrapDx = rawDx > 0 ? rawDx - cylSpan : rawDx + cylSpan;
+      const exitEdgeA = wrapDx < 0 ? leftEdge : rightEdge;
+      const enterEdgeB = wrapDx < 0 ? rightEdge : leftEdge;
+      const spanA = Math.abs(exitEdgeA - pA.x);
+      const spanB = Math.abs(pB.x - enterEdgeB);
+      const totalWrap = Math.max(1, spanA + spanB);
+      const tSeam = spanA / totalWrap;
+      const seamYBase = Math.max(topBound, Math.min(bottomBound, pA.y + (pB.y - pA.y) * tSeam));
+
+      groupProbes.forEach((probe, idx) => {
+        const from = coordByID.get(probe.from);
+        const to = coordByID.get(probe.to);
+        if (!from || !to) return;
+        const pDx = to.x - from.x;
+        const pWrapDx = pDx > 0 ? pDx - cylSpan : pDx + cylSpan;
+        const eA = pWrapDx < 0 ? leftEdge : rightEdge;
+        const eB = pWrapDx < 0 ? rightEdge : leftEdge;
+        const dA = Math.abs(eA - from.x);
+        const dB = Math.abs(to.x - eB);
+        const slotSign = idx % 2 === 0 ? -1 : 1;
+        const slotMag = Math.floor((idx + 1) / 2) * 18;
+        const seamY = Math.max(topBound, Math.min(bottomBound, seamYBase + slotSign * slotMag));
+        const bowA = (16 + dA * 0.14 + idx * 8) * slotSign;
+        const bowB = (16 + dB * 0.14 + idx * 8) * slotSign;
+        const ctrlAx = (from.x + eA) / 2;
+        const ctrlAy = Math.max(minY, Math.min(maxY, (from.y + seamY) / 2 + bowA));
+        const ctrlBx = (eB + to.x) / 2;
+        const ctrlBy = Math.max(minY, Math.min(maxY, (seamY + to.y) / 2 + bowB));
+        const seg1 = { x1: from.x, y1: from.y, cx: ctrlAx, cy: ctrlAy, x2: eA, y2: seamY };
+        const seg2 = { x1: eB, y1: seamY, cx: ctrlBx, cy: ctrlBy, x2: to.x, y2: to.y };
+        const primaryHalf = dA >= dB ? seg1 : seg2;
+        const mid = quadPointAt(primaryHalf.x1, primaryHalf.y1, primaryHalf.cx, primaryHalf.cy, primaryHalf.x2, primaryHalf.y2, 0.5);
+        placedMids.push(mid);
+        geomByProbeID.set(probe.id, {
+          d: `M ${seg1.x1.toFixed(1)} ${seg1.y1.toFixed(1)} Q ${seg1.cx.toFixed(1)} ${seg1.cy.toFixed(1)}, ${seg1.x2.toFixed(1)} ${seg1.y2.toFixed(1)} M ${seg2.x1.toFixed(1)} ${seg2.y1.toFixed(1)} Q ${seg2.cx.toFixed(1)} ${seg2.cy.toFixed(1)}, ${seg2.x2.toFixed(1)} ${seg2.y2.toFixed(1)}`,
+          segments: [seg1, seg2],
+          seamMarks: [{ x: eA, y: seamY }, { x: eB, y: seamY }],
+          mid,
+          wrapped: true,
+        });
+      });
+      continue;
+    }
+
+    const chordDx = pB.x - pA.x;
+    const chordDy = pB.y - pA.y;
+    const chordLen = Math.hypot(chordDx, chordDy);
+
+    // Self-cluster or super short links get a compact local halo arc.
+    if (chordLen < 12) {
+      groupProbes.forEach((probe, idx) => {
+        const offset = 18 + idx * 9;
+        const cx = pA.x;
+        const cy = Math.max(minY, pA.y - offset);
+        const d = `M ${(pA.x - 4).toFixed(1)} ${pA.y.toFixed(1)} Q ${cx.toFixed(1)} ${(cy - 10).toFixed(1)}, ${(pA.x + 4).toFixed(1)} ${pA.y.toFixed(1)}`;
+        geomByProbeID.set(probe.id, { d, segments: [{ x1: pA.x - 4, y1: pA.y, cx, cy: cy - 10, x2: pA.x + 4, y2: pA.y }], mid: { x: cx, y: cy }, wrapped: false });
+      });
+      continue;
+    }
+
+    const ux = chordDx / chordLen;
+    const uy = chordDy / chordLen;
+    // Perpendicular unit normal; choose preferred sign oriented cleanly upward in canvas coordinates.
+    let nx = -uy;
+    let ny = ux;
+    if (ny > 0.1 || (Math.abs(ny) <= 0.1 && nx > 0)) {
+      nx = -nx;
+      ny = -ny;
+    }
+
+    const baseBow = Math.min(82 * scaleY, Math.max(16 * scaleY, chordLen * 0.15));
+    const scoreCandidate = (sign, mag) => {
+      const cx = (pA.x + pB.x) / 2 + nx * sign * mag;
+      const cy = Math.max(minY, Math.min(maxY, (pA.y + pB.y) / 2 + ny * sign * mag));
+      let penalty = sign < 0 ? 4 : 0; // slight preference for upward geodesic arch when clear
+      for (const sampleT of [0.25, 0.5, 0.75]) {
+        const pt = quadPointAt(pA.x, pA.y, cx, cy, pB.x, pB.y, sampleT);
+        if (pt.x < mapBounds.minX + 12 || pt.x > mapBounds.maxX - 12 || pt.y < minY + 6 || pt.y > maxY - 6) {
+          penalty += 55;
+        }
+        for (const beacon of allBeacons) {
+          if (Math.hypot(beacon.x - pA.x, beacon.y - pA.y) < 3 || Math.hypot(beacon.x - pB.x, beacon.y - pB.y) < 3) continue;
+          const bDist = Math.hypot(pt.x - beacon.x, pt.y - beacon.y);
+          if (bDist < 22) penalty += (22 - bDist) * 2.2;
+        }
+      }
+      const mid = quadPointAt(pA.x, pA.y, cx, cy, pB.x, pB.y, 0.5);
+      for (const prevMid of placedMids) {
+        const mDist = Math.hypot(mid.x - prevMid.x, mid.y - prevMid.y);
+        if (mDist < 24) penalty += (24 - mDist) * 1.4;
+      }
+      return { cx, cy, mid, penalty };
+    };
+
+    const primaryForward = scoreCandidate(1, baseBow);
+    const primaryReverse = scoreCandidate(-1, baseBow);
+    const dominantSign = primaryForward.penalty <= primaryReverse.penalty ? 1 : -1;
+
+    groupProbes.forEach((probe, idx) => {
+      const from = coordByID.get(probe.from);
+      const to = coordByID.get(probe.to);
+      if (!from || !to) return;
+      const sign = groupProbes.length === 1
+        ? dominantSign
+        : (idx % 2 === 0 ? dominantSign : -dominantSign);
+      const laneTier = Math.floor(idx / 2);
+      const mag = baseBow + laneTier * (18 * scaleY);
+      const cx = (from.x + to.x) / 2 + nx * sign * mag;
+      const cy = Math.max(minY, Math.min(maxY, (from.y + to.y) / 2 + ny * sign * mag));
+      const d = `M ${from.x.toFixed(1)} ${from.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)}, ${to.x.toFixed(1)} ${to.y.toFixed(1)}`;
+      const mid = quadPointAt(from.x, from.y, cx, cy, to.x, to.y, 0.5);
+      placedMids.push(mid);
+      geomByProbeID.set(probe.id, {
+        d,
+        segments: [{ x1: from.x, y1: from.y, cx, cy, x2: to.x, y2: to.y }],
+        mid,
+        wrapped: false,
+        groupKey,
+      });
+    });
   }
 
-  for (const item of beacons) {
-    const { node, x, y } = item;
-    const entityKey = `node:${node.id}`;
-    const extPeers = Array.from(externalByNode.get(node.id) || []);
-    const peers = [entityKey, ...(peerProbesByNode.get(node.id) || []), ...extPeers];
-    const hl = isHighlightedEdge(peers);
-    const active = activeKey() === entityKey;
-    const coreColor = node.blocked ? BLOCKED_COLOR : !node.isOnline ? IDLE_FLOW_COLOR : OK_COLOR;
+  return geomByProbeID;
+}
+
+/**
+ * Appends Pacific Ocean canvas + land vectors with an explicit parameter signature check so
+ * `reconcileTable` never returns a stale `true` across dimension or instance changes.
+ */
+function appendPacificBackdrop(svg, defs, { width, mapHeight, clipId, graticuleTransform = "" }) {
+  const backdropSig = `${width}:${mapHeight}:${clipId}:${graticuleTransform}`;
+  const clip = createSVGEl("clipPath", { id: clipId, "data-refresh-key": clipId, "data-clip-sig": backdropSig });
+  clip.append(createSVGEl("rect", { x: 0, y: 0, width, height: mapHeight, rx: 9 }));
+  clip.reconcileTable = (fresh) => fresh?.getAttribute?.("data-clip-sig") === clip.getAttribute("data-clip-sig");
+  defs.append(clip);
+
+  const backdrop = createSVGEl("g", {
+    class: "a-dash-topo-map-backdrop",
+    "clip-path": `url(#${clipId})`,
+    "data-refresh-key": "pacific-backdrop",
+    "data-backdrop-sig": backdropSig,
+  });
+  backdrop.reconcileTable = (fresh) => fresh?.getAttribute?.("data-backdrop-sig") === backdrop.getAttribute("data-backdrop-sig");
+
+  const ocean = createSVGEl("rect", { x: 0, y: 0, width, height: mapHeight, fill: "#f4f6f9" });
+  const graticuleG = createSVGEl("g", {
+    fill: "none",
+    stroke: "#e2e6ed",
+    "stroke-width": "0.65",
+    "stroke-dasharray": "2.5 3.5",
+    transform: graticuleTransform || null,
+  });
+  PACIFIC_GRATICULES.meridians.forEach((m) => graticuleG.append(createSVGEl("path", { d: m.d })));
+  PACIFIC_GRATICULES.parallels.forEach((p) => graticuleG.append(createSVGEl("path", { d: p.d })));
+
+  const landPath = createSVGEl("path", {
+    d: PACIFIC_LAND_PATH,
+    fill: "#e8ecf2",
+    stroke: "#d3dae6",
+    "stroke-width": "0.85",
+    "stroke-linejoin": "round",
+    transform: graticuleTransform || null,
+  });
+  backdrop.append(ocean, graticuleG, landPath);
+  svg.append(defs, backdrop);
+}
+
+/**
+ * Formats HUD traffic rate/monthly copy without fabricating `0 B/s` / `0 B` when `traffic.read` is absent
+ * or traffic telemetry is still loading / failed.
+ */
+function buildMapHudTrafficLine(model, bytes, trafficMeta = {}, compact = false) {
+  const readable = trafficMeta.readable !== false;
+  const state = trafficMeta.state || "ready";
+  const label = trafficMeta.label || "";
+  if (!readable) return "无流量权限";
+  if (state === "loading" && !trafficMeta.hasData) return "流量读取中…";
+  if (state === "failed" && !trafficMeta.hasData) return "流量读取失败";
+  const prefix = label ? `${label} · ` : "";
+  if (compact) {
+    return `${prefix}↓ ${bytes(model.ingress.rateBPS)}/s · ↑ ${bytes(model.egress.rateBPS)}/s`;
+  }
+  return `${prefix}↓ ${bytes(model.ingress.rateBPS)}/s · ↑ ${bytes(model.egress.rateBPS)}/s · 本月 ${bytes(model.ingress.monthlyBytes + model.egress.monthlyBytes)}`;
+}
+
+/** Compact Mobile Pacific Map preserving beacon tags, cluster tap expansion, bad link distinction & wrapped external dock. */
+function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
+  const w = Math.max(300, Math.min(620, Math.round(width)));
+  const mapHeight = Math.round(Math.max(210, Math.min(268, w * 0.68)));
+  const scaleX = w / PACIFIC_MAP_BOUNDS.width;
+  const scaleY = mapHeight / PACIFIC_MAP_BOUNDS.height;
+
+  const dockArea = placeExternalDockTargets(model.externalTargets, w, 10, mapHeight + 8, {
+    minChipW: Math.min(138, Math.floor((w - 28) / 2)),
+    maxChipW: 200,
+    chipH: 30,
+    chipGap: 6,
+    rowGap: 6,
+    maxUnits: 18,
+  });
+  const totalHeight = dockArea.rowCount > 0 ? dockArea.bottomY + 10 : mapHeight;
+
+  const svg = createSVGEl("svg", {
+    class: "a-dash-topo-svg a-dash-topo-map-svg is-mobile",
+    viewBox: `0 0 ${w} ${totalHeight}`,
+    role: "img",
+    "data-topo-mode": "map",
+    "aria-label": "太平洋海缆地理拓扑图",
+  });
+
+  const clipId = `a-topo-map-mob-clip-${++mapClipInstanceSeq}`;
+  const defs = createTopologyDefs("a-topo");
+  const bgGroupTransform = `scale(${scaleX.toFixed(4)} ${scaleY.toFixed(4)})`;
+  appendPacificBackdrop(svg, defs, { width: w, mapHeight, clipId, graticuleTransform: bgGroupTransform });
+
+  const clusters = clusterTopologyNodes(model.nodes, {
+    radiusPx: 7.5,
+    scaleX,
+    scaleY,
+  });
+  const selIndex = buildTopologySelectionIndex(model, clusters);
+  const coordByID = new Map();
+  clusters.forEach((cl) => cl.members.forEach((m) => coordByID.set(m.node.id, { x: cl.x, y: cl.y })));
+
+  const chipByID = new Map();
+  dockArea.chips.forEach((chip) => chipByID.set(chip.ext.id, chip));
+
+  const arcGeom = computeCorridorLanes(
+    model.probeLinks,
+    coordByID,
+    chipByID,
+    clusters,
+    { minX: 8, maxX: w - 8, minY: 28, maxY: mapHeight - 8 },
+    scaleX,
+    scaleY,
+  );
+
+  const linkLayer = createSVGEl("g", { class: "a-dash-topo-map-links" });
+  const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true" });
+  const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons" });
+  const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags" });
+  const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills" });
+
+  // Reserve HUD top bar + beacon circles, place priority cluster tags BEFORE alert pills so both remain legible.
+  const ambientBadSet = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 3 });
+  const occupiedTags = [
+    { x: 0, y: 0, w, h: 24 },
+    ...clusters.map((c) => ({ x: c.x - 10, y: c.y - 10, w: 20, h: 20 })),
+  ];
+
+  const sortedForTags = [...clusters].sort((a, b) => {
+    const aCl = a.isCluster ? 1 : 0;
+    const bCl = b.isCluster ? 1 : 0;
+    if (bCl !== aCl) return bCl - aCl;
+    const aBad = a.members.some((m) => m.node.blocked) ? 1 : 0;
+    const bBad = b.members.some((m) => m.node.blocked) ? 1 : 0;
+    if (bBad !== aBad) return bBad - aBad;
+    const aOnline = a.members.some((m) => m.node.isOnline) ? 1 : 0;
+    const bOnline = b.members.some((m) => m.node.isOnline) ? 1 : 0;
+    if (bOnline !== aOnline) return bOnline - aOnline;
+    return b.members.length - a.members.length;
+  });
+
+  // Place compact city/cluster tags first cleanly on mobile map
+  sortedForTags.slice(0, 10).forEach((cluster) => {
+    const key = cluster.key;
+    const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
+    const hl = helpers.isHighlightedEdge(peers);
+    const anyBlocked = cluster.members.some((m) => m.node.blocked);
+    const anyOnline = cluster.members.some((m) => m.node.isOnline);
+    const rawTagText = cluster.isCluster
+      ? `${cluster.label} ×${cluster.members.length}`
+      : (cluster.primary.geo.matched ? cluster.label : clipLabel(cluster.primary.node.name, 9));
+    const tagText = clipLabel(rawTagText, 11);
+    const tagW = Math.max(32, Math.min(86, visualUnits(tagText) * 5.6 + 9));
+    const tagH = 14.5;
+    const r = cluster.isCluster ? 7.5 : 5;
+    const candidates = buildDensityAwareTagCandidates(cluster, clusters, tagW, tagH, r, {
+      minX: 6, maxX: w - 6, minY: 25, maxY: mapHeight - 6,
+    });
+    const pick = candidates.find((c) => !occupiedTags.some((o) => rectsOverlap({ x: c.x, y: c.y, w: tagW, h: tagH }, o, 2)));
+    if (!pick) return;
+    occupiedTags.push({ x: pick.x, y: pick.y, w: tagW, h: tagH });
     const g = createSVGEl("g", {
-      class: `a-dash-topo-node ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-      "data-refresh-key": `mob-beacon-${node.id}`,
+      class: `a-dash-topo-node a-dash-topo-map-tag ${helpers.activeKey() === key ? "is-active" : ""}`,
+      "data-refresh-key": `m-tag-${key}`,
       "data-topo-peers": peers.join(" "),
       "data-base-opacity": "1",
       opacity: hl === false ? "0.24" : "1",
     });
     g.append(
-      createSVGEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: active ? "18" : "13", fill: "#ffffff", stroke: active ? INGRESS_COLOR : coreColor, "stroke-width": "3.6" }),
-      createSVGEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: "6.8", fill: coreColor }),
+      createSVGEl("rect", {
+        x: pick.x.toFixed(1),
+        y: pick.y.toFixed(1),
+        width: tagW.toFixed(1),
+        height: tagH,
+        rx: 3.5,
+        fill: "#ffffff",
+        stroke: anyBlocked ? BLOCKED_COLOR : anyOnline ? "#d4d4d8" : "#e4e4e7",
+        "stroke-width": "0.9",
+        class: "a-dash-topo-card",
+      }),
+      createSVGEl("text", {
+        x: (pick.x + 4.5).toFixed(1),
+        y: (pick.y + 10.6).toFixed(1),
+        class: "a-dash-topo-map-tag-text",
+        fill: anyBlocked ? BLOCKED_COLOR : anyOnline ? "#18181b" : "#71717a",
+      }, tagText),
     );
-    bindInteractive(g, entityKey);
-    mapGroup.append(g);
+    helpers.bindInteractive(g, key);
+    tagLayer.append(g);
+  });
+
+  model.probeLinks.forEach((probe) => {
+    const geom = arcGeom.get(probe.id);
+    if (!geom) return;
+    const peers = selIndex.probePeers(probe);
+    const hl = helpers.isHighlightedEdge(peers);
+    const isBad = probe.tone === "bad";
+    const isWarn = probe.tone === "warn";
+    const pal = tonePalette(probe.tone);
+    const baseOpacity = isBad ? 0.9 : isWarn ? 0.78 : probe.isExternal ? 0.5 : 0.42;
+    const opacity = hl === true ? 1 : hl === false ? 0.14 : baseOpacity;
+
+    const g = createSVGEl("g", {
+      "data-refresh-key": `m-map-arc-${probe.id}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": String(baseOpacity),
+      opacity: opacity.toFixed(2),
+    });
+    const strokeW = (hl === true ? 2.4 : isBad ? 2.0 : 1.35).toFixed(2);
+    g.append(createSVGEl("path", {
+      d: geom.d,
+      fill: "none",
+      stroke: pal.stroke,
+      "stroke-width": strokeW,
+      "stroke-dasharray": isBad ? "4 3" : probe.isExternal ? "2 3" : null,
+      "stroke-linecap": "round",
+      "marker-end": isBad ? "url(#a-topo-arrow-bad)" : isWarn ? "url(#a-topo-arrow-warn)" : probe.tone === "ok" ? "url(#a-topo-arrow-ok)" : "url(#a-topo-arrow-idle)",
+    }));
+
+    if (geom.seamMarks) {
+      geom.seamMarks.forEach((mk) => {
+        g.append(createSVGEl("circle", { cx: mk.x.toFixed(1), cy: mk.y.toFixed(1), r: 2.6, fill: pal.stroke }));
+      });
+    }
+
+    const hitPath = createSVGEl("path", {
+      d: geom.d,
+      fill: "none",
+      stroke: "transparent",
+      "stroke-width": "12",
+      class: "a-dash-topo-probe-item",
+    });
+    helpers.bindInteractive(hitPath, `probe:${probe.id}`, { openProbeID: probe.id });
+    g.append(hitPath);
+    linkLayer.append(g);
+
+    const isFocused = hl === true || ambientBadSet.has(probe.id);
+    const label = ambientBadSet.has(probe.id) && hl !== true
+      ? buildProbeShortAlertLabel(probe)
+      : buildProbePillLabel(probe, true, true);
+    const pillW = Math.max(44, Math.min(118, visualUnits(label) * 6.0 + 18));
+    const pillH = 16;
+    const placed = placeCollisionFreePill(geom.mid.x, geom.mid.y, pillW, pillH, occupiedTags, {
+      minX: 8, maxX: w - 8, minY: 28, maxY: mapHeight - 10,
+    }, [geom.mid]);
+    if (placed.shifted) {
+      helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, true, !ambientBadSet.has(probe.id));
+    }
+    pillLayer.append(helpers.createProbePillGroup({
+      probe,
+      cx: placed.cx,
+      cy: placed.cy,
+      pillW,
+      fullW: pillW,
+      pillH,
+      label,
+      pal,
+      compact: true,
+      peers,
+      focusOnly: !ambientBadSet.has(probe.id),
+      ambientAlert: false,
+    }));
+  });
+
+  // Draw clusters / beacons
+  clusters.forEach((cluster) => {
+    const key = cluster.key;
+    const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
+    const anyOnline = cluster.members.some((m) => m.node.isOnline);
+    const anyBlocked = cluster.members.some((m) => m.node.blocked);
+    const active = helpers.activeKey() === key;
+    const hl = helpers.isHighlightedEdge(peers);
+    const toneColor = anyBlocked ? BLOCKED_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
+    const r = cluster.isCluster ? Math.min(8.5, 5.2 + cluster.members.length * 0.9) : 4.8;
+
+    const g = createSVGEl("g", {
+      class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
+      "data-refresh-key": `m-beacon-${key}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": "1",
+      opacity: hl === false ? "0.24" : "1",
+    });
+
+    if (anyOnline && helpers.allowMotion()) {
+      pulseLayer.append(createSVGEl("circle", {
+        cx: cluster.x.toFixed(1),
+        cy: cluster.y.toFixed(1),
+        r: (r + 5.5).toFixed(1),
+        fill: "none",
+        stroke: toneColor,
+        "stroke-width": "1",
+        class: "a-dash-topo-beacon-pulse",
+        "data-topo-peers": peers.join(" "),
+        "data-base-opacity": "0.38",
+        "data-dim-opacity": "0.08",
+        opacity: hl === false ? "0.08" : "0.38",
+      }));
+    }
+    // Generous 16px touch hit target
+    g.append(createSVGEl("circle", {
+      cx: cluster.x.toFixed(1),
+      cy: cluster.y.toFixed(1),
+      r: 15,
+      fill: "transparent",
+    }));
+    g.append(createSVGEl("circle", {
+      cx: cluster.x.toFixed(1),
+      cy: cluster.y.toFixed(1),
+      r: r.toFixed(1),
+      fill: "#ffffff",
+      stroke: toneColor,
+      "stroke-width": active || hl === true ? "2.4" : "1.8",
+    }));
+    if (cluster.isCluster) {
+      g.append(createSVGEl("text", {
+        x: cluster.x.toFixed(1),
+        y: (cluster.y + 3).toFixed(1),
+        "text-anchor": "middle",
+        class: "a-dash-topo-micro",
+        fill: toneColor,
+      }, String(cluster.members.length)));
+    }
+    g.append(createSVGEl("title", {}, cluster.isCluster ? `${cluster.label} (${cluster.members.length} 节点)` : cluster.primary.node.name));
+    helpers.bindInteractive(g, key);
+    beaconLayer.append(g);
+  });
+
+  // External Dock Grid on Mobile
+  const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock" });
+  dockArea.chips.forEach((chip) => {
+    const extID = chip.ext.id;
+    const peers = selIndex.extPeers(extID);
+    const hl = helpers.isHighlightedEdge(peers);
+    const active = helpers.activeKey() === extID;
+    const g = createSVGEl("g", {
+      class: `a-dash-topo-dock-chip ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
+      "data-refresh-key": `m-dock-${extID}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": "1",
+      opacity: hl === false ? "0.24" : "1",
+    });
+    g.append(
+      createSVGEl("rect", { x: chip.x.toFixed(1), y: chip.y.toFixed(1), width: chip.w.toFixed(1), height: chip.h, rx: 6, fill: "#ffffff", stroke: active ? INGRESS_COLOR : "#d4d4d8", "stroke-width": active ? "1.6" : "1", class: "a-dash-topo-card" }),
+      createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 14.5).toFixed(1), class: "a-dash-topo-map-tag-text", fill: "#18181b" }, chip.title),
+      createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 25.5).toFixed(1), class: "a-dash-topo-micro", fill: "#71717a" }, chip.subText),
+    );
+    g.append(createSVGEl("title", {}, `${chip.fullTitle} (${chip.ext.linkCount} 条探测链路)`));
+    helpers.bindInteractive(g, extID);
+    dockLayer.append(g);
+  });
+
+  const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud" });
+  hudLayer.append(
+    createSVGEl("text", { x: 10, y: 15, class: "a-dash-topo-map-coord" }, `158°E · ${model.onlineNodes}/${model.totalNodes} 在线`),
+    createSVGEl("text", { x: w - 10, y: 15, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudTrafficLine(model, bytes, trafficMeta, true)),
+  );
+
+  svg.append(linkLayer, pulseLayer, beaconLayer, tagLayer, pillLayer, dockLayer, hudLayer);
+  return svg;
+}
+
+/**
+ * Renders the 1160px Pacific Ocean topology SVG (desktop) or compact mobile map SVG,
+ * integrating shortest-path/seam-wrapping arcs, sector-repulsion city tags, collision-free
+ * reserved alert pills, multi-row external dock, and optional SVG zoom/pan viewport transform.
+ */
+export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta = {}, zoomTransform = null, helpers }) {
+  if (isMobile) {
+    return renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers });
   }
 
-  svg.append(mapGroup);
+  const vw = PACIFIC_MAP_BOUNDS.width;
+  const mapHeight = PACIFIC_MAP_BOUNDS.height;
 
-  if (dockSlots.length) {
-    svg.append(
-      createSVGEl("rect", { x: "0", y: String(dockRowTop), width: "342", height: "30", fill: "#f4f4f5" }),
-      createSVGEl("line", { x1: "0", y1: String(dockRowTop), x2: "342", y2: String(dockRowTop), stroke: "#e4e4e7", "stroke-width": "1" }),
+  const dockArea = placeExternalDockTargets(model.externalTargets, vw, 18, mapHeight + 10, {
+    minChipW: 132,
+    maxChipW: 218,
+    chipH: 36,
+    chipGap: 8,
+    rowGap: 8,
+    maxUnits: 21,
+  });
+  const totalHeight = dockArea.rowCount > 0 ? dockArea.bottomY + 14 : mapHeight;
+
+  const svg = createSVGEl("svg", {
+    class: "a-dash-topo-svg a-dash-topo-map-svg",
+    viewBox: `0 0 ${vw} ${totalHeight}`,
+    role: "img",
+    "data-topo-mode": "map",
+    "aria-label": "太平洋海缆与全网拓扑态势图",
+  });
+
+  const clipId = `a-topo-map-clip-${++mapClipInstanceSeq}`;
+  const defs = createTopologyDefs("a-topo");
+  const zoomStr = zoomTransform && zoomTransform.scale > 1.001
+    ? `translate(${zoomTransform.tx.toFixed(1)} ${zoomTransform.ty.toFixed(1)}) scale(${zoomTransform.scale.toFixed(3)})`
+    : "";
+
+  // Wrap zoomable map stage separately from External Dock & HUD chrome.
+  const clip = createSVGEl("clipPath", { id: clipId, "data-refresh-key": clipId, "data-clip-sig": `${vw}:${mapHeight}:${clipId}` });
+  clip.append(createSVGEl("rect", { x: 0, y: 0, width: vw, height: mapHeight, rx: 9 }));
+  clip.reconcileTable = (fresh) => fresh?.getAttribute?.("data-clip-sig") === clip.getAttribute("data-clip-sig");
+  defs.append(clip);
+  svg.append(defs);
+
+  const stageClipGroup = createSVGEl("g", {
+    "clip-path": `url(#${clipId})`,
+    "data-refresh-key": "pacific-stage-clip",
+  });
+  const zoomGroup = createSVGEl("g", {
+    class: "a-dash-topo-map-viewport",
+    "data-refresh-key": "pacific-viewport",
+    transform: zoomStr || null,
+  });
+
+  const backdropSig = `${vw}:${mapHeight}`;
+  const backdrop = createSVGEl("g", {
+    class: "a-dash-topo-map-backdrop",
+    "data-refresh-key": "pacific-backdrop",
+    "data-backdrop-sig": backdropSig,
+  });
+  backdrop.reconcileTable = (fresh) => fresh?.getAttribute?.("data-backdrop-sig") === backdrop.getAttribute("data-backdrop-sig");
+  const ocean = createSVGEl("rect", { x: 0, y: 0, width: vw, height: mapHeight, fill: "#f4f6f9" });
+  const graticuleG = createSVGEl("g", { fill: "none", stroke: "#e2e6ed", "stroke-width": "0.65", "stroke-dasharray": "2.5 3.5" });
+  PACIFIC_GRATICULES.meridians.forEach((m) => graticuleG.append(createSVGEl("path", { d: m.d })));
+  PACIFIC_GRATICULES.parallels.forEach((p) => graticuleG.append(createSVGEl("path", { d: p.d })));
+  const landPath = createSVGEl("path", { d: PACIFIC_LAND_PATH, fill: "#e8ecf2", stroke: "#d3dae6", "stroke-width": "0.85", "stroke-linejoin": "round" });
+  backdrop.append(ocean, graticuleG, landPath);
+
+  const clusters = clusterTopologyNodes(model.nodes);
+  const selIndex = buildTopologySelectionIndex(model, clusters);
+  const coordByID = new Map();
+  clusters.forEach((cl) => cl.members.forEach((m) => coordByID.set(m.node.id, { x: cl.x, y: cl.y })));
+
+  const chipByID = new Map();
+  dockArea.chips.forEach((chip) => chipByID.set(chip.ext.id, chip));
+
+  const arcGeom = computeCorridorLanes(
+    model.probeLinks,
+    coordByID,
+    chipByID,
+    clusters,
+    { minX: 16, maxX: vw - 16, minY: 28, maxY: mapHeight - 16 },
+    1,
+    1,
+    zoomTransform,
+  );
+
+  const flowLayer = createSVGEl("g", { class: "a-dash-topo-map-flows" });
+  const probeLayer = createSVGEl("g", { class: "a-dash-topo-map-probes" });
+  const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true" });
+  const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons" });
+  const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags" });
+  const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills" });
+
+  // Reserve static occupied obstacles: beacon circles & map corners (HUD bars)
+  const staticOccupied = [
+    { x: 0, y: 0, w: 280, h: 30 },
+    { x: vw - 360, y: 0, w: 360, h: 30 },
+  ];
+  clusters.forEach((c) => {
+    const br = c.isCluster ? Math.min(11, 6.2 + c.members.length * 1.1) : 6.2;
+    staticOccupied.push({ x: c.x - br - 3, y: c.y - br - 3, w: (br + 3) * 2, h: (br + 3) * 2 });
+  });
+
+  // 1. Place City / Cluster Tags using Density-Vector Repulsion (zooming/dense labels stay collision-free)
+  const tagPriority = [...clusters].sort((a, b) => {
+    const aPinned = helpers.activeKey() === a.key ? 1 : 0;
+    const bPinned = helpers.activeKey() === b.key ? 1 : 0;
+    if (bPinned !== aPinned) return bPinned - aPinned;
+    const aBad = a.members.some((m) => m.node.blocked) ? 1 : 0;
+    const bBad = b.members.some((m) => m.node.blocked) ? 1 : 0;
+    if (bBad !== aBad) return bBad - aBad;
+    const aOnline = a.members.some((m) => m.node.isOnline) ? 1 : 0;
+    const bOnline = b.members.some((m) => m.node.isOnline) ? 1 : 0;
+    if (bOnline !== aOnline) return bOnline - aOnline;
+    return b.members.length - a.members.length;
+  });
+
+  const tagBounds = { minX: 20, maxX: vw - 20, minY: 32, maxY: mapHeight - 12 };
+  const hiddenClusterCount = [];
+
+  tagPriority.forEach((cluster) => {
+    const key = cluster.key;
+    const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
+    const hl = helpers.isHighlightedEdge(peers);
+    const active = helpers.activeKey() === key;
+    const anyOnline = cluster.members.some((m) => m.node.isOnline);
+    const anyBlocked = cluster.members.some((m) => m.node.blocked);
+    const r = cluster.isCluster ? Math.min(11, 6.2 + cluster.members.length * 1.1) : 5.8;
+
+    const tagText = cluster.isCluster
+      ? `${cluster.label} ×${cluster.members.length}`
+      : (cluster.primary.geo.matched ? cluster.label : formatMapCityLabel(cluster.primary.node.name, cluster.primary.node));
+    const displayTag = clipLabel(tagText, 16);
+    const tagW = Math.max(44, Math.min(138, visualUnits(displayTag) * 6.4 + 14));
+    const tagH = 19;
+
+    const candidates = buildDensityAwareTagCandidates(cluster, clusters, tagW, tagH, r, tagBounds);
+    let chosen = null;
+    let bestScore = Infinity;
+    for (const c of candidates) {
+      const box = { x: c.x, y: c.y, w: tagW, h: tagH };
+      if (staticOccupied.some((o) => rectsOverlap(box, o, 3, 2.5))) continue;
+      if (c.sectorPenalty < bestScore) {
+        bestScore = c.sectorPenalty;
+        chosen = { ...c, box };
+      }
+    }
+
+    if (!chosen) {
+      hiddenClusterCount.push(cluster);
+      return;
+    }
+
+    staticOccupied.push(chosen.box);
+    const g = createSVGEl("g", {
+      class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
+      "data-refresh-key": `map-tag-${key}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": "1",
+      opacity: hl === false ? "0.22" : "1",
+    });
+
+    if (chosen.leader) {
+      const lx = Math.max(chosen.x, Math.min(chosen.x + tagW, cluster.x));
+      const ly = Math.max(chosen.y, Math.min(chosen.y + tagH, cluster.y));
+      g.append(createSVGEl("line", {
+        x1: cluster.x.toFixed(1),
+        y1: cluster.y.toFixed(1),
+        x2: lx.toFixed(1),
+        y2: ly.toFixed(1),
+        stroke: "#a1a1aa",
+        "stroke-width": "0.9",
+        "stroke-dasharray": "2 2",
+      }));
+    }
+
+    g.append(
+      createSVGEl("rect", {
+        x: chosen.x.toFixed(1),
+        y: chosen.y.toFixed(1),
+        width: tagW.toFixed(1),
+        height: tagH,
+        rx: 5,
+        fill: "#ffffff",
+        stroke: active ? INGRESS_COLOR : anyBlocked ? BLOCKED_COLOR : anyOnline ? "#d4d4d8" : "#e4e4e7",
+        "stroke-width": active ? "1.6" : "1",
+        class: "a-dash-topo-card",
+      }),
+      createSVGEl("text", {
+        x: (chosen.x + 7).toFixed(1),
+        y: (chosen.y + 13).toFixed(1),
+        class: "a-dash-topo-map-tag-text",
+        fill: anyBlocked ? BLOCKED_COLOR : anyOnline ? "#18181b" : "#71717a",
+      }, displayTag),
     );
-    const gap = 4;
-    const availW = 330 - (dockSlots.length - 1) * gap;
-    const rawWidths = dockSlots.map((slot) => Math.max(46, slot.ext.address.length * 4.9 + 14));
-    const sumRaw = rawWidths.reduce((s, v) => s + v, 0);
-    const chipWidths = rawWidths.map((rw) => Math.floor((rw / sumRaw) * availW));
-    let curX = 6;
-    const chipY = dockRowTop + 5;
-    dockSlots.forEach((slot, idx) => {
-      const chipW = idx === dockSlots.length - 1 ? Math.max(40, 336 - curX) : chipWidths[idx];
-      const extID = slot.ext.id;
-      const peers = [extID, ...slot.linked.map((p) => `probe:${p.id}`), ...slot.linked.map((p) => `node:${p.from}`)];
-      const hl = isHighlightedEdge(peers);
-      const active = activeKey() === extID;
-      const cx = curX;
-      curX += chipW + gap;
-      const isLongIP = slot.ext.address.length > 9;
+    g.append(createSVGEl("title", {}, cluster.members.map((m) => m.node.name).join(" / ")));
+    helpers.bindInteractive(g, key);
+    tagLayer.append(g);
+  });
+
+  // 2. Render Nodes / Clusters Beacons
+  clusters.forEach((cluster) => {
+    const key = cluster.key;
+    const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
+    const hl = helpers.isHighlightedEdge(peers);
+    const active = helpers.activeKey() === key;
+    const anyOnline = cluster.members.some((m) => m.node.isOnline);
+    const anyBlocked = cluster.members.some((m) => m.node.blocked);
+    const totalTraffic = cluster.members.reduce((s, m) => s + (m.node.rxBPS || 0) + (m.node.txBPS || 0), 0);
+    const toneColor = anyBlocked ? BLOCKED_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
+    const r = cluster.isCluster ? Math.min(11, 6.2 + cluster.members.length * 1.1) : 5.8;
+
+    const g = createSVGEl("g", {
+      class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
+      "data-refresh-key": `map-beacon-${key}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": "1",
+      opacity: hl === false ? "0.22" : "1",
+    });
+
+    if (anyOnline && (totalTraffic > 0 || helpers.allowMotion()) && helpers.allowMotion()) {
+      pulseLayer.append(createSVGEl("circle", {
+        cx: cluster.x.toFixed(1),
+        cy: cluster.y.toFixed(1),
+        r: (r + 6.5).toFixed(1),
+        fill: "none",
+        stroke: toneColor,
+        "stroke-width": "1.1",
+        class: "a-dash-topo-beacon-pulse",
+        "data-topo-peers": peers.join(" "),
+        "data-base-opacity": "0.42",
+        "data-dim-opacity": "0.08",
+        opacity: hl === false ? "0.08" : "0.42",
+      }));
+    }
+
+    g.append(createSVGEl("circle", {
+      cx: cluster.x.toFixed(1),
+      cy: cluster.y.toFixed(1),
+      r: (r + 7).toFixed(1),
+      fill: "transparent",
+    }));
+    g.append(createSVGEl("circle", {
+      cx: cluster.x.toFixed(1),
+      cy: cluster.y.toFixed(1),
+      r: r.toFixed(1),
+      fill: "#ffffff",
+      stroke: active ? INGRESS_COLOR : toneColor,
+      "stroke-width": active || hl === true ? "2.6" : "2.1",
+      class: "a-dash-topo-card",
+    }));
+
+    if (cluster.isCluster) {
+      g.append(createSVGEl("text", {
+        x: cluster.x.toFixed(1),
+        y: (cluster.y + 3.4).toFixed(1),
+        "text-anchor": "middle",
+        class: "a-dash-topo-micro",
+        fill: toneColor,
+      }, String(cluster.members.length)));
+    }
+    g.append(createSVGEl("title", {}, cluster.members.map((m) => m.node.name).join(" / ")));
+    helpers.bindInteractive(g, key);
+    beaconLayer.append(g);
+  });
+
+  // 3. Render Probe Arcs + Guaranteed Non-Colliding Alert Pills (fullW reserved upfront, zero silent drop of top alerts)
+  const ambientBadSet = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 6 });
+  const totalBadCount = model.probeLinks.filter((p) => p.tone === "bad").length;
+  const unshownBadCount = Math.max(0, totalBadCount - ambientBadSet.size);
+  const pillBounds = { minX: 20, maxX: vw - 20, minY: 32, maxY: mapHeight - 12 };
+  const leaderSegments = [];
+  const activeSel = helpers.activeKey();
+
+  // Sort probes so bad/focused render on top
+  const renderOrder = [...model.probeLinks].sort((a, b) => {
+    const score = { ok: 1, idle: 1, warn: 2, bad: 3 };
+    return (score[a.tone] || 0) - (score[b.tone] || 0);
+  });
+
+  renderOrder.forEach((probe) => {
+    const geom = arcGeom.get(probe.id);
+    if (!geom) return;
+
+    const entityKey = `probe:${probe.id}`;
+    const peers = selIndex.probePeers(probe);
+    const hl = helpers.isHighlightedEdge(peers);
+    const pal = tonePalette(probe.tone);
+    const isBad = probe.tone === "bad";
+    const isWarn = probe.tone === "warn";
+    const baseOpacity = isBad ? 0.92 : isWarn ? 0.8 : probe.isExternal ? 0.45 : 0.42;
+    const opacity = hl === true ? 1 : hl === false ? 0.12 : baseOpacity;
+
+    const g = createSVGEl("g", {
+      "data-refresh-key": `map-arc-${probe.id}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": String(baseOpacity),
+      opacity: opacity.toFixed(2),
+    });
+
+    const strokeW = (hl === true ? 2.4 : isBad ? 2.0 : 1.45).toFixed(2);
+    g.append(createSVGEl("path", {
+      d: geom.d,
+      fill: "none",
+      stroke: pal.stroke,
+      "stroke-width": strokeW,
+      "stroke-dasharray": probe.running ? "6 4" : isBad ? "5 3" : probe.isExternal ? "2 3" : null,
+      "stroke-linecap": "round",
+      "marker-end": isBad ? "url(#a-topo-arrow-bad)" : isWarn ? "url(#a-topo-arrow-warn)" : probe.tone === "ok" ? "url(#a-topo-arrow-ok)" : "url(#a-topo-arrow-idle)",
+      class: probe.running ? "a-dash-topo-probe-running" : null,
+    }));
+
+    if (geom.seamMarks) {
+      geom.seamMarks.forEach((mk) => {
+        g.append(createSVGEl("path", {
+          d: `M ${mk.x.toFixed(1)} ${(mk.y - 3.5).toFixed(1)} L ${(mk.x + 3.5).toFixed(1)} ${mk.y.toFixed(1)} L ${mk.x.toFixed(1)} ${(mk.y + 3.5).toFixed(1)} L ${(mk.x - 3.5).toFixed(1)} ${mk.y.toFixed(1)} Z`,
+          fill: "#ffffff",
+          stroke: pal.stroke,
+          "stroke-width": "1.3",
+        }));
+      });
+    }
+
+    if (helpers.allowMotion() && !isProbeUnreachable(probe) && (probe.tone === "ok" || hl === true)) {
+      const spd = flowSpeedClass(0.55);
+      geom.segments.forEach((seg, segIdx) => {
+        const segD = `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
+        g.append(createSVGEl("path", {
+          d: segD,
+          fill: "none",
+          stroke: pal.stroke,
+          "stroke-width": "1.5",
+          "stroke-dasharray": "4 16",
+          opacity: "0.45",
+          class: `a-dash-topo-flow-pulse ${spd}`,
+          "data-refresh-key": `map-pulse-${probe.id}-${segIdx}`,
+        }));
+      });
+    }
+
+    const hit = createSVGEl("path", {
+      d: geom.d,
+      fill: "none",
+      stroke: "transparent",
+      "stroke-width": "12",
+      class: "a-dash-topo-probe-item",
+    });
+    helpers.bindInteractive(hit, entityKey, { openProbeID: probe.id });
+    g.append(hit);
+    probeLayer.append(g);
+
+    // Reserve full pill width upfront for ambient alerts so hover/pin never causes neighbor overlap.
+    const isAmbientBad = ambientBadSet.has(probe.id);
+    const fullLabel = buildProbePillLabel(probe, false, false);
+    const compactLabel = isAmbientBad ? buildProbePillLabel(probe, true, false) : fullLabel;
+    const pillH = 20;
+    const fullW = Math.max(58, Math.min(148, visualUnits(compactLabel) * 6.3 + 22));
+    const reserveW = fullW;
+
+    const pillOccupied = isAmbientBad ? staticOccupied : [...staticOccupied];
+    const placed = placeCollisionFreePill(
+      geom.mid.x,
+      geom.mid.y,
+      reserveW,
+      pillH,
+      pillOccupied,
+      pillBounds,
+      [geom.mid],
+      { leaderSegments, reserveW },
+    );
+
+    if (placed.shifted || isAmbientBad) {
+      if (Math.hypot(placed.cx - geom.mid.x, placed.cy - geom.mid.y) > 16) {
+        helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, false, !isAmbientBad);
+      }
+    }
+
+    pillLayer.append(helpers.createProbePillGroup({
+      probe,
+      cx: placed.cx,
+      cy: placed.cy,
+      pillW: fullW,
+      fullW,
+      pillH,
+      label: compactLabel,
+      shortLabel: compactLabel,
+      pal,
+      compact: false,
+      peers,
+      focusOnly: !isAmbientBad,
+      ambientAlert: false,
+    }));
+  });
+
+  // External Dock sits below the clip/zoom map viewport so chips never clip or pan offscreen.
+  const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock" });
+  if (dockArea.rowCount > 0) {
+    dockLayer.append(createSVGEl("line", { x1: 18, y1: mapHeight + 2, x2: vw - 18, y2: mapHeight + 2, stroke: "#e4e4e7", "stroke-width": "1" }));
+    dockArea.chips.forEach((chip) => {
+      const extID = chip.ext.id;
+      const peers = selIndex.extPeers(extID);
+      const hl = helpers.isHighlightedEdge(peers);
+      const active = activeSel === extID;
 
       const g = createSVGEl("g", {
-        class: `a-dash-topo-node a-dash-topo-dock-chip ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-        "data-refresh-key": `mob-dock-${extID}`,
+        class: `a-dash-topo-dock-chip ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
+        "data-refresh-key": `dock-${extID}`,
         "data-topo-peers": peers.join(" "),
         "data-base-opacity": "1",
-        opacity: hl === false ? "0.28" : "1",
+        opacity: hl === false ? "0.24" : "1",
       });
       g.append(
         createSVGEl("rect", {
-          x: cx,
-          y: chipY,
-          width: chipW,
-          height: 20,
-          rx: "5",
+          x: chip.x.toFixed(1),
+          y: chip.y.toFixed(1),
+          width: chip.w.toFixed(1),
+          height: chip.h,
+          rx: 7,
           fill: "#ffffff",
           stroke: active ? INGRESS_COLOR : "#d4d4d8",
-          "stroke-width": active || hl === true ? "1.4" : "0.95",
+          "stroke-width": active ? "1.8" : "1",
           class: "a-dash-topo-card",
         }),
-        createSVGEl("text", {
-          x: (cx + chipW / 2).toFixed(1),
-          y: (chipY + 13.0).toFixed(1),
-          "text-anchor": "middle",
-          class: "a-dash-topo-micro",
-          "font-size": isLongIP ? "8.2" : "9.2",
-          fill: "#18181b",
-        }, clipLabel(slot.ext.address, Math.max(8, Math.floor((chipW - 6) / (isLongIP ? 4.7 : 5.3))))),
+        createSVGEl("circle", { cx: chip.cx.toFixed(1), cy: chip.y.toFixed(1), r: 2.5, fill: "#ffffff", stroke: EGRESS_COLOR, "stroke-width": "1.2" }),
+        createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 15).toFixed(1), class: "a-dash-topo-map-tag-text", fill: "#18181b" }, chip.title),
+        createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 28).toFixed(1), class: "a-dash-topo-ext-sub", fill: "#71717a" }, chip.subText),
       );
-      bindInteractive(g, extID);
-      svg.append(g);
+      g.append(createSVGEl("title", {}, `${chip.fullTitle}${chip.ext.address ? ` (${chip.ext.address})` : ""} · ${chip.ext.linkCount} 条链路`));
+      helpers.bindInteractive(g, extID);
+      dockLayer.append(g);
     });
   }
 
+  zoomGroup.append(backdrop, flowLayer, probeLayer, pulseLayer, beaconLayer, tagLayer, pillLayer);
+  stageClipGroup.append(zoomGroup);
+
+  const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud" });
+  hudLayer.append(
+    createSVGEl("text", { x: 16, y: 20, class: "a-dash-topo-map-coord" }, `158°E PACIFIC BASIN · ${clusters.length} 枢纽`),
+    createSVGEl("text", { x: vw - 16, y: 20, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudTrafficLine(model, bytes, trafficMeta)),
+  );
+  if (unshownBadCount > 0 || hiddenClusterCount.length > 0) {
+    const parts = [];
+    if (unshownBadCount > 0) parts.push(`另有 ${unshownBadCount} 条告警见下方台账/链路监控`);
+    if (hiddenClusterCount.length > 0) parts.push(`可放大查看 ${hiddenClusterCount.length} 处密集标签`);
+    hudLayer.append(createSVGEl("text", {
+      x: 16,
+      y: mapHeight - 10,
+      class: "a-dash-topo-micro",
+      fill: unshownBadCount > 0 ? BLOCKED_COLOR : "#52525b",
+    }, parts.join(" · ")));
+  }
+
+  svg.append(stageClipGroup, dockLayer, hudLayer);
   return svg;
 }
