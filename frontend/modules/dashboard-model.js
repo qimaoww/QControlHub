@@ -326,6 +326,9 @@ export function rankDashboardTrafficView({
 
 export function probeDirectionStatus(dir, availability, activeState = "") {
   if (availability && availability.ready === false) {
+    if (dir && (dir.state === "failed" || dir.error || !dir.reached || Number(dir.loss_percent) >= 100)) {
+      return { label: availability.reason || "不可达", tone: "bad", available: false };
+    }
     return { label: availability.reason || "暂不可用", tone: "warn", available: false };
   }
   if (availability?.running || ["preparing", "running", "stopping"].includes(activeState)) {
@@ -559,7 +562,14 @@ export function buildDashboardTopology({
   today = new Date().toISOString().slice(0, 10),
   now = Date.now(),
   maxNodes = 6,
+  onlyProbedNodes = false,
 } = {}) {
+  const probeEndpointSet = new Set();
+  for (const pair of probes || []) {
+    if (pair?.node1?.agent_id) probeEndpointSet.add(pair.node1.agent_id);
+    if (pair?.target_mode !== "ip" && pair?.node2?.agent_id) probeEndpointSet.add(pair.node2.agent_id);
+  }
+
   const agentMeta = buildAgentMetaMap(agents, pageAgents);
   const { byAgent: policyMap } = buildPolicyAgentRollup(policies, agentMeta, "all");
   const monthlyByAgent = new Map();
@@ -568,6 +578,7 @@ export function buildDashboardTopology({
 
   for (const row of usageRows || []) {
     if (!row?.agent_id || !row.day?.startsWith(`${month}-`) || row.day > today) continue;
+    if (onlyProbedNodes && !probeEndpointSet.has(row.agent_id)) continue;
     const rx = finiteNonNegative(Number(row.received_bytes)) ? Number(row.received_bytes) : 0;
     const tx = finiteNonNegative(Number(row.sent_bytes)) ? Number(row.sent_bytes) : 0;
     monthlyRxTotal += rx;
@@ -585,11 +596,6 @@ export function buildDashboardTopology({
       .filter((src) => src?.agent_id && src.status === "ok")
       .map((src) => src.agent_id),
   );
-  const probeEndpointSet = new Set();
-  for (const pair of probes || []) {
-    if (pair?.node1?.agent_id) probeEndpointSet.add(pair.node1.agent_id);
-    if (pair?.target_mode !== "ip" && pair?.node2?.agent_id) probeEndpointSet.add(pair.node2.agent_id);
-  }
 
   const orderIndex = new Map((orderIDs || []).map((id, idx) => [id, idx]));
   const allNodes = [];
@@ -599,6 +605,7 @@ export function buildDashboardTopology({
   let runningEngines = 0;
 
   for (const id of allIDs) {
+    if (onlyProbedNodes && !probeEndpointSet.has(id)) continue;
     const agent = agentMeta.get(id) || { id, name: id, status: "unknown" };
     const policy = policyMap.get(id) || null;
     const usage = monthlyByAgent.get(id) || { rx: 0, tx: 0, used: 0 };
@@ -773,10 +780,10 @@ export function buildDashboardTopology({
     let metricLabel = fwdStatus.label;
     if (running || fwdDir?.state === "running" || fwdDir?.state === "preparing") {
       metricLabel = "探测中";
-    } else if (pair?.availability?.ready === false) {
-      metricLabel = "暂不可用";
     } else if (fwdStatus.tone === "bad" && (!fwdDir?.reached || Number(fwdDir?.loss_percent) >= 100)) {
       metricLabel = "不可达";
+    } else if (pair?.availability?.ready === false) {
+      metricLabel = "暂不可用";
     } else if (fwdLatency != null) {
       const rtt = `${fwdLatency.toFixed(fwdLatency >= 100 ? 0 : 1)}ms`;
       metricLabel = maxLoss != null && maxLoss > 0 ? `${rtt} · 丢包${Math.round(maxLoss)}%` : rtt;

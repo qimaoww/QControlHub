@@ -154,8 +154,12 @@ export async function testDashboardRuntime(mode, preview = false) {
     if (path === "/preferences/ui") {
       if (method === "PATCH") {
         const body = JSON.parse(options.body || "{}");
+        const nextValues = { ...fixture.uiPrefs.values };
+        for (const [page, fields] of Object.entries(body.values || {})) {
+          nextValues[page] = { ...(nextValues[page] || {}), ...(fields || {}) };
+        }
         fixture.uiPrefs = {
-          values: { ...fixture.uiPrefs.values, ...(body.values || {}) },
+          values: nextValues,
           revision: fixture.uiPrefs.revision + 1,
         };
       }
@@ -323,7 +327,14 @@ export async function testDashboardRuntime(mode, preview = false) {
   const traffic = () => card("流量概况");
   const ranking = () => card("流量累计排行");
   const topology = () => card("全网数据流拓扑");
-  const probes = () => card("节点链路监控");
+  const probesDialog = () => [...document.querySelectorAll("dialog.a-dialog[open]")].find((d) => d.querySelector(".a-dialog-head h2")?.textContent === "节点链路监控");
+  const openProbesModal = async () => {
+    const btn = topology()?.querySelector(".a-dash-topo-probe-btn");
+    assert(btn, "topology probe modal trigger missing");
+    btn.click();
+    await waitFor(() => probesDialog()?.querySelector('[data-refresh-key]'), "probe modal did not open");
+    return probesDialog();
+  };
   const nodes = () => card("节点运行状态");
   const activity = () => card("最近任务");
   const metric = (label) => panel()?.querySelector(`[data-refresh-key="${label}"] strong`);
@@ -348,12 +359,15 @@ export async function testDashboardRuntime(mode, preview = false) {
       for (const path of ["/agents", "/tasks", "/traffic-usage", "/traffic-policies", "/dashboard/probes", "/network-diagnostics/nodes", "/client-connections", "/ip-quality", "/settings", "/preferences/node-order"]) {
         assert(reads(path) === 0, `overview-only user requested ${path}`);
       }
-      assert(!nodes() && !activity() && !traffic() && !ranking() && !topology() && !probes(), "inaccessible shortcuts exposed");
+      assert(!nodes() && !activity() && !traffic() && !ranking() && !topology() && !card("节点链路监控"), "inaccessible shortcuts exposed");
       await waitFor(() => document.querySelector(".a-main").textContent.includes("3/4") && document.querySelector(".a-main").textContent.includes("在线率 75%"), "overview-only user lost allowed summary");
     } else {
       assert(traffic() && ranking(), "readonly user lost own traffic");
-      await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && probes()?.querySelector('[data-refresh-key="prb_1"]'), "readonly user with agents.read+tasks.read should view topology and probes");
-      assert(![...probes().querySelectorAll("button")].some((b) => ["添加链路", "立即探测", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
+      await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector(".a-dash-topo-probe-btn"), "readonly user with agents.read+tasks.read should view topology and link monitor trigger");
+      const roDialog = await openProbesModal();
+      assert(roDialog.querySelector('[data-refresh-key="prb_1"]'), "readonly user lost probes inside topology modal");
+      assert(![...roDialog.querySelectorAll("button")].some((b) => ["添加链路", "立即探测", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
+      roDialog.close();
       assert(reads("/network-diagnostics/nodes") === 0, "readonly user fetched diagnostic node write metadata");
     }
     return;
@@ -363,7 +377,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   if (preview) return;
   if (fixture.failed) {
     assert(cpu().textContent === "—", "failed first sample became zero");
-    assert(nodes() && traffic() && ranking() && probes(), "optional host failure blocked dashboard");
+    assert(nodes() && traffic() && ranking() && topology(), "optional host failure blocked dashboard");
     fixture.failed = false;
     await refresh();
   }
@@ -400,41 +414,57 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(nodes().textContent.includes("时钟异常") && nodes().textContent.includes("IPv6"), "matrix omitted clock_sync or IPv6 capability badges");
   assert(!activity() && reads("/tasks") === 0, "retired recent-task area still renders or polls");
 
+  assert(!card("节点链路监控"), "probes card still renders directly on main dashboard instead of topology modal");
   await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector('[data-topo-entity="node:tokyo"]') && (topology()?.textContent.includes("43.8ms") || topology()?.querySelector(".a-dash-topo-chip")?.textContent.includes("43.8ms")), "topology card did not render nodes and live probe links");
   topology().querySelector('[data-topo-entity="node:tokyo"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await waitFor(() => topology()?.querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector(".a-dash-topo-inspect")?.textContent.includes("东京 · JP-03"), "topology node selection did not update inspect bar");
 
-  await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]') && probes()?.textContent.includes("20%"), "link probes card did not render stats");
+  // Open link monitoring popup directly from the topology probe arc (or chip/header trigger) & verify stability across refreshes.
+  const probeArc = topology().querySelector('[data-topo-entity="probe:prb_1"]');
+  if (probeArc) {
+    probeArc.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  } else {
+    topology().querySelector('.a-dash-topo-probe-btn').click();
+  }
+  await waitFor(() => probesDialog()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("20%"), "link probes modal did not open from topology");
+  const modalBox = probesDialog();
   assert(!panel().querySelector(".a-dash-chip-pill") && !/\d+\/\d+\s*样本|协程/.test(panel().textContent), "panel still renders removed sample/goroutine pills");
-  const stableAddProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加链路");
+  const stableAddProbeBtn = [...modalBox.querySelectorAll("button")].find((b) => b.textContent === "添加链路");
   assert(stableAddProbeBtn, "add probe link button missing for authorized operator");
-  const runBtn = [...probes().querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "立即探测");
-  runBtn.click();
-  await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("停止"), "run action did not enter running/stop state");
-  const stopBtn = [...probes().querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "停止");
-  stopBtn.click();
-  await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("立即探测"), "stop action did not settle");
-  assert([...probes().querySelectorAll("button")].find((b) => b.textContent === "添加链路") === stableAddProbeBtn, "conditional status badge replaced add probe button");
+  const stableProbesSVG = modalBox.querySelector("svg");
+  const stableProbeGrads = [...modalBox.querySelectorAll("linearGradient")].map((g) => g.id);
+  await refresh();
+  assert(probesDialog() === modalBox && modalBox.querySelector("svg") === stableProbesSVG, "unchanged refresh rebuilt probe modal SVG");
+  assert(JSON.stringify([...modalBox.querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stableProbeGrads), "probe gradient IDs churned across refresh");
+  assert([...modalBox.querySelectorAll("button")].find((b) => b.textContent === "添加链路") === stableAddProbeBtn, "refresh replaced add probe button inside modal");
 
-  // Add, toggle, and delete a custom probe link through the UI form & confirmation dialog.
-  const addProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加链路");
-  assert(addProbeBtn, "add probe link button missing for authorized operator");
-  addProbeBtn.click();
-  const addDialog = document.querySelector("dialog[open]");
-  assert(addDialog?.matches(":modal"), "add probe dialog missing");
+  const runBtn = [...modalBox.querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "立即探测");
+  runBtn.click();
+  await waitFor(() => modalBox.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("停止"), "run action did not enter running/stop state");
+  const stopBtn = [...modalBox.querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "停止");
+  stopBtn.click();
+  await waitFor(() => modalBox.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("立即探测"), "stop action did not settle");
+
+  // Add, toggle, and delete a custom probe link through stacked UI form & confirmation dialog.
+  stableAddProbeBtn.click();
+  const addDialog = [...document.querySelectorAll("dialog[open]")].at(-1);
+  assert(addDialog?.matches(":modal") && addDialog !== modalBox, "add probe stacked dialog missing");
   await waitFor(() => reads("/network-diagnostics/nodes") > 0 && addDialog.querySelector('select[name="node2_key"] option[value="singapore/main"]'), "diagnostic nodes not populated in dialog");
   addDialog.querySelector('input[name="name"]').value = "东京 → 新加坡测试";
   addDialog.querySelector('select[name="node2_key"]').value = "singapore/main";
   addDialog.querySelector('select[name="node2_key"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('button[type="submit"]').click();
-  await waitFor(() => !addDialog.open && probes().textContent.includes("东京 → 新加坡测试"), "created probe link not rendered");
-  const createdCard = [...probes().querySelectorAll('[data-refresh-key]')].find((el) => el.textContent.includes("东京 → 新加坡测试"));
+  await waitFor(() => !addDialog.open && modalBox.textContent.includes("东京 → 新加坡测试"), "created probe link not rendered inside modal");
+  const createdCard = [...modalBox.querySelectorAll('[data-refresh-key]')].find((el) => el.textContent.includes("东京 → 新加坡测试"));
   [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "暂停自动").click();
   await waitFor(() => createdCard.textContent.includes("开启自动"), "toggling auto probe state failed");
   [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "删除").click();
-  const delConfirm = document.querySelector("dialog[open]");
+  const delConfirm = [...document.querySelectorAll("dialog[open]")].at(-1);
+  assert(delConfirm && delConfirm !== modalBox, "delete probe confirmation dialog missing");
   [...delConfirm.querySelectorAll("button")].find((b) => b.textContent === "删除链路").click();
-  await waitFor(() => !probes().textContent.includes("东京 → 新加坡测试"), "deleted probe link stayed rendered");
+  await waitFor(() => !modalBox.textContent.includes("东京 → 新加坡测试"), "deleted probe link stayed rendered");
+  modalBox.close();
+  await waitFor(() => !document.querySelector("dialog[open]"), "probe modal did not close cleanly");
 
   // Verify node telemetry matrix 24h dialog opens and renders metrics without interfering with polling.
   const trendBtn = [...nodes().querySelector(".a-dash-matrix-row").querySelectorAll("button")].find((b) => b.textContent === "24h 趋势");
@@ -474,7 +504,7 @@ export async function testDashboardRuntime(mode, preview = false) {
 
   const assertLayout = () => {
     assert(document.documentElement.scrollWidth <= innerWidth + 1, `viewport overflow ${innerWidth}`);
-    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-dash-topo-canvas,.a-dash-topo-inspect,.a-dash-topo-mobile-links,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-dash-topo-canvas,.a-dash-topo-inspect,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
       assert(element.scrollWidth <= element.clientWidth + 1, `content overflow ${element.className}`);
     }
     for (const element of document.querySelectorAll('[aria-label="节点运行状态"]')) {
@@ -501,18 +531,16 @@ export async function testDashboardRuntime(mode, preview = false) {
   const beforePageScroll = scrollHost.scrollTop;
   const stablePanel = panel(), stableCPU = cpu(), stableNode = nodes().querySelector(".a-dash-matrix-row"), stableSVG = traffic().querySelector("svg.a-chart");
   const stableNodeAction = nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a");
-  const stableProbesSVG = probes().querySelector("svg"), stableRankRow = ranking().querySelector(".a-dash-rank-row");
+  const stableRankRow = ranking().querySelector(".a-dash-rank-row");
   const stableTopoSVG = topology().querySelector("svg.a-dash-topo-svg");
   const stablePanelSVGs = [...panel().querySelectorAll("svg")];
   const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
-  const stableProbeGrads = [...probes().querySelectorAll("linearGradient")].map((g) => g.id);
   await refresh();
   assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
   assert(topology().querySelector("svg.a-dash-topo-svg") === stableTopoSVG && topology().querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh rebuilt topology SVG or lost selected node");
   assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
   assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
-  assert(JSON.stringify([...probes().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stableProbeGrads), "probe gradient IDs churned across refresh");
-  assert(probes().querySelector("svg") === stableProbesSVG && ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");
+  assert(ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");
   const month = () => traffic().querySelector('[name="traffic_month"]');
   month().focus();
   fixture.metrics.history = [];
@@ -607,6 +635,38 @@ export async function testDashboardRuntime(mode, preview = false) {
   assertLayout();
 
   if (mode === "dashboard") {
+    assert(!topology().querySelector(".a-dash-topo-ledger"), "dashboard topology card should not render link matrix ledger");
+    assert(topology().querySelector('[data-refresh-key="open-topology-page"]')?.getAttribute("href") === "#topology", "dashboard topology detail link missing");
+    topology().querySelector('[data-topo-mode-btn="map"]').click();
+    await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg") && topology().querySelector('[data-topo-mode-btn="map"]')?.getAttribute("aria-pressed") === "true", "topology view mode did not switch to pacific map");
+    topology().querySelector('.a-dash-topo-probe-btn').click();
+    await waitFor(() => probesDialog()?.querySelector('[data-refresh-key="filter-abnormal"]'), "probes filter button missing");
+    probesDialog().querySelector('[data-refresh-key="filter-abnormal"]').click();
+    await waitFor(() => probesDialog().querySelector('[data-refresh-key="filter-abnormal"]')?.getAttribute("aria-pressed") === "true", "probe modal filter did not switch to abnormal");
+    probesDialog().close();
+
+    location.hash = "#topology";
+    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-dash-topo-ledger") && topology()?.querySelector("svg.a-dash-topo-map-svg"), "standalone topology page did not render ledger or restored map mode");
+    assert(!topology().querySelector('[data-refresh-key="open-topology-page"]'), "standalone topology page should not render duplicate detail link");
+    topology().querySelector('.a-dash-topo-filter-btn[data-filter="bad"]').click();
+    await waitFor(() => topology().querySelector('.a-dash-topo-filter-btn[data-filter="bad"]')?.getAttribute("aria-pressed") === "true", "topology ledger filter did not switch to bad");
+    await waitFor(() => fixture.uiPrefs.values?.dashboard?.topo_view_mode === "map" && fixture.uiPrefs.values?.dashboard?.topo_probe_filter === "bad" && fixture.uiPrefs.values?.dashboard?.probe_filter === "abnormal", "selectable dashboard options did not persist to /preferences/ui");
+
+    location.hash = "#tasks";
+    await waitFor(() => document.title.startsWith("任务"), "failed to leave topology before option restore check");
+    location.hash = "#topology";
+    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector("svg.a-dash-topo-map-svg") && topology()?.querySelector('.a-dash-topo-filter-btn[data-filter="bad"]')?.getAttribute("aria-pressed") === "true", "saved topology view mode or ledger filter did not restore on revisit");
+    topology().querySelector('[data-topo-mode-btn="flow"]').click();
+    topology().querySelector('.a-dash-topo-filter-btn[data-filter="all"]').click();
+
+    location.hash = "#dashboard";
+    await waitFor(() => document.title.startsWith("仪表盘") && topology()?.querySelector("svg.a-dash-topo-svg") && !topology()?.querySelector("svg.a-dash-topo-map-svg") && !topology()?.querySelector(".a-dash-topo-ledger"), "saved dashboard view mode did not sync or ledger leaked on revisit");
+    topology().querySelector('.a-dash-topo-probe-btn').click();
+    await waitFor(() => probesDialog()?.querySelector('[data-refresh-key="filter-abnormal"]')?.getAttribute("aria-pressed") === "true", "saved probe modal filter did not restore on revisit");
+    probesDialog().querySelector('[data-refresh-key="filter-all"]').click();
+    probesDialog().close();
+    await waitFor(() => fixture.uiPrefs.values?.dashboard?.topo_view_mode === "flow" && fixture.uiPrefs.values?.dashboard?.topo_probe_filter === "all" && fixture.uiPrefs.values?.dashboard?.probe_filter === "all", "resetting selectable dashboard options did not persist");
+
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
     document.dispatchEvent(new Event("visibilitychange"));
     const hidden = reads("/panel-metrics");

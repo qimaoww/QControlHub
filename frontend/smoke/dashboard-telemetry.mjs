@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { resolveNodeGeoPoint, matchesActiveSelection } from "../analytics/dashboard-topo-shared.js";
+import { projectPacificGeo } from "../analytics/pacific-map-data.js";
 
 import {
   aggregateDashboardTrafficDays,
@@ -324,6 +326,26 @@ export async function run() {
   assert.equal(topo.egress.rateBPS, 3000);
   assert.equal(topo.ingress.clientIPs, 12);
   assert.equal(topo.egress.panelRxBPS, 8000);
+
+  const berlin = resolveNodeGeoPoint({ id: "berlin-01", name: "berlin-01", regionCode: "DE" }, 0);
+  const berlinExpected = projectPacificGeo(52.52, 13.405);
+  assert.equal(berlin.matched, true);
+  assert.equal(berlin.country, "DE");
+  assert.ok(Math.hypot(berlin.x - berlinExpected.x, berlin.y - berlinExpected.y) < 12, "berlin-01 should resolve to Berlin");
+
+  const canada = resolveNodeGeoPoint({ id: "canada-01", name: "canada-01", regionCode: "CA" }, 1);
+  assert.equal(canada.matched, true);
+  assert.equal(canada.country, "CA");
+
+  const helsinki = resolveNodeGeoPoint({ id: "helsinki-01", name: "helsinki-01", regionCode: "FI" }, 2);
+  assert.equal(helsinki.matched, true);
+  assert.equal(helsinki.country, "FI");
+
+  const mainNode = resolveNodeGeoPoint({ id: "main-01", name: "main-01", regionCode: "" }, 3);
+  assert.notEqual(mainNode.country, "IN");
+
+  assert.equal(matchesActiveSelection(["probe:p1", "node:b"], "cluster:a,b,c"), true);
+  assert.equal(matchesActiveSelection(["probe:p1", "node:z"], "cluster:a,b,c"), false);
 
   console.log("Dashboard telemetry model smoke passed");
 }

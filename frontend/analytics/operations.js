@@ -197,15 +197,95 @@ import { createDashboardProbesSection } from "./dashboard-probes.js";
 import { createDashboardTopologySection } from "./dashboard-topology.js";
 import { createEdgeTelemetryController, paintNodeTelemetryMatrix } from "./dashboard-telemetry.js";
 
-export async function dashboardPage(ctx) {
-  let month = ctx.state.data.dashboardMonth || utcMonth();
-  const can = permission => ctx.can(permission);
+/** Shared telemetry resource loader/poller used by both the dashboard and standalone topology pages. */
+function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, onSettled } = {}) {
   const readings = new Map();
   const states = new Map();
   const requests = new Map();
+  const reading = new Map();
+
+  async function readResource(key, path, force = false) {
+    if (!ctx.current() || (requests.has(key) && !force)) return;
+    requests.get(key)?.abort();
+    const controller = new AbortController();
+    requests.set(key, controller);
+    if (!readings.has(key)) {
+      states.set(key, "loading");
+      onLoading?.(key);
+    }
+    const requestedMonth = getMonth();
+    try {
+      const value = await ctx.api(path, { signal: AbortSignal.any([ctx.signal, controller.signal]) });
+      if (!ctx.current() || requests.get(key) !== controller) return;
+      if (key === "traffic" && value.month !== requestedMonth) throw new Error("流量月份不匹配");
+      readings.set(key, value);
+      states.set(key, "ready");
+      onSuccess?.(key, value);
+    } catch (error) {
+      if (!ctx.current() || requests.get(key) !== controller || error.name === "AbortError") return;
+      if (error.status === 403) { readings.delete(key); states.set(key, "denied"); }
+      else states.set(key, "failed");
+    } finally {
+      if (ctx.current() && requests.get(key) === controller) {
+        requests.delete(key);
+        await onSettled?.(key);
+      }
+    }
+  }
+
+  function read(key, path, force = false) {
+    if (reading.has(key) && !force) return reading.get(key);
+    const work = readResource(key, path, force);
+    reading.set(key, work);
+    void work.finally(() => { if (reading.get(key) === work) reading.delete(key); }).catch(() => {});
+    return work;
+  }
+
+  const probePollInterval = () => {
+    const pairs = readings.get("probes")?.pairs;
+    return Array.isArray(pairs) && pairs.some(p => p.availability?.running || ["preparing", "running", "stopping"].includes(p.active_state)) ? 2000 : 5000;
+  };
+
+  ctx.signal.addEventListener("abort", () => { requests.forEach(controller => controller.abort()); }, { once: true });
+
+  return {
+    readings,
+    states,
+    read,
+    shouldPoll: (key, manual) => manual || states.get(key) !== "denied",
+    probePollInterval,
+  };
+}
+
+export async function dashboardPage(ctx) {
+  let month = ctx.state.data.dashboardMonth || utcMonth();
+  const can = permission => ctx.can(permission);
   let panelHistory = [];
   let panelRuntime = null;
   let edgeLastFetch = 0;
+  const store = createTelemetryStore(ctx, {
+    getMonth: () => month,
+    onLoading: (key) => { if (key === "traffic") paintTraffic(); },
+    onSuccess: (key, value) => {
+      if (key === "metrics") {
+        panelHistory = mergePanelMetricsHistory(value, panelHistory, 60);
+        panelRuntime = value?.panel_runtime || null;
+      }
+    },
+    onSettled: async (key) => {
+      if (key === "metrics") { paintMetrics(); }
+      else if (key === "traffic") { paintTraffic(); topologySection.schedulePaint(); }
+      else if (key === "trafficPolicies") { rankingCard?.paint(); topologySection.schedulePaint(); }
+      else if (key === "probes") { probesSection.paint(); topologySection.schedulePaint(); }
+      else if (key === "connections" || key === "certificates" || key === "ipQuality") {
+        edgeTelemetry.paint();
+        if (key === "connections") topologySection.schedulePaint();
+      } else {
+        await queueBusiness();
+      }
+    },
+  });
+  const { readings, states, read, shouldPoll, probePollInterval } = store;
 
   const cmdCell = (title, valueEl, bodyEl, dotClass = "") => node("div", { className: "a-dash-cmd-cell", "data-refresh-key": title },
     node("div", { className: "a-dash-cmd-head" },
@@ -367,6 +447,14 @@ export async function dashboardPage(ctx) {
   ), trafficState);
   trafficCard?.classList?.add("a-dash-traffic-card");
 
+  const probesSection = createDashboardProbesSection(ctx, {
+    date,
+    getOrderIDs: () => readings.get("order")?.ids || [],
+    getProbes: () => readings.get("probes"),
+    getProbesState: () => states.get("probes"),
+    reloadProbes: () => read("probes", "/dashboard/probes", true),
+  });
+
   const topologySection = createDashboardTopologySection(ctx, {
     bytes,
     getAgents: () => list(readings.get("agents")),
@@ -378,14 +466,10 @@ export async function dashboardPage(ctx) {
     getConnections: () => readings.get("connections"),
     getStates: () => states,
     getMonth: () => month,
-  });
-
-  const probesSection = createDashboardProbesSection(ctx, {
-    date,
-    getOrderIDs: () => readings.get("order")?.ids || [],
-    getProbes: () => readings.get("probes"),
-    getProbesState: () => states.get("probes"),
-    reloadProbes: () => read("probes", "/dashboard/probes", true),
+    canOpenProbes: probesSection.canView,
+    onOpenProbes: (probeID) => probesSection.open(probeID),
+    showLedger: false,
+    isStandalonePage: false,
   });
 
   const edgeTelemetry = createEdgeTelemetryController(ctx, {
@@ -403,7 +487,7 @@ export async function dashboardPage(ctx) {
         if (ctx.current()) {
           paintBusiness();
           rankingCard?.paint();
-          topologySection.paint();
+          topologySection.schedulePaint();
           probesSection.paint();
           edgeTelemetry.paint();
         }
@@ -560,83 +644,31 @@ export async function dashboardPage(ctx) {
     trafficState.hidden = !statusText;
   }
 
-  const reading = new Map();
-  function read(key, path, force = false) {
-    if (reading.has(key) && !force) return reading.get(key);
-    const work = readResource(key, path, force);
-    reading.set(key, work);
-    void work.finally(() => { if (reading.get(key) === work) reading.delete(key); }).catch(() => {});
-    return work;
-  }
-
-  async function readResource(key, path, force = false) {
-    if (!ctx.current() || requests.has(key) && !force) return;
-    requests.get(key)?.abort();
-    const controller = new AbortController();
-    requests.set(key, controller);
-    if (!readings.has(key)) {
-      states.set(key, "loading");
-      if (key === "traffic") paintTraffic();
-    }
-    const requestedMonth = month;
-    try {
-      const value = await ctx.api(path, { signal: AbortSignal.any([ctx.signal, controller.signal]) });
-      if (!ctx.current() || requests.get(key) !== controller) return;
-      if (key === "traffic" && value.month !== requestedMonth) throw new Error("流量月份不匹配");
-      readings.set(key, value); states.set(key, "ready");
-      if (key === "metrics") {
-        panelHistory = mergePanelMetricsHistory(value, panelHistory, 60);
-        panelRuntime = value?.panel_runtime || null;
-      }
-    } catch (error) {
-      if (!ctx.current() || requests.get(key) !== controller || error.name === "AbortError") return;
-      if (error.status === 403) { readings.delete(key); states.set(key, "denied"); }
-      else states.set(key, "failed");
-    } finally {
-      if (ctx.current() && requests.get(key) === controller) {
-        requests.delete(key);
-        if (key === "metrics") { paintMetrics(); topologySection.paint(); }
-        else if (key === "traffic") { paintTraffic(); topologySection.paint(); }
-        else if (key === "trafficPolicies") { rankingCard?.paint(); topologySection.paint(); }
-        else if (key === "probes") { probesSection.paint(); topologySection.paint(); }
-        else if (key === "connections" || key === "certificates" || key === "ipQuality") {
-          edgeTelemetry.paint();
-          if (key === "connections") topologySection.paint();
-        }
-        else await queueBusiness();
-      }
-    }
-  }
-
   function refresh(manual = false) {
-    const shouldPoll = (key) => manual || states.get(key) !== "denied";
     const sources = [
       ["overview", "/overview"],
       ...(can("agents.read") ? [["agents", "/agents"], ["order", "/preferences/node-order"]] : []),
-      ...(can("panel-metrics.read") && shouldPoll("metrics") ? [["metrics", "/panel-metrics"]] : []),
-      ...(can("traffic.read") && shouldPoll("traffic") ? [["traffic", query("/traffic-usage", { month })]] : []),
-      ...(can("traffic.read") && shouldPoll("trafficPolicies") ? [["trafficPolicies", "/traffic-policies?view=page"]] : []),
-      ...(can("agents.read") && can("tasks.read") && shouldPoll("probes") ? [["probes", "/dashboard/probes"]] : []),
+      ...(can("panel-metrics.read") && shouldPoll("metrics", manual) ? [["metrics", "/panel-metrics"]] : []),
+      ...(can("traffic.read") && shouldPoll("traffic", manual) ? [["traffic", query("/traffic-usage", { month })]] : []),
+      ...(can("traffic.read") && shouldPoll("trafficPolicies", manual) ? [["trafficPolicies", "/traffic-policies?view=page"]] : []),
+      ...(can("agents.read") && can("tasks.read") && shouldPoll("probes", manual) ? [["probes", "/dashboard/probes"]] : []),
     ];
     const now = Date.now();
     if (manual || !edgeLastFetch || now - edgeLastFetch >= 30000) {
       edgeLastFetch = now;
-      if (can("core-logs.read") && shouldPoll("connections")) sources.push(["connections", "/client-connections?limit=1&timeline=true"]);
-      if (can("certificates.read") && shouldPoll("certificates")) sources.push(["certificates", "/certificates"]);
-      if (can("agents.read") && shouldPoll("ipQuality")) sources.push(["ipQuality", "/ip-quality"]);
+      if (can("core-logs.read") && shouldPoll("connections", manual)) sources.push(["connections", "/client-connections?limit=1&timeline=true"]);
+      if (can("certificates.read") && shouldPoll("certificates", manual)) sources.push(["certificates", "/certificates"]);
+      if (can("agents.read") && shouldPoll("ipQuality", manual)) sources.push(["ipQuality", "/ip-quality"]);
     }
     return Promise.all(sources.map(([key, path]) => read(key, path)));
   }
 
   ctx.onRefresh(() => refresh(true));
-  ctx.signal.addEventListener("abort", () => { requests.forEach(controller => controller.abort()); trafficDialog?.close(); }, { once: true });
+  ctx.signal.addEventListener("abort", () => { trafficDialog?.close(); }, { once: true });
   paintMetrics(); paintTraffic(); paintBusiness();
   topologySection.paint(); probesSection.paint(); edgeTelemetry.paint();
   void refresh(true);
-  poll(ctx, () => refresh(false), () => {
-    const pairs = readings.get("probes")?.pairs;
-    return Array.isArray(pairs) && pairs.some(p => p.availability?.running || ["preparing", "running", "stopping"].includes(p.active_state)) ? 2000 : 5000;
-  });
+  poll(ctx, () => refresh(false), probePollInterval);
   const bentoRow = (className, ...items) => {
     const visible = items.filter(Boolean);
     return visible.length
@@ -648,10 +680,77 @@ export async function dashboardPage(ctx) {
     overviewCard,
     bentoRow("a-dash-bento-primary", host, trafficCard),
     topologySection.visible && topologySection.element,
-    probesSection.element,
     rankingCard?.element,
     nodes,
     edgeTelemetry.visible && edgeTelemetry.element,
+  );
+}
+
+export async function topologyPage(ctx) {
+  const month = ctx.state.data.dashboardMonth || utcMonth();
+  const can = permission => ctx.can(permission);
+  let probesSection;
+  let topologySection;
+
+  const store = createTelemetryStore(ctx, {
+    getMonth: () => month,
+    onSettled: (key) => {
+      if (key === "probes" || key === "agents" || key === "order") probesSection?.paint();
+      topologySection?.schedulePaint();
+    },
+  });
+  const { readings, states, read, shouldPoll, probePollInterval } = store;
+
+  probesSection = createDashboardProbesSection(ctx, {
+    date,
+    getOrderIDs: () => readings.get("order")?.ids || [],
+    getProbes: () => readings.get("probes"),
+    getProbesState: () => states.get("probes"),
+    reloadProbes: () => read("probes", "/dashboard/probes", true),
+  });
+
+  topologySection = createDashboardTopologySection(ctx, {
+    bytes,
+    getAgents: () => list(readings.get("agents")),
+    getOrderIDs: () => readings.get("order")?.ids || [],
+    getUsage: () => readings.get("traffic"),
+    getPolicies: () => readings.get("trafficPolicies"),
+    getProbes: () => readings.get("probes"),
+    getMetrics: () => readings.get("metrics"),
+    getConnections: () => readings.get("connections"),
+    getStates: () => states,
+    getMonth: () => month,
+    canOpenProbes: probesSection.canView,
+    onOpenProbes: (probeID) => probesSection.open(probeID),
+    showLedger: true,
+    isStandalonePage: true,
+  });
+
+  let connectionsLastFetch = 0;
+  function refresh(manual = false) {
+    const sources = [
+      ...(can("agents.read") ? [["agents", "/agents"], ["order", "/preferences/node-order"]] : []),
+      ...(can("panel-metrics.read") && shouldPoll("metrics", manual) ? [["metrics", "/panel-metrics"]] : []),
+      ...(can("traffic.read") && shouldPoll("traffic", manual) ? [["traffic", query("/traffic-usage", { month })]] : []),
+      ...(can("traffic.read") && shouldPoll("trafficPolicies", manual) ? [["trafficPolicies", "/traffic-policies?view=page"]] : []),
+      ...(can("agents.read") && can("tasks.read") && shouldPoll("probes", manual) ? [["probes", "/dashboard/probes"]] : []),
+    ];
+    const now = Date.now();
+    if (manual || !connectionsLastFetch || now - connectionsLastFetch >= 15000) {
+      connectionsLastFetch = now;
+      if (can("core-logs.read") && shouldPoll("connections", manual)) sources.push(["connections", "/client-connections?limit=1&timeline=true"]);
+    }
+    return Promise.all(sources.map(([key, path]) => read(key, path)));
+  }
+
+  ctx.onRefresh(() => refresh(true));
+  topologySection.paint();
+  probesSection.paint();
+  void refresh(true);
+  poll(ctx, () => refresh(false), probePollInterval);
+
+  return node("div", { className: "a-dash-deck" },
+    topologySection.visible ? topologySection.element : node("div", { className: "a-notice" }, "当前账号无权查看网络拓扑。"),
   );
 }
 

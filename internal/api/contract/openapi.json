@@ -22100,6 +22100,9 @@
                     "time_mode": "today"
                   },
                   "dashboard": {
+                    "probe_filter": "all",
+                    "topo_probe_filter": "all",
+                    "topo_view_mode": "flow",
                     "traffic_month": "example",
                     "traffic_rank_limit": "5",
                     "traffic_rank_period": "month",
@@ -22302,9 +22305,32 @@
                       },
                       "dashboard": {
                         "additionalProperties": false,
-                        "maxProperties": 4,
+                        "maxProperties": 7,
                         "minProperties": 1,
                         "properties": {
+                          "probe_filter": {
+                            "enum": [
+                              "all",
+                              "abnormal"
+                            ],
+                            "type": "string"
+                          },
+                          "topo_probe_filter": {
+                            "enum": [
+                              "all",
+                              "bad",
+                              "mesh",
+                              "ext"
+                            ],
+                            "type": "string"
+                          },
+                          "topo_view_mode": {
+                            "enum": [
+                              "flow",
+                              "map"
+                            ],
+                            "type": "string"
+                          },
                           "traffic_month": {
                             "maxLength": 7,
                             "pattern": "^\\d{4}-\\d{2}$",

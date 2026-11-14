@@ -8,7 +8,7 @@ import { orderNodesBySavedOrder } from "../modules/node-order.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import { patch } from "./live-dom.js";
 import { nodeRegionFlag } from "./node-region.js";
-import { actions, badge, button, empty, field, list, muted, node, pathID, section } from "./ui.js";
+import { actions, badge, button, empty, field, list, muted, node, pathID } from "./ui.js";
 
 const nodeKey = (endpoint) => `${endpoint?.agent_id || ""}/${endpoint?.instance_id || ""}`;
 const isIPv6 = (addr) => String(addr || "").includes(":");
@@ -160,8 +160,34 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   const canExecute = () => ctx.can("tasks.execute");
   const canView = () => ctx.can("agents.read") && ctx.can("tasks.read");
   const summaryNode = node("div", { className: "a-actions", role: "status" });
+  const addProbeButton = canExecute()
+    ? button("添加链路", () => openProbeDialog(), { tone: "primary", "data-refresh-key": "add-probe" })
+    : null;
+  const modalToolbar = node("div", { className: "a-dash-probe-modal-bar" }, summaryNode, addProbeButton);
   const gridHost = node("div", { className: "a-dash-probe-grid" });
+  const modalContent = node("div", { className: "a-dash-probe-modal" }, modalToolbar, gridHost);
 
+  const VALID_PROBE_MODAL_FILTERS = new Set(["all", "abnormal"]);
+  let modalBox = null;
+  let focusProbeID = "";
+  let filterMode = "all";
+  let filterModeTouched = false;
+  const syncSavedProbeFilter = ({ repaint = false } = {}) => {
+    if (!ctx.preferences?.get || filterModeTouched) return;
+    const saved = ctx.preferences.get("dashboard");
+    if (VALID_PROBE_MODAL_FILTERS.has(saved?.probe_filter) && saved.probe_filter !== filterMode) {
+      filterMode = saved.probe_filter;
+      if (repaint && modalBox?.open && ctx.current()) paint(true);
+    }
+  };
+  syncSavedProbeFilter({ repaint: false });
+  if (ctx.preferences) {
+    const unsubPrefs = ctx.preferences.subscribe?.(() => syncSavedProbeFilter({ repaint: true }));
+    if (typeof unsubPrefs === "function" && ctx.signal) {
+      ctx.signal.addEventListener("abort", unsubPrefs, { once: true });
+    }
+    void ctx.preferences.ready?.().then(() => syncSavedProbeFilter({ repaint: true }));
+  }
   let diagnosticNodes = [];
   const inFlightOps = new Set();
   let sparkWidth = 360;
@@ -172,20 +198,29 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   };
 
   if (typeof ResizeObserver === "function") {
+    let measureFrame = 0;
     const ro = new ResizeObserver(() => {
-      if (!canView() || !ctx.current()) return;
+      if (!canView() || !ctx.current() || !modalBox?.open || !gridHost.isConnected) return;
       const sampleSpark = gridHost.querySelector(".a-dash-probe-spark");
       const raw = sampleSpark ? sampleSpark.clientWidth - 32 : 0;
       const fallback = gridHost.clientWidth > 0 ? Math.max(220, gridHost.clientWidth - 36) : 0;
       const next = raw > 40 ? raw : fallback;
       if (next > 0 && Math.abs(next - sparkWidth) >= 4) {
         sparkWidth = next;
-        paint();
+        cancelAnimationFrame(measureFrame);
+        measureFrame = requestAnimationFrame(() => {
+          measureFrame = 0;
+          if (canView() && ctx.current() && modalBox?.open) paint();
+        });
       }
     });
     ro.observe(gridHost);
-    ctx.signal.addEventListener("abort", () => ro.disconnect(), { once: true });
+    ctx.signal.addEventListener("abort", () => {
+      cancelAnimationFrame(measureFrame);
+      ro.disconnect();
+    }, { once: true });
   }
+  ctx.signal.addEventListener("abort", () => modalBox?.close(), { once: true });
 
   function openProbeDialog(pair = null) {
     if (!canExecute()) return;
@@ -452,28 +487,68 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     }
   }
 
-  function paint() {
+  const isPairAbnormal = (pair) => {
+    if (pair?.availability?.ready === false) return true;
+    const dirs = [pair?.latest?.forward, pair?.bidirectional ? pair?.latest?.reverse : null].filter(Boolean);
+    return dirs.some((d) => ["warn", "bad"].includes(probeDirectionStatus(d, pair.availability, pair.active_state).tone));
+  };
+
+  const focusProbeCard = (probeID) => {
+    if (!probeID || !modalBox?.open) return;
+    const card = [...gridHost.querySelectorAll(".a-dash-probe-card")].find(
+      (el) => el.getAttribute("data-refresh-key") === probeID,
+    );
+    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+
+  function paint(force = false) {
     if (!canView()) return;
     const raw = getProbes();
     const pairs = Array.isArray(raw?.pairs) ? raw.pairs : [];
     const probeState = getProbesState();
     const summary = summarizeDashboardProbes(pairs);
     const exec = canExecute();
-    const sampledLabels = pairs.map((p) => (p.latest?.sampled_at ? date(p.latest.sampled_at) : "未采样"));
-    const sig = JSON.stringify([probeState, exec, sparkWidth, summary, pairs, sampledLabels]);
-    if (sig === lastPaintSignature) return;
+    const abnormalPairs = pairs.filter(isPairAbnormal);
+    // Preserve saved "abnormal" preference when focusing a probe or before probes finish loading.
+    const effectiveFilterMode = (focusProbeID || !abnormalPairs.length) ? "all" : filterMode;
+    const visiblePairs = effectiveFilterMode === "abnormal" ? abnormalPairs : pairs;
+    const sampledLabels = visiblePairs.map((p) => (p.latest?.sampled_at ? date(p.latest.sampled_at) : "未采样"));
+    const sig = JSON.stringify([probeState, exec, sparkWidth, effectiveFilterMode, focusProbeID, summary, visiblePairs, sampledLabels]);
+    if (!force && sig === lastPaintSignature) return;
     lastPaintSignature = sig;
 
+    const showFilter = abnormalPairs.length > 0 && abnormalPairs.length < pairs.length;
     patch(summaryNode, node("div", { className: "a-actions", role: "status" },
       pairs.length ? keyed("count", badge(`自动 ${summary.enabled}/${summary.total}`)) : null,
       summary.running > 0 ? keyed("running", badge(`进行中 ${summary.running}`, "warn")) : null,
       summary.bad > 0 ? keyed("abnormal", badge(`异常 ${summary.bad}`, "bad")) : null,
+      showFilter ? button(`全部 ${pairs.length}`, () => {
+        filterModeTouched = true;
+        filterMode = "all";
+        focusProbeID = "";
+        ctx.preferences?.patch?.("dashboard", { probe_filter: "all" });
+        paint(true);
+      }, {
+        className: "a-button a-dash-probe-filter",
+        "aria-pressed": effectiveFilterMode === "all" ? "true" : "false",
+        "data-refresh-key": "filter-all",
+      }) : null,
+      showFilter ? button(`仅告警 ${abnormalPairs.length}`, () => {
+        filterModeTouched = true;
+        filterMode = "abnormal";
+        focusProbeID = "";
+        ctx.preferences?.patch?.("dashboard", { probe_filter: "abnormal" });
+        paint(true);
+      }, {
+        className: "a-button a-dash-probe-filter",
+        "aria-pressed": effectiveFilterMode === "abnormal" ? "true" : "false",
+        "data-refresh-key": "filter-abnormal",
+      }) : null,
       probeState === "failed" ? keyed("failed", badge("读取失败 · 保留上次数据", "warn")) : null,
       probeState === "denied" ? keyed("denied", badge("无诊断读取权限", "warn")) : null,
-      exec ? button("添加链路", () => openProbeDialog(), { tone: "primary", "data-refresh-key": "add-probe" }) : null,
     ));
 
-    if (!pairs.length) {
+    if (!visiblePairs.length) {
       const message = probeState === "loading"
         ? "读取中…"
         : probeState === "failed"
@@ -483,8 +558,8 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       return;
     }
 
-    const colMode = pairs.length === 1 ? "1" : pairs.length === 2 || pairs.length === 4 ? "2" : "3";
-    const cards = pairs.map((pair, pairIdx) => {
+    const colMode = visiblePairs.length <= 1 ? "1" : "2";
+    const cards = visiblePairs.map((pair, pairIdx) => {
       const aName = pair.node1_name || pair.node1?.name || pair.node1?.agent_id || "节点 A";
       const bName = pair.target_mode === "ip"
         ? pair.node2?.address || "自定义 IP"
@@ -493,6 +568,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       const bFlag = pair.target_mode === "ip" ? null : nodeRegionFlag(ctx, { id: pair.node2?.agent_id, region_code: pair.node2_region });
       const title = pair.name || `${aName} ${pair.bidirectional ? "↔" : "→"} ${bName}`;
       const isRunning = Boolean(pair.availability?.running || ["preparing", "running", "stopping", "cleanup_pending"].includes(pair.active_state));
+      const isFocused = Boolean(focusProbeID && pair.id === focusProbeID);
 
       const fwdSeries = probeHistorySeries(pair.history, "forward");
       const revSeries = pair.bidirectional ? probeHistorySeries(pair.history, "reverse") : [];
@@ -512,7 +588,10 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
               : `近 ${fwdSeries.length} 次 · 丢包`)
         : (showOuterReason ? pair.availability.reason : "—");
 
-      return node("article", { className: "a-card a-dash-probe-card", "data-refresh-key": pair.id },
+      return node("article", {
+        className: `a-card a-dash-probe-card${isFocused ? " is-focused" : ""}`,
+        "data-refresh-key": pair.id,
+      },
         node("div", { className: "a-dash-probe-head" },
           node("div", { className: "a-dash-probe-title" },
             node("h3", {}, title),
@@ -568,11 +647,33 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     patch(gridHost, node("div", { className: "a-dash-probe-grid", "data-cols": colMode }, cards));
   }
 
-  const card = canView() && section(
-    "节点链路监控",
-    node("div", { className: "a-card-body" }, gridHost),
-    summaryNode,
-  );
+  function openModal(targetProbeID = "") {
+    if (!canView()) return;
+    focusProbeID = String(targetProbeID || "");
+    paint(true);
+    if (!modalBox || !modalBox.open) {
+      modalBox = ctx.dialog("节点链路监控", modalContent, { wide: true });
+      modalBox.classList.add("a-dash-probe-dialog");
+      modalBox.addEventListener("close", () => {
+        modalBox = null;
+        focusProbeID = "";
+      }, { once: true });
+    }
+    requestAnimationFrame(() => {
+      if (!modalBox?.open || !ctx.current()) return;
+      const sampleSpark = gridHost.querySelector(".a-dash-probe-spark");
+      const next = sampleSpark ? sampleSpark.clientWidth - 32 : 0;
+      if (next > 40 && Math.abs(next - sparkWidth) >= 4) {
+        sparkWidth = next;
+        paint(true);
+      }
+      focusProbeCard(focusProbeID);
+    });
+  }
 
-  return { element: card, paint };
+  return {
+    canView: canView(),
+    open: openModal,
+    paint,
+  };
 }

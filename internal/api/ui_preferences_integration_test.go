@@ -116,6 +116,24 @@ func TestAccountUIPreferences(t *testing.T) {
 			t.Fatalf("anonymous: %d", res.Code)
 		}
 	}
+	// Verify all newly added dashboard selectable options persist, isolate per account, restore across sessions, and reject invalid values.
+	dashPref := patch(alice, map[string]any{"dashboard": map[string]any{"topo_view_mode": "map", "topo_probe_filter": "bad", "probe_filter": "abnormal"}}, 4, 200)
+	if string(dashPref.Values["dashboard"]["topo_view_mode"]) != `"map"` || string(dashPref.Values["dashboard"]["topo_probe_filter"]) != `"bad"` || string(dashPref.Values["dashboard"]["probe_filter"]) != `"abnormal"` {
+		t.Fatalf("dashboard selectable options did not save: %+v", dashPref)
+	}
+	if len(read(bob).Values["dashboard"]) != 0 {
+		t.Fatal("dashboard options leaked across accounts")
+	}
+	if gotDash := read(device).Values["dashboard"]; string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_probe_filter"]) != `"bad"` || string(gotDash["probe_filter"]) != `"abnormal"` {
+		t.Fatalf("dashboard selectable options did not restore across client session: %+v", gotDash)
+	}
+	for _, badDash := range []any{
+		map[string]any{"dashboard": map[string]any{"topo_view_mode": "globe"}},
+		map[string]any{"dashboard": map[string]any{"topo_probe_filter": "invalid"}},
+		map[string]any{"dashboard": map[string]any{"probe_filter": "warn"}},
+	} {
+		patch(alice, badDash, 5, 400)
+	}
 }
 
 func TestAccountUIPreferencesConcurrentFields(t *testing.T) {

@@ -19,7 +19,10 @@ import { createRouteModuleLoader } from "../modules/route-loader.js";
 import { createRouteWarmup } from "../modules/route-warmup.js";
 
 const destinations = [
-  ["概览", [["dashboard", "仪表盘", "grid", "overview.read"]]],
+  ["概览", [
+    ["dashboard", "仪表盘", "grid", "overview.read"],
+    ["topology", "网络拓扑", "activity", "agents.read"],
+  ]],
   ["节点与配置", [
     ["node-settings", "节点", "server", "agents.read"],
     ["live-config", "实时配置", "config-live", "agent-config.read"],
@@ -43,7 +46,7 @@ const destinations = [
 ];
 const pageModules = {
  'network-tools': ['network-tools','networkToolsPage'],
-  dashboard: ['dashboard', 'dashboardPage'], 'node-settings': ['agents', 'nodesPage'], tasks: ['tasks', 'tasksPage'],
+  dashboard: ['dashboard', 'dashboardPage'], topology: ['dashboard', 'topologyPage'], 'node-settings': ['agents', 'nodesPage'], tasks: ['tasks', 'tasksPage'],
   'my-quota': ['quota', 'quotaPage'], 'archive-config': ['archives', 'archivePage'], themes: ['themes', 'themePage'],
   certificates: ['certificates', 'certificatesPage'], 'ip-quality': ['ip-quality', 'ipQualityPage'], users: ['users', 'usersPage'],
   notifications: ['notifications', 'notificationsPage'], api: ['api-management', 'apiPage'],
