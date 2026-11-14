@@ -12,7 +12,10 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const minimumCPUSampleWindow = 500 * time.Millisecond
+const (
+	minimumCPUSampleWindow   = 500 * time.Millisecond
+	networkInterfaceCacheTTL = 30 * time.Second
+)
 
 // cpuUsagePercent converts two aggregate /proc/stat readings into a busy
 // percentage. Identical counters mean a tickless idle host consumed no CPU
@@ -62,8 +65,8 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 	problems := make([]error, 0, 4)
 
 	cpuRead := false
-	if contents, err := readMetricFile("/proc/stat", 256<<10); err == nil {
-		total, idle, parseErr := parseCPUTimes(string(contents))
+	if contents, err := readFirstLineReuse(&next.scratch, "/proc/stat", 256<<10); err == nil {
+		total, idle, parseErr := parseCPUTimesData(contents)
 		if parseErr != nil {
 			problems = append(problems, parseErr)
 		} else {
@@ -112,8 +115,8 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 	}
 
 	memoryRead := false
-	if contents, err := readMetricFile("/proc/meminfo", 256<<10); err == nil {
-		used, total, parseErr := parseMemoryUsage(string(contents))
+	if contents, err := readMetricFileReuse(&next.scratch, "/proc/meminfo", 256<<10); err == nil {
+		used, total, parseErr := parseMemoryUsageData(contents)
 		if parseErr != nil {
 			problems = append(problems, parseErr)
 		} else {
@@ -144,36 +147,39 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 		metrics.DiskTotalBytes = total
 	}
 
-	interfaces, interfaceErr := routedNetworkInterfaces()
+	interfaces, interfaceDetails, key, cachedInterfaces, interfaceErr := collectNetworkInterfacesCached(&previous, &next, now)
 	if interfaceErr != nil {
 		problems = append(problems, interfaceErr)
-	} else {
-		metrics.NetworkInterfaces, interfaceErr = networkInterfaceDetails(interfaces)
-		if interfaceErr != nil {
-			problems = append(problems, interfaceErr)
-		}
-		rx, tx, err := networkCounters(interfaces)
-		if err != nil {
-			problems = append(problems, err)
-		} else {
-			key := strings.Join(interfaces, ",")
-			metrics.NetworkAvailable = true
-			rateAvailable := false
-			metrics.NetworkRateAvailable = &rateAvailable
-			metrics.NetworkRXBytes = rx
-			metrics.NetworkTXBytes = tx
-			if previous.networkValid && previous.networkKey == key && rx >= previous.networkRX && tx >= previous.networkTX {
-				seconds := now.Sub(previous.networkAt).Seconds()
-				// Windows shorter than half the sampling cadence (for example
-				// between the startup warm-up and the first heartbeat) would
-				// inflate byte-per-second rates; they report zero instead.
-				if seconds >= 0.5 {
-					rateAvailable = true
-					metrics.NetworkRXBPS = bytesPerSecond(rx-previous.networkRX, seconds)
-					metrics.NetworkTXBPS = bytesPerSecond(tx-previous.networkTX, seconds)
+	}
+	if len(interfaces) > 0 {
+		rx, tx, err := networkCountersWithScratch(interfaces, &next.scratch)
+		if err != nil && cachedInterfaces {
+			// Cached route interfaces may have disappeared or been renamed; refresh immediately once.
+			next.interfacesValid = false
+			next.interfaces = nil
+			next.interfaceDetails = nil
+			next.interfacesKey = ""
+			next.interfacesAt = time.Time{}
+			interfaces, interfaceDetails, key, _, refreshErr := collectNetworkInterfacesCached(&next, &next, now)
+			if refreshErr != nil {
+				problems = append(problems, refreshErr)
+			}
+			if len(interfaces) > 0 {
+				metrics.NetworkInterfaces = interfaceDetails
+				rx, tx, err = networkCountersWithScratch(interfaces, &next.scratch)
+				if err != nil {
+					problems = append(problems, err)
+				} else {
+					recordNetworkSample(&metrics, &next, previous, key, rx, tx, now)
 				}
 			}
-			next.networkRX, next.networkTX, next.networkKey, next.networkAt, next.networkValid = rx, tx, key, now, true
+		} else {
+			metrics.NetworkInterfaces = interfaceDetails
+			if err != nil {
+				problems = append(problems, err)
+			} else {
+				recordNetworkSample(&metrics, &next, previous, key, rx, tx, now)
+			}
 		}
 	}
 
@@ -181,4 +187,47 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 		metrics.CollectedAt = time.Time{}
 	}
 	return metrics, next, errors.Join(problems...)
+}
+
+func collectNetworkInterfacesCached(previous *metricSample, next *metricSample, now time.Time) ([]string, []core.HostNetworkInterface, string, bool, error) {
+	if previous != nil && previous.interfacesValid && len(previous.interfaces) > 0 && !now.Before(previous.interfacesAt) && now.Sub(previous.interfacesAt) < networkInterfaceCacheTTL {
+		return previous.interfaces, previous.interfaceDetails, previous.interfacesKey, true, nil
+	}
+	interfaces, err := routedNetworkInterfacesWithScratch(&next.scratch)
+	if err != nil {
+		next.interfacesValid = false
+		next.interfaces = nil
+		next.interfaceDetails = nil
+		next.interfacesKey = ""
+		next.interfacesAt = time.Time{}
+		return nil, nil, "", false, err
+	}
+	details, detailsErr := networkInterfaceDetails(interfaces)
+	key := strings.Join(interfaces, ",")
+	next.interfaces = interfaces
+	next.interfaceDetails = details
+	next.interfacesKey = key
+	next.interfacesAt = now
+	next.interfacesValid = true
+	return interfaces, details, key, false, detailsErr
+}
+
+func recordNetworkSample(metrics *core.HostMetrics, next *metricSample, previous metricSample, key string, rx, tx uint64, now time.Time) {
+	rateAvailable := false
+	metrics.NetworkAvailable = true
+	metrics.NetworkRateAvailable = &rateAvailable
+	metrics.NetworkRXBytes = rx
+	metrics.NetworkTXBytes = tx
+	if previous.networkValid && previous.networkKey == key && rx >= previous.networkRX && tx >= previous.networkTX {
+		seconds := now.Sub(previous.networkAt).Seconds()
+		// Windows shorter than half the sampling cadence (for example
+		// between the startup warm-up and the first heartbeat) would
+		// inflate byte-per-second rates; they report zero instead.
+		if seconds >= 0.5 {
+			rateAvailable = true
+			metrics.NetworkRXBPS = bytesPerSecond(rx-previous.networkRX, seconds)
+			metrics.NetworkTXBPS = bytesPerSecond(tx-previous.networkTX, seconds)
+		}
+	}
+	next.networkRX, next.networkTX, next.networkKey, next.networkAt, next.networkValid = rx, tx, key, now, true
 }

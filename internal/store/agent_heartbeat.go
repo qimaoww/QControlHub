@@ -208,16 +208,14 @@ func (s *Store) UpdateAgentMetricsWithPublicIPProbeTrust(ctx context.Context, id
 	if err != nil {
 		return err
 	}
-	command, err := s.pool.Exec(ctx, `
-			UPDATE agents SET last_seen=now()
-			WHERE id=$1 AND revoked_at IS NULL`, id)
+	command, err := s.pool.Exec(ctx, updateAgentMetricsAndLiveStateSQL, id, metricsState)
 	if err != nil {
-		return err
+		return fmt.Errorf("store agent live state: %w", err)
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return s.recordAgentLiveState(ctx, id, metricsState)
+	return nil
 }
 
 // UpdateAgentObservedPublicIP stores the authenticated WSS peer address for the

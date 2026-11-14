@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -28,6 +30,11 @@ import (
 // failure: clock skew outside the signing window, a control plane restored from
 // a backup, and a re-enrolled identity all recover without a process restart.
 var ErrIdentityRejected = errors.New("agent identity was rejected by the control plane")
+
+var (
+	wsPingInterval = 15 * time.Second
+	wsPingTimeout  = 10 * time.Second
+)
 
 // nextReconnectBackoff doubles the reconnect delay without exceeding max.
 func nextReconnectBackoff(current, max time.Duration) time.Duration {
@@ -81,6 +88,7 @@ func (c *Client) refreshDiagnosticCapabilities(ctx context.Context) {
 }
 
 func (c *Client) Run(ctx context.Context) error {
+	defer closeAllNativeStatsClients()
 	diagnosticErr := c.initializeNetworkDiagnostics(ctx)
 	if diagnosticErr != nil {
 		slog.Warn("network diagnostics unavailable", "error", diagnosticErr)
@@ -397,7 +405,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	if err := c.publicIP.ApplyManagedConfig(core.PublicIPProbeConfig{}); err != nil {
 		return err
 	}
-	privateKey, err := authn.DecodePrivateKey(c.creds.PrivateKey)
+	privateKey, err := c.cachedPrivateKey(c.creds.PrivateKey)
 	if err != nil {
 		return err
 	}
@@ -441,12 +449,15 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	challenges := &certificateChallengeService{}
 	defer challenges.Close()
 	sessionContext, cancel := context.WithCancelCause(ctx)
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	defer cancel(nil)
-	incoming := make(chan core.WireMessage, 1)
-	outgoing := make(chan core.WireMessage, 16)
-	// The main loop may be blocked enqueueing a heartbeat or metrics. Signal
-	// failures through cancellation so that producer also wakes immediately;
-	// an error channel consumed only by the main loop can deadlock here.
+
+	incoming := make(chan core.WireMessage, 4)
+	outbox := newWireOutbox(16)
+	telemetryBaseline := newCompactTelemetryState()
+	var compactEnabled atomic.Bool
+
 	go func() {
 		for {
 			var message core.WireMessage
@@ -463,16 +474,118 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	}()
 	go func() {
 		for {
+			message, ok := outbox.Pop(sessionContext)
+			if !ok {
+				return
+			}
+			writeContext, writeCancel := context.WithTimeout(sessionContext, 15*time.Second)
+			err := wsjson.Write(writeContext, connection, message)
+			writeCancel()
+			if err != nil {
+				cancel(err)
+				return
+			}
+		}
+	}()
+
+	if pingInterval, pingTimeout := wsPingInterval, wsPingTimeout; pingInterval > 0 && pingTimeout > 0 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ticker := time.NewTicker(pingInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-sessionContext.Done():
+					return
+				case <-ticker.C:
+					var pingDone atomic.Bool
+					pingContext, pingCancel := context.WithCancel(sessionContext)
+					timer := time.AfterFunc(pingTimeout, func() {
+						if !pingDone.CompareAndSwap(false, true) {
+							return
+						}
+						if sessionContext.Err() == nil {
+							cancel(fmt.Errorf("websocket keepalive ping: %v", context.DeadlineExceeded))
+						}
+						pingCancel()
+					})
+					err := connection.Ping(pingContext)
+					first := pingDone.CompareAndSwap(false, true)
+					timer.Stop()
+					pingCancel()
+					if !first {
+						return
+					}
+					if err != nil && sessionContext.Err() == nil {
+						if errors.Is(err, context.DeadlineExceeded) {
+							cancel(fmt.Errorf("websocket keepalive ping: %v", err))
+						} else {
+							cancel(fmt.Errorf("websocket keepalive ping: %w", err))
+						}
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	heartbeatTrigger := make(chan struct{}, 1)
+	var pendingPolicyApply atomic.Bool
+	triggerHeartbeat := func(applyPolicies bool) {
+		if applyPolicies {
+			pendingPolicyApply.Store(true)
+		}
+		select {
+		case heartbeatTrigger <- struct{}{}:
+		default:
+		}
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		for {
 			select {
 			case <-sessionContext.Done():
 				return
-			case message := <-outgoing:
-				writeContext, writeCancel := context.WithTimeout(sessionContext, 15*time.Second)
-				err := wsjson.Write(writeContext, connection, message)
-				writeCancel()
-				if err != nil {
-					cancel(err)
+			case <-heartbeatTrigger:
+				if pendingPolicyApply.Swap(false) {
+					if err := c.tryApplyTrafficPolicies(sessionContext); err != nil {
+						cancel(err)
+						return
+					}
+				}
+				heartbeatMsg := c.buildHeartbeatMessage(sessionContext)
+				if sessionContext.Err() != nil {
 					return
+				}
+				telemetryBaseline.RecordHeartbeat(heartbeatMsg)
+				outbox.EnqueueHeartbeat(heartbeatMsg)
+			}
+		}
+	}()
+
+	metricsTrigger := make(chan struct{}, 1)
+	triggerMetrics := func() {
+		select {
+		case metricsTrigger <- struct{}{}:
+		default:
+		}
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		for {
+			select {
+			case <-sessionContext.Done():
+				return
+			case <-metricsTrigger:
+				var compact *compactTelemetryState
+				if compactEnabled.Load() {
+					compact = telemetryBaseline
+				}
+				if msg, ok := c.buildMetricsMessage(sessionContext, true, compact); ok {
+					outbox.EnqueueMetric(msg)
 				}
 			}
 		}
@@ -482,14 +595,28 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	defer heartbeatTicker.Stop()
 	metricsTicker := time.NewTicker(c.config.MetricsEvery)
 	defer metricsTicker.Stop()
-	logTicker := time.NewTicker(500 * time.Millisecond)
-	defer logTicker.Stop()
-	if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
-		return err
+	var logReady <-chan struct{}
+	if c.logs != nil {
+		logReady = c.logs.Ready()
 	}
+	logFallbackTicker := time.NewTicker(10 * time.Second)
+	defer logFallbackTicker.Stop()
+
+	triggerHeartbeat(false)
 	managedScan := make(chan struct{}, 1)
 	var activeTask string
 	var sentLogBatch string
+	flushLogs := func() {
+		if sentLogBatch != "" || c.logs == nil {
+			return
+		}
+		if batch := c.logs.NextBatch(); batch != nil {
+			if outbox.TryEnqueueLogs(core.WireMessage{Type: core.WireCoreLogs, CoreLogs: batch}) {
+				sentLogBatch = batch.ID
+			}
+		}
+	}
+	flushLogs()
 	for {
 		select {
 		case <-sessionContext.Done():
@@ -498,46 +625,37 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			}
 			return context.Cause(sessionContext)
 		case <-heartbeatTicker.C:
-			if err := c.tryApplyTrafficPolicies(sessionContext); err != nil {
-				return err
-			}
-			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
-				return err
-			}
+			triggerHeartbeat(true)
 			if c.committedUpgradeAwaitingRestart() {
 				go c.reexecAfterUpgrade()
 			}
 		case <-c.runtimeRefresh:
-			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
-				return err
-			}
+			triggerHeartbeat(false)
 		case <-metricsTicker.C:
-			if err := c.queueMetrics(sessionContext, outgoing); err != nil {
-				return err
-			}
-		case <-logTicker.C:
-			if sentLogBatch == "" {
-				if batch := c.logs.NextBatch(); batch != nil {
-					select {
-					case outgoing <- core.WireMessage{Type: core.WireCoreLogs, CoreLogs: batch}:
-						sentLogBatch = batch.ID
-					default:
-					}
-				}
-			}
+			triggerMetrics()
+		case <-logReady:
+			flushLogs()
+		case <-logFallbackTicker.C:
+			flushLogs()
 		case message := <-incoming:
 			switch message.Type {
 			case core.WireManagedCertificateSources:
 				select {
 				case managedScan <- struct{}{}:
 					sources := message.ManagedCertificateSources
-					go func() { defer func() { <-managedScan }(); c.syncManagedCertificates(sessionContext, sources, outgoing) }()
+					go func() {
+						defer func() { <-managedScan }()
+						c.syncManagedCertificates(sessionContext, sources, outbox.High())
+					}()
 				default:
 				}
 			case core.WireCertificateChallenges:
 				_ = challenges.Replace(sessionContext, message.CertificateChallenges)
 				continue
 			case core.WireHello:
+				if message.CompactTelemetry {
+					compactEnabled.Store(true)
+				}
 				// The result ACK can be lost after the control plane committed
 				// it. A subsequent authenticated connection must not leave the
 				// old process running forever with a new binary on disk.
@@ -568,8 +686,13 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				if err := c.applyAgentPolicy(sessionContext, *message.AgentPolicy); err != nil {
 					return fmt.Errorf("apply control-plane agent policy: %w", err)
 				}
-				heartbeatTicker.Reset(time.Duration(message.AgentPolicy.HeartbeatIntervalSeconds) * time.Second)
-				metricsTicker.Reset(time.Duration(message.AgentPolicy.MetricsIntervalSeconds) * time.Second)
+				newHeartbeat := time.Duration(message.AgentPolicy.HeartbeatIntervalSeconds) * time.Second
+				newMetrics := time.Duration(message.AgentPolicy.MetricsIntervalSeconds) * time.Second
+				heartbeatTicker.Reset(newHeartbeat)
+				metricsTicker.Reset(newMetrics)
+				if c.traffic != nil {
+					c.traffic.SetMetricsInterval(newMetrics)
+				}
 				continue
 			case core.WireAgentTimeZone:
 				if message.AgentTimeZone == nil || message.AgentTimeZone.Revision < 1 || message.AgentTimeZone.Revision < c.timeZoneRevision {
@@ -608,10 +731,8 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 						c.taskLifecycleMu.Unlock()
 					}
 				}
-				select {
-				case outgoing <- core.WireMessage{Type: core.WireAgentTimeZoneResult, AgentTimeZoneResult: &result}:
-				case <-sessionContext.Done():
-					return context.Cause(sessionContext)
+				if err := outbox.EnqueueHigh(sessionContext, core.WireMessage{Type: core.WireAgentTimeZoneResult, AgentTimeZoneResult: &result}); err != nil {
+					return err
 				}
 				continue
 			case core.WireDiagnostics:
@@ -630,10 +751,8 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				}
 				for _, result := range results {
 					copyResult := result
-					select {
-					case outgoing <- core.WireMessage{Type: core.WireDiagnosticResult, DiagnosticResult: &copyResult}:
-					case <-sessionContext.Done():
-						return context.Cause(sessionContext)
+					if err := outbox.EnqueueHigh(sessionContext, core.WireMessage{Type: core.WireDiagnosticResult, DiagnosticResult: &copyResult}); err != nil {
+						return err
 					}
 				}
 			case core.WireTask:
@@ -645,7 +764,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				// A transient WSS disconnect must not terminate an in-flight system
 				// operation. Execution follows the Agent process lifetime; only result
 				// delivery follows this individual websocket session.
-				go c.executeTaskForSession(ctx, sessionContext, task, outgoing)
+				go c.executeTaskForSession(ctx, sessionContext, task, outbox.High())
 			case core.WireResultAck:
 				if message.TaskID == "" || message.TaskID != activeTask {
 					return errors.New("control plane acknowledged an unexpected task")
@@ -658,6 +777,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 					return errors.New("control plane acknowledged an unexpected core log batch")
 				}
 				sentLogBatch = ""
+				flushLogs()
 			case core.WireError:
 				return fmt.Errorf("control plane WSS error: %s", message.Error)
 			default:

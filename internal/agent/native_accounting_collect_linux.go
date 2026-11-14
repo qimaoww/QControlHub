@@ -9,10 +9,37 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
+
+const accountingProcessEpochCacheTTL = 10 * time.Second
+
+var (
+	cachedKernelBootIDMu sync.Mutex
+	cachedKernelBootID   string
+)
+
+func readKernelBootID() (string, error) {
+	cachedKernelBootIDMu.Lock()
+	defer cachedKernelBootIDMu.Unlock()
+	if cachedKernelBootID != "" {
+		return cachedKernelBootID, nil
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(string(boot))
+	if value == "" {
+		return "", errors.New("empty kernel boot_id")
+	}
+	cachedKernelBootID = value
+	return value, nil
+}
 
 func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (nativeAccountingSnapshot, error) {
 	var result nativeAccountingSnapshot
@@ -74,15 +101,21 @@ func (e *Executor) sharedAccounting(ctx context.Context, engine core.Engine, sha
 	if err != nil {
 		return result, err
 	}
-	epoch, err := e.accountingProcessEpoch(ctx, spec)
+	epoch, activeState, err := e.accountingProcessEpochWithState(ctx, spec)
 	if err != nil {
-		status, statusErr := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
-		if statusErr != nil || (status != "inactive" && status != "failed") {
-			return result, fmt.Errorf("cannot verify shared accounting process: %w", err)
+		if activeState == "inactive" || activeState == "failed" {
+			// nft counters outlive the stopped process. Read the still-verified config
+			// to settle its final packets before releasing ports or revoking access.
+			epoch = "stopped"
+		} else {
+			status, statusErr := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
+			if statusErr != nil || (status != "inactive" && status != "failed") {
+				return result, fmt.Errorf("cannot verify shared accounting process: %w", err)
+			}
+			// nft counters outlive the stopped process. Read the still-verified config
+			// to settle its final packets before releasing ports or revoking access.
+			epoch = "stopped"
 		}
-		// nft counters outlive the stopped process. Read the still-verified config
-		// to settle its final packets before releasing ports or revoking access.
-		epoch = "stopped"
 	}
 	content, err := readConfigurationFile(spec.ConfigPath)
 	if err != nil {
@@ -104,13 +137,51 @@ func (e *Executor) sharedAccounting(ctx context.Context, engine core.Engine, sha
 	return result, nil
 }
 
-func (e *Executor) accountingProcessEpoch(ctx context.Context, spec EngineSpec) (string, error) {
-	if e.serviceManager().Kind() == ServiceManagerOpenRC {
-		return managedCoreProcessEpoch(spec)
+func (e *Executor) invalidateProcessEpoch(service string) {
+	if e == nil || service == "" {
+		return
 	}
-	output, err := run(ctx, e.serviceManager().executable, "show", spec.Service, "--property=MainPID", "--property=ExecMainStartTimestampMonotonic", "--property=ActiveState", "--no-pager")
+	e.processEpochMu.Lock()
+	prefix := service + "\x00"
+	for key := range e.processEpochs {
+		if key == service || strings.HasPrefix(key, prefix) {
+			delete(e.processEpochs, key)
+		}
+	}
+	e.processEpochMu.Unlock()
+}
+
+func (e *Executor) accountingProcessEpoch(ctx context.Context, spec EngineSpec) (string, error) {
+	epoch, _, err := e.accountingProcessEpochWithState(ctx, spec)
+	return epoch, err
+}
+
+func (e *Executor) accountingProcessEpochWithState(ctx context.Context, spec EngineSpec) (string, string, error) {
+	if e.serviceManager().Kind() == ServiceManagerOpenRC {
+		epoch, err := managedCoreProcessEpoch(spec)
+		return epoch, "", err
+	}
+	manager := e.serviceManager()
+	cacheKey := spec.Service + "\x00" + manager.executable
+	now := time.Now()
+	if e != nil && spec.Service != "" {
+		e.processEpochMu.Lock()
+		cached, ok := e.processEpochs[cacheKey]
+		e.processEpochMu.Unlock()
+		if ok && !now.Before(cached.verifiedAt) && now.Sub(cached.verifiedAt) < accountingProcessEpochCacheTTL {
+			if starttime, cgroup, alive := readProcServiceIdentity(cached.pid, spec.Service); alive && starttime == cached.starttime && cgroup == cached.cgroup {
+				return cached.epoch, "active", nil
+			}
+			e.processEpochMu.Lock()
+			if current, exists := e.processEpochs[cacheKey]; exists && current == cached {
+				delete(e.processEpochs, cacheKey)
+			}
+			e.processEpochMu.Unlock()
+		}
+	}
+	output, err := run(ctx, manager.executable, "show", spec.Service, "--property=MainPID", "--property=ExecMainStartTimestampMonotonic", "--property=ActiveState", "--no-pager")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	properties := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {
@@ -119,16 +190,77 @@ func (e *Executor) accountingProcessEpoch(ctx context.Context, spec EngineSpec) 
 			properties[key] = strings.TrimSpace(value)
 		}
 	}
+	activeState := properties["ActiveState"]
 	pid, pidErr := strconv.ParseUint(properties["MainPID"], 10, 32)
 	started, startErr := strconv.ParseUint(properties["ExecMainStartTimestampMonotonic"], 10, 64)
-	if pidErr != nil || startErr != nil || pid == 0 || started == 0 || properties["ActiveState"] != "active" {
-		return "", errors.New("managed accounting service is not active")
+	if pidErr != nil || startErr != nil || pid == 0 || started == 0 || activeState != "active" {
+		return "", activeState, errors.New("managed accounting service is not active")
 	}
-	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	boot, err := readKernelBootID()
 	if err != nil {
-		return "", err
+		return "", activeState, err
 	}
-	return fmt.Sprintf("%s:%d:%d", strings.TrimSpace(string(boot)), pid, started), nil
+	epoch := fmt.Sprintf("%s:%d:%d", boot, pid, started)
+	if e != nil && spec.Service != "" {
+		if starttime, cgroup, alive := readProcServiceIdentity(pid, spec.Service); alive {
+			e.processEpochMu.Lock()
+			if e.processEpochs == nil {
+				e.processEpochs = make(map[string]cachedProcessEpochEntry)
+			}
+			if len(e.processEpochs) >= 512 {
+				clear(e.processEpochs)
+			}
+			e.processEpochs[cacheKey] = cachedProcessEpochEntry{
+				epoch:      epoch,
+				pid:        pid,
+				starttime:  starttime,
+				cgroup:     cgroup,
+				verifiedAt: now,
+			}
+			e.processEpochMu.Unlock()
+		}
+	}
+	return epoch, activeState, nil
+}
+
+func readProcServiceIdentity(pid uint64, service string) (string, string, bool) {
+	if pid == 0 || service == "" {
+		return "", "", false
+	}
+	base := "/proc/" + strconv.FormatUint(pid, 10)
+	cgroupBytes, err := os.ReadFile(base + "/cgroup")
+	if err != nil {
+		return "", "", false
+	}
+	cgroup := string(cgroupBytes)
+	if !cgroupMatchesServiceUnit(cgroup, service) {
+		return "", "", false
+	}
+	statBytes, err := os.ReadFile(base + "/stat")
+	if err != nil {
+		return "", "", false
+	}
+	statStr := string(statBytes)
+	end := strings.LastIndexByte(statStr, ')')
+	if end < 0 {
+		return "", "", false
+	}
+	fields := strings.Fields(statStr[end+1:])
+	if len(fields) < 20 || fields[0] == "Z" || fields[0] == "X" {
+		return "", "", false
+	}
+	return fields[19], cgroup, true
+}
+
+func cgroupMatchesServiceUnit(cgroup, service string) bool {
+	suffix := "/" + service
+	for _, line := range strings.Split(strings.TrimSpace(cgroup), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func managedCoreProcessEpoch(spec EngineSpec) (string, error) {

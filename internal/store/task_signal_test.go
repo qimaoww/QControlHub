@@ -25,3 +25,48 @@ func TestTaskReadySignalIsAgentScopedAndCoalescing(t *testing.T) {
 	default:
 	}
 }
+
+func TestDiagnosticAndCertificateSignalsAreAgentScopedAndCoalescing(t *testing.T) {
+	t.Parallel()
+	dataStore := &Store{}
+
+	diagFirst := dataStore.DiagnosticReady("agt_first")
+	diagSecond := dataStore.DiagnosticReady("agt_second")
+	dataStore.signalDiagnosticReadyAfterCommit(t.Context(), "agt_first")
+	dataStore.signalDiagnosticReadyAfterCommit(t.Context(), "agt_first")
+	select {
+	case <-diagFirst:
+	default:
+		t.Fatal("first agent did not receive diagnostic-ready signal")
+	}
+	select {
+	case <-diagFirst:
+		t.Fatal("duplicate diagnostic-ready signals were not coalesced")
+	default:
+	}
+	select {
+	case <-diagSecond:
+		t.Fatal("diagnostic-ready signal leaked to another agent")
+	default:
+	}
+
+	certFirst := dataStore.CertificateChallengeReady("agt_first")
+	certSecond := dataStore.CertificateChallengeReady("agt_second")
+	dataStore.signalChallengeReadyAfterCommit(t.Context(), "agt_first")
+	dataStore.signalChallengeReadyAfterCommit(t.Context(), "agt_first")
+	select {
+	case <-certFirst:
+	default:
+		t.Fatal("first agent did not receive challenge-ready signal")
+	}
+	select {
+	case <-certFirst:
+		t.Fatal("duplicate challenge-ready signals were not coalesced")
+	default:
+	}
+	select {
+	case <-certSecond:
+		t.Fatal("challenge-ready signal leaked to another agent")
+	default:
+	}
+}

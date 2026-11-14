@@ -27,8 +27,11 @@ type Store struct {
 	cryptor             *configCryptor
 	notificationTokenMu sync.RWMutex
 	notificationTokens  map[string][]core.Permission
-	taskWakeMu          sync.Mutex
-	taskWakes           map[string]chan struct{}
+	taskSignals         agentSignalHub
+	diagSignals         agentSignalHub
+	certSignals         agentSignalHub
+	pubKeyCacheMu       sync.RWMutex
+	pubKeyCache         map[string]cachedAgentPublicKey
 }
 
 type storeExecutor interface {

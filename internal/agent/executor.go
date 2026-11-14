@@ -57,8 +57,50 @@ type Executor struct {
 	sharedStateMu              sync.Mutex
 	sharedAccountingLocks      sync.Map
 	accountingConfigs          map[string]nativeAccountingConfigEntry
+	processEpochMu             sync.Mutex
+	processEpochs              map[string]cachedProcessEpochEntry
+	runtimeCacheMu             sync.Mutex
+	runtimeTargets             map[core.Engine]cachedRuntimeTarget
+	binaryVersions             map[string]cachedBinaryVersion
 	completedMigrations        map[core.Engine]completedCoreMigration
 	verifyCompletedMigration   func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
+}
+
+type cachedProcessEpochEntry struct {
+	epoch      string
+	pid        uint64
+	starttime  string
+	cgroup     string
+	verifiedAt time.Time
+}
+
+type cachedRuntimeTarget struct {
+	blockedReason string
+	fingerprint   string
+	checkedAt     time.Time
+	hasErr        bool
+}
+
+type cachedBinaryVersion struct {
+	version     string
+	size        int64
+	modTimeNano int64
+	mode        os.FileMode
+}
+
+// InvalidateRuntimeCaches clears cached service validation, binary versions,
+// and process epochs after lifecycle or binary-changing operations.
+func (e *Executor) InvalidateRuntimeCaches() {
+	if e == nil {
+		return
+	}
+	e.runtimeCacheMu.Lock()
+	clear(e.runtimeTargets)
+	clear(e.binaryVersions)
+	e.runtimeCacheMu.Unlock()
+	e.processEpochMu.Lock()
+	clear(e.processEpochs)
+	e.processEpochMu.Unlock()
 }
 
 type completedCoreMigration struct {

@@ -210,7 +210,13 @@ func (s *Store) ContinueCertificateOrder(ctx context.Context, id, orderID string
 	if tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
-	return recordAPIKeyWork(ctx, s.pool, "certificate-order", orderID)
+	if err = recordAPIKeyWork(ctx, s.pool, "certificate-order", orderID); err != nil {
+		return err
+	}
+	if cancel && item.AgentID != "" {
+		s.signalChallengeReadyAfterCommit(ctx, item.AgentID)
+	}
+	return nil
 }
 func (s *Store) CheckCertificateHTTPPermission(ctx context.Context, agentID, domain string) error {
 	names, err := certificates.Domains([]string{domain})
@@ -295,7 +301,13 @@ func (s *Store) SetCertificateHTTPGrant(ctx context.Context, grant core.HTTPChal
 	if _, err = tx.Exec(ctx, `UPDATE panel_users SET agent_access_revision=agent_access_revision+1 WHERE id=$1`, grant.UserID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	if remove {
+		s.signalChallengeReadyAfterCommit(ctx, grant.AgentID)
+	}
+	return nil
 }
 func (s *Store) CertificateHTTPGrants(ctx context.Context) ([]core.HTTPChallengeGrant, error) {
 	rows, err := s.pool.Query(ctx, `SELECT g.agent_id,g.user_id,g.domain,u.username FROM certificate_http_grants g JOIN agents a ON a.id=g.agent_id JOIN panel_users u ON u.id=g.user_id WHERE a.owner_id=$1 OR g.user_id=$1`, certificateActor(ctx))
@@ -359,6 +371,9 @@ func (s *Store) certificateOrderCanceled(ctx context.Context, id string) bool {
 func (s *Store) cleanupCertificateOrder(ctx context.Context, item core.Certificate, id string, state *certificateOrderState) error {
 	if _, err := s.pool.Exec(ctx, `DELETE FROM certificate_http_challenges WHERE order_id=$1`, id); err != nil {
 		return err
+	}
+	if item.AgentID != "" {
+		s.signalChallengeReady(item.AgentID)
 	}
 	needsDNS := false
 	for _, c := range state.Challenges {
@@ -705,6 +720,9 @@ func (s *Store) processCertificateOrder(ctx context.Context, item core.Certifica
 			if err != nil {
 				return err
 			}
+		}
+		if item.Method == "http-01" && item.AgentID != "" {
+			s.signalChallengeReady(item.AgentID)
 		}
 		if err = s.saveCertificateOrderState(ctx, id, state, "http_preflight"); err != nil {
 			return err

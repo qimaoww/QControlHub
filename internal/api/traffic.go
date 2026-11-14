@@ -50,8 +50,12 @@ func trafficPoliciesForSession(policies []core.PortTrafficPolicy, heartbeatVerif
 }
 
 func trafficPolicyHello(policies []core.PortTrafficPolicy, verified bool) core.WireMessage {
-	return core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, verified),
-		TrafficPoliciesPending: !verified && hasSharedTrafficPolicies(policies)}
+	return core.WireMessage{
+		Type:                   core.WireHello,
+		TrafficPolicies:        trafficPoliciesForSession(policies, verified),
+		TrafficPoliciesPending: !verified && hasSharedTrafficPolicies(policies),
+		CompactTelemetry:       true,
+	}
 }
 
 func hasSharedTrafficPolicies(policies []core.PortTrafficPolicy) bool {

@@ -331,6 +331,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	if err = tx.Commit(ctx); err != nil {
 		return fail(err)
 	}
+	s.signalDiagnosticRequestParticipantsAfterCommit(ctx, in)
 	return session, nil
 }
 
@@ -398,11 +399,18 @@ func (s *Store) ListDiagnosticsForTool(ctx context.Context, tool string) ([]core
 	return result, nil
 }
 func (s *Store) StopDiagnostic(ctx context.Context, id string) error {
-	if _, err := s.GetDiagnostic(ctx, id); err != nil {
+	session, err := s.GetDiagnostic(ctx, id)
+	if err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE network_diagnostic_sessions SET state='stopping',document=jsonb_set(document,'{state}','"stopping"') WHERE id=$1 AND owner_id=$2 AND state IN ('preparing','running')`, id, scopeForConfig(ctx).OwnerID)
-	return err
+	tag, err := s.pool.Exec(ctx, `UPDATE network_diagnostic_sessions SET state='stopping',document=jsonb_set(document,'{state}','"stopping"') WHERE id=$1 AND owner_id=$2 AND state IN ('preparing','running')`, id, scopeForConfig(ctx).OwnerID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		s.signalDiagnosticRequestParticipantsAfterCommit(ctx, session.Request)
+	}
+	return nil
 }
 
 func diagnosticCommands(d core.DiagnosticSession) []core.DiagnosticCommand {
@@ -646,7 +654,11 @@ func (s *Store) CompleteDiagnosticCommand(ctx context.Context, agentID string, r
 	if _, err = tx.Exec(ctx, `UPDATE network_diagnostic_sessions SET document=$2,state=$3 WHERE id=$1`, id, b, d.State); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.signalDiagnosticRequestParticipantsAfterCommit(ctx, d.Request)
+	return nil
 }
 
 func syncDiagnosticTask(ctx context.Context, tx pgx.Tx, d core.DiagnosticSession) error {
@@ -710,4 +722,12 @@ func diagnosticEndpoints(r core.DiagnosticRequest) []core.DiagnosticEndpoint {
 		return []core.DiagnosticEndpoint{r.Node1}
 	}
 	return []core.DiagnosticEndpoint{r.Node1, r.Node2}
+}
+
+func (s *Store) signalDiagnosticRequestParticipantsAfterCommit(ctx context.Context, r core.DiagnosticRequest) {
+	for _, endpoint := range diagnosticEndpoints(r) {
+		if endpoint.AgentID != "" {
+			s.signalDiagnosticReadyAfterCommit(ctx, endpoint.AgentID)
+		}
+	}
 }

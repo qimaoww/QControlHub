@@ -67,13 +67,13 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	s.recordAudit(request, "settings.saved", "", "api")
 	if agentPolicyChanged(previous, saved) {
-		disconnect := func() {
+		refresh := func() {
 			for _, id := range ids {
-				s.DisconnectAgent(id)
+				s.RefreshAgentPolicy(id)
 			}
 		}
-		if !store.AfterRequestCommit(request.Context(), disconnect) {
-			disconnect()
+		if !store.AfterRequestCommit(request.Context(), refresh) {
+			refresh()
 		}
 	}
 	writeJSON(w, http.StatusOK, panelSettingsResponse(saved))

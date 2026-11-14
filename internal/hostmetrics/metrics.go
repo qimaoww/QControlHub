@@ -12,20 +12,26 @@ import (
 )
 
 type metricSample struct {
-	cpuTotal        uint64
-	cpuIdle         uint64
-	cpuAt           time.Time
-	cpuValid        bool
-	cpuPercent      float64
-	cpuPercentValid bool
-	cgroupCPU       uint64
-	cgroupCPUAt     time.Time
-	cgroupCPUValid  bool
-	networkRX       uint64
-	networkTX       uint64
-	networkKey      string
-	networkAt       time.Time
-	networkValid    bool
+	cpuTotal         uint64
+	cpuIdle          uint64
+	cpuAt            time.Time
+	cpuValid         bool
+	cpuPercent       float64
+	cpuPercentValid  bool
+	cgroupCPU        uint64
+	cgroupCPUAt      time.Time
+	cgroupCPUValid   bool
+	networkRX        uint64
+	networkTX        uint64
+	networkKey       string
+	networkAt        time.Time
+	networkValid     bool
+	interfaces       []string
+	interfaceDetails []core.HostNetworkInterface
+	interfacesKey    string
+	interfacesAt     time.Time
+	interfacesValid  bool
+	scratch          []byte
 }
 
 type Collector struct {
@@ -35,6 +41,21 @@ type Collector struct {
 
 func NewCollector() *Collector {
 	return &Collector{}
+}
+
+// InvalidateInterfaces drops cached routed network interface discovery so the
+// next Collect call refreshes interface names and assigned IP addresses.
+func (collector *Collector) InvalidateInterfaces() {
+	if collector == nil {
+		return
+	}
+	collector.mu.Lock()
+	collector.previous.interfacesValid = false
+	collector.previous.interfaces = nil
+	collector.previous.interfaceDetails = nil
+	collector.previous.interfacesKey = ""
+	collector.previous.interfacesAt = time.Time{}
+	collector.mu.Unlock()
 }
 
 func (collector *Collector) Collect(ctx context.Context) (core.HostMetrics, error) {

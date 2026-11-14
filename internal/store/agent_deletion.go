@@ -63,5 +63,9 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) (err error) {
 		return err
 	}
 	stage = "commit"
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.invalidateAgentPublicKeyAfterCommit(ctx, id)
+	return nil
 }

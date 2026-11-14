@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,37 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func (e *Executor) runtimeBinaryVersion(ctx context.Context, engine core.Engine, binary string) string {
+	if e == nil {
+		return binaryVersion(ctx, engine, binary)
+	}
+	info, statErr := os.Stat(binary)
+	key := string(engine) + "\x00" + binary
+	if statErr == nil {
+		e.runtimeCacheMu.Lock()
+		cached, ok := e.binaryVersions[key]
+		e.runtimeCacheMu.Unlock()
+		if ok && cached.size == info.Size() && cached.modTimeNano == info.ModTime().UnixNano() && cached.mode == info.Mode() {
+			return cached.version
+		}
+	}
+	version := binaryVersion(ctx, engine, binary)
+	if statErr == nil && ctx.Err() == nil && version != "unknown" {
+		e.runtimeCacheMu.Lock()
+		if e.binaryVersions == nil {
+			e.binaryVersions = make(map[string]cachedBinaryVersion, 4)
+		}
+		e.binaryVersions[key] = cachedBinaryVersion{
+			version:     version,
+			size:        info.Size(),
+			modTimeNano: info.ModTime().UnixNano(),
+			mode:        info.Mode(),
+		}
+		e.runtimeCacheMu.Unlock()
+	}
+	return version
+}
 
 func binaryVersion(ctx context.Context, engine core.Engine, binary string) string {
 	args := []string{"version"}
