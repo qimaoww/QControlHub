@@ -1043,20 +1043,22 @@ strong, b { font-weight: 600; }
   font-size: 11px;
   line-height: 1.2;
 }
-.a-dash-topo-flow-board { position: relative; width: 100%; min-width: 0; padding: 4px; }
+.a-dash-topo-flow-board { position: relative; width: 100%; max-width: 1120px; margin-inline: auto; min-width: 0; padding: 4px; }
 .a-dash-topo-flow-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
 .a-dash-topo-flow-svg .a-dash-topo-probe-item { pointer-events: auto; }
 .a-dash-topo-flow-grid {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(140px, 180px) minmax(240px, 1.35fr) minmax(168px, 224px);
-  column-gap: clamp(58px, 6.8vw, 114px);
+  grid-template-columns: minmax(144px, 176px) clamp(52px, 5.5vw, 96px) minmax(236px, 288px) minmax(140px, 1fr) minmax(168px, 212px);
+  column-gap: 0;
   align-items: start;
   min-width: 0;
 }
 .a-dash-topo-flow-col { display: grid; gap: 7px; min-width: 0; align-content: start; }
-.a-dash-topo-flow-col.is-nodes { padding-right: clamp(44px, 5.5vw, 84px); }
+.a-dash-topo-flow-col.is-ingress { grid-column: 1; }
+.a-dash-topo-flow-col.is-nodes { grid-column: 3; }
+.a-dash-topo-flow-col.is-egress { grid-column: 5; }
 .a-dash-topo-flow-stage { font-size: 10.5px; font-weight: 600; color: var(--soft-ink); letter-spacing: .04em; }
 .a-dash-topo-flow-list { display: grid; gap: 8px; min-width: 0; }
 .a-dash-topo-flow-card {
@@ -1363,7 +1365,7 @@ strong, b { font-weight: 600; }
 }
 .a-dash-topo-ledger-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
   gap: 8px;
   min-width: 0;
 }
@@ -1439,6 +1441,13 @@ strong, b { font-weight: 600; }
   line-height: 1.35;
   white-space: normal;
   overflow-wrap: anywhere;
+  word-break: normal;
+}
+.a-dash-topo-link-ep {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 .a-dash-topo-link-loss {
@@ -1497,10 +1506,9 @@ strong, b { font-weight: 600; }
 }
 @media (max-width: 60rem) {
   .a-dash-topo-flow-grid {
-    grid-template-columns: minmax(126px, 158px) minmax(200px, 1fr) minmax(148px, 192px);
-    column-gap: clamp(46px, 5.2vw, 72px);
+    grid-template-columns: minmax(126px, 154px) clamp(38px, 4.2vw, 60px) minmax(200px, 250px) minmax(96px, 1fr) minmax(148px, 188px);
+    column-gap: 0;
   }
-  .a-dash-topo-flow-col.is-nodes { padding-right: clamp(32px, 4.2vw, 56px); }
 }
 @media (max-width: 47.5rem) {
   .a-dash-topo-flow-grid {
@@ -1508,7 +1516,9 @@ strong, b { font-weight: 600; }
     row-gap: 12px;
     padding-right: clamp(92px, 23vw, 152px);
   }
-  .a-dash-topo-flow-col.is-nodes { padding-right: 0; }
+  .a-dash-topo-flow-col.is-ingress,
+  .a-dash-topo-flow-col.is-nodes,
+  .a-dash-topo-flow-col.is-egress { grid-column: 1; }
 }
 @media (max-width: 40rem) {
   .a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-node-name { font-size: 11.5px; }
@@ -1524,7 +1534,9 @@ strong, b { font-weight: 600; }
   row-gap: 12px;
   padding-right: clamp(92px, 23vw, 152px);
 }
-.a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-col.is-nodes { padding-right: 0; }
+.a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-col.is-ingress,
+.a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-col.is-nodes,
+.a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-col.is-egress { grid-column: 1; }
 .a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-node-name { font-size: 11.5px; }
 .a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-rate,
 .a-dash-topo-flow-board.is-mobile .a-dash-topo-flow-month,

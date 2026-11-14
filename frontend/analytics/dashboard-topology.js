@@ -707,7 +707,9 @@ export function createDashboardTopologySection(ctx, {
             const eKey = entityKey.probe(probe.id);
             const peers = selIndex.probePeers(probe);
             const arrow = probe.bidirectional ? "↔" : "→";
-            const routeTitle = `${fullNameOf(probe.from)} ${arrow} ${fullNameOf(probe.to)}`;
+            const fromTitle = fullNameOf(probe.from);
+            const toTitle = fullNameOf(probe.to);
+            const routeTitle = `${fromTitle} ${arrow} ${toTitle}`;
             const cardEl = node(
               "button",
               {
@@ -721,7 +723,13 @@ export function createDashboardTopologySection(ctx, {
               node(
                 "div",
                 { className: "a-dash-topo-link-top", "data-refresh-key": "top" },
-                node("span", { className: "a-dash-topo-link-route", "data-refresh-key": "route" }, routeTitle),
+                node(
+                  "span",
+                  { className: "a-dash-topo-link-route", "data-refresh-key": "route" },
+                  node("span", { className: "a-dash-topo-link-ep" }, fromTitle),
+                  ` ${arrow} `,
+                  node("span", { className: "a-dash-topo-link-ep" }, toTitle),
+                ),
                 node("span", { className: "a-dash-topo-link-loss", "data-refresh-key": "loss" }, formatLossBadge(probe)),
               ),
               node(
@@ -1298,7 +1306,7 @@ export function createDashboardTopologySection(ctx, {
         const info = laneInfo.get(probe.id) || { lane: 0, count: 1 };
         const laneCount = Math.max(1, info.count);
         const availRight = (isMobile ? w - 10 : (outHub ? outHub.left - 12 : w - 16)) - Math.max(fromPort.right, toPort.right);
-        const maxBow = Math.max(22, Math.min(isMobile ? 54 : 84, availRight * 0.65));
+        const maxBow = Math.max(22, Math.min(isMobile ? 54 : 132, availRight * 0.62));
         const bowStep = (maxBow - 16) / laneCount;
         const bow = 16 + (info.lane + 0.5) * bowStep;
         const baseX = Math.max(fromPort.right, toPort.right) + 2;
