@@ -194,7 +194,7 @@ export async function dashboardPage(ctx) {
   }
 
   const host = hostController?.element || false;
-  const businessState = muted("正在读取业务状态");
+  const businessState = muted("读取中…");
   businessState.setAttribute("role", "status");
   const overviewCard = section("运行概况", overviewGrid, businessState);
   const nodeSummary = actions();
@@ -204,7 +204,7 @@ export async function dashboardPage(ctx) {
   const plot = responsiveChart([], ctx.signal);
   const trafficSummary = (receive, sent, summary = {}, peaks = {}, trafficMonth = month) => node("div", { className: "a-dash-traffic-ledger" },
     node("div", { className: "a-dash-ledger-cell is-primary", "data-refresh-key": "月累计流量" },
-      node("div", { className: "a-dash-ledger-head" }, muted("月累计流量"), muted("RX / TX 占比")),
+      node("div", { className: "a-dash-ledger-head" }, muted("月累计流量")),
       node("strong", {}, receive == null ? "—" : bytes(receive + sent)),
       node("div", { className: "a-dash-ledger-foot" },
         node("div", { className: "a-dash-ledger-duplex" },
@@ -212,15 +212,15 @@ export async function dashboardPage(ctx) {
           node("span", { className: "a-dash-tx" }, `↑ ${sent == null ? "—" : bytes(sent)}`)),
         trafficSplitBar(receive || 0, sent || 0, (receive || 0) + (sent || 0)))),
     node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "UTC 今日" },
-      node("div", { className: "a-dash-ledger-head" }, muted(summary.isCurrentMonth === false ? "历史月份" : "UTC 今日")),
+      node("div", { className: "a-dash-ledger-head" }, muted(summary.isCurrentMonth === false ? "统计月份" : "UTC 今日")),
       node("strong", {}, summary.isCurrentMonth === false ? trafficMonth : summary.todayBytes == null ? "—" : bytes(summary.todayBytes)),
-      node("div", { className: "a-dash-ledger-foot" }, muted(summary.isCurrentMonth === false ? "历史归档 · UTC" : `${trafficMonth} · UTC 增量`))),
+      node("div", { className: "a-dash-ledger-foot" }, muted(summary.isCurrentMonth === false ? "历史归档" : trafficMonth))),
     node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "日均用量" },
       node("div", { className: "a-dash-ledger-head" }, muted("日均用量")),
       node("strong", {}, summary.averageBytes == null ? "—" : bytes(summary.averageBytes)),
-      node("div", { className: "a-dash-ledger-foot" }, muted(summary.elapsedDays ? `已计 · ${summary.elapsedDays} 天` : "等待统计周期"))),
+      node("div", { className: "a-dash-ledger-foot" }, muted(summary.elapsedDays ? `共 · ${summary.elapsedDays} 天` : "—"))),
     node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "峰值带宽" },
-      node("div", { className: "a-dash-ledger-head" }, muted("峰值日与带宽")),
+      node("div", { className: "a-dash-ledger-head" }, muted("日峰值")),
       node("strong", {}, summary.peakDay ? `${bytes(summary.peakBytes)}` : "—"),
       node("div", { className: "a-dash-ledger-foot" },
         summary.peakDay
@@ -230,10 +230,10 @@ export async function dashboardPage(ctx) {
                 node("span", { className: "a-dash-rx" }, `↓ ${bytes(peaks.peakReceiveBPS || 0)}/s`),
                 node("span", { className: "a-dash-tx" }, `↑ ${bytes(peaks.peakSendBPS || 0)}/s`)),
             ]
-          : muted("暂无每日峰值"))),
+          : muted("—"))),
   );
   const trafficTotals = trafficSummary();
-  const trafficState = muted("正在读取流量记录");
+  const trafficState = muted("读取中…");
   trafficState.setAttribute("role", "status");
   const trafficPeriod = badge(`${month} · UTC`);
 
@@ -278,9 +278,9 @@ export async function dashboardPage(ctx) {
       node("div", { className: "a-chart-meta" },
         node("span", { className: "a-chart-legend" },
           node("span", { className: "a-chart-key-rx" }),
-          muted("实线 接收"),
+          muted("接收"),
           node("span", { className: "a-chart-key-tx" }),
-          muted("虚线 发送")),
+          muted("发送")),
         trafficPeriod)),
   ), trafficState);
   trafficCard?.classList?.add("a-dash-traffic-card");
@@ -323,7 +323,8 @@ export async function dashboardPage(ctx) {
     const agents = orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids);
     const failed = [...states].filter(([key, state]) => coreBusinessKeys.has(key) && ["failed", "denied"].includes(state));
     const waiting = ["overview", ...(can("agents.read") ? ["agents"] : [])].some(key => !readings.has(key) && (!states.has(key) || states.get(key) === "loading"));
-    businessState.textContent = waiting ? "正在读取业务状态" : failed.length ? "部分业务状态不可用 · 自动重试中" : "业务状态每 5 秒更新";
+    businessState.textContent = waiting ? "读取中…" : failed.length ? "部分状态异常" : "";
+    businessState.hidden = !businessState.textContent;
     const knownNodes = readings.has("overview") || readings.has("agents");
     const online = knownNodes ? overview.agents_online ?? agents.filter(agent => agent.status === "online").length : "—";
     const count = knownNodes ? overview.agents ?? agents.length : "—";
@@ -339,16 +340,16 @@ export async function dashboardPage(ctx) {
           node("span", { className: "a-dash-engine-chip" },
             node("span", { className: `a-dash-dot ${e.running > 0 ? "is-ok" : "is-muted"}` }),
             `${({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS" })[e.engine] || e.engine} ${e.running}/${e.installed}`)))
-      : muted(knownRuntime ? `共 ${fleet.installed} 个已安装实例` : "正在读取实例状态");
+      : muted(knownRuntime ? "未安装内核" : "读取中…");
 
     const taskMeta = knownNodes
       ? actions(
           muted(`运行 ${runningTasks} · 排队 ${pendingTotal}`),
           failedTasks > 0 && can("tasks.read")
             ? node("a", { className: "a-badge bad", href: "#tasks?status=failed" }, `失败 ${failedTasks}`)
-            : failedTasks > 0 ? badge(`失败 ${failedTasks}`, "bad") : badge("无失败任务", "ok"),
+            : failedTasks > 0 ? badge(`失败 ${failedTasks}`, "bad") : badge("无失败", "ok"),
         )
-      : muted("正在读取任务统计");
+      : muted("读取中…");
 
     const nodePct = knownNodes && count > 0 ? Math.round((online / count) * 100) : 0;
     const nodeDot = !knownNodes ? "" : online === count && count > 0 ? "is-ok" : online > 0 ? "is-warn" : "is-bad";
@@ -358,18 +359,18 @@ export async function dashboardPage(ctx) {
         node("strong", { className: "a-dash-cmd-val" }, knownNodes ? `${online}/${count}` : "—"),
         stack(
           knownNodes ? metricTrack(nodePct, true, false) : null,
-          muted(knownNodes ? `在线率 ${nodePct}% · 离线 ${Math.max(0, count - online)}` : "正在读取节点状态"),
+          muted(knownNodes ? `在线率 ${nodePct}% · 离线 ${Math.max(0, count - online)}` : "读取中…"),
         ),
         nodeDot),
       can("agents.read")
         ? cmdCell("运行内核",
             actions(
               node("strong", { className: "a-dash-cmd-val" }, knownRuntime ? String(fleet.running) : "—"),
-              knownRuntime ? muted(`/ ${fleet.installed} 实例`) : null,
+              knownRuntime ? muted(`/ ${fleet.installed}`) : null,
             ),
             engineChips,
             knownRuntime ? (fleet.running > 0 ? "is-ok" : "is-muted") : "")
-        : cmdCell("节点配置", node("strong", { className: "a-dash-cmd-val" }, String(overview.node_configs ?? "—")), muted("当前获授权的节点配置")),
+        : cmdCell("节点配置", node("strong", { className: "a-dash-cmd-val" }, String(overview.node_configs ?? "—")), muted("已授权节点配置")),
       cmdCell("调度任务",
         node("strong", { className: "a-dash-cmd-val" }, activeTasks === "—" ? "—" : String(activeTasks)),
         taskMeta,
@@ -381,7 +382,7 @@ export async function dashboardPage(ctx) {
               fleet.sampled ? trafficSplitBar(fleet.receiveBPS, fleet.sendBPS, fleet.receiveBPS + fleet.sendBPS) : null,
               node("div", { className: "a-dash-duplex" },
                 node("span", { className: "a-dash-tx" }, fleet.sampled ? `↑ ${bytes(fleet.sendBPS)}/s` : "↑ —"),
-                muted(fleet.sampled ? `${fleet.sampled} 节点采样` : "暂无有效采样")),
+                muted(fleet.sampled ? `${fleet.sampled} 节点` : "无采样")),
             ),
             fleet.sampled ? "is-ok" : "is-muted")
         : cmdCell("配置档案", node("strong", { className: "a-dash-cmd-val" }, String(overview.configs ?? "—")), muted(`节点配置 ${overview.node_configs ?? "—"}`)),
@@ -420,7 +421,8 @@ export async function dashboardPage(ctx) {
       rankingCard?.paint();
     }
     detailsButton.disabled = !traffic;
-    trafficState.textContent = states.get("traffic") === "denied" ? "流量查看权限已变化" : states.get("traffic") === "loading" ? "正在读取" : states.get("traffic") === "failed" ? (traffic ? "刷新失败 · 保留已有记录" : "流量读取失败 · 自动重试中") : traffic ? (list(traffic.days).length ? "每日流量" : "所选月份暂无流量记录") : "尚无流量记录";
+    trafficState.textContent = states.get("traffic") === "denied" ? "无流量权限" : states.get("traffic") === "loading" ? "读取中…" : states.get("traffic") === "failed" ? (traffic ? "刷新失败 · 保留已有记录" : "读取失败") : traffic ? (list(traffic.days).length ? "" : "暂无记录") : "暂无记录";
+    trafficState.hidden = !trafficState.textContent;
   }
 
   const reading = new Map();

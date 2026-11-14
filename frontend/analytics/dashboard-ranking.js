@@ -38,7 +38,7 @@ export function trafficSplitBar(received, sent, scaleTotal = 0) {
 export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, getPolicies, getPoliciesState, getAgents, getOrderIDs, getMonth }) {
   const state = { period: "month", limit: "5", scope: "all" };
   const periodField = field("周期", "traffic_rank_period", state.period, {
-    options: [["month", "选定 UTC 月份"], ["cycle", "当前计费周期"]],
+    options: [["month", "月度"], ["cycle", "计费周期"]],
     "aria-label": "排行统计周期",
   });
   const limitField = field("数量", "traffic_rank_limit", state.limit, {
@@ -46,7 +46,7 @@ export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, 
     "aria-label": "显示节点数量",
   });
   const scopeField = field("范围", "traffic_rank_scope", state.scope, {
-    options: [["all", "全部获授权资源"], ["current", "当前用户"]],
+    options: [["all", "全部"], ["current", "当前用户"]],
     "aria-label": "统计范围",
   });
   periodField.classList.add("a-dash-inline-field");
@@ -111,28 +111,28 @@ export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, 
     }
 
     if (state.period === "cycle" && !policies.length && policyState === "loading") {
-      statusNode.textContent = "正在读取计费周期流量…";
+      statusNode.textContent = "读取中…";
     } else if (state.period === "cycle" && policyState === "denied") {
-      statusNode.textContent = "计费周期明细无读取权限";
+      statusNode.textContent = "无权限";
     } else if (state.period === "cycle" && policyState === "failed" && !policies.length) {
-      statusNode.textContent = "计费周期读取失败 · 请切换月份或重试";
+      statusNode.textContent = "读取失败";
     } else if (state.period === "month" && !usage && usageState === "loading") {
-      statusNode.textContent = "正在读取月度排行…";
+      statusNode.textContent = "读取中…";
     } else if (usageState === "denied" && state.period === "month") {
-      statusNode.textContent = "流量查看权限已变化";
+      statusNode.textContent = "无权限";
     } else {
       statusNode.textContent = ranked.totalCount
-        ? `${state.period === "cycle" ? "当前周期" : month} · 合计 ${bytes(ranked.totalUsed)} · ${ranked.items.length}/${ranked.totalCount} 节点`
-        : "尚无按节点归集的流量记录";
+        ? `${state.period === "cycle" ? "当前周期" : month} · 合计 ${bytes(ranked.totalUsed)} · ${ranked.items.length}/${ranked.totalCount}`
+        : "暂无数据";
     }
 
     const headerNode = ranked.items.length
       ? node("div", { className: "a-dash-rank-headbar" },
           muted("#"),
-          muted("节点与归属"),
-          muted("下行 ↓ / 上行 ↑ 分流对比"),
-          muted("累计与占比"),
-          muted("配额 / 实时速率"),
+          muted("节点"),
+          muted("↓ / ↑ 流量"),
+          muted("总计 / 占比"),
+          muted("配额 / 速率"),
         )
       : null;
 
@@ -197,7 +197,7 @@ export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, 
             ),
           );
         })
-      : [empty(ranked.hasCrossOwner || state.scope === "all" ? "所选条件暂无节点流量记录" : "当前用户所选范围暂无流量记录")];
+      : [empty("暂无数据")];
 
     patch(rankHost, node("div", { className: "a-dash-rank-list", "aria-label": "节点流量排行" },
       headerNode,

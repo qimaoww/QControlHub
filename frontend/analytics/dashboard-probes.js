@@ -188,38 +188,38 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     const params = pair?.parameters || {};
     const initialMode = pair?.target_mode === "ip" ? "ip" : "node";
 
-    const nameInput = field("探测名称", "name", pair?.name || "", { maxlength: 80, placeholder: "可选，默认按节点命名" });
+    const nameInput = field("探测名称", "name", pair?.name || "", { maxlength: 80, placeholder: "可选" });
     const modeField = field("目标模式", "target_mode", initialMode, {
-      options: [["node", "托管节点"], ["ip", "自定义单播 IP"]],
+      options: [["node", "托管节点"], ["ip", "自定义 IP"]],
     });
     const node1Field = field("源节点 A", "node1_key", pair ? nodeKey(pair.node1) : "", {
-      options: [["", "正在读取节点…"]],
+      options: [["", "读取中…"]],
       required: true,
     });
     const addr1Field = field("源地址 A", "node1_addr", pair?.node1?.address || "", {
-      options: pair?.node1?.address ? [[pair.node1.address, pair.node1.address]] : [["", "请选择源节点"]],
+      options: pair?.node1?.address ? [[pair.node1.address, pair.node1.address]] : [["", "请选择"]],
       required: true,
     });
     const node2Field = field("目标节点 B", "node2_key", pair && initialMode === "node" ? nodeKey(pair.node2) : "", {
-      options: [["", "正在读取节点…"]],
+      options: [["", "读取中…"]],
     });
     const addr2Field = field("目标地址 B", "node2_addr", pair && initialMode === "node" ? pair?.node2?.address || "" : "", {
-      options: pair?.node2?.address ? [[pair.node2.address, pair.node2.address]] : [["", "请选择目标节点"]],
+      options: pair?.node2?.address ? [[pair.node2.address, pair.node2.address]] : [["", "请选择"]],
     });
-    const customIPField = field("目标 IP 地址", "node2_ip", pair && initialMode === "ip" ? pair?.node2?.address || "" : "", {
-      placeholder: "例如 1.1.1.1 或 2606:4700:4700::1111",
+    const customIPField = field("目标 IP", "node2_ip", pair && initialMode === "ip" ? pair?.node2?.address || "" : "", {
+      placeholder: "IPv4 / IPv6",
     });
-    const bidirField = field("双向探测 (A ↔ B)", "bidirectional", Boolean(pair?.bidirectional), {
+    const bidirField = field("双向 (A ↔ B)", "bidirectional", Boolean(pair?.bidirectional), {
       type: "checkbox",
     });
 
     const countField = field("探测次数", "count", params.count || 5, { type: "number", min: 1, max: 100, required: true });
-    const intervalField = field("发包间隔 (ms)", "interval_ms", params.interval_ms || 200, { type: "number", min: 200, max: 5000, required: true });
-    const timeoutField = field("单包超时 (ms)", "timeout_ms", params.timeout_ms || 1000, { type: "number", min: 100, max: 5000, required: true });
-    const sizeField = field("ICMP 负载 (字节)", "size", params.size ?? 56, { type: "number", min: 0, max: 1400, required: true });
-    const autoEnabledField = field("启用自动周期探测", "auto_enabled", pair ? Boolean(pair.auto_enabled) : true, { type: "checkbox" });
-    const autoSecField = field("周期 (秒)", "auto_interval_seconds", pair?.auto_interval_seconds || 60, { type: "number", min: 15, max: 3600, required: true });
-    const readHint = muted("正在读取可用诊断节点与地址…");
+    const intervalField = field("间隔 (ms)", "interval_ms", params.interval_ms || 200, { type: "number", min: 200, max: 5000, required: true });
+    const timeoutField = field("超时 (ms)", "timeout_ms", params.timeout_ms || 1000, { type: "number", min: 100, max: 5000, required: true });
+    const sizeField = field("负载 (B)", "size", params.size ?? 56, { type: "number", min: 0, max: 1400, required: true });
+    const autoEnabledField = field("自动周期探测", "auto_enabled", pair ? Boolean(pair.auto_enabled) : true, { type: "checkbox" });
+    const autoSecField = field("周期 (s)", "auto_interval_seconds", pair?.auto_interval_seconds || 60, { type: "number", min: 15, max: 3600, required: true });
+    const readHint = muted("读取节点中…");
 
     const modeSelect = modeField.querySelector("select");
     const n1Select = node1Field.querySelector("select");
@@ -465,12 +465,10 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
 
     if (!pairs.length) {
       const message = probeState === "loading"
-        ? "正在读取 A/B 探测配置…"
+        ? "读取中…"
         : probeState === "failed"
-          ? "探测记录读取失败，自动重试中"
-          : canExecute()
-            ? "暂无 A/B 探测对，点击右上角添加节点延迟与丢包监测"
-            : "暂无已配置的 A/B 探测对";
+          ? "读取失败"
+          : "暂无探测对";
       patch(gridHost, node("div", { className: "a-dash-probe-grid" }, empty(message)));
       return;
     }
@@ -495,14 +493,14 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         .filter(Boolean)
         .map((d) => probeDirectionStatus(d, pair.availability, pair.active_state).label);
       const showOuterReason = Boolean(!pair.availability?.ready && pair.availability?.reason && !laneReasons.includes(pair.availability.reason));
-      const specText = `${pair.bidirectional ? "双向" : "单向"} · ICMP ×${pair.parameters?.count || 5} · ${pair.auto_enabled ? `每 ${pair.auto_interval_seconds}s` : "已暂停"}`;
+      const specText = `${pair.bidirectional ? "双向" : "单向"} · ICMP ×${pair.parameters?.count || 5} · ${pair.auto_enabled ? `${pair.auto_interval_seconds}s` : "暂停"}`;
       const trendLabel = trend
         ? (pair.bidirectional
             ? "实线 A→B · 虚线 B→A"
             : trend.peakMS != null
               ? `近 ${fwdSeries.length} 次 · 峰值 ${fmtMS(trend.peakMS)}`
-              : `近 ${fwdSeries.length} 次 · 丢包告警`)
-        : (showOuterReason ? pair.availability.reason : "等待多轮采样生成趋势");
+              : `近 ${fwdSeries.length} 次 · 丢包`)
+        : (showOuterReason ? pair.availability.reason : "—");
 
       return node("article", { className: "a-card a-dash-probe-card", "data-refresh-key": pair.id },
         node("div", { className: "a-dash-probe-head" },
@@ -514,7 +512,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         ),
         node("div", { className: "a-dash-probe-lanes" },
           directionBlock({
-            title: "去程 A → B",
+            title: "A → B",
             fromName: aName,
             fromAddress: pair.node1?.address || "—",
             toName: bName,
@@ -525,7 +523,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
             pair,
           }),
           pair.bidirectional ? directionBlock({
-            title: "回程 B → A",
+            title: "B → A",
             fromName: bName,
             fromAddress: pair.node2?.address || "—",
             toName: aName,
@@ -540,7 +538,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
           trend?.svg || null,
           node("div", { className: "a-chart-meta" },
             muted(trendLabel),
-            muted(pair.latest?.sampled_at ? `采样 ${date(pair.latest.sampled_at)}` : "尚无采样记录"),
+            muted(pair.latest?.sampled_at ? date(pair.latest.sampled_at) : "未采样"),
           ),
           trend && showOuterReason ? muted(pair.availability.reason) : null,
         ),

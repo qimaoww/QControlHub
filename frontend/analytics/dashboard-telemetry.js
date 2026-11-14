@@ -72,22 +72,22 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
 
   if (!agents.length) {
     patch(matrixHost, node("div", { className: "a-dash-matrix", "aria-label": "节点运行状态" },
-      empty(agentsReady ? "还没有纳管节点。可在节点页面查看接入方式。" : "正在读取节点状态"),
+      empty(agentsReady ? "暂无节点" : "读取中…"),
     ));
     return;
   }
 
   const headRow = canMetrics
     ? node("div", { className: "a-dash-matrix-head" },
-        muted("节点与心跳"),
+        muted("节点"),
         muted("内核"),
-        muted("CPU 负载"),
-        muted("内存占用"),
-        muted("实时吞吐"),
+        muted("CPU"),
+        muted("内存"),
+        muted("吞吐"),
         muted("操作"),
       )
     : node("div", { className: "a-dash-matrix-head" },
-        muted("节点与心跳"),
+        muted("节点"),
         muted("内核"),
         muted("操作"),
       );
@@ -115,7 +115,7 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
           status(agent.status),
         ),
         node("div", { className: "a-dash-matrix-sub" },
-          muted(lastHeartbeat ? date(lastHeartbeat) : "尚未同步"),
+          muted(lastHeartbeat ? date(lastHeartbeat) : "未同步"),
           ipv4Ready ? badge("IPv4") : null,
           ipv6Ready ? badge("IPv6") : null,
           skewAbnormal ? badge("时钟异常", "warn") : null,
@@ -204,12 +204,12 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     if (!data) {
       patch(connStatsHost, node("div", { className: "a-dash-edge-stats" },
         edgeKPIStat("活跃 IP", node("strong", {}, "—")),
-        edgeKPIStat("活跃连接流", node("strong", {}, "—")),
-        edgeKPIStat("活跃来源", node("strong", {}, "—")),
+        edgeKPIStat("活跃流", node("strong", {}, "—")),
+        edgeKPIStat("来源", node("strong", {}, "—")),
       ));
       connSlot.update({ buckets: [] });
       patch(connFoot, node("div", { className: "a-chart-meta" },
-        muted(state === "failed" ? "连接脉冲读取失败" : state === "denied" ? "无连接日志读取权限" : "正在统计入站连接脉冲…"),
+        muted(state === "failed" ? "读取失败" : state === "denied" ? "无权限" : "读取中…"),
       ));
       return;
     }
@@ -220,13 +220,13 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
 
     patch(connStatsHost, node("div", { className: "a-dash-edge-stats" },
       edgeKPIStat("活跃 IP", node("strong", {}, String(pulse.ips))),
-      edgeKPIStat("活跃连接流", node("strong", {}, String(pulse.flows))),
-      edgeKPIStat("活跃来源", node("strong", {}, `${pulse.activeSources}/${pulse.totalSources}`)),
+      edgeKPIStat("活跃流", node("strong", {}, String(pulse.flows))),
+      edgeKPIStat("来源", node("strong", {}, `${pulse.activeSources}/${pulse.totalSources}`)),
     ));
     connSlot.update(pulse);
     patch(connFoot, node("div", { className: "a-chart-meta" },
-      muted(slice.length ? `近 ${slice.length} 小时分桶` : "尚无时间序列分桶"),
-      muted(slice.length ? `峰值 ${maxFlow} 流/h` : ""),
+      muted(slice.length ? `近 ${slice.length}h` : "暂无数据"),
+      muted(slice.length ? `峰值 ${maxFlow}/h` : ""),
     ));
   }
 
@@ -235,21 +235,21 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     const { data, state } = readEdgeState("certificates");
     if (!data) {
       patch(certStatsHost, node("div", { className: "a-dash-edge-stats" },
-        edgeKPIStat("有效持有", node("strong", {}, "—")),
+        edgeKPIStat("有效", node("strong", {}, "—")),
         edgeKPIStat("14 天内到期", node("strong", {}, "—")),
-        edgeKPIStat("订单异常", node("strong", {}, "—")),
+        edgeKPIStat("异常", node("strong", {}, "—")),
       ));
       patch(certViz, node("div", { className: "a-dash-edge-viz" },
-        muted(state === "failed" ? "证书状态读取失败" : state === "denied" ? "无证书读取权限" : "正在统计当前用户持有证书…"),
+        muted(state === "failed" ? "读取失败" : state === "denied" ? "无权限" : "读取中…"),
       ));
       return;
     }
 
     const summary = summarizeExpiringCertificates(data);
     patch(certStatsHost, node("div", { className: "a-dash-edge-stats" },
-      edgeKPIStat("有效持有", node("strong", {}, String(summary.totalOwned))),
+      edgeKPIStat("有效", node("strong", {}, String(summary.totalOwned))),
       edgeKPIStat("14 天内到期", node("strong", { className: summary.expiringSoon ? "is-warn-txt" : "" }, String(summary.expiringSoon))),
-      edgeKPIStat("订单异常", node("strong", { className: summary.abnormal ? "is-bad" : "" }, String(summary.abnormal))),
+      edgeKPIStat("异常", node("strong", { className: summary.abnormal ? "is-bad" : "" }, String(summary.abnormal))),
     ));
 
     patch(certViz, node("div", { className: "a-dash-edge-viz" },
@@ -258,12 +258,12 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
             summary.expiringSoon ? muted(`告警明细 · 14 天内到期 ${summary.expiringSoon}`) : null,
             ...summary.urgent.map((item) => node("div", { className: "a-dash-cert-row" },
               node("span", { className: "a-dash-ep" }, item.name),
-              badge(item.abnormal ? "订单/同步异常" : `${item.daysLeft ?? 0} 天后到期`, item.abnormal ? "bad" : "warn"),
+              badge(item.abnormal ? "异常" : `${item.daysLeft ?? 0} 天到期`, item.abnormal ? "bad" : "warn"),
             )),
           )
         : node("div", { className: "a-dash-edge-status-bar" },
             metricTrack(100, true, false),
-            muted(summary.totalOwned ? "持有证书均处于有效期内" : "当前账号尚无持有证书"),
+            muted(summary.totalOwned ? "全部有效" : "暂无证书"),
           ),
     ));
   }
@@ -273,12 +273,12 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     const { data, state } = readEdgeState("ipQuality");
     if (!data) {
       patch(ipqStatsHost, node("div", { className: "a-dash-edge-stats" },
-        edgeKPIStat("最新检测节点", node("strong", {}, "—")),
+        edgeKPIStat("已检测", node("strong", {}, "—")),
         edgeKPIStat("完成", node("strong", {}, "—")),
         edgeKPIStat("异常/失败", node("strong", {}, "—")),
       ));
       patch(ipqViz, node("div", { className: "a-dash-edge-viz" },
-        muted(state === "failed" ? "IP 质量状态读取失败" : state === "denied" ? "无 IP 质量读取权限" : "正在统计节点 IP 质量归档…"),
+        muted(state === "failed" ? "读取失败" : state === "denied" ? "无权限" : "读取中…"),
       ));
       return;
     }
@@ -286,7 +286,7 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     const summary = summarizeIPQualityFleet(data);
     const passPct = summary.total ? (summary.succeeded / summary.total) * 100 : 0;
     patch(ipqStatsHost, node("div", { className: "a-dash-edge-stats" },
-      edgeKPIStat("最新检测节点", node("strong", {}, String(summary.total))),
+      edgeKPIStat("已检测", node("strong", {}, String(summary.total))),
       edgeKPIStat("完成", node("strong", {}, String(summary.succeeded))),
       edgeKPIStat("异常/失败", node("strong", { className: summary.failed ? "is-bad" : "" }, String(summary.failed))),
     ));
@@ -295,11 +295,11 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
         ? node("div", { className: "a-dash-edge-status-bar" },
             metricTrack(passPct, true, false),
             node("div", { className: "a-chart-meta" },
-              muted(`通过率 ${Math.round(passPct)}%`),
-              muted(summary.running ? `进行中 ${summary.running}` : "按最近一次节点检测归档"),
+              muted(`通过 ${Math.round(passPct)}%`),
+              summary.running ? muted(`进行中 ${summary.running}`) : null,
             ),
           )
-        : muted("尚无 IP 质量检测记录"),
+        : muted("暂无记录"),
     ));
   }
 

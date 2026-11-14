@@ -89,7 +89,7 @@ const DIAL_TICKS = [-120, -90, -60, -30, 0, 30, 60, 90, 120].map((deg) => {
 
 function createDialSlot(label, key) {
   const valEl = node("strong", {}, "—");
-  const metaEl = node("span", { className: "a-dash-dial-meta a-muted" }, "等待采样");
+  const metaEl = node("span", { className: "a-dash-dial-meta a-muted" }, "\u00a0");
   const r = 34;
   const sweep = 240;
   const arcLen = (2 * Math.PI * r * sweep) / 360;
@@ -288,9 +288,6 @@ function drawDualOscilloscope({ width, height }, data) {
     const [txX, txY] = txPts.at(-1);
     svg.append(createSVGEl("circle", { cx: txX.toFixed(1), cy: txY.toFixed(1), r: "2.8", class: "a-dash-osc-dot-tx" }));
   }
-  if (rxPts.length >= 2 || txPts.length >= 2) {
-    svg.append(createSVGEl("text", { x: width - padR - 2, y: padT + 9, class: "a-dash-osc-scale" }, `刻度上限 ${bytes(peak)}/s`));
-  }
   return svg;
 }
 
@@ -316,7 +313,7 @@ function readSampleSeries(history, bytes) {
 
 export function createPanelHostController(ctx, { bytes, date }) {
   const headBadges = node("div", { className: "a-actions", role: "status" });
-  const subTime = node("span", { className: "a-dash-subbar-text a-muted" }, "正在读取资源采样");
+  const subTime = node("span", { className: "a-dash-subbar-text a-muted" }, "读取中…");
   const subChips = node("div", { className: "a-dash-subbar-tags" });
   const subbar = node("div", { className: "a-dash-subbar" }, subTime, subChips);
 
@@ -333,7 +330,7 @@ export function createPanelHostController(ctx, { bytes, date }) {
   const rxCumEl = node("span", { className: "a-muted" }, "累计 —");
   const txValEl = node("strong", {}, "—");
   const txCumEl = node("span", { className: "a-muted" }, "累计 —");
-  const oscSummaryEl = node("span", { className: "a-muted" }, "等待采样序列");
+  const oscSummaryEl = node("span", { className: "a-muted" }, "—");
 
   const body = node("div", { className: "a-dash-host-wrap" },
     subbar,
@@ -357,9 +354,9 @@ export function createPanelHostController(ctx, { bytes, date }) {
         node("div", { className: "a-dash-io-head" },
           node("span", { className: "a-dash-osc-legend a-muted" },
             node("span", { className: "a-chart-key-rx" }),
-            " 实线 接收",
+            " 接收",
             node("span", { className: "a-chart-key-tx" }),
-            " 虚线 发送",
+            " 发送",
           ),
           oscSummaryEl,
         ),
@@ -389,9 +386,9 @@ export function createPanelHostController(ctx, { bytes, date }) {
     const txTotal = m.network_available ? finiteNonNegative(m.network_tx_bytes) : null;
 
     const series = readSampleSeries(history, bytes);
-    cpuDial.setPercent(cpuPct, cpuPct == null ? "等待采集器" : "逻辑核心均值");
-    memDial.setPercent(memPct, memOK ? `${bytes(memUsed)} / ${bytes(memTotal)}` : "等待采集器");
-    diskDial.setPercent(diskPct, diskOK ? `${bytes(diskUsed)} / ${bytes(diskTotal)}` : "等待采集器");
+    cpuDial.setPercent(cpuPct, "\u00a0");
+    memDial.setPercent(memPct, memOK ? `${bytes(memUsed)} / ${bytes(memTotal)}` : "\u00a0");
+    diskDial.setPercent(diskPct, diskOK ? `${bytes(diskUsed)} / ${bytes(diskTotal)}` : "\u00a0");
 
     cpuSpark.update({ values: series.cpuSeries });
     memSpark.update({ values: series.memSeries });
@@ -403,7 +400,7 @@ export function createPanelHostController(ctx, { bytes, date }) {
     txCumEl.textContent = txTotal == null ? "累计 —" : `累计 ${bytes(txTotal)}`;
 
     const finiteRates = [...series.rxSeries, ...series.txSeries].filter((v) => v != null && Number.isFinite(v));
-    oscSummaryEl.textContent = finiteRates.length >= 2 ? `窗口峰值 ${bytes(Math.max(...finiteRates))}/s` : "等待足够采样点";
+    oscSummaryEl.textContent = finiteRates.length >= 2 ? `峰值 ${bytes(Math.max(...finiteRates))}/s` : "—";
     netOsc.update({ rx: series.rxSeries, tx: series.txSeries, bytes });
 
     const time = Date.parse(m.collected_at);
@@ -425,7 +422,7 @@ export function createPanelHostController(ctx, { bytes, date }) {
     if (status === "denied") {
       subTime.textContent = "面板资源无读取权限";
     } else if (status === "failed" && !collected) {
-      subTime.textContent = "面板主机资源读取失败 · 自动重试中";
+      subTime.textContent = "资源读取失败";
     } else if (!collected) {
       subTime.textContent = "尚无有效采样";
     } else {
@@ -433,7 +430,6 @@ export function createPanelHostController(ctx, { bytes, date }) {
     }
 
     const chipItems = [];
-    if (collected && runtimeInfo.sample_interval_seconds) chipItems.push(`${runtimeInfo.sample_interval_seconds}s 周期`);
     const sampleCount = runtimeInfo.sample_window_count ?? history.length;
     const sampleCap = runtimeInfo.sample_window_capacity || 60;
     if (sampleCount > 0) chipItems.push(`${sampleCount}/${sampleCap} 样本`);
