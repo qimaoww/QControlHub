@@ -61,27 +61,40 @@ function drawPulseSVG({ width, height }, pulse) {
   return svg;
 }
 
+const matrixSignatures = new WeakMap();
+const keyed = (key, el) => {
+  if (el?.setAttribute) el.setAttribute("data-refresh-key", key);
+  return el;
+};
+
 export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents, agentsReady, canMetrics, bytes, date, status }) {
   const visibleAgents = selectMostActiveNodes(agents, { limit: 5 });
   const skewedCount = agents.filter((a) => isClockSyncAbnormal(a.metrics?.clock_sync)).length;
   const onlineCount = agents.filter((a) => a.status === "online").length;
+  const heartbeatLabels = visibleAgents.map((agent) => {
+    const lastHeartbeat = agent.metrics?.collected_at || agent.last_seen;
+    return lastHeartbeat ? date(lastHeartbeat) : "未同步";
+  });
+  const sig = JSON.stringify([agentsReady, agents.length, onlineCount, skewedCount, canMetrics, visibleAgents, heartbeatLabels]);
+  if (matrixSignatures.get(matrixHost) === sig) return;
+  matrixSignatures.set(matrixHost, sig);
 
   patch(nodeSummary, node("div", { className: "a-actions" },
-    agents.length > visibleAgents.length ? badge(`活跃 Top ${visibleAgents.length}`) : null,
-    agents.length ? badge(`${onlineCount}/${agents.length} 在线`, onlineCount === agents.length ? "ok" : onlineCount > 0 ? "warn" : "bad") : null,
-    skewedCount > 0 ? badge(`时钟异常 ${skewedCount}`, "warn") : null,
-    link("管理节点", "#node-settings"),
+    agents.length > visibleAgents.length ? keyed("top", badge(`活跃 Top ${visibleAgents.length}`)) : null,
+    agents.length ? keyed("online", badge(`${onlineCount}/${agents.length} 在线`, onlineCount === agents.length ? "ok" : onlineCount > 0 ? "warn" : "bad")) : null,
+    skewedCount > 0 ? keyed("skew", badge(`时钟异常 ${skewedCount}`, "warn")) : null,
+    node("a", { className: "a-button", href: "#node-settings", "data-refresh-key": "manage-all" }, "管理节点"),
   ));
 
   if (!agents.length) {
     patch(matrixHost, node("div", { className: "a-dash-matrix", "aria-label": "节点运行状态" },
-      empty(agentsReady ? "暂无节点" : "读取中…"),
+      keyed("empty", empty(agentsReady ? "暂无节点" : "读取中…")),
     ));
     return;
   }
 
   const headRow = canMetrics
-    ? node("div", { className: "a-dash-matrix-head" },
+    ? node("div", { className: "a-dash-matrix-head", "data-refresh-key": "head" },
         muted("节点"),
         muted("内核"),
         muted("CPU"),
@@ -89,13 +102,13 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
         muted("吞吐"),
         muted("操作"),
       )
-    : node("div", { className: "a-dash-matrix-head" },
+    : node("div", { className: "a-dash-matrix-head", "data-refresh-key": "head" },
         muted("节点"),
         muted("内核"),
         muted("操作"),
       );
 
-  const rows = visibleAgents.map((agent) => {
+  const rows = visibleAgents.map((agent, index) => {
     const cpu = panelMetricUsage(agent.metrics, "cpu");
     const mem = panelMetricUsage(agent.metrics, "memory");
     const cpuStale = agent.status !== "online" || cpu == null;
@@ -108,41 +121,40 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
     const rowStatus = agent.status !== "online" ? "offline" : skewAbnormal ? "skew" : "online";
     const ipv4Ready = Boolean(agent.public_ipv4 || agent.metrics?.public_ipv4);
     const ipv6Ready = Boolean(agent.public_ipv6 || agent.metrics?.public_ipv6);
-    const lastHeartbeat = agent.metrics?.collected_at || agent.last_seen;
 
     return node("div", { className: "a-dash-matrix-row", "data-refresh-key": agent.id, "data-status": rowStatus },
-      node("div", { className: "a-dash-matrix-identity" },
+      node("div", { className: "a-dash-matrix-identity", "data-refresh-key": "identity" },
         node("div", { className: "a-probe-name" },
           nodeRegionFlag(ctx, agent),
           node("a", { className: "a-dash-node-link", href: `#node-settings?agent=${pathID(agent.id)}` }, agent.name || agent.id),
-          status(agent.status),
+          keyed("status", status(agent.status)),
         ),
         node("div", { className: "a-dash-matrix-sub" },
-          muted(lastHeartbeat ? date(lastHeartbeat) : "未同步"),
-          ipv4Ready ? badge("IPv4") : null,
-          ipv6Ready ? badge("IPv6") : null,
-          skewAbnormal ? badge("时钟异常", "warn") : null,
+          keyed("hb", muted(heartbeatLabels[index])),
+          ipv4Ready ? keyed("ipv4", badge("IPv4")) : null,
+          ipv6Ready ? keyed("ipv6", badge("IPv6")) : null,
+          skewAbnormal ? keyed("skew", badge("时钟异常", "warn")) : null,
         ),
       ),
-      node("div", { className: "a-dash-matrix-cores" },
+      node("div", { className: "a-dash-matrix-cores", "data-refresh-key": "cores" },
         node("span", { className: "a-dash-mobile-lbl a-muted" }, "内核"),
         node("strong", {}, runtimes.length ? `${activeCount}/${runtimes.length}` : "—"),
       ),
-      canMetrics ? node("div", { className: "a-dash-matrix-meter is-cpu" },
+      canMetrics ? node("div", { className: "a-dash-matrix-meter is-cpu", "data-refresh-key": "cpu" },
         node("div", { className: "a-dash-matrix-meter-label" },
           node("span", { className: "a-dash-mobile-lbl a-muted" }, "CPU"),
           node("strong", {}, cpuStale ? "—" : `${cpu.toFixed(1)}%`),
         ),
         metricTrack(cpuStale ? null : cpu, !cpuStale, true),
       ) : null,
-      canMetrics ? node("div", { className: "a-dash-matrix-meter is-mem" },
+      canMetrics ? node("div", { className: "a-dash-matrix-meter is-mem", "data-refresh-key": "mem" },
         node("div", { className: "a-dash-matrix-meter-label" },
           node("span", { className: "a-dash-mobile-lbl a-muted" }, "内存"),
           node("strong", {}, memStale ? "—" : `${mem.toFixed(1)}%`),
         ),
         metricTrack(memStale ? null : mem, !memStale, true),
       ) : null,
-      canMetrics ? node("div", { className: "a-dash-matrix-rate" },
+      canMetrics ? node("div", { className: "a-dash-matrix-rate", "data-refresh-key": "rate" },
         node("span", { className: "a-dash-mobile-lbl a-muted" }, "吞吐"),
         agent.status === "online" && rx != null && tx != null
           ? node("div", { className: "a-dash-matrix-duplex" },
@@ -151,9 +163,9 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
             )
           : muted("—"),
       ) : null,
-      node("div", { className: "a-dash-matrix-actions a-actions" },
-        canMetrics ? button("24h 趋势", () => nodeMetrics(ctx, agent)) : null,
-        node("a", { className: "a-button", href: `#node-settings?agent=${pathID(agent.id)}` }, "管理"),
+      node("div", { className: "a-dash-matrix-actions a-actions", "data-refresh-key": "actions" },
+        canMetrics ? button("24h 趋势", () => nodeMetrics(ctx, agent), { "data-refresh-key": "trend" }) : null,
+        node("a", { className: "a-button", href: `#node-settings?agent=${pathID(agent.id)}`, "data-refresh-key": "manage" }, "管理"),
       ),
     );
   });
@@ -165,7 +177,7 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
 }
 
 function edgeKPIStat(label, valueEl, sub = "") {
-  return node("div", { className: "a-dash-edge-kpi" },
+  return node("div", { className: "a-dash-edge-kpi", "data-refresh-key": label },
     muted(label),
     valueEl,
     sub ? node("span", { className: "a-dash-edge-kpi-sub a-muted" }, sub) : null,
@@ -200,11 +212,17 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
 
   const cards = [connCard, certCard, ipqCard].filter(Boolean);
   const grid = node("div", { className: `a-dash-edge-grid is-cols-${cards.length || 1}` }, ...cards);
+  let lastConnSig = "";
+  let lastCertSig = "";
+  let lastIpqSig = "";
 
   function paintConn() {
     if (!connCard) return;
     const { data, state } = readEdgeState("connections");
     if (!data) {
+      const sig = JSON.stringify(["empty", state || ""]);
+      if (sig === lastConnSig) return;
+      lastConnSig = sig;
       patch(connStatsHost, node("div", { className: "a-dash-edge-stats" },
         edgeKPIStat("活跃 IP", node("strong", {}, "—")),
         edgeKPIStat("活跃流", node("strong", {}, "—")),
@@ -218,6 +236,10 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     }
 
     const pulse = summarizeClientConnectionsPulse(data);
+    const sig = JSON.stringify(["ready", state || "", pulse]);
+    if (sig === lastConnSig) return;
+    lastConnSig = sig;
+
     const slice = pulse.buckets.slice(-24);
     const maxFlow = Math.max(0, ...slice.map((b) => b.flows));
 
@@ -237,6 +259,9 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     if (!certCard) return;
     const { data, state } = readEdgeState("certificates");
     if (!data) {
+      const sig = JSON.stringify(["empty", state || ""]);
+      if (sig === lastCertSig) return;
+      lastCertSig = sig;
       patch(certStatsHost, node("div", { className: "a-dash-edge-stats" },
         edgeKPIStat("有效", node("strong", {}, "—")),
         edgeKPIStat("14 天内到期", node("strong", {}, "—")),
@@ -249,6 +274,10 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     }
 
     const summary = summarizeExpiringCertificates(data);
+    const sig = JSON.stringify(["ready", state || "", summary]);
+    if (sig === lastCertSig) return;
+    lastCertSig = sig;
+
     patch(certStatsHost, node("div", { className: "a-dash-edge-stats" },
       edgeKPIStat("有效", node("strong", {}, String(summary.totalOwned))),
       edgeKPIStat("14 天内到期", node("strong", { className: summary.expiringSoon ? "is-warn-txt" : "" }, String(summary.expiringSoon))),
@@ -258,13 +287,13 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     patch(certViz, node("div", { className: "a-dash-edge-viz" },
       (summary.expiringSoon || summary.abnormal)
         ? node("div", { className: "a-dash-cert-alerts" },
-            summary.expiringSoon ? muted(`告警明细 · 14 天内到期 ${summary.expiringSoon}`) : null,
-            ...summary.urgent.map((item) => node("div", { className: "a-dash-cert-row" },
+            summary.expiringSoon ? keyed("alert-head", muted(`告警明细 · 14 天内到期 ${summary.expiringSoon}`)) : null,
+            ...summary.urgent.map((item) => node("div", { className: "a-dash-cert-row", "data-refresh-key": item.id || item.name },
               node("span", { className: "a-dash-ep" }, item.name),
               badge(item.abnormal ? "异常" : `${item.daysLeft ?? 0} 天到期`, item.abnormal ? "bad" : "warn"),
             )),
           )
-        : node("div", { className: "a-dash-edge-status-bar" },
+        : node("div", { className: "a-dash-edge-status-bar", "data-refresh-key": "status-bar" },
             metricTrack(100, true, false),
             muted(summary.totalOwned ? "全部有效" : "暂无证书"),
           ),
@@ -275,6 +304,9 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     if (!ipqCard) return;
     const { data, state } = readEdgeState("ipQuality");
     if (!data) {
+      const sig = JSON.stringify(["empty", state || ""]);
+      if (sig === lastIpqSig) return;
+      lastIpqSig = sig;
       patch(ipqStatsHost, node("div", { className: "a-dash-edge-stats" },
         edgeKPIStat("已检测", node("strong", {}, "—")),
         edgeKPIStat("完成", node("strong", {}, "—")),
@@ -287,6 +319,10 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     }
 
     const summary = summarizeIPQualityFleet(data);
+    const sig = JSON.stringify(["ready", state || "", summary]);
+    if (sig === lastIpqSig) return;
+    lastIpqSig = sig;
+
     const passPct = summary.total ? (summary.succeeded / summary.total) * 100 : 0;
     patch(ipqStatsHost, node("div", { className: "a-dash-edge-stats" },
       edgeKPIStat("已检测", node("strong", {}, String(summary.total))),
@@ -295,14 +331,14 @@ export function createEdgeTelemetryController(ctx, { readEdgeState }) {
     ));
     patch(ipqViz, node("div", { className: "a-dash-edge-viz" },
       summary.total > 0
-        ? node("div", { className: "a-dash-edge-status-bar" },
+        ? node("div", { className: "a-dash-edge-status-bar", "data-refresh-key": "status-bar" },
             metricTrack(passPct, true, false),
             node("div", { className: "a-chart-meta" },
-              muted(`通过 ${Math.round(passPct)}%`),
-              summary.running ? muted(`进行中 ${summary.running}`) : null,
+              keyed("pass", muted(`通过 ${Math.round(passPct)}%`)),
+              summary.running ? keyed("running", muted(`进行中 ${summary.running}`)) : null,
             ),
           )
-        : muted("暂无记录"),
+        : keyed("empty", muted("暂无记录")),
     ));
   }
 

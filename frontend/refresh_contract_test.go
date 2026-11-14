@@ -106,7 +106,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"orderNodesBySavedOrder(", "poll(ctx, refresh, pollDelay)",
 		},
 		"analytics/dashboard-panel.js": {
-			"patch(headBadges,", "patch(subChips,",
+			"patch(headBadges,", "lastRenderSignature", "observedWidth",
 			" · 保留上次采样", "面板资源无读取权限",
 		},
 		"analytics/traffic.js": {

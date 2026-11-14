@@ -2,7 +2,6 @@ import { patch } from "./live-dom.js";
 import { actions, badge, muted, node, section } from "./ui.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-let svgGradSeq = 0;
 
 export function createSVGEl(tag, attrs = {}, text = "") {
   const element = document.createElementNS(SVG_NS, tag);
@@ -20,25 +19,34 @@ export function createSVGEl(tag, attrs = {}, text = "") {
 export function createResponsiveSVG(hostClass, signal, { height, fallbackWidth = 300, draw }) {
   const host = node("div", { className: hostClass ? `a-dash-svg-host ${hostClass}` : "a-dash-svg-host" });
   let width = fallbackWidth;
+  let observedWidth = 0;
   let currentData;
   let drawn = false;
+  let lastSignature = "";
 
   const paintNow = () => {
-    const measured = host.clientWidth || Math.round(host.getBoundingClientRect().width) || 0;
+    const measured = observedWidth > 0 ? observedWidth : (host.clientWidth || 0);
     if (measured > 0) width = measured;
-    const svg = draw({ width: Math.max(80, width), height }, currentData);
+    const renderWidth = Math.max(80, Math.round(width));
+    const sig = JSON.stringify([renderWidth, currentData ?? null]);
+    if (drawn && sig === lastSignature) return;
+    const svg = draw({ width: renderWidth, height }, currentData);
     if (!svg) return;
     if (host.firstChild) patch(host.firstChild, svg);
     else host.append(svg);
+    lastSignature = sig;
     drawn = true;
   };
 
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver((entries) => {
       const next = Math.round(entries[0]?.contentRect?.width || 0);
-      if (next > 0 && (Math.abs(next - width) >= 2 || !drawn)) {
-        width = next;
-        paintNow();
+      if (next > 0) {
+        observedWidth = next;
+        if (Math.abs(next - width) >= 2 || !drawn) {
+          width = next;
+          paintNow();
+        }
       }
     });
     observer.observe(host);
@@ -153,7 +161,7 @@ function drawMiniSpark({ width, height }, data) {
     return svg;
   }
 
-  const gradID = `a-spark-grad-${++svgGradSeq}`;
+  const gradID = data?.gradID || "a-spark-grad";
   const defs = createSVGEl("defs");
   const grad = createSVGEl("linearGradient", { id: gradID, x1: "0", y1: "0", x2: "0", y2: "1" });
   grad.append(
@@ -253,7 +261,7 @@ function drawDualOscilloscope({ width, height }, data) {
   const txPts = buildPath(txSeries);
 
   if (rxPts.length >= 2) {
-    const gradID = `a-osc-grad-${++svgGradSeq}`;
+    const gradID = data?.gradID || "a-osc-grad";
     const defs = createSVGEl("defs");
     const grad = createSVGEl("linearGradient", { id: gradID, x1: "0", y1: "0", x2: "0", y2: "1" });
     grad.append(
@@ -314,8 +322,14 @@ function readSampleSeries(history, bytes) {
 export function createPanelHostController(ctx, { bytes, date }) {
   const headBadges = node("div", { className: "a-actions", role: "status" });
   const subTime = node("span", { className: "a-dash-subbar-text a-muted" }, "读取中…");
-  const subChips = node("div", { className: "a-dash-subbar-tags" });
-  const subbar = node("div", { className: "a-dash-subbar" }, subTime, subChips);
+  const subbar = node("div", { className: "a-dash-subbar" }, subTime);
+  let lastRenderSignature = "";
+
+  const keyedBadge = (key, label, tone = "") => {
+    const el = badge(label, tone);
+    el.setAttribute("data-refresh-key", key);
+    return el;
+  };
 
   const cpuSpark = createResponsiveSVG("a-dash-dial-spark", ctx.signal, { height: 22, fallbackWidth: 120, draw: drawMiniSpark });
   const memSpark = createResponsiveSVG("a-dash-dial-spark", ctx.signal, { height: 22, fallbackWidth: 120, draw: drawMiniSpark });
@@ -386,12 +400,37 @@ export function createPanelHostController(ctx, { bytes, date }) {
     const txTotal = m.network_available ? finiteNonNegative(m.network_tx_bytes) : null;
 
     const series = readSampleSeries(history, bytes);
+    const time = Date.parse(m.collected_at);
+    const collected = Number.isFinite(time) && time > 0;
+    const stale = collected && Date.now() - time > 15000;
+    let subTimeText = "";
+    if (status === "denied") {
+      subTimeText = "面板资源无读取权限";
+    } else if (status === "failed" && !collected) {
+      subTimeText = "资源读取失败";
+    } else if (!collected) {
+      subTimeText = "尚无有效采样";
+    } else {
+      const formattedTime = date(m.collected_at);
+      subTimeText = status === "failed" ? `${formattedTime} · 保留上次采样` : formattedTime;
+    }
+
+    const renderSignature = JSON.stringify([
+      status, collected, stale, subTimeText,
+      cpuPct, memPct, memUsed, memTotal, diskPct, diskUsed, diskTotal,
+      rxBps, txBps, rxTotal, txTotal,
+      series.cpuSeries, series.memSeries, series.rxSeries, series.txSeries,
+      Boolean(m.cpu_available), memOK, diskOK, Boolean(m.network_available), netRateOK,
+    ]);
+    if (renderSignature === lastRenderSignature) return;
+    lastRenderSignature = renderSignature;
+
     cpuDial.setPercent(cpuPct, "\u00a0");
     memDial.setPercent(memPct, memOK ? `${bytes(memUsed)} / ${bytes(memTotal)}` : "\u00a0");
     diskDial.setPercent(diskPct, diskOK ? `${bytes(diskUsed)} / ${bytes(diskTotal)}` : "\u00a0");
 
-    cpuSpark.update({ values: series.cpuSeries });
-    memSpark.update({ values: series.memSeries });
+    cpuSpark.update({ values: series.cpuSeries, gradID: "a-spark-grad-cpu" });
+    memSpark.update({ values: series.memSeries, gradID: "a-spark-grad-mem" });
     diskMeter.update({ pct: diskPct });
 
     rxValEl.textContent = rxBps == null ? "—" : `${bytes(rxBps)}/s`;
@@ -401,42 +440,20 @@ export function createPanelHostController(ctx, { bytes, date }) {
 
     const finiteRates = [...series.rxSeries, ...series.txSeries].filter((v) => v != null && Number.isFinite(v));
     oscSummaryEl.textContent = finiteRates.length >= 2 ? `峰值 ${bytes(Math.max(...finiteRates))}/s` : "—";
-    netOsc.update({ rx: series.rxSeries, tx: series.txSeries, bytes });
-
-    const time = Date.parse(m.collected_at);
-    const collected = Number.isFinite(time) && time > 0;
-    const stale = collected && Date.now() - time > 15000;
-    const runtimeInfo = runtime || m.panel_runtime || {};
+    netOsc.update({ rx: series.rxSeries, tx: series.txSeries, bytes, gradID: "a-osc-grad-panel-net" });
 
     patch(headBadges, node("div", { className: "a-actions", role: "status" },
-      collected ? badge("容器可见") : null,
+      collected ? keyedBadge("scope", "容器可见") : null,
       status === "denied"
-        ? badge("无读取权限", "bad")
+        ? keyedBadge("state", "无读取权限", "bad")
         : status === "failed"
-          ? badge(collected ? "刷新失败" : "资源读取失败", "warn")
+          ? keyedBadge("state", collected ? "刷新失败" : "资源读取失败", "warn")
           : collected
-            ? badge(stale ? "采样已过期" : "实时", stale ? "warn" : "ok")
-            : badge("尚无有效采样", "warn"),
+            ? keyedBadge("state", stale ? "采样已过期" : "实时", stale ? "warn" : "ok")
+            : keyedBadge("state", "尚无有效采样", "warn"),
     ));
 
-    if (status === "denied") {
-      subTime.textContent = "面板资源无读取权限";
-    } else if (status === "failed" && !collected) {
-      subTime.textContent = "资源读取失败";
-    } else if (!collected) {
-      subTime.textContent = "尚无有效采样";
-    } else {
-      subTime.textContent = status === "failed" ? `${date(m.collected_at)} · 保留上次采样` : date(m.collected_at);
-    }
-
-    const chipItems = [];
-    const sampleCount = runtimeInfo.sample_window_count ?? history.length;
-    const sampleCap = runtimeInfo.sample_window_capacity || 60;
-    if (sampleCount > 0) chipItems.push(`${sampleCount}/${sampleCap} 样本`);
-    if (runtimeInfo.goroutines > 0) chipItems.push(`${runtimeInfo.goroutines} 协程`);
-    patch(subChips, node("div", { className: "a-dash-subbar-tags" },
-      ...chipItems.map((text) => node("span", { className: "a-dash-chip-pill" }, text)),
-    ));
+    if (subTime.textContent !== subTimeText) subTime.textContent = subTimeText;
   }
 
   return { element, paint };

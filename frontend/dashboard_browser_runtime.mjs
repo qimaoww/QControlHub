@@ -400,12 +400,16 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(!activity() && reads("/tasks") === 0, "retired recent-task area still renders or polls");
 
   await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]') && probes()?.textContent.includes("20%"), "A/B probes card did not render pair stats");
+  assert(!panel().querySelector(".a-dash-chip-pill") && !/\d+\/\d+\s*样本|协程/.test(panel().textContent), "panel still renders removed sample/goroutine pills");
+  const stableAddProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加探测对");
+  assert(stableAddProbeBtn, "add A/B probe button missing for authorized operator");
   const runBtn = [...probes().querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "立即探测");
   runBtn.click();
   await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("停止"), "run action did not enter running/stop state");
   const stopBtn = [...probes().querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "停止");
   stopBtn.click();
   await waitFor(() => probes()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("立即探测"), "stop action did not settle");
+  assert([...probes().querySelectorAll("button")].find((b) => b.textContent === "添加探测对") === stableAddProbeBtn, "conditional status badge replaced add probe button");
 
   // Add, toggle, and delete a custom A/B probe pair through the UI form & confirmation dialog.
   const addProbeBtn = [...probes().querySelectorAll("button")].find((b) => b.textContent === "添加探测对");
@@ -486,7 +490,21 @@ export async function testDashboardRuntime(mode, preview = false) {
   document.documentElement.style.fontSize = "100%";
   await delay(80);
 
+  const scrollHost = document.scrollingElement || document.documentElement;
+  scrollHost.scrollTop = 200;
+  const beforePageScroll = scrollHost.scrollTop;
   const stablePanel = panel(), stableCPU = cpu(), stableNode = nodes().querySelector(".a-dash-matrix-row"), stableSVG = traffic().querySelector("svg.a-chart");
+  const stableNodeAction = nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a");
+  const stableProbesSVG = probes().querySelector("svg"), stableRankRow = ranking().querySelector(".a-dash-rank-row");
+  const stablePanelSVGs = [...panel().querySelectorAll("svg")];
+  const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
+  const stableProbeGrads = [...probes().querySelectorAll("linearGradient")].map((g) => g.id);
+  await refresh();
+  assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
+  assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
+  assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
+  assert(JSON.stringify([...probes().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stableProbeGrads), "probe gradient IDs churned across refresh");
+  assert(probes().querySelector("svg") === stableProbesSVG && ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");
   const month = () => traffic().querySelector('[name="traffic_month"]');
   month().focus();
   fixture.metrics.history = [];
@@ -572,6 +590,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   fixture.trafficFailed = false;
   const february = `${new Date().getUTCFullYear() - 1}-02`;
   chooseMonth(february);
+  assert(!traffic().textContent.includes("读取中"), "month change flashed loading text over ready chart");
   await waitFor(() => period().includes(february), "February not loaded");
   const days = new Date(Date.UTC(new Date().getUTCFullYear() - 1, 2, 0)).getUTCDate();
   assert(traffic().textContent.includes(`· ${days} 天`), "historical average uses incorrect day count");

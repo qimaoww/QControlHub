@@ -676,8 +676,6 @@ strong, b { font-weight: 600; }
 
 .a-dash-subbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; min-height: 48px; padding: 8px var(--card-gutter); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--canvas); min-width: 0; }
 .a-dash-subbar-text { font-size: var(--text-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.a-dash-subbar-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
-.a-dash-chip-pill { display: inline-flex; align-items: center; padding: 2px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--paper); color: var(--soft-ink); font-size: var(--text-caption); line-height: 1.4; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .a-dash-inline-field { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; min-width: 0; }
 .a-dash-inline-field > .a-field-label { margin: 0; flex: none; white-space: nowrap; color: var(--soft-ink); font-size: var(--text-caption); }
 .a-dash-inline-field > :is(input, select) { width: auto; min-width: 0; height: 32px; min-height: 32px; padding: 4px 10px; font-size: var(--text-label); line-height: 20px; }

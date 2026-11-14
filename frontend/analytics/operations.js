@@ -179,10 +179,10 @@ export async function dashboardPage(ctx) {
 
   const cmdCell = (title, valueEl, bodyEl, dotClass = "") => node("div", { className: "a-dash-cmd-cell", "data-refresh-key": title },
     node("div", { className: "a-dash-cmd-head" },
-      dotClass ? node("span", { className: `a-dash-dot ${dotClass}` }) : null,
-      muted(title)),
-    node("div", { className: "a-dash-cmd-metric" }, valueEl),
-    node("div", { className: "a-dash-cmd-foot" }, bodyEl));
+      dotClass ? node("span", { className: `a-dash-dot ${dotClass}`, "data-refresh-key": "dot" }) : null,
+      node("span", { className: "a-muted", "data-refresh-key": "label" }, title)),
+    node("div", { className: "a-dash-cmd-metric", "data-refresh-key": "metric" }, valueEl),
+    node("div", { className: "a-dash-cmd-foot", "data-refresh-key": "foot" }, bodyEl));
   const overviewGrid = node("div", { className: "a-dash-cmd-grid" });
 
   const hostController = can("panel-metrics.read") ? createPanelHostController(ctx, { bytes, date }) : null;
@@ -318,13 +318,17 @@ export async function dashboardPage(ctx) {
   ctx.signal.addEventListener('abort', () => { cancelAnimationFrame(businessPaint); finishBusiness?.(); }, { once: true });
 
   const coreBusinessKeys = new Set(["overview", "agents", "order"]);
+  const keyed = (key, el) => {
+    if (el?.setAttribute) el.setAttribute("data-refresh-key", key);
+    return el;
+  };
+  let lastOverviewSignature = "";
   function paintBusiness() {
     const overview = readings.get("overview") || {};
     const agents = orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids);
     const failed = [...states].filter(([key, state]) => coreBusinessKeys.has(key) && ["failed", "denied"].includes(state));
     const waiting = ["overview", ...(can("agents.read") ? ["agents"] : [])].some(key => !readings.has(key) && (!states.has(key) || states.get(key) === "loading"));
-    businessState.textContent = waiting ? "读取中…" : failed.length ? "部分状态异常" : "";
-    businessState.hidden = !businessState.textContent;
+    const nextBusinessText = waiting ? "读取中…" : failed.length ? "部分状态异常" : "";
     const knownNodes = readings.has("overview") || readings.has("agents");
     const online = knownNodes ? overview.agents_online ?? agents.filter(agent => agent.status === "online").length : "—";
     const count = knownNodes ? overview.agents ?? agents.length : "—";
@@ -334,68 +338,84 @@ export async function dashboardPage(ctx) {
     const runningTasks = knownNodes ? Number(overview.tasks_running || 0) : 0;
     const failedTasks = knownNodes ? Number(overview.tasks_failed || 0) : 0;
     const activeTasks = knownNodes ? pendingTotal + runningTasks : "—";
+    const canAgents = can("agents.read");
+    const canMetrics = can("metrics.read");
+    const canTasks = can("tasks.read");
 
-    const engineChips = knownRuntime && fleet.engines.length
-      ? node("div", { className: "a-dash-engine-chips" }, ...fleet.engines.map(e =>
-          node("span", { className: "a-dash-engine-chip" },
-            node("span", { className: `a-dash-dot ${e.running > 0 ? "is-ok" : "is-muted"}` }),
-            `${({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS" })[e.engine] || e.engine} ${e.running}/${e.installed}`)))
-      : muted(knownRuntime ? "未安装内核" : "读取中…");
+    const overviewSig = JSON.stringify([
+      nextBusinessText, knownNodes, online, count, fleet, knownRuntime,
+      pendingTotal, runningTasks, failedTasks, activeTasks,
+      overview.node_configs ?? null, overview.configs ?? null,
+      canAgents, canMetrics, canTasks,
+    ]);
 
-    const taskMeta = knownNodes
-      ? actions(
-          muted(`运行 ${runningTasks} · 排队 ${pendingTotal}`),
-          failedTasks > 0 && can("tasks.read")
-            ? node("a", { className: "a-badge bad", href: "#tasks?status=failed" }, `失败 ${failedTasks}`)
-            : failedTasks > 0 ? badge(`失败 ${failedTasks}`, "bad") : badge("无失败", "ok"),
-        )
-      : muted("读取中…");
+    if (overviewSig !== lastOverviewSignature) {
+      lastOverviewSignature = overviewSig;
+      if (businessState.textContent !== nextBusinessText) businessState.textContent = nextBusinessText;
+      businessState.hidden = !nextBusinessText;
 
-    const nodePct = knownNodes && count > 0 ? Math.round((online / count) * 100) : 0;
-    const nodeDot = !knownNodes ? "" : online === count && count > 0 ? "is-ok" : online > 0 ? "is-warn" : "is-bad";
+      const engineChips = knownRuntime && fleet.engines.length
+        ? node("div", { className: "a-dash-engine-chips", "data-refresh-key": "chips" }, ...fleet.engines.map(e =>
+            node("span", { className: "a-dash-engine-chip", "data-refresh-key": e.engine },
+              node("span", { className: `a-dash-dot ${e.running > 0 ? "is-ok" : "is-muted"}` }),
+              `${({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS" })[e.engine] || e.engine} ${e.running}/${e.installed}`)))
+        : keyed("empty", muted(knownRuntime ? "未安装内核" : "读取中…"));
 
-    patch(overviewGrid, node("div", { className: overviewGrid.className },
-      cmdCell("在线节点",
-        node("strong", { className: "a-dash-cmd-val" }, knownNodes ? `${online}/${count}` : "—"),
-        stack(
-          knownNodes ? metricTrack(nodePct, true, false) : null,
-          muted(knownNodes ? `在线率 ${nodePct}% · 离线 ${Math.max(0, count - online)}` : "读取中…"),
-        ),
-        nodeDot),
-      can("agents.read")
-        ? cmdCell("运行内核",
-            actions(
-              node("strong", { className: "a-dash-cmd-val" }, knownRuntime ? String(fleet.running) : "—"),
-              knownRuntime ? muted(`/ ${fleet.installed}`) : null,
-            ),
-            engineChips,
-            knownRuntime ? (fleet.running > 0 ? "is-ok" : "is-muted") : "")
-        : cmdCell("节点配置", node("strong", { className: "a-dash-cmd-val" }, String(overview.node_configs ?? "—")), muted("已授权节点配置")),
-      cmdCell("调度任务",
-        node("strong", { className: "a-dash-cmd-val" }, activeTasks === "—" ? "—" : String(activeTasks)),
-        taskMeta,
-        failedTasks > 0 ? "is-bad" : runningTasks > 0 ? "is-warn" : knownNodes ? "is-ok" : ""),
-      can("agents.read") && can("metrics.read")
-        ? cmdCell("全网实时吞吐",
-            node("strong", { className: "a-dash-cmd-val" }, fleet.sampled ? `↓ ${bytes(fleet.receiveBPS)}/s` : "—"),
-            stack(
-              fleet.sampled ? trafficSplitBar(fleet.receiveBPS, fleet.sendBPS, fleet.receiveBPS + fleet.sendBPS) : null,
-              node("div", { className: "a-dash-duplex" },
-                node("span", { className: "a-dash-tx" }, fleet.sampled ? `↑ ${bytes(fleet.sendBPS)}/s` : "↑ —"),
-                muted(fleet.sampled ? `${fleet.sampled} 节点` : "无采样")),
-            ),
-            fleet.sampled ? "is-ok" : "is-muted")
-        : cmdCell("配置档案", node("strong", { className: "a-dash-cmd-val" }, String(overview.configs ?? "—")), muted(`节点配置 ${overview.node_configs ?? "—"}`)),
-    ));
+      const taskMeta = knownNodes
+        ? actions(
+            keyed("counts", muted(`运行 ${runningTasks} · 排队 ${pendingTotal}`)),
+            failedTasks > 0 && canTasks
+              ? node("a", { className: "a-badge bad", href: "#tasks?status=failed", "data-refresh-key": "fail" }, `失败 ${failedTasks}`)
+              : keyed("fail", failedTasks > 0 ? badge(`失败 ${failedTasks}`, "bad") : badge("无失败", "ok")),
+          )
+        : keyed("empty", muted("读取中…"));
 
-    if (can("agents.read")) {
+      const nodePct = knownNodes && count > 0 ? Math.round((online / count) * 100) : 0;
+      const nodeDot = !knownNodes ? "" : online === count && count > 0 ? "is-ok" : online > 0 ? "is-warn" : "is-bad";
+
+      patch(overviewGrid, node("div", { className: overviewGrid.className },
+        cmdCell("在线节点",
+          node("strong", { className: "a-dash-cmd-val" }, knownNodes ? `${online}/${count}` : "—"),
+          stack(
+            knownNodes ? keyed("track", metricTrack(nodePct, true, false)) : null,
+            keyed("meta", muted(knownNodes ? `在线率 ${nodePct}% · 离线 ${Math.max(0, count - online)}` : "读取中…")),
+          ),
+          nodeDot),
+        canAgents
+          ? cmdCell("运行内核",
+              actions(
+                keyed("running", node("strong", { className: "a-dash-cmd-val" }, knownRuntime ? String(fleet.running) : "—")),
+                knownRuntime ? keyed("installed", muted(`/ ${fleet.installed}`)) : null,
+              ),
+              engineChips,
+              knownRuntime ? (fleet.running > 0 ? "is-ok" : "is-muted") : "")
+          : cmdCell("节点配置", node("strong", { className: "a-dash-cmd-val" }, String(overview.node_configs ?? "—")), muted("已授权节点配置")),
+        cmdCell("调度任务",
+          node("strong", { className: "a-dash-cmd-val" }, activeTasks === "—" ? "—" : String(activeTasks)),
+          taskMeta,
+          failedTasks > 0 ? "is-bad" : runningTasks > 0 ? "is-warn" : knownNodes ? "is-ok" : ""),
+        canAgents && canMetrics
+          ? cmdCell("全网实时吞吐",
+              node("strong", { className: "a-dash-cmd-val" }, fleet.sampled ? `↓ ${bytes(fleet.receiveBPS)}/s` : "—"),
+              stack(
+                fleet.sampled ? keyed("split", trafficSplitBar(fleet.receiveBPS, fleet.sendBPS, fleet.receiveBPS + fleet.sendBPS)) : null,
+                node("div", { className: "a-dash-duplex", "data-refresh-key": "duplex" },
+                  node("span", { className: "a-dash-tx" }, fleet.sampled ? `↑ ${bytes(fleet.sendBPS)}/s` : "↑ —"),
+                  muted(fleet.sampled ? `${fleet.sampled} 节点` : "无采样")),
+              ),
+              fleet.sampled ? "is-ok" : "is-muted")
+          : cmdCell("配置档案", node("strong", { className: "a-dash-cmd-val" }, String(overview.configs ?? "—")), muted(`节点配置 ${overview.node_configs ?? "—"}`)),
+      ));
+    }
+
+    if (canAgents) {
       paintNodeTelemetryMatrix({
         ctx,
         nodeSummary,
         matrixHost: nodeMatrix,
         agents,
         agentsReady: readings.has("agents") || states.get("agents") === "denied",
-        canMetrics: can("metrics.read"),
+        canMetrics,
         bytes,
         date,
         status,
@@ -403,10 +423,24 @@ export async function dashboardPage(ctx) {
     }
   }
 
+  let lastTrafficSignature = "";
   function paintTraffic() {
     const traffic = readings.get("traffic");
+    const trafficStatus = states.get("traffic") || "";
+    const today = new Date().toISOString().slice(0, 10);
+    const statusText = trafficStatus === "denied"
+      ? "无流量权限"
+      : trafficStatus === "loading"
+        ? "读取中…"
+        : trafficStatus === "failed"
+          ? (traffic ? "刷新失败 · 保留已有记录" : "读取失败")
+          : traffic ? (list(traffic.days).length ? "" : "暂无记录") : "暂无记录";
+    const sig = JSON.stringify([trafficStatus, statusText, Boolean(traffic), traffic ? [traffic.month, today, traffic.days] : null]);
+    if (sig === lastTrafficSignature) return;
+    lastTrafficSignature = sig;
+
     if (traffic) {
-      const days = aggregateDashboardTrafficDays(traffic.days, traffic.month).filter(day => day.day <= new Date().toISOString().slice(0, 10));
+      const days = aggregateDashboardTrafficDays(traffic.days, traffic.month).filter(day => day.day <= today);
       const summary = summarizeDashboardTraffic(days, traffic.month);
       const peaks = summarizeDashboardTrafficPeaks(days);
       trafficPeriod.textContent = `${traffic.month} · UTC`;
@@ -416,13 +450,13 @@ export async function dashboardPage(ctx) {
       detailTable.updateRows(days.map(day => [day.day, bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.received_bytes + day.sent_bytes), `${bytes(day.peak_receive_bps)}/s`, `${bytes(day.peak_send_bps)}/s`]));
       plot.updateDays(days);
       rankingCard?.paint();
-    } else if (states.get("traffic") === "denied") {
+    } else if (trafficStatus === "denied") {
       trafficTotals.replaceChildren(); plot.updateDays([]); detailTable.updateRows([]);
       rankingCard?.paint();
     }
     detailsButton.disabled = !traffic;
-    trafficState.textContent = states.get("traffic") === "denied" ? "无流量权限" : states.get("traffic") === "loading" ? "读取中…" : states.get("traffic") === "failed" ? (traffic ? "刷新失败 · 保留已有记录" : "读取失败") : traffic ? (list(traffic.days).length ? "" : "暂无记录") : "暂无记录";
-    trafficState.hidden = !trafficState.textContent;
+    if (trafficState.textContent !== statusText) trafficState.textContent = statusText;
+    trafficState.hidden = !statusText;
   }
 
   const reading = new Map();
@@ -439,7 +473,7 @@ export async function dashboardPage(ctx) {
     requests.get(key)?.abort();
     const controller = new AbortController();
     requests.set(key, controller);
-    if (!readings.has(key) || force) {
+    if (!readings.has(key)) {
       states.set(key, "loading");
       if (key === "traffic") paintTraffic();
     }

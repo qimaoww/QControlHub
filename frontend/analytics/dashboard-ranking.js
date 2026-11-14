@@ -60,6 +60,11 @@ export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, 
   const rankHost = node("div", { className: "a-dash-rank-list", "aria-label": "节点流量排行" });
   const statusNode = muted("");
   statusNode.setAttribute("role", "status");
+  let lastSignature = "";
+  const keyed = (key, el) => {
+    if (el?.setAttribute) el.setAttribute("data-refresh-key", key);
+    return el;
+  };
 
   const syncFromInputs = () => {
     state.period = periodSelect.value || "month";
@@ -104,27 +109,38 @@ export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, 
       orderIDs,
     });
 
-    scopeField.hidden = !ranked.hasCrossOwner;
     if (!ranked.hasCrossOwner && state.scope !== "all") {
       state.scope = "all";
       scopeSelect.value = "all";
     }
 
+    let nextStatus = "";
     if (state.period === "cycle" && !policies.length && policyState === "loading") {
-      statusNode.textContent = "读取中…";
+      nextStatus = "读取中…";
     } else if (state.period === "cycle" && policyState === "denied") {
-      statusNode.textContent = "无权限";
+      nextStatus = "无权限";
     } else if (state.period === "cycle" && policyState === "failed" && !policies.length) {
-      statusNode.textContent = "读取失败";
+      nextStatus = "读取失败";
     } else if (state.period === "month" && !usage && usageState === "loading") {
-      statusNode.textContent = "读取中…";
+      nextStatus = "读取中…";
     } else if (usageState === "denied" && state.period === "month") {
-      statusNode.textContent = "无权限";
+      nextStatus = "无权限";
     } else {
-      statusNode.textContent = ranked.totalCount
+      nextStatus = ranked.totalCount
         ? `${state.period === "cycle" ? "当前周期" : month} · 合计 ${bytes(ranked.totalUsed)} · ${ranked.items.length}/${ranked.totalCount}`
         : "暂无数据";
     }
+
+    const sig = JSON.stringify([
+      state.period, state.limit, state.scope, month,
+      usageState, policyState, usage?.month || "", Boolean(usage),
+      nextStatus, ranked,
+    ]);
+    if (sig === lastSignature) return;
+    lastSignature = sig;
+
+    scopeField.hidden = !ranked.hasCrossOwner;
+    if (statusNode.textContent !== nextStatus) statusNode.textContent = nextStatus;
 
     const headerNode = ranked.items.length
       ? node("div", { className: "a-dash-rank-headbar" },
@@ -156,44 +172,44 @@ export function createTrafficRankingCard(ctx, { bytes, getUsage, getUsageState, 
             : null;
 
           return node("div", { className: "a-dash-rank-row", "data-refresh-key": item.agentID },
-            node("div", { className: "a-dash-rank-col-idx" },
+            node("div", { className: "a-dash-rank-col-idx", "data-refresh-key": "idx" },
               node("span", { className: `a-dash-rank-index${idx < 3 ? " is-top" : ""}` }, String(idx + 1).padStart(2, "0")),
             ),
-            node("div", { className: "a-dash-rank-col-node" },
+            node("div", { className: "a-dash-rank-col-node", "data-refresh-key": "node" },
               node("div", { className: "a-probe-name" },
                 nodeRegionFlag(ctx, agentMeta),
                 node("a", { className: "a-dash-node-link", href: `#traffic?agent=${pathID(item.agentID)}` }, displayName),
               ),
               (ownerTag || item.blocked || item.portCount > 1)
-                ? node("div", { className: "a-dash-rank-tags" },
-                    ownerTag ? badge(ownerTag) : null,
-                    item.blocked ? badge("已封禁", "bad") : null,
-                    item.portCount > 1 ? badge(`${item.portCount} 端口`) : null,
+                ? node("div", { className: "a-dash-rank-tags", "data-refresh-key": "tags" },
+                    ownerTag ? keyed("owner", badge(ownerTag)) : null,
+                    item.blocked ? keyed("blocked", badge("已封禁", "bad")) : null,
+                    item.portCount > 1 ? keyed("ports", badge(`${item.portCount} 端口`)) : null,
                   )
                 : null,
             ),
-            node("div", { className: "a-dash-rank-col-flow" },
+            node("div", { className: "a-dash-rank-col-flow", "data-refresh-key": "flow" },
               node("div", { className: "a-dash-rank-flow-nums" },
                 node("span", { className: "a-dash-rx" }, `↓ ${bytes(item.received)}`),
                 node("span", { className: "a-dash-tx" }, `↑ ${bytes(item.sent)}`),
               ),
               trafficSplitBar(item.received, item.sent, ranked.maxUsed),
             ),
-            node("div", { className: "a-dash-rank-col-share" },
+            node("div", { className: "a-dash-rank-col-share", "data-refresh-key": "share" },
               node("div", { className: "a-dash-rank-share-head" },
                 node("strong", {}, bytes(item.used)),
                 muted(`${sharePercent.toFixed(1)}%`),
               ),
               metricTrack(sharePercent, true, false),
             ),
-            node("div", { className: "a-dash-rank-col-quota" },
+            node("div", { className: "a-dash-rank-col-quota", "data-refresh-key": "quota" },
               quotaText
-                ? node("div", { className: "a-dash-rank-quota" },
+                ? node("div", { className: "a-dash-rank-quota", "data-refresh-key": "bar" },
                     muted(quotaText),
                     metricTrack(item.quotaPercent, true, true),
                   )
                 : null,
-              rateNode || (!quotaText ? muted("—") : null),
+              rateNode ? keyed("rate", rateNode) : (!quotaText ? keyed("empty", muted("—")) : null),
             ),
           );
         })

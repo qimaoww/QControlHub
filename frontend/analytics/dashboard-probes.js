@@ -14,8 +14,7 @@ const nodeKey = (endpoint) => `${endpoint?.agent_id || ""}/${endpoint?.instance_
 const isIPv6 = (addr) => String(addr || "").includes(":");
 const fmtMS = (val) => (typeof val === "number" && Number.isFinite(val) ? `${val.toFixed(1)} ms` : "—");
 const fmtLoss = (val) => (typeof val === "number" && Number.isFinite(val) ? `${val.toFixed(val % 1 === 0 ? 0 : 1)}%` : "—");
-
-let probeGradSeq = 0;
+const sanitizeSVGKey = (val) => String(val || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
 
 function renderConduitSVG(dir, availability, activeState) {
   const info = probeDirectionStatus(dir, availability, activeState);
@@ -46,7 +45,7 @@ function renderConduitSVG(dir, availability, activeState) {
   return { svg, info };
 }
 
-function renderProbeHistoryChart(fwdSeries = [], revSeries = [], width = 360) {
+function renderProbeHistoryChart(fwdSeries = [], revSeries = [], width = 360, gradKey = "default") {
   const w = Math.max(160, Math.round(width));
   const h = 46;
   const padX = 4;
@@ -86,7 +85,7 @@ function renderProbeHistoryChart(fwdSeries = [], revSeries = [], width = 360) {
   );
 
   if (fwd.pts.length >= 2) {
-    const gradID = `a-probe-grad-${++probeGradSeq}`;
+    const gradID = `a-probe-grad-${sanitizeSVGKey(gradKey)}`;
     const defs = createSVGEl("defs");
     const grad = createSVGEl("linearGradient", { id: gradID, x1: "0", y1: "0", x2: "0", y2: "1" });
     grad.append(
@@ -133,15 +132,15 @@ function probeEndpointCell(flagNode, name, address, alignRight = false) {
   );
 }
 
-function directionBlock({ title, fromName, fromAddress, toName, toAddress, fromFlag, toFlag, dir, pair }) {
+function directionBlock({ key = "fwd", title, fromName, fromAddress, toName, toAddress, fromFlag, toFlag, dir, pair }) {
   const { svg: conduitSVG, info: statusInfo } = renderConduitSVG(dir, pair.availability, pair.active_state);
   const lossVal = dir ? dir.loss_percent : null;
   const lossClass = dir && lossVal > 0 ? (lossVal >= 20 || !dir.reached ? "is-bad" : "is-warn") : "";
 
-  return node("div", { className: "a-dash-probe-lane" },
+  return node("div", { className: "a-dash-probe-lane", "data-refresh-key": key },
     node("div", { className: "a-dash-probe-lane-head" },
-      node("span", { className: "a-dash-probe-dir-tag" }, title),
-      badge(statusInfo.label, statusInfo.tone),
+      node("span", { className: "a-dash-probe-dir-tag", "data-refresh-key": "dir" }, title),
+      (() => { const b = badge(statusInfo.label, statusInfo.tone); b.setAttribute("data-refresh-key", "status"); return b; })(),
     ),
     node("div", { className: "a-dash-flow-row" },
       probeEndpointCell(fromFlag, fromName, fromAddress, false),
@@ -149,10 +148,10 @@ function directionBlock({ title, fromName, fromAddress, toName, toAddress, fromF
       probeEndpointCell(toFlag, toName, toAddress, true),
     ),
     node("dl", { className: "a-dash-probe-stats" },
-      node("div", {}, node("dt", {}, "平均延迟"), node("dd", { className: "is-primary" }, dir ? fmtMS(dir.avg_ms) : "—")),
-      node("div", {}, node("dt", {}, "最小 / 最大"), node("dd", {}, dir ? `${fmtMS(dir.min_ms)} / ${fmtMS(dir.max_ms)}` : "—")),
-      node("div", {}, node("dt", {}, "抖动"), node("dd", {}, dir ? fmtMS(dir.stdev_ms) : "—")),
-      node("div", {}, node("dt", {}, "丢包率"), node("dd", { className: lossClass }, dir ? fmtLoss(lossVal) : "—")),
+      node("div", { "data-refresh-key": "avg" }, node("dt", {}, "平均延迟"), node("dd", { className: "is-primary" }, dir ? fmtMS(dir.avg_ms) : "—")),
+      node("div", { "data-refresh-key": "minmax" }, node("dt", {}, "最小 / 最大"), node("dd", {}, dir ? `${fmtMS(dir.min_ms)} / ${fmtMS(dir.max_ms)}` : "—")),
+      node("div", { "data-refresh-key": "jitter" }, node("dt", {}, "抖动"), node("dd", {}, dir ? fmtMS(dir.stdev_ms) : "—")),
+      node("div", { "data-refresh-key": "loss" }, node("dt", {}, "丢包率"), node("dd", { className: lossClass }, dir ? fmtLoss(lossVal) : "—")),
     ),
   );
 }
@@ -166,9 +165,15 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   let diagnosticNodes = [];
   const inFlightOps = new Set();
   let sparkWidth = 360;
+  let lastPaintSignature = "";
+  const keyed = (key, el) => {
+    if (el?.setAttribute) el.setAttribute("data-refresh-key", key);
+    return el;
+  };
 
   if (typeof ResizeObserver === "function") {
     const ro = new ResizeObserver(() => {
+      if (!canView() || !ctx.current()) return;
       const sampleSpark = gridHost.querySelector(".a-dash-probe-spark");
       const raw = sampleSpark ? sampleSpark.clientWidth - 32 : 0;
       const fallback = gridHost.clientWidth > 0 ? Math.max(220, gridHost.clientWidth - 36) : 0;
@@ -453,14 +458,19 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     const pairs = Array.isArray(raw?.pairs) ? raw.pairs : [];
     const probeState = getProbesState();
     const summary = summarizeDashboardProbes(pairs);
+    const exec = canExecute();
+    const sampledLabels = pairs.map((p) => (p.latest?.sampled_at ? date(p.latest.sampled_at) : "未采样"));
+    const sig = JSON.stringify([probeState, exec, sparkWidth, summary, pairs, sampledLabels]);
+    if (sig === lastPaintSignature) return;
+    lastPaintSignature = sig;
 
     patch(summaryNode, node("div", { className: "a-actions", role: "status" },
-      pairs.length ? badge(`自动 ${summary.enabled}/${summary.total}`) : null,
-      summary.running > 0 ? badge(`进行中 ${summary.running}`, "warn") : null,
-      summary.bad > 0 ? badge(`异常 ${summary.bad}`, "bad") : null,
-      probeState === "failed" ? badge("读取失败 · 保留上次数据", "warn") : null,
-      probeState === "denied" ? badge("无诊断读取权限", "warn") : null,
-      canExecute() ? button("添加探测对", () => openProbeDialog(), { tone: "primary" }) : null,
+      pairs.length ? keyed("count", badge(`自动 ${summary.enabled}/${summary.total}`)) : null,
+      summary.running > 0 ? keyed("running", badge(`进行中 ${summary.running}`, "warn")) : null,
+      summary.bad > 0 ? keyed("abnormal", badge(`异常 ${summary.bad}`, "bad")) : null,
+      probeState === "failed" ? keyed("failed", badge("读取失败 · 保留上次数据", "warn")) : null,
+      probeState === "denied" ? keyed("denied", badge("无诊断读取权限", "warn")) : null,
+      exec ? button("添加探测对", () => openProbeDialog(), { tone: "primary", "data-refresh-key": "add-probe" }) : null,
     ));
 
     if (!pairs.length) {
@@ -474,7 +484,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     }
 
     const colMode = pairs.length === 1 ? "1" : pairs.length === 2 || pairs.length === 4 ? "2" : "3";
-    const cards = pairs.map((pair) => {
+    const cards = pairs.map((pair, pairIdx) => {
       const aName = pair.node1_name || pair.node1?.name || pair.node1?.agent_id || "节点 A";
       const bName = pair.target_mode === "ip"
         ? pair.node2?.address || "自定义 IP"
@@ -487,7 +497,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       const fwdSeries = probeHistorySeries(pair.history, "forward");
       const revSeries = pair.bidirectional ? probeHistorySeries(pair.history, "reverse") : [];
       const hasSpark = fwdSeries.length >= 2 || revSeries.length >= 2;
-      const trend = hasSpark ? renderProbeHistoryChart(fwdSeries, pair.bidirectional ? revSeries : [], sparkWidth) : null;
+      const trend = hasSpark ? renderProbeHistoryChart(fwdSeries, pair.bidirectional ? revSeries : [], sparkWidth, pair.id) : null;
 
       const laneReasons = [pair.latest?.forward, pair.bidirectional ? pair.latest?.reverse : null]
         .filter(Boolean)
@@ -508,10 +518,11 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
             node("h3", {}, title),
             muted(specText),
           ),
-          isRunning ? badge("探测中", "warn") : pair.availability?.ready === false ? badge("不可用", "warn") : badge(pair.auto_enabled ? "监控中" : "已暂停", pair.auto_enabled ? "ok" : ""),
+          keyed("status", isRunning ? badge("探测中", "warn") : pair.availability?.ready === false ? badge("不可用", "warn") : badge(pair.auto_enabled ? "监控中" : "已暂停", pair.auto_enabled ? "ok" : "")),
         ),
         node("div", { className: "a-dash-probe-lanes" },
           directionBlock({
+            key: "fwd",
             title: "A → B",
             fromName: aName,
             fromAddress: pair.node1?.address || "—",
@@ -523,6 +534,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
             pair,
           }),
           pair.bidirectional ? directionBlock({
+            key: "rev",
             title: "B → A",
             fromName: bName,
             fromAddress: pair.node2?.address || "—",
@@ -535,20 +547,20 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
           }) : null,
         ),
         node("div", { className: "a-dash-probe-spark" },
-          trend?.svg || null,
-          node("div", { className: "a-chart-meta" },
+          trend?.svg ? keyed("spark-svg", trend.svg) : null,
+          node("div", { className: "a-chart-meta", "data-refresh-key": "spark-meta" },
             muted(trendLabel),
-            muted(pair.latest?.sampled_at ? date(pair.latest.sampled_at) : "未采样"),
+            muted(sampledLabels[pairIdx]),
           ),
-          trend && showOuterReason ? muted(pair.availability.reason) : null,
+          trend && showOuterReason ? keyed("spark-reason", muted(pair.availability.reason)) : null,
         ),
-        canExecute() ? node("div", { className: "a-dash-probe-actions a-actions" },
+        exec ? node("div", { className: "a-dash-probe-actions a-actions" },
           isRunning
-            ? button("停止", (e) => void mutatePair(pair, e.currentTarget, "stop"))
-            : button("立即探测", (e) => void mutatePair(pair, e.currentTarget, "run"), { disabled: pair.availability?.ready === false, title: pair.availability?.reason || "" }),
-          button(pair.auto_enabled ? "暂停自动" : "开启自动", (e) => void mutatePair(pair, e.currentTarget, "toggle")),
-          button("编辑", () => openProbeDialog(pair)),
-          button("删除", (e) => void mutatePair(pair, e.currentTarget, "delete"), { tone: "danger" }),
+            ? button("停止", (e) => void mutatePair(pair, e.currentTarget, "stop"), { "data-refresh-key": "stop" })
+            : button("立即探测", (e) => void mutatePair(pair, e.currentTarget, "run"), { disabled: pair.availability?.ready === false, title: pair.availability?.reason || "", "data-refresh-key": "run" }),
+          button(pair.auto_enabled ? "暂停自动" : "开启自动", (e) => void mutatePair(pair, e.currentTarget, "toggle"), { "data-refresh-key": "toggle" }),
+          button("编辑", () => openProbeDialog(pair), { "data-refresh-key": "edit" }),
+          button("删除", (e) => void mutatePair(pair, e.currentTarget, "delete"), { tone: "danger", "data-refresh-key": "delete" }),
         ) : null,
       );
     });
