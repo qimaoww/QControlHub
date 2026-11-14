@@ -4,6 +4,7 @@ import {
   clusterTopologyNodes,
   findSameCityMembers,
   matchesActiveSelection,
+  reconcileSelectionKey,
   resolveNodeGeoPoint,
 } from "../analytics/dashboard-topo-shared.js";
 import { projectPacificGeo } from "../analytics/pacific-map-data.js";
@@ -385,6 +386,57 @@ export async function run() {
     ["hk-a", "hk-b"],
   );
   assert.equal(findSameCityMembers(unordered, "unk-2").length, 0, "unmatched geo nodes should not merge into one city cluster");
+
+  // Multi-hop A-B-C-D bidirectional full-chain monitoring & grouped display assertions
+  const chainTopo = buildDashboardTopology({
+    now: Date.parse("2026-08-03T12:00:00Z"),
+    month: "2026-08",
+    today: "2026-08-03",
+    agents: [
+      { id: "a", name: "东京 · A", region_code: "JP", ip: "10.0.0.1", status: "online" },
+      { id: "b", name: "香港 · B", region_code: "HK", ip: "10.0.0.2", status: "online" },
+      { id: "c", name: "新加坡 · C", region_code: "SG", ip: "10.0.0.3", status: "online" },
+      { id: "d", name: "悉尼 · D", region_code: "AU", ip: "10.0.0.4", status: "online" },
+      { id: "idle-e", name: "备用 · E", region_code: "DE", ip: "10.0.0.5", status: "online" },
+    ],
+    probes: [
+      {
+        id: "chain_abcd",
+        name: "亚太全链路 A-B-C-D",
+        group_name: "核心专线",
+        target_mode: "",
+        nodes: [
+          { agent_id: "a", name: "东京 · A", address: "10.0.0.1" },
+          { agent_id: "b", name: "香港 · B", address: "10.0.0.2" },
+          { agent_id: "c", name: "新加坡 · C", address: "10.0.0.3" },
+          { agent_id: "d", name: "悉尼 · D", address: "10.0.0.4" },
+        ],
+        bidirectional: true,
+        availability: { ready: true, running: false },
+        latest: {
+          forward: { state: "succeeded", avg_ms: 120.5, loss_percent: 10, reached: true },
+          reverse: { state: "succeeded", avg_ms: 125.0, loss_percent: 5, reached: true },
+          hops: [
+            { hop_index: 0, from: "a", to: "b", forward: { state: "succeeded", avg_ms: 40.0, loss_percent: 0, reached: true }, reverse: { state: "succeeded", avg_ms: 41.0, loss_percent: 0, reached: true } },
+            { hop_index: 1, from: "b", to: "c", forward: { state: "succeeded", avg_ms: 30.5, loss_percent: 10, reached: true }, reverse: { state: "succeeded", avg_ms: 32.0, loss_percent: 5, reached: true } },
+            { hop_index: 2, from: "c", to: "d", forward: { state: "succeeded", avg_ms: 50.0, loss_percent: 0, reached: true }, reverse: { state: "succeeded", avg_ms: 52.0, loss_percent: 0, reached: true } },
+          ],
+        },
+      },
+    ],
+    maxNodes: null,
+  });
+  assert.equal(chainTopo.probeChains.length, 1);
+  assert.equal(chainTopo.probeChains[0].isMultiHop, true);
+  assert.equal(chainTopo.probeChains[0].hops.length, 3);
+  assert.equal(chainTopo.probeLinks.length, 3);
+  assert.equal(chainTopo.probeGroups[0].kind, "named");
+  assert.equal(chainTopo.probeGroups[0].title, "核心专线");
+  assert.equal(chainTopo.probeGroups[1].kind, "nodes");
+  assert.equal(chainTopo.probeGroups[1].nodes.length, 1);
+  const chainIdx = buildTopologySelectionIndex(chainTopo);
+  assert.ok(chainIdx.chainPeers("chain_abcd").includes("node:c"), "intermediate hop node must belong to chain peers");
+  assert.equal(reconcileSelectionKey("probe:chain_abcd", chainTopo, { allowCluster: false }), "probe:chain_abcd");
 
   console.log("Dashboard telemetry model smoke passed");
 }

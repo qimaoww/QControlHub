@@ -545,9 +545,47 @@ export function summarizeDashboardTrafficBreakdown(days, month, now = new Date()
   };
 }
 
+const MACRO_REGION_CODES = {
+  APAC: new Set(["HK", "JP", "SG", "TW", "KR", "CN", "MY", "TH", "VN", "ID", "PH", "IN", "AU", "NZ", "MO", "APAC", "AP"]),
+  EMEA: new Set(["DE", "NL", "UK", "GB", "FR", "IT", "ES", "CH", "AT", "BE", "PL", "SE", "NO", "FI", "DK", "IE", "PT", "RU", "AE", "SA", "QA", "IL", "TR", "ZA", "EG", "NG", "KE", "EU", "EMEA", "ME", "AF"]),
+  AMER: new Set(["US", "CA", "BR", "MX", "AR", "CL", "CO", "PE", "NA", "LATAM", "AMER"]),
+};
+
+const MACRO_REGION_PHRASES = {
+  APAC: ["香港", "hong kong", "hongkong", "东京", "大阪", "日本", "tokyo", "osaka", "japan", "新加坡", "狮城", "singapore", "台北", "台湾", "高雄", "taipei", "taiwan", "首尔", "韩国", "seoul", "korea", "吉隆坡", "马来", "kuala lumpur", "malaysia", "悉尼", "墨尔本", "澳洲", "澳大利亚", "sydney", "melbourne", "australia", "孟买", "印度", "mumbai", "india", "曼谷", "bangkok", "雅加达", "jakarta", "马尼拉", "manila", "胡志明", "河内", "hanoi", "奥克兰", "auckland", "北京", "上海", "深圳", "广州", "杭州", "成都"],
+  EMEA: ["法兰克福", "德国", "frankfurt", "germany", "阿姆斯特丹", "荷兰", "amsterdam", "netherlands", "伦敦", "英国", "london", "paris", "巴黎", "法国", "france", "苏黎世", "zurich", "维也纳", "vienna", "华沙", "warsaw", "斯德哥尔摩", "stockholm", "都柏林", "dublin", "马德里", "madrid", "米兰", "milan", "罗马", "rome", "莫斯科", "moscow", "迪拜", "阿联酋", "dubai", "uae", "利雅得", "riyadh", "约翰内斯堡", "南非", "johannesburg", "开罗", "cairo", "伊斯坦布尔", "istanbul"],
+  AMER: ["洛杉矶", "圣何塞", "硅谷", "纽约", "西雅图", "芝加哥", "达拉斯", "迈阿密", "华盛顿", "亚特兰大", "凤凰城", "丹佛", "美国", "los angeles", "san jose", "new york", "seattle", "chicago", "dallas", "miami", "ashburn", "atlanta", "phoenix", "denver", "多伦多", "温哥华", "蒙特利尔", "加拿大", "toronto", "vancouver", "montreal", "canada", "圣保罗", "巴西", "sao paulo", "são paulo", "brazil", "墨西哥城", "mexico", "布宜诺斯艾利斯", "buenos aires", "圣地亚哥", "santiago", "波哥大", "bogota"],
+};
+
+const MACRO_CODE_RE = {
+  APAC: /(?:^|[^a-z0-9])(?:hk|jp|sg|tw|kr|cn|my|th|vn|id|ph|in|au|nz|mo)(?:[-_ ]?\d+)(?:$|[^a-z0-9])/i,
+  EMEA: /(?:^|[^a-z0-9])(?:de|nl|uk|gb|fr|it|es|ch|at|be|pl|se|no|fi|dk|ie|pt|ru|ae|sa|qa|il|tr|za|eg|ng|ke)(?:[-_ ]?\d+)(?:$|[^a-z0-9])/i,
+  AMER: /(?:^|[^a-z0-9])(?:us|ca|br|mx|ar|cl|co|pe)(?:[-_ ]?\d+)(?:$|[^a-z0-9])/i,
+};
+
 /**
- * Projects existing dashboard datasets into a three-tier end-to-end data flow
- * topology without fabricating proxy/tunnel rates that the API does not provide.
+ * Classifies a topology node or endpoint into a macro geographic region
+ * (`APAC`, `EMEA`, `AMER`, or `""`) using region codes with city/code fallback.
+ */
+export function macroRegionForNode(ep) {
+  if (!ep || ep.kind === "ext") return "";
+  const code = String(ep.regionCode || ep.region_code || ep.region || "").trim().toUpperCase();
+  if (code) {
+    for (const [macro, set] of Object.entries(MACRO_REGION_CODES)) {
+      if (set.has(code)) return macro;
+    }
+  }
+  const text = [ep.name, ep.city, ep.id, ep.regionCode, ep.region_code].filter(Boolean).join(" ").toLowerCase();
+  if (!text) return "";
+  for (const macro of ["APAC", "EMEA", "AMER"]) {
+    if (MACRO_CODE_RE[macro].test(text)) return macro;
+    if (MACRO_REGION_PHRASES[macro].some((kw) => text.includes(kw))) return macro;
+  }
+  return "";
+}
+
+/**
+ * Projects existing dashboard datasets into a connected delay-monitoring topology.
  */
 export function buildDashboardTopology({
   agents = [],
@@ -568,6 +606,12 @@ export function buildDashboardTopology({
   for (const pair of probes || []) {
     if (pair?.node1?.agent_id) probeEndpointSet.add(pair.node1.agent_id);
     if (pair?.target_mode !== "ip" && pair?.node2?.agent_id) probeEndpointSet.add(pair.node2.agent_id);
+    if (Array.isArray(pair?.nodes)) {
+      for (let i = 0; i < pair.nodes.length; i += 1) {
+        if (pair?.target_mode === "ip" && i === pair.nodes.length - 1) continue;
+        if (pair.nodes[i]?.agent_id) probeEndpointSet.add(pair.nodes[i].agent_id);
+      }
+    }
   }
 
   const agentMeta = buildAgentMetaMap(agents, pageAgents);
@@ -725,88 +769,361 @@ export function buildDashboardTopology({
     weight: weightFor(node.txBPS, node.monthlyTxBytes, maxTxSignal),
   }));
 
+  const visibleNodeByID = new Map(visibleNodes.map((n) => [n.id, n]));
   const externalTargetMap = new Map();
   const probeLinks = [];
+  const probeChains = [];
+  const monitoredNodeIDs = new Set();
   let omittedProbeCount = 0;
   let abnormalLinks = 0;
 
+  const summarizeDir = (dir, pair) => {
+    const status = probeDirectionStatus(dir, pair?.availability, pair?.active_state);
+    const latencyMS = dir?.reached && finiteNonNegative(Number(dir.avg_ms)) ? Number(dir.avg_ms) : null;
+    const minMS = dir?.reached && finiteNonNegative(Number(dir.min_ms)) ? Number(dir.min_ms) : null;
+    const maxMS = dir?.reached && finiteNonNegative(Number(dir.max_ms)) ? Number(dir.max_ms) : null;
+    const stdevMS = dir?.reached && finiteNonNegative(Number(dir.stdev_ms)) ? Number(dir.stdev_ms) : null;
+    const lossVal = dir && finiteNonNegative(Number(dir.loss_percent)) ? Number(dir.loss_percent) : null;
+    return { status, latencyMS, minMS, maxMS, stdevMS, lossPercent: lossVal, reached: Boolean(dir?.reached) };
+  };
+
+  const formatSegmentMetric = (fwd, rev, pair, bidirectional) => {
+    const running = Boolean(pair?.availability?.running || ["preparing", "running", "stopping"].includes(pair?.active_state));
+    if (running || fwd.status.label === "探测中" || rev?.status?.label === "探测中") return "探测中";
+    if (fwd.status.tone === "bad" && !fwd.reached && (!rev || !rev.reached)) {
+      const lossMax = Math.max(fwd.lossPercent ?? 0, rev?.lossPercent ?? 0);
+      return lossMax >= 100 ? "不可达" : fwd.status.label;
+    }
+    if (pair?.availability?.ready === false && fwd.latencyMS == null && rev?.latencyMS == null) return "暂不可用";
+    const maxLoss = [fwd.lossPercent, rev?.lossPercent].filter((v) => v != null).reduce((m, v) => Math.max(m, v), -1);
+    if (fwd.latencyMS != null) {
+      const rtt = `${fwd.latencyMS.toFixed(fwd.latencyMS >= 100 ? 0 : 1)}ms`;
+      return maxLoss > 0 ? `${rtt} · 丢包${Math.round(maxLoss)}%` : rtt;
+    }
+    if (bidirectional && rev?.latencyMS != null) {
+      const rtt = `回${rev.latencyMS.toFixed(rev.latencyMS >= 100 ? 0 : 1)}ms`;
+      return maxLoss > 0 ? `${rtt} · 丢包${Math.round(maxLoss)}%` : rtt;
+    }
+    return fwd.status.label;
+  };
+
+  const pickTone = (fwdTone, revTone, hopTones = []) => {
+    const tones = [fwdTone, revTone, ...hopTones].filter(Boolean);
+    if (tones.includes("bad")) return "bad";
+    if (tones.includes("warn")) return "warn";
+    if (tones.includes("ok")) return "ok";
+    return "";
+  };
+
   for (const pair of probes || []) {
-    const fromID = pair?.node1?.agent_id || "";
     const isExternal = pair?.target_mode === "ip";
-    const extAddr = String(pair?.node2?.address || pair?.node2?.name || "").trim();
-    const toID = isExternal ? `ext:${extAddr}` : (pair?.node2?.agent_id || "");
+    const rawNodes = Array.isArray(pair?.nodes) && pair.nodes.length >= 2
+      ? pair.nodes
+      : [pair?.node1, pair?.node2].filter(Boolean);
+    const chainMeta = Array.isArray(pair?.chain) ? pair.chain : [];
+    const endpoints = rawNodes.map((ep, idx) => {
+      const ext = isExternal && idx === rawNodes.length - 1;
+      const meta = chainMeta[idx] || null;
+      const addr = String(ep?.address || meta?.address || "").trim();
+      const id = ext ? `ext:${addr}` : String(ep?.agent_id || "").trim();
+      const visNode = ext ? null : (visibleNodeByID.get(id) || null);
+      const agent = ext ? null : (agentMeta.get(id) || null);
+      return {
+        kind: ext ? "ext" : "node",
+        id,
+        agentID: ext ? "" : id,
+        name: ext
+          ? (ep?.name && ep.name !== addr ? ep.name : addr)
+          : (meta?.name || ep?.name || visNode?.name || agent?.name || id),
+        regionCode: ext ? "" : (meta?.region || visNode?.regionCode || agent?.region_code || ""),
+        address: addr,
+        online: ext ? true : (meta ? Boolean(meta.online) : Boolean(visNode?.isOnline)),
+      };
+    });
 
     const fwdDir = pair?.latest?.forward || null;
     const revDir = pair?.bidirectional ? (pair?.latest?.reverse || null) : null;
-    const fwdStatus = probeDirectionStatus(fwdDir, pair?.availability, pair?.active_state);
-    const revStatus = pair?.bidirectional
-      ? probeDirectionStatus(revDir, pair?.availability, pair?.active_state)
-      : null;
+    const fwdSum = summarizeDir(fwdDir, pair);
+    const revSum = pair?.bidirectional ? summarizeDir(revDir, pair) : null;
+    const overallPreTone = pickTone(fwdSum.status.tone, revSum?.status?.tone);
 
-    const tone = [fwdStatus.tone, revStatus?.tone].includes("bad")
-      ? "bad"
-      : [fwdStatus.tone, revStatus?.tone].includes("warn")
-        ? "warn"
-        : fwdStatus.tone === "ok"
-          ? "ok"
-          : "";
-    if (tone === "bad" || tone === "warn") abnormalLinks += 1;
-
-    if (!fromID || !visibleSet.has(fromID) || (!isExternal && !visibleSet.has(toID)) || (isExternal && !extAddr)) {
+    const allEndpointsVisible = endpoints.length >= 2 && endpoints.every((ep) => (
+      ep.kind === "ext" ? Boolean(ep.address) : (Boolean(ep.id) && visibleSet.has(ep.id))
+    ));
+    if (!allEndpointsVisible) {
+      if (overallPreTone === "bad" || overallPreTone === "warn") abnormalLinks += 1;
       omittedProbeCount += 1;
       continue;
     }
 
-    if (isExternal && !externalTargetMap.has(toID)) {
-      externalTargetMap.set(toID, {
-        id: toID,
-        name: pair?.node2?.name && pair.node2.name !== extAddr ? pair.node2.name : extAddr,
-        address: extAddr,
-        linkCount: 0,
-      });
-    }
-    if (isExternal) {
-      externalTargetMap.get(toID).linkCount += 1;
-    }
-
-    const fwdLatency = fwdDir?.reached && finiteNonNegative(Number(fwdDir.avg_ms)) ? Number(fwdDir.avg_ms) : null;
-    const revLatency = revDir?.reached && finiteNonNegative(Number(revDir.avg_ms)) ? Number(revDir.avg_ms) : null;
-    const lossValues = [fwdDir?.loss_percent, revDir?.loss_percent]
-      .map((v) => Number(v))
-      .filter((v) => Number.isFinite(v) && v >= 0);
-    const maxLoss = lossValues.length ? Math.max(...lossValues) : null;
+    const isMultiHop = endpoints.length >= 3;
+    const groupName = String(pair?.group_name || "").trim();
     const running = Boolean(pair?.availability?.running || ["preparing", "running", "stopping"].includes(pair?.active_state));
+    const rawHops = Array.isArray(pair?.latest?.hops) && pair.latest.hops.length === endpoints.length - 1
+      ? pair.latest.hops
+      : (endpoints.length === 2 ? [{ hop_index: 0, forward: fwdDir, reverse: revDir }] : []);
 
-    let metricLabel = fwdStatus.label;
-    if (running || fwdDir?.state === "running" || fwdDir?.state === "preparing") {
-      metricLabel = "探测中";
-    } else if (fwdStatus.tone === "bad" && (!fwdDir?.reached || Number(fwdDir?.loss_percent) >= 100)) {
-      metricLabel = "不可达";
-    } else if (pair?.availability?.ready === false) {
-      metricLabel = "暂不可用";
-    } else if (fwdLatency != null) {
-      const rtt = `${fwdLatency.toFixed(fwdLatency >= 100 ? 0 : 1)}ms`;
-      metricLabel = maxLoss != null && maxLoss > 0 ? `${rtt} · 丢包${Math.round(maxLoss)}%` : rtt;
+    const builtHops = [];
+    const chainNodeIDs = endpoints.filter((ep) => ep.kind === "node").map((ep) => ep.id);
+    for (const nid of chainNodeIDs) monitoredNodeIDs.add(nid);
+
+    for (let i = 0; i < endpoints.length - 1; i += 1) {
+      const fromEp = endpoints[i];
+      const toEp = endpoints[i + 1];
+      const hopIsExt = toEp.kind === "ext";
+      const hopBidir = Boolean(pair?.bidirectional) && !hopIsExt;
+      const hopSample = rawHops[i] || null;
+      const hFwd = summarizeDir(hopSample?.forward || (!isMultiHop ? fwdDir : null), pair);
+      const hRev = hopBidir ? summarizeDir(hopSample?.reverse || (!isMultiHop ? revDir : null), pair) : null;
+      const hTone = pickTone(hFwd.status.tone, hRev?.status?.tone);
+      const hLossValues = [hFwd.lossPercent, hRev?.lossPercent].filter((v) => v != null);
+      const hMaxLoss = hLossValues.length ? Math.max(...hLossValues) : null;
+      const hMetric = formatSegmentMetric(hFwd, hRev, pair, hopBidir);
+      const hStatusLabel = hTone === "bad" ? (hFwd.status.tone === "bad" ? hFwd.status.label : hRev?.status?.label || hFwd.status.label) : hFwd.status.label;
+      const segID = isMultiHop ? `${pair.id}::hop:${i}` : pair.id;
+
+      if (hopIsExt) {
+        if (!externalTargetMap.has(toEp.id)) {
+          externalTargetMap.set(toEp.id, {
+            id: toEp.id,
+            name: toEp.name,
+            address: toEp.address,
+            linkCount: 0,
+          });
+        }
+        externalTargetMap.get(toEp.id).linkCount += 1;
+      }
+
+      const segObj = {
+        id: segID,
+        probeID: pair.id,
+        name: isMultiHop ? `${fromEp.name} ${hopBidir ? "↔" : "→"} ${toEp.name} (${pair.name || "全程链路"})` : (pair.name || `${fromEp.name} → ${toEp.name}`),
+        groupName,
+        isMultiHop,
+        hopIndex: i,
+        hopCount: endpoints.length - 1,
+        chainEndpoints: chainNodeIDs,
+        from: fromEp.id,
+        to: toEp.id,
+        fromName: fromEp.name,
+        toName: toEp.name,
+        isExternal: hopIsExt,
+        bidirectional: hopBidir,
+        running,
+        tone: hTone,
+        statusLabel: hStatusLabel,
+        metricLabel: hMetric,
+        latencyMS: hFwd.latencyMS,
+        revLatencyMS: hRev ? hRev.latencyMS : null,
+        fwdLossPercent: hFwd.lossPercent,
+        revLossPercent: hRev ? hRev.lossPercent : null,
+        lossPercent: hMaxLoss,
+        forward: hFwd,
+        reverse: hRev,
+        sourceAddr: fromEp.address,
+        targetAddr: toEp.address,
+        sampledAt: pair?.latest?.sampled_at || "",
+      };
+      builtHops.push(segObj);
+      probeLinks.push(segObj);
     }
 
-    probeLinks.push({
+    const chainTone = pickTone(fwdSum.status.tone, revSum?.status?.tone, builtHops.map((h) => h.tone));
+    if (chainTone === "bad" || chainTone === "warn") abnormalLinks += 1;
+    const lossValues = [fwdSum.lossPercent, revSum?.lossPercent].filter((v) => v != null);
+    const maxLoss = lossValues.length ? Math.max(...lossValues) : null;
+    const chainArrow = pair?.bidirectional ? "↔" : "→";
+    const defaultChainTitle = endpoints.map((e) => e.name).join(` ${chainArrow} `);
+
+    probeChains.push({
       id: pair.id,
-      name: pair.name || `${pair.node1?.name || fromID} → ${pair.node2?.name || extAddr}`,
-      from: fromID,
-      to: toID,
+      name: pair.name || defaultChainTitle,
+      groupName,
+      endpoints,
+      hops: builtHops,
+      isMultiHop,
       isExternal,
       bidirectional: Boolean(pair?.bidirectional),
       running,
-      tone,
-      statusLabel: tone === "bad" ? (fwdStatus.tone === "bad" ? fwdStatus.label : revStatus.label) : fwdStatus.label,
-      metricLabel,
-      latencyMS: fwdLatency,
-      revLatencyMS: revLatency,
+      tone: chainTone,
+      statusLabel: chainTone === "bad" ? (fwdSum.status.tone === "bad" ? fwdSum.status.label : revSum?.status?.label || "异常") : fwdSum.status.label,
+      metricLabel: formatSegmentMetric(fwdSum, revSum, pair, Boolean(pair?.bidirectional)),
+      latencyMS: fwdSum.latencyMS,
+      revLatencyMS: revSum ? revSum.latencyMS : null,
+      fwdLossPercent: fwdSum.lossPercent,
+      revLossPercent: revSum ? revSum.lossPercent : null,
       lossPercent: maxLoss,
-      sourceAddr: pair?.node1?.address || "",
-      targetAddr: pair?.node2?.address || extAddr,
+      forward: fwdSum,
+      reverse: revSum,
       sampledAt: pair?.latest?.sampled_at || "",
+      availabilityReady: pair?.availability?.ready !== false,
+      reason: pair?.availability?.reason || "",
+      autoEnabled: Boolean(pair?.auto_enabled),
+      autoIntervalSeconds: Number(pair?.auto_interval_seconds || 60),
+      revision: Number(pair?.revision || 0),
+      raw: pair,
     });
+  }
+
+  // Group topology into coherent monitoring groups for grouped display.
+  const namedGroupMap = new Map();
+  const multiHopChains = [];
+  const regionalBuckets = {
+    APAC: [],
+    EMEA: [],
+    AMER: [],
+    CROSS: [],
+  };
+  const externalChains = [];
+
+  for (const ch of probeChains) {
+    if (ch.groupName) {
+      if (!namedGroupMap.has(ch.groupName)) namedGroupMap.set(ch.groupName, []);
+      namedGroupMap.get(ch.groupName).push(ch);
+    } else if (ch.isMultiHop) {
+      multiHopChains.push(ch);
+    } else if (ch.isExternal) {
+      externalChains.push(ch);
+    } else {
+      const nodeEps = (ch.endpoints || []).filter((ep) => ep.kind !== "ext");
+      const regions = nodeEps.map((ep) => macroRegionForNode(ep));
+      if (nodeEps.length >= 2 && regions[0] && regions.every((r) => r === regions[0])) {
+        regionalBuckets[regions[0]].push(ch);
+      } else {
+        regionalBuckets.CROSS.push(ch);
+      }
+    }
+  }
+
+  const summarizeGroupStats = (chains, nodes = [], extTargets = [], links = []) => {
+    const okCount = chains.filter((c) => c.tone === "ok").length;
+    const badCount = chains.filter((c) => c.tone === "bad" || c.tone === "warn").length;
+    const runningCount = chains.filter((c) => c.running).length;
+    const hopOrChain = links.length ? links : chains;
+    const fwdVals = hopOrChain.map((c) => c.latencyMS).filter((v) => v != null);
+    const revVals = hopOrChain.filter((c) => c.bidirectional).map((c) => c.revLatencyMS).filter((v) => v != null);
+    return {
+      total: chains.length,
+      hopCount: links.length,
+      nodeCount: nodes.length,
+      extCount: extTargets.length,
+      okCount,
+      badCount,
+      runningCount,
+      avgFwdMS: fwdVals.length ? Math.round((fwdVals.reduce((s, v) => s + v, 0) / fwdVals.length) * 10) / 10 : null,
+      avgRevMS: revVals.length ? Math.round((revVals.reduce((s, v) => s + v, 0) / revVals.length) * 10) / 10 : null,
+    };
+  };
+
+  const visibleOrder = new Map(visibleNodes.map((n, idx) => [n.id, idx]));
+  const finalizeGroup = ({ id, title, kind, region = "", chains = [], explicitNodes = [] }) => {
+    const nodeMap = new Map();
+    const extMap = new Map();
+    const links = [];
+    for (const node of explicitNodes) {
+      if (node?.id && !nodeMap.has(node.id)) nodeMap.set(node.id, node);
+    }
+    for (const chain of chains) {
+      for (const hop of chain.hops || []) links.push(hop);
+      for (const ep of chain.endpoints || []) {
+        if (ep.kind === "ext") {
+          const prev = extMap.get(ep.id);
+          if (prev) {
+            prev.linkCount += 1;
+          } else {
+            const shared = externalTargetMap.get(ep.id);
+            extMap.set(ep.id, {
+              id: ep.id,
+              name: ep.name || shared?.name || ep.address,
+              address: ep.address || shared?.address || "",
+              linkCount: 1,
+            });
+          }
+        } else if (ep.id && !nodeMap.has(ep.id)) {
+          const vis = visibleNodeByID.get(ep.id);
+          nodeMap.set(ep.id, vis || {
+            id: ep.id,
+            name: ep.name || ep.id,
+            regionCode: ep.regionCode || "",
+            status: ep.online ? "online" : "offline",
+            isOnline: Boolean(ep.online),
+            ip: ep.address || "",
+          });
+        }
+      }
+    }
+    const nodes = [...nodeMap.values()].sort((a, b) => {
+      const ia = visibleOrder.has(a.id) ? visibleOrder.get(a.id) : Number.MAX_SAFE_INTEGER;
+      const ib = visibleOrder.has(b.id) ? visibleOrder.get(b.id) : Number.MAX_SAFE_INTEGER;
+      if (ia !== ib) return ia - ib;
+      return String(a.name || a.id).localeCompare(String(b.name || b.id));
+    });
+    const externalTargets = [...extMap.values()];
+    return {
+      id,
+      title,
+      kind,
+      region,
+      chains,
+      links,
+      nodes,
+      externalTargets,
+      stats: summarizeGroupStats(chains, nodes, externalTargets, links),
+    };
+  };
+
+  const probeGroups = [];
+  for (const [gTitle, chains] of namedGroupMap.entries()) {
+    probeGroups.push(finalizeGroup({
+      id: `named:${gTitle}`,
+      title: gTitle,
+      kind: "named",
+      chains,
+    }));
+  }
+  if (multiHopChains.length) {
+    probeGroups.push(finalizeGroup({
+      id: "chains",
+      title: "全程多跳专线",
+      kind: "chain",
+      chains: multiHopChains,
+    }));
+  }
+  const regionDefs = [
+    { key: "APAC", id: "region:apac", title: "亚太节点分组", kind: "region" },
+    { key: "EMEA", id: "region:emea", title: "欧非中东分组", kind: "region" },
+    { key: "AMER", id: "region:amer", title: "美洲节点分组", kind: "region" },
+    { key: "CROSS", id: "cross-region", title: "跨区骨干分组", kind: "mesh" },
+  ];
+  for (const def of regionDefs) {
+    const bucket = regionalBuckets[def.key];
+    if (bucket.length) {
+      probeGroups.push(finalizeGroup({
+        id: def.id,
+        title: def.title,
+        kind: def.kind,
+        region: def.key,
+        chains: bucket,
+      }));
+    }
+  }
+  if (externalChains.length) {
+    probeGroups.push(finalizeGroup({
+      id: "external",
+      title: "公网出口延迟监测",
+      kind: "external",
+      chains: externalChains,
+    }));
+  }
+  const unmonitoredNodes = visibleNodes.filter((n) => !monitoredNodeIDs.has(n.id));
+  if (unmonitoredNodes.length) {
+    probeGroups.push(finalizeGroup({
+      id: "unmonitored",
+      title: "待纳入监测节点",
+      kind: "nodes",
+      chains: [],
+      explicitNodes: unmonitoredNodes,
+    }));
   }
 
   return {
@@ -820,6 +1137,8 @@ export function buildDashboardTopology({
     ingressLinks,
     egressLinks,
     probeLinks,
+    probeChains,
+    probeGroups,
     omittedProbeCount,
     abnormalLinks,
     totalProbeLinks: (probes || []).length,

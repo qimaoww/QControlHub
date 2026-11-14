@@ -73,4 +73,54 @@ func TestDashboardProbePairRequestNormalizeAndValidate(t *testing.T) {
 			}
 		})
 	}
+
+	chain := DashboardProbePairRequest{
+		Name:      "  A-B-C-D Full Chain  ",
+		GroupName: "  亚太骨干组  ",
+		Nodes: []DiagnosticEndpoint{
+			{AgentID: "agt_a", Address: "198.51.100.1"},
+			{AgentID: "agt_b", Address: "198.51.100.2"},
+			{AgentID: "agt_c", Address: "198.51.100.3"},
+			{AgentID: "agt_d", Address: "198.51.100.4"},
+		},
+		Bidirectional: true,
+	}
+	if err := chain.NormalizeAndValidate(); err != nil {
+		t.Fatalf("valid A-B-C-D chain rejected: %v", err)
+	}
+	if chain.GroupName != "亚太骨干组" || chain.Node1.AgentID != "agt_a" || chain.Node2.AgentID != "agt_d" || len(chain.Nodes) != 4 {
+		t.Fatalf("unexpected normalized chain: %+v", chain)
+	}
+
+	dupChain := chain
+	dupChain.Nodes = []DiagnosticEndpoint{
+		{AgentID: "agt_a", Address: "198.51.100.1"},
+		{AgentID: "agt_b", Address: "198.51.100.2"},
+		{AgentID: "agt_a", Address: "198.51.100.1"},
+	}
+	if err := dupChain.NormalizeAndValidate(); err == nil {
+		t.Fatal("duplicate agent in chain must be rejected")
+	}
+
+	mixedChain := chain
+	mixedChain.Nodes = []DiagnosticEndpoint{
+		{AgentID: "agt_a", Address: "198.51.100.1"},
+		{AgentID: "agt_b", Address: "2001:db8::2"},
+		{AgentID: "agt_c", Address: "198.51.100.3"},
+	}
+	if err := mixedChain.NormalizeAndValidate(); err == nil {
+		t.Fatal("mixed IPv4/IPv6 hop chain must be rejected")
+	}
+
+	customChain := DashboardProbePairRequest{
+		TargetMode: "ip",
+		Nodes: []DiagnosticEndpoint{
+			{AgentID: "agt_a", Address: "198.51.100.1"},
+			{AgentID: "agt_b", Address: "198.51.100.2"},
+			{Address: "1.1.1.1"},
+		},
+	}
+	if err := customChain.NormalizeAndValidate(); err == nil {
+		t.Fatal("custom IP mode with >2 hops must be rejected")
+	}
 }

@@ -147,3 +147,104 @@ func TestDashboardProbePairsCRUDPermissionsAndScheduling(t *testing.T) {
 		t.Fatalf("deleted probe still present: %+v", listAfter.Pairs)
 	}
 }
+
+func TestDashboardProbeChainABCDExtension(t *testing.T) {
+	db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
+	a, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "chain-a")
+	b, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "chain-b")
+	c, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "chain-c")
+	d, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "chain-d")
+	addrs := []string{"192.0.2.11", "192.0.2.12", "192.0.2.13", "192.0.2.14"}
+	for i, agent := range []core.Agent{a, b, c, d} {
+		grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 5201)
+		caps := core.DiagnosticCapabilities{
+			Tools:     map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}},
+			Addresses: []string{addrs[i]},
+		}
+		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: append(agent.Features, core.AgentFeatureNetworkDiagnostics)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpdateDiagnosticCapabilities(ctx, agent.ID, &caps); err != nil {
+			t.Fatal(err)
+		}
+	}
+	access := acceptConfigScopeAPIInvitations(alice)
+	for _, sh := range access.Shares {
+		admin.call("PUT", "/agents/"+sh.AgentID+"/diagnostic-grants/"+sh.ID, map[string]bool{"enabled": true}, 204, nil)
+	}
+	var nodes []core.DiagnosticNode
+	alice.call("GET", "/network-diagnostics/nodes", nil, 200, &nodes)
+	ep := map[string]core.DiagnosticEndpoint{}
+	for _, n := range nodes {
+		ep[n.AgentID] = core.DiagnosticEndpoint{AgentID: n.AgentID, InstanceID: n.InstanceID, Address: n.Capabilities.Addresses[0]}
+	}
+
+	// Start with A-B and extend into A-B-C-D with explicit group_name.
+	createReq := core.DashboardProbePairRequest{
+		Name:                "核心全程专线",
+		GroupName:           "亚太核心",
+		Nodes:               []core.DiagnosticEndpoint{ep[a.ID], ep[b.ID]},
+		Bidirectional:       true,
+		AutoEnabled:         true,
+		AutoIntervalSeconds: 60,
+		Parameters:          core.DiagnosticParameters{Tool: "ping", Protocol: "icmp", Count: 4, IntervalMS: 200, TimeoutMS: 1000, Size: 56},
+	}
+	var chain core.DashboardProbePair
+	alice.call("POST", "/dashboard/probes", createReq, 201, &chain)
+
+	extendReq := createReq
+	extendReq.Nodes = []core.DiagnosticEndpoint{ep[a.ID], ep[b.ID], ep[c.ID], ep[d.ID]}
+	extendReq.Revision = chain.Revision
+	alice.call("PUT", "/dashboard/probes/"+chain.ID, extendReq, 200, &chain)
+	if len(chain.Nodes) != 4 || chain.GroupName != "亚太核心" {
+		t.Fatalf("extended chain unexpected: %+v", chain)
+	}
+
+	if err := db.RunDueDashboardProbes(ctx, time.Now().UTC().Add(time.Second)); err != nil {
+		t.Fatalf("run due chain probes: %v", err)
+	}
+	// Run all agent polls until the multi-round A<->B<->C<->D commands complete.
+	agents := []core.Agent{a, b, c, d}
+	for round := 0; round < 4; round++ {
+		progressed := false
+		for idx, ag := range agents {
+			cmds, err := db.AgentDiagnosticCommands(ctx, ag.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, cmd := range cmds {
+				progressed = true
+				avg := 10.0 + float64(idx+round)
+				loss := 0.0
+				if cmd.Source.AgentID == b.ID && cmd.Target.AgentID == c.ID {
+					loss = 10.0
+				}
+				raw, _ := json.Marshal(map[string]any{
+					"sent": 5, "received": 5, "loss_percent": loss,
+					"min_ms": avg - 2, "avg_ms": avg, "max_ms": avg + 2, "stdev_ms": 0.8, "reached": true,
+				})
+				if err := db.CompleteDiagnosticCommand(ctx, ag.ID, core.DiagnosticResult{
+					ID: cmd.ID, State: "succeeded", Cleaned: true, Output: raw,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+
+	var listAfter core.DashboardProbeListResponse
+	alice.call("GET", "/dashboard/probes", nil, 200, &listAfter)
+	if len(listAfter.Pairs) != 1 || listAfter.Pairs[0].Latest == nil || len(listAfter.Pairs[0].Latest.Hops) != 3 {
+		t.Fatalf("expected 3 measured hops on latest chain sample: %+v", listAfter.Pairs)
+	}
+	sample := listAfter.Pairs[0].Latest
+	if sample.Forward == nil || sample.Reverse == nil || !sample.Forward.Reached || !sample.Reverse.Reached {
+		t.Fatalf("expected bidirectional aggregated forward/reverse chain metrics: %+v", sample)
+	}
+	if sample.Forward.LossPercent != 10 {
+		t.Fatalf("expected combined forward chain loss 10%%, got %+v", sample.Forward)
+	}
+}

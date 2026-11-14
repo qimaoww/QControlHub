@@ -467,7 +467,7 @@ export async function dashboardPage(ctx) {
     getStates: () => states,
     getMonth: () => month,
     canOpenProbes: probesSection.canView,
-    onOpenProbes: (probeID) => probesSection.open(probeID),
+    onOpenProbes: (probeID, options) => probesSection.open(probeID, options),
     showLedger: false,
     isStandalonePage: false,
   });
@@ -721,7 +721,7 @@ export async function topologyPage(ctx) {
     getStates: () => states,
     getMonth: () => month,
     canOpenProbes: probesSection.canView,
-    onOpenProbes: (probeID) => probesSection.open(probeID),
+    onOpenProbes: (probeID, options) => probesSection.open(probeID, options),
     showLedger: true,
     isStandalonePage: true,
   });

@@ -432,19 +432,34 @@ export function parseEntityKey(key) {
   return { kind: "", id: s, memberIDs: [] };
 }
 
-/** Computes peer tag arrays for nodes and external targets (always prefixing internal nodes with `node:`). */
+/** Computes peer tag arrays for nodes and external targets (always prefixing internal nodes with `node:` and linking full multi-hop chains). */
 export function buildPeerProbeTags(model) {
   const map = new Map();
   for (const n of (model?.nodes || [])) map.set(n.id, new Set());
   for (const ext of (model?.externalTargets || [])) map.set(ext.id, new Set());
   for (const p of (model?.probeLinks || [])) {
     const tag = entityKey.probe(p.id);
+    const parentTag = p.probeID && p.probeID !== p.id ? entityKey.probe(p.probeID) : "";
     const fromKey = entityKey.node(p.from);
     const toKey = p.isExternal ? entityKey.external(p.to) : entityKey.node(p.to);
     map.get(p.from)?.add(tag);
+    if (parentTag) map.get(p.from)?.add(parentTag);
     map.get(p.from)?.add(toKey);
     map.get(p.to)?.add(tag);
+    if (parentTag) map.get(p.to)?.add(parentTag);
     map.get(p.to)?.add(fromKey);
+  }
+  for (const ch of (model?.probeChains || [])) {
+    const cTag = entityKey.probe(ch.id);
+    const segTags = (ch.hops || []).map((h) => entityKey.probe(h.id));
+    const epKeys = (ch.endpoints || []).map((ep) => (ep.kind === "ext" ? entityKey.external(ep.id) : entityKey.node(ep.id)));
+    for (const ep of (ch.endpoints || [])) {
+      const set = map.get(ep.id);
+      if (!set) continue;
+      set.add(cTag);
+      segTags.forEach((t) => set.add(t));
+      epKeys.forEach((k) => set.add(k));
+    }
   }
   const out = new Map();
   map.forEach((set, k) => out.set(k, [...set]));
@@ -453,13 +468,14 @@ export function buildPeerProbeTags(model) {
 
 /**
  * Single source of truth for entity identities, adjacency `peers` arrays, and valid active keys
- * shared across desktop/mobile flow boards, Pacific maps, probe pills, inspect bar, and ledger cards.
+ * shared across grouped flow boards, Pacific maps, probe pills, inspect bar, and ledger cards.
  */
 export function buildTopologySelectionIndex(model, clusters = []) {
   const peerTags = buildPeerProbeTags(model);
   const nodeMap = new Map();
   const extMap = new Map();
   const probeMap = new Map();
+  const chainMap = new Map();
   const clusterMap = new Map();
   const validKeys = new Set();
 
@@ -491,12 +507,27 @@ export function buildTopologySelectionIndex(model, clusters = []) {
     extMap.set(ext.id, [extKey, ...(peerTags.get(ext.id) || [])]);
   }
 
+  for (const ch of (model?.probeChains || [])) {
+    const cKey = entityKey.probe(ch.id);
+    validKeys.add(cKey);
+    const set = new Set([cKey]);
+    for (const h of (ch.hops || [])) set.add(entityKey.probe(h.id));
+    for (const ep of (ch.endpoints || [])) {
+      set.add(ep.kind === "ext" ? entityKey.external(ep.id) : entityKey.node(ep.id));
+    }
+    chainMap.set(ch.id, [...set]);
+  }
+
   for (const p of (model?.probeLinks || [])) {
     const pKey = entityKey.probe(p.id);
     const fromKey = entityKey.node(p.from);
     const toKey = p.isExternal ? entityKey.external(p.to) : entityKey.node(p.to);
     validKeys.add(pKey);
-    probeMap.set(p.id, [...new Set([pKey, fromKey, toKey])]);
+    const set = new Set([pKey, fromKey, toKey]);
+    if (p.probeID && chainMap.has(p.probeID)) {
+      chainMap.get(p.probeID).forEach((k) => set.add(k));
+    }
+    probeMap.set(p.id, [...set]);
   }
 
   for (const cl of (clusters || [])) {
@@ -520,11 +551,12 @@ export function buildTopologySelectionIndex(model, clusters = []) {
     },
     nodePeers: (id) => nodeMap.get(id) || [entityKey.node(id)],
     extPeers: (id) => extMap.get(id) || [entityKey.external(id)],
-    probePeers: (probe) => probeMap.get(probe.id) || [
+    probePeers: (probe) => probeMap.get(probe.id) || chainMap.get(probe.id) || [
       entityKey.probe(probe.id),
-      entityKey.node(probe.from),
-      probe.isExternal ? entityKey.external(probe.to) : entityKey.node(probe.to),
+      ...(probe.from ? [entityKey.node(probe.from)] : []),
+      ...(probe.to ? [probe.isExternal ? entityKey.external(probe.to) : entityKey.node(probe.to)] : []),
     ],
+    chainPeers: (chainID) => chainMap.get(chainID) || probeMap.get(chainID) || [entityKey.probe(chainID)],
     ingressEdgePeers: (nodeID) => ["hub:ingress", entityKey.node(nodeID)],
     egressEdgePeers: (nodeID) => ["hub:egress", entityKey.node(nodeID)],
     clusterPeers: (clusterKey) => clusterMap.get(clusterKey) || [clusterKey],
@@ -554,7 +586,10 @@ export function reconcileSelectionKey(key, model, { clusters = null, allowCluste
 
   const nodeSet = new Set(model.nodes.map((n) => n.id));
   const extSet = new Set((model.externalTargets || []).map((e) => e.id));
-  const probeSet = new Set((model.probeLinks || []).map((p) => p.id));
+  const probeSet = new Set([
+    ...(model.probeLinks || []).map((p) => p.id),
+    ...(model.probeChains || []).map((c) => c.id),
+  ]);
 
   if (s.startsWith("node:")) {
     return nodeSet.has(s.slice(5)) ? s : "";
@@ -907,4 +942,444 @@ export function findSameCityMembers(nodes, targetNodeID) {
   const clusters = clusterTopologyNodes(nodes);
   const hit = clusters.find((cl) => cl.isCluster && cl.members.some((m) => m.node.id === targetNodeID));
   return hit ? hit.members.map((m) => m.node) : [];
+}
+
+/**
+ * Returns a group-scoped slice of a dashboard topology model while keeping
+ * `probeGroups` intact so Group Selector tabs stay navigable across modes.
+ */
+export function filterTopologyModelByGroup(model, groupId = "") {
+  if (!model || !groupId || groupId === "all") return model;
+  const groups = model.probeGroups || [];
+  const group = groups.find((g) => g.id === groupId);
+  if (!group) return model;
+
+  const modelNodeMap = new Map((model.nodes || []).map((n) => [n.id, n]));
+  const nodes = (group.nodes || []).map((gn) => modelNodeMap.get(gn.id) || gn);
+  const externalTargets = group.externalTargets || [];
+  const probeChains = group.chains || [];
+  const allowedChainIDs = new Set(probeChains.map((c) => c.id));
+  const probeLinks = Array.isArray(group.links) && group.links.length
+    ? group.links
+    : (model.probeLinks || []).filter((p) => allowedChainIDs.has(p.probeID || p.id));
+  const abnormalLinks = probeChains.filter((c) => c.tone === "bad" || c.tone === "warn").length;
+
+  return {
+    ...model,
+    nodes,
+    onlineNodes: nodes.filter((n) => n.isOnline).length,
+    externalTargets,
+    probeLinks,
+    probeChains,
+    abnormalLinks,
+    totalProbeLinks: probeChains.length,
+    activeGroup: group,
+  };
+}
+
+const CIRCLED_HOP_NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
+
+/**
+ * Formats bidirectional delay and packet-loss copy as a compact two-line SVG pill payload.
+ */
+export function buildBidirectionalPillLines(hop) {
+  const idx = Number(hop?.hopIndex);
+  const prefix = hop?.isMultiHop && Number.isFinite(idx) && idx >= 0
+    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
+    : "";
+  const fmtPct = (v) => Number(v).toFixed(Number(v) % 1 ? 1 : 0);
+
+  if (hop?.running) {
+    const line1 = `${prefix}探测中…`;
+    const line2 = hop?.bidirectional ? "去/回检测中" : "单向检测中";
+    return { line1, line2, fullLabel: `${line1} · ${line2}` };
+  }
+
+  const hasFwd = hop?.latencyMS != null && Number.isFinite(Number(hop.latencyMS))
+    && !(hop?.fwdLossPercent != null && Number(hop.fwdLossPercent) >= 100 && Number(hop.latencyMS) === 0);
+  const hasRev = Boolean(hop?.bidirectional) && hop?.revLatencyMS != null && Number.isFinite(Number(hop.revLatencyMS))
+    && !(hop?.revLossPercent != null && Number(hop.revLossPercent) >= 100 && Number(hop.revLatencyMS) === 0);
+  const lossVal = hop?.lossPercent != null
+    ? Number(hop.lossPercent)
+    : (hop?.fwdLossPercent != null ? Number(hop.fwdLossPercent) : (hop?.revLossPercent != null ? Number(hop.revLossPercent) : null));
+
+  if (!hasFwd && !hasRev) {
+    const rawLabel = String(hop?.statusLabel || "");
+    if (rawLabel && rawLabel !== "不可达" && rawLabel !== "异常" && lossVal == null) {
+      const line1 = `${prefix}${rawLabel}`;
+      const line2 = hop?.bidirectional ? "去/回待测" : "单向待测";
+      return { line1, line2, fullLabel: `${line1} · ${line2}` };
+    }
+    const line1 = `${prefix}${hop?.bidirectional ? "去/回 不可达" : "不可达"}`;
+    const line2 = lossVal != null ? `丢包 ${fmtPct(lossVal)}%` : "100% 丢包";
+    return { line1, line2, fullLabel: `${line1} · ${line2}` };
+  }
+
+  let line1 = "";
+  if (hop?.bidirectional) {
+    const fwdText = hasFwd ? `去 ${formatMs(hop.latencyMS)}` : "去 ×";
+    const revText = hasRev ? `回 ${formatMs(hop.revLatencyMS)}` : "回 ×";
+    line1 = `${prefix}${fwdText} · ${revText}`;
+  } else {
+    line1 = `${prefix}去 ${formatMs(hop.latencyMS)}`;
+  }
+
+  let line2 = "";
+  if (
+    hop?.bidirectional
+    && hop?.fwdLossPercent != null
+    && hop?.revLossPercent != null
+    && (Number(hop.fwdLossPercent) > 0 || Number(hop.revLossPercent) > 0)
+    && Math.round(Number(hop.fwdLossPercent) * 10) !== Math.round(Number(hop.revLossPercent) * 10)
+  ) {
+    line2 = `去${fmtPct(hop.fwdLossPercent)}%/回${fmtPct(hop.revLossPercent)}%`;
+  } else if (lossVal != null && lossVal > 0) {
+    line2 = `丢包 ${fmtPct(lossVal)}%`;
+  } else if (lossVal === 0) {
+    line2 = "0% 丢包";
+  } else {
+    line2 = hop?.isExternal ? "公网出口" : (hop?.bidirectional ? "双程探测" : "单向探测");
+  }
+
+  return { line1, line2, fullLabel: `${line1} · ${line2}` };
+}
+
+/**
+ * Computes deduplicated topological grid coordinates (`col`, `row`) for a single monitoring group:
+ * - mobile `stacked`: 1-column vertical order with all links arching in a dedicated right rail;
+ * - standalone nodes: compact multi-column grid;
+ * - external / pure node->ext: 2-column bipartite layout;
+ * - multi-hop chains: DAG column layout with boustrophedon snake wrap at `maxCols`;
+ * - small mesh (`<= 5` vertices): balanced 2-column Max-Cut minimizing same-column chords;
+ * - dense regional mesh (`>= 6` vertices): 3-column Hub-in-Center Max-Cut (hubs in center `col 1`).
+ */
+export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } = {}) {
+  const safeMaxCols = Math.max(2, Math.min(4, Number(maxCols) || 4));
+  const vertexMap = new Map();
+  const adj = new Map();
+  const addVertex = (v) => {
+    if (!vertexMap.has(v.key)) {
+      vertexMap.set(v.key, v);
+      adj.set(v.key, new Set());
+    }
+    return vertexMap.get(v.key);
+  };
+
+  for (const n of group?.nodes || []) {
+    addVertex({
+      key: entityKey.node(n.id),
+      kind: "node",
+      id: n.id,
+      label: n.name || n.id,
+      isOnline: Boolean(n.isOnline),
+      node: n,
+      ext: null,
+    });
+  }
+  for (const e of group?.externalTargets || []) {
+    const key = entityKey.external(e.id);
+    addVertex({
+      key,
+      kind: "ext",
+      id: e.id,
+      label: e.name || e.address || e.id,
+      isOnline: true,
+      node: null,
+      ext: e,
+    });
+  }
+
+  const chains = group?.chains || [];
+  const edges = [];
+  const nodeHopStats = new Map();
+  const bumpStats = (key, hop) => {
+    const st = nodeHopStats.get(key) || { links: 0, bad: 0, latSum: 0, latCount: 0 };
+    st.links += 1;
+    if (hop.tone === "bad" || hop.tone === "warn") st.bad += 1;
+    if (hop.latencyMS != null) {
+      st.latSum += Number(hop.latencyMS);
+      st.latCount += 1;
+    }
+    nodeHopStats.set(key, st);
+  };
+
+  for (const chain of chains) {
+    for (const ep of chain.endpoints || []) {
+      if (ep.kind === "ext") {
+        addVertex({
+          key: entityKey.external(ep.id),
+          kind: "ext",
+          id: ep.id,
+          label: ep.name || ep.address || ep.id,
+          isOnline: true,
+          node: null,
+          ext: { id: ep.id, name: ep.name || ep.address, address: ep.address || "", linkCount: 1 },
+        });
+      } else {
+        addVertex({
+          key: entityKey.node(ep.id),
+          kind: "node",
+          id: ep.id,
+          label: ep.name || ep.id,
+          isOnline: Boolean(ep.online),
+          node: { id: ep.id, name: ep.name || ep.id, regionCode: ep.regionCode || "", isOnline: Boolean(ep.online), ip: ep.address || "" },
+          ext: null,
+        });
+      }
+    }
+    for (const hop of chain.hops || []) {
+      const u = entityKey.node(hop.from);
+      const v = hop.isExternal ? entityKey.external(hop.to) : entityKey.node(hop.to);
+      if (adj.has(u) && adj.has(v)) {
+        adj.get(u).add(v);
+        adj.get(v).add(u);
+      }
+      bumpStats(u, hop);
+      bumpStats(v, hop);
+      edges.push([u, v, hop]);
+    }
+  }
+
+  const allVerts = [...vertexMap.values()];
+  for (const v of allVerts) {
+    const st = nodeHopStats.get(v.key) || { links: 0, bad: 0, latSum: 0, latCount: 0 };
+    v.degree = adj.get(v.key)?.size || 0;
+    v.degreeInGroup = st.links;
+    v.badCount = st.bad;
+    v.avgLatencyMS = st.latCount ? Math.round((st.latSum / st.latCount) * 10) / 10 : null;
+  }
+
+  const sortVertsDefault = (arr) => [...arr].sort((a, b) => (
+    (b.degree - a.degree)
+    || (b.degreeInGroup - a.degreeInGroup)
+    || (Number(b.isOnline) - Number(a.isOnline))
+    || String(a.label).localeCompare(String(b.label))
+  ));
+
+  const placements = new Map();
+  if (!allVerts.length) {
+    return { cols: 1, rows: 1, layout: "empty", vertices: [], placements, edgeCount: 0 };
+  }
+
+  let layout = "grid";
+  let cols = 1;
+
+  const hasMultiHop = chains.some((c) => c.isMultiHop || (c.endpoints?.length || 0) >= 3);
+  const nodeVerts = allVerts.filter((v) => v.kind === "node");
+  const extVerts = allVerts.filter((v) => v.kind === "ext");
+
+  const sortColByBarycenter = (colKeys, refRowMap, fallbackAll) => {
+    colKeys.sort((ka, kb) => {
+      const avgOf = (k) => {
+        const neighbors = [...(adj.get(k) || [])].filter((nb) => refRowMap.has(nb));
+        if (!neighbors.length) return Number.MAX_SAFE_INTEGER;
+        return neighbors.reduce((s, nb) => s + refRowMap.get(nb), 0) / neighbors.length;
+      };
+      const ba = avgOf(ka);
+      const bb = avgOf(kb);
+      if (ba !== bb) return ba - bb;
+      return fallbackAll(vertexMap.get(ka), vertexMap.get(kb));
+    });
+  };
+
+  if (stacked) {
+    layout = "stack";
+    cols = 1;
+    const ordered = [];
+    if (hasMultiHop) {
+      const seen = new Set();
+      for (const chain of chains) {
+        for (const ep of chain.endpoints || []) {
+          const k = ep.kind === "ext" ? entityKey.external(ep.id) : entityKey.node(ep.id);
+          if (!seen.has(k) && vertexMap.has(k)) {
+            seen.add(k);
+            ordered.push(vertexMap.get(k));
+          }
+        }
+      }
+      for (const v of sortVertsDefault(allVerts)) {
+        if (!seen.has(v.key)) ordered.push(v);
+      }
+    } else {
+      ordered.push(...sortVertsDefault(nodeVerts), ...sortVertsDefault(extVerts));
+    }
+    ordered.forEach((v, idx) => placements.set(v.key, { col: 0, row: idx }));
+  } else if (edges.length === 0 || group?.kind === "nodes") {
+    layout = "grid";
+    cols = Math.min(safeMaxCols, Math.max(1, Math.ceil(Math.sqrt(allVerts.length))));
+    sortVertsDefault(allVerts).forEach((v, i) => {
+      placements.set(v.key, { col: i % cols, row: Math.floor(i / cols) });
+    });
+  } else if (extVerts.length > 0 && !hasMultiHop && edges.every(([, vKey]) => vertexMap.get(vKey)?.kind === "ext" || vKey.startsWith("ext:"))) {
+    layout = "bipartite";
+    cols = 2;
+    const left = sortVertsDefault(nodeVerts);
+    const leftRows = new Map(left.map((v, idx) => [v.key, idx]));
+    const rightKeys = extVerts.map((v) => v.key);
+    sortColByBarycenter(rightKeys, leftRows, (a, b) => (b.degreeInGroup - a.degreeInGroup) || a.label.localeCompare(b.label));
+    left.forEach((v, r) => placements.set(v.key, { col: 0, row: r }));
+    rightKeys.forEach((k, r) => placements.set(k, { col: 1, row: r }));
+  } else if (hasMultiHop) {
+    layout = "chain";
+    // Compute topological rank along directed chain sequences (handles snake wrap for 5..10 hops).
+    const rank = new Map();
+    const visitOrder = [];
+    const seen = new Set();
+    for (const chain of chains) {
+      const eps = chain.endpoints || [];
+      eps.forEach((ep, idx) => {
+        const k = ep.kind === "ext" ? entityKey.external(ep.id) : entityKey.node(ep.id);
+        if (!vertexMap.has(k)) return;
+        const prev = rank.has(k) ? rank.get(k) : -1;
+        if (idx > prev) rank.set(k, idx);
+        if (!seen.has(k)) {
+          seen.add(k);
+          visitOrder.push(k);
+        }
+      });
+    }
+    for (const v of sortVertsDefault(allVerts)) {
+      if (!seen.has(v.key)) {
+        rank.set(v.key, 0);
+        visitOrder.push(v.key);
+      }
+    }
+    const maxRank = Math.max(0, ...visitOrder.map((k) => rank.get(k) || 0));
+    cols = Math.max(2, Math.min(safeMaxCols, maxRank + 1));
+
+    const occupied = new Set();
+    const rankBucketCount = new Map();
+    for (const k of visitOrder) {
+      const r = rank.get(k) || 0;
+      const band = Math.floor(r / cols);
+      const stepInBand = r % cols;
+      // Boustrophedon snake wrap on odd bands so consecutive hops stay horizontally or vertically adjacent.
+      const col = band % 2 === 1 ? (cols - 1 - stepInBand) : stepInBand;
+      let row = band + (rankBucketCount.get(`${band}:${col}`) || 0);
+      while (occupied.has(`${col}:${row}`)) row += 1;
+      occupied.add(`${col}:${row}`);
+      rankBucketCount.set(`${band}:${col}`, (rankBucketCount.get(`${band}:${col}`) || 0) + 1);
+      placements.set(k, { col, row });
+    }
+  } else if (allVerts.length <= 5) {
+    layout = "maxcut-2col";
+    cols = 2;
+    const sorted = sortVertsDefault(allVerts);
+    const side = new Map(); // 0 = left, 1 = right
+    let count0 = 0;
+    let count1 = 0;
+    for (const v of sorted) {
+      if (v.kind === "ext") {
+        side.set(v.key, 1);
+        count1 += 1;
+        continue;
+      }
+      const nbs = [...(adj.get(v.key) || [])];
+      const links0 = nbs.filter((nb) => side.get(nb) === 0).length;
+      const links1 = nbs.filter((nb) => side.get(nb) === 1).length;
+      const target = links0 !== links1 ? (links0 < links1 ? 0 : 1) : (count0 <= count1 ? 0 : 1);
+      side.set(v.key, target);
+      if (target === 0) count0 += 1;
+      else count1 += 1;
+    }
+    // Rebalance if heavily skewed.
+    const limit = Math.ceil(sorted.length / 2);
+    while (count0 > limit) {
+      const move = sorted.find((v) => side.get(v.key) === 0);
+      if (!move) break;
+      side.set(move.key, 1);
+      count0 -= 1;
+      count1 += 1;
+    }
+    while (count1 > limit) {
+      const move = sorted.find((v) => side.get(v.key) === 1 && v.kind !== "ext");
+      if (!move) break;
+      side.set(move.key, 0);
+      count1 -= 1;
+      count0 += 1;
+    }
+
+    const leftKeys = sorted.filter((v) => side.get(v.key) === 0).map((v) => v.key);
+    const rightKeys = sorted.filter((v) => side.get(v.key) === 1).map((v) => v.key);
+    const leftMap = new Map(leftKeys.map((k, idx) => [k, idx]));
+    sortColByBarycenter(rightKeys, leftMap, (a, b) => (b.degree - a.degree) || a.label.localeCompare(b.label));
+    const rightMap = new Map(rightKeys.map((k, idx) => [k, idx]));
+    sortColByBarycenter(leftKeys, rightMap, (a, b) => (b.degree - a.degree) || a.label.localeCompare(b.label));
+
+    leftKeys.forEach((k, r) => placements.set(k, { col: 0, row: r }));
+    rightKeys.forEach((k, r) => placements.set(k, { col: 1, row: r }));
+  } else {
+    layout = "hub-center-3col";
+    cols = Math.min(safeMaxCols, 3);
+    const sorted = sortVertsDefault(allVerts);
+    const hubCount = Math.max(1, Math.min(2, Math.round(sorted.length / 4)));
+    const hubs = sorted.filter((v) => v.kind !== "ext").slice(0, hubCount);
+    const hubSet = new Set(hubs.map((v) => v.key));
+    const satellites = sorted.filter((v) => !hubSet.has(v.key));
+
+    const leftKeys = [];
+    const rightKeys = [];
+    const side = new Map();
+    for (const v of satellites) {
+      if (v.kind === "ext") {
+        rightKeys.push(v.key);
+        side.set(v.key, 2);
+        continue;
+      }
+      const nbs = [...(adj.get(v.key) || [])];
+      const satLeftLinks = nbs.filter((nb) => side.get(nb) === 0).length;
+      const satRightLinks = nbs.filter((nb) => side.get(nb) === 2).length;
+      const goLeft = satLeftLinks !== satRightLinks
+        ? satLeftLinks < satRightLinks
+        : leftKeys.length <= rightKeys.length;
+      if (goLeft) {
+        leftKeys.push(v.key);
+        side.set(v.key, 0);
+      } else {
+        rightKeys.push(v.key);
+        side.set(v.key, 2);
+      }
+    }
+    while (leftKeys.length - rightKeys.length > 1) {
+      const k = leftKeys.pop();
+      rightKeys.push(k);
+    }
+    while (rightKeys.length - leftKeys.length > 1) {
+      const idx = rightKeys.findIndex((k) => vertexMap.get(k)?.kind !== "ext");
+      if (idx < 0) break;
+      const [k] = rightKeys.splice(idx, 1);
+      leftKeys.push(k);
+    }
+
+    const centerKeys = hubs.map((h) => h.key);
+    const centerMap = new Map(centerKeys.map((k, idx) => [k, idx]));
+    const cmpFallback = (a, b) => (b.degree - a.degree) || a.label.localeCompare(b.label);
+    sortColByBarycenter(leftKeys, centerMap, cmpFallback);
+    sortColByBarycenter(rightKeys, centerMap, cmpFallback);
+
+    // Vertically center hub(s) alongside wing rows when symmetric.
+    const maxWingRows = Math.max(leftKeys.length, rightKeys.length);
+    const centerStart = maxWingRows > centerKeys.length ? Math.floor((maxWingRows - centerKeys.length) / 2) : 0;
+    leftKeys.forEach((k, r) => placements.set(k, { col: 0, row: r }));
+    centerKeys.forEach((k, r) => placements.set(k, { col: 1, row: centerStart + r }));
+    rightKeys.forEach((k, r) => placements.set(k, { col: 2, row: r }));
+  }
+
+  let maxRow = 0;
+  for (const v of allVerts) {
+    const pos = placements.get(v.key) || { col: 0, row: 0 };
+    v.col = pos.col;
+    v.row = pos.row;
+    v.isHub = layout === "hub-center-3col" && pos.col === 1;
+    if (pos.row > maxRow) maxRow = pos.row;
+  }
+
+  return {
+    cols,
+    rows: maxRow + 1,
+    layout,
+    vertices: allVerts,
+    placements,
+    edgeCount: edges.length,
+  };
 }

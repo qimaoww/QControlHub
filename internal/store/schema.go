@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 103
+const currentSchemaVersion = 104
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1272,18 +1272,21 @@ CREATE TABLE IF NOT EXISTS network_diagnostic_sessions (
  request_id text NOT NULL,
  node1 text NOT NULL,
  node2 text NOT NULL CHECK(node1<>node2),
+ node_ids text[] NOT NULL DEFAULT '{}'::text[],
  document jsonb NOT NULL CHECK(octet_length(document::text)<=2097152),
  state text NOT NULL CHECK(state IN ('preparing','running','stopping','succeeded','failed','canceled','cleanup_pending')),
  deadline timestamptz NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(owner_id,request_id)
 );
+ALTER TABLE network_diagnostic_sessions ADD COLUMN IF NOT EXISTS node_ids text[] NOT NULL DEFAULT '{}'::text[];
 CREATE INDEX IF NOT EXISTS network_diagnostic_active_idx ON network_diagnostic_sessions(deadline)
  WHERE state IN ('preparing','running','stopping','cleanup_pending');
 CREATE TABLE IF NOT EXISTS dashboard_probe_pairs (
  id text PRIMARY KEY,
  owner_id text NOT NULL,
  name varchar(80) NOT NULL DEFAULT '',
+ group_name varchar(40) NOT NULL DEFAULT '',
  target_mode varchar(16) NOT NULL DEFAULT '' CHECK (target_mode IN ('','ip')),
  node1_agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
  node1_instance_id text NOT NULL DEFAULT '',
@@ -1291,6 +1294,7 @@ CREATE TABLE IF NOT EXISTS dashboard_probe_pairs (
  node2_agent_id text NOT NULL DEFAULT '',
  node2_instance_id text NOT NULL DEFAULT '',
  node2_address text NOT NULL,
+ nodes jsonb NOT NULL DEFAULT '[]'::jsonb,
  bidirectional boolean NOT NULL DEFAULT false,
  parameters jsonb NOT NULL,
  auto_enabled boolean NOT NULL DEFAULT false,
@@ -1302,6 +1306,8 @@ CREATE TABLE IF NOT EXISTS dashboard_probe_pairs (
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE dashboard_probe_pairs ADD COLUMN IF NOT EXISTS group_name varchar(40) NOT NULL DEFAULT '';
+ALTER TABLE dashboard_probe_pairs ADD COLUMN IF NOT EXISTS nodes jsonb NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_owner_idx ON dashboard_probe_pairs(owner_id, created_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_due_idx ON dashboard_probe_pairs(next_run_at) WHERE auto_enabled;
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_session_idx ON dashboard_probe_pairs(last_session_id) WHERE last_session_id <> '';
@@ -1312,9 +1318,11 @@ CREATE TABLE IF NOT EXISTS dashboard_probe_samples (
  state text NOT NULL CHECK (state IN ('succeeded','failed','canceled')),
  forward jsonb,
  reverse jsonb,
+ hops jsonb NOT NULL DEFAULT '[]'::jsonb,
  error text NOT NULL DEFAULT '',
  sampled_at timestamptz NOT NULL,
  UNIQUE(pair_id, session_id)
 );
+ALTER TABLE dashboard_probe_samples ADD COLUMN IF NOT EXISTS hops jsonb NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS dashboard_probe_samples_pair_idx ON dashboard_probe_samples(pair_id, sampled_at DESC, id DESC);
 `

@@ -362,21 +362,29 @@ function appendPacificBackdrop(svg, defs, { width, mapHeight, clipId, graticuleT
 }
 
 /**
- * Formats HUD traffic rate/monthly copy without fabricating `0 B/s` / `0 B` when `traffic.read` is absent
- * or traffic telemetry is still loading / failed.
+ * Formats HUD latency monitoring summary (routes, measured segments, mean RTT & alerts).
  */
-function buildMapHudTrafficLine(model, bytes, trafficMeta = {}, compact = false) {
-  const readable = trafficMeta.readable !== false;
-  const state = trafficMeta.state || "ready";
-  const label = trafficMeta.label || "";
-  if (!readable) return "无流量权限";
-  if (state === "loading" && !trafficMeta.hasData) return "流量读取中…";
-  if (state === "failed" && !trafficMeta.hasData) return "流量读取失败";
-  const prefix = label ? `${label} · ` : "";
+function buildMapHudLatencyLine(model, compact = false) {
+  const chains = model?.probeChains || [];
+  const links = model?.probeLinks || [];
+  const routeCount = chains.length || links.length;
+  const rtts = links.map((p) => p.latencyMS).filter((v) => typeof v === "number" && Number.isFinite(v) && v >= 0);
+  const avgRtt = rtts.length ? (rtts.reduce((s, v) => s + v, 0) / rtts.length) : null;
+  const bad = Number(model?.abnormalLinks || 0);
   if (compact) {
-    return `${prefix}↓ ${bytes(model.ingress.rateBPS)}/s · ↑ ${bytes(model.egress.rateBPS)}/s`;
+    if (!routeCount) return "暂无延迟监测";
+    return bad > 0
+      ? `监测 ${routeCount} · 告警 ${bad}`
+      : avgRtt != null
+        ? `监测 ${routeCount} · 均 ${avgRtt.toFixed(avgRtt >= 100 ? 0 : 1)}ms`
+        : `监测 ${routeCount} 条`;
   }
-  return `${prefix}↓ ${bytes(model.ingress.rateBPS)}/s · ↑ ${bytes(model.egress.rateBPS)}/s · 本月 ${bytes(model.ingress.monthlyBytes + model.egress.monthlyBytes)}`;
+  if (!routeCount) return `在线 ${model?.onlineNodes || 0}/${model?.totalNodes || 0} · 暂无监测链路`;
+  const parts = [`监测链路 ${routeCount} 条`, `段 ${links.length}`];
+  if (avgRtt != null) parts.push(`均值 ${avgRtt.toFixed(avgRtt >= 100 ? 0 : 1)}ms`);
+  if (bad > 0) parts.push(`告警 ${bad}`);
+  else parts.push("全链正常");
+  return parts.join(" · ");
 }
 
 /** Compact Mobile Pacific Map preserving beacon tags, cluster tap expansion, bad link distinction & wrapped external dock. */
@@ -548,7 +556,7 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
       "stroke-width": "12",
       class: "a-dash-topo-probe-item",
     });
-    helpers.bindInteractive(hitPath, `probe:${probe.id}`, { openProbeID: probe.id });
+    helpers.bindInteractive(hitPath, `probe:${probe.id}`, { openProbeID: probe.probeID || probe.id });
     g.append(hitPath);
     linkLayer.append(g);
 
@@ -670,7 +678,7 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
   const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud" });
   hudLayer.append(
     createSVGEl("text", { x: 10, y: 15, class: "a-dash-topo-map-coord" }, `158°E · ${model.onlineNodes}/${model.totalNodes} 在线`),
-    createSVGEl("text", { x: w - 10, y: 15, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudTrafficLine(model, bytes, trafficMeta, true)),
+    createSVGEl("text", { x: w - 10, y: 15, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudLatencyLine(model, true)),
   );
 
   svg.append(linkLayer, pulseLayer, beaconLayer, tagLayer, pillLayer, dockLayer, hudLayer);
@@ -886,7 +894,6 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     const active = helpers.activeKey() === key;
     const anyOnline = cluster.members.some((m) => m.node.isOnline);
     const anyBlocked = cluster.members.some((m) => m.node.blocked);
-    const totalTraffic = cluster.members.reduce((s, m) => s + (m.node.rxBPS || 0) + (m.node.txBPS || 0), 0);
     const toneColor = anyBlocked ? BLOCKED_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
     const r = cluster.isCluster ? Math.min(11, 6.2 + cluster.members.length * 1.1) : 5.8;
 
@@ -898,7 +905,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       opacity: hl === false ? "0.22" : "1",
     });
 
-    if (anyOnline && (totalTraffic > 0 || helpers.allowMotion()) && helpers.allowMotion()) {
+    if (anyOnline && helpers.allowMotion()) {
       pulseLayer.append(createSVGEl("circle", {
         cx: cluster.x.toFixed(1),
         cy: cluster.y.toFixed(1),
@@ -1025,7 +1032,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       "stroke-width": "12",
       class: "a-dash-topo-probe-item",
     });
-    helpers.bindInteractive(hit, entityKey, { openProbeID: probe.id });
+    helpers.bindInteractive(hit, entityKey, { openProbeID: probe.probeID || probe.id });
     g.append(hit);
     probeLayer.append(g);
 
@@ -1117,7 +1124,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
   const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud" });
   hudLayer.append(
     createSVGEl("text", { x: 16, y: 20, class: "a-dash-topo-map-coord" }, `158°E PACIFIC BASIN · ${clusters.length} 枢纽`),
-    createSVGEl("text", { x: vw - 16, y: 20, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudTrafficLine(model, bytes, trafficMeta)),
+    createSVGEl("text", { x: vw - 16, y: 20, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudLatencyLine(model, false)),
   );
   if (unshownBadCount > 0 || hiddenClusterCount.length > 0) {
     const parts = [];

@@ -231,9 +231,11 @@ export async function testDashboardRuntime(mode, preview = false) {
         const created = {
           id: `prb_${fixture.probes.length + 1}`,
           name: body.name || "新建探测对",
+          group_name: body.group_name || "",
           target_mode: body.target_mode || "",
           node1: body.node1,
           node2: body.node2,
+          nodes: Array.isArray(body.nodes) ? body.nodes : undefined,
           bidirectional: Boolean(body.bidirectional),
           parameters: body.parameters,
           auto_enabled: Boolean(body.auto_enabled),
@@ -326,7 +328,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   const panel = () => card("面板运行资源");
   const traffic = () => card("流量概况");
   const ranking = () => card("流量累计排行");
-  const topology = () => card("全网数据流拓扑");
+  const topology = () => card("网络延迟监测拓扑");
   const probesDialog = () => [...document.querySelectorAll("dialog.a-dialog[open]")].find((d) => d.querySelector(".a-dialog-head h2")?.textContent === "节点链路监控");
   const openProbesModal = async () => {
     const btn = topology()?.querySelector(".a-dash-topo-probe-btn");
@@ -415,7 +417,8 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(!activity() && reads("/tasks") === 0, "retired recent-task area still renders or polls");
 
   assert(!card("节点链路监控"), "probes card still renders directly on main dashboard instead of topology modal");
-  await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector('[data-topo-entity="node:tokyo"]') && (topology()?.textContent.includes("43.8ms") || topology()?.querySelector(".a-dash-topo-chip")?.textContent.includes("43.8ms")), "topology card did not render nodes and live probe links");
+  await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector(".a-dash-topo-groups") && topology()?.querySelector('[data-topo-entity="node:tokyo"]') && (topology()?.textContent.includes("43.8ms") || topology()?.querySelector(".a-dash-topo-chip")?.textContent.includes("43.8ms")), "topology card did not render grouped nodes and live probe links");
+  assert(!/(B\/s|KB\/s|MB\/s|GB\/s|实时入站|实时出站|本月)/.test(topology().textContent), "topology still displays real-time traffic speed or monthly traffic");
   topology().querySelector('[data-topo-entity="node:tokyo"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await waitFor(() => topology()?.querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector(".a-dash-topo-inspect")?.textContent.includes("东京 · JP-03"), "topology node selection did not update inspect bar");
 
@@ -445,16 +448,21 @@ export async function testDashboardRuntime(mode, preview = false) {
   stopBtn.click();
   await waitFor(() => modalBox.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("立即探测"), "stop action did not settle");
 
-  // Add, toggle, and delete a custom probe link through stacked UI form & confirmation dialog.
+  // Add, extend to 3-hop chain (A-B-C), toggle, and delete a grouped probe chain through stacked UI form & confirmation dialog.
   stableAddProbeBtn.click();
   const addDialog = [...document.querySelectorAll("dialog[open]")].at(-1);
   assert(addDialog?.matches(":modal") && addDialog !== modalBox, "add probe stacked dialog missing");
-  await waitFor(() => reads("/network-diagnostics/nodes") > 0 && addDialog.querySelector('select[name="node2_key"] option[value="singapore/main"]'), "diagnostic nodes not populated in dialog");
+  await waitFor(() => reads("/network-diagnostics/nodes") > 0 && addDialog.querySelector('select[name="hop_node_1"] option[value="singapore/main"]'), "diagnostic nodes not populated in chain builder");
   addDialog.querySelector('input[name="name"]').value = "东京 → 新加坡测试";
-  addDialog.querySelector('select[name="node2_key"]').value = "singapore/main";
-  addDialog.querySelector('select[name="node2_key"]').dispatchEvent(new Event("change", { bubbles: true }));
+  addDialog.querySelector('input[name="group_name"]').value = "亚太核心组";
+  addDialog.querySelector('select[name="hop_node_1"]').value = "hongkong/main";
+  addDialog.querySelector('select[name="hop_node_1"]').dispatchEvent(new Event("change", { bubbles: true }));
+  addDialog.querySelector('[data-refresh-key="add-hop"]').click();
+  await waitFor(() => addDialog.querySelector('select[name="hop_node_2"]'), "adding 3rd chain hop failed");
+  addDialog.querySelector('select[name="hop_node_2"]').value = "singapore/main";
+  addDialog.querySelector('select[name="hop_node_2"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('button[type="submit"]').click();
-  await waitFor(() => !addDialog.open && modalBox.textContent.includes("东京 → 新加坡测试"), "created probe link not rendered inside modal");
+  await waitFor(() => !addDialog.open && modalBox.textContent.includes("东京 → 新加坡测试") && modalBox.textContent.includes("亚太核心组") && modalBox.textContent.includes("全程 3 站"), "created multi-hop chain or group badge not rendered inside modal");
   const createdCard = [...modalBox.querySelectorAll('[data-refresh-key]')].find((el) => el.textContent.includes("东京 → 新加坡测试"));
   [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "暂停自动").click();
   await waitFor(() => createdCard.textContent.includes("开启自动"), "toggling auto probe state failed");

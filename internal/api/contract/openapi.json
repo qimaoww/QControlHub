@@ -2297,6 +2297,41 @@
         },
         "type": "object"
       },
+      "core_DashboardProbeHopMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "forward": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_DashboardProbeDirectionMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from": {
+            "type": "string"
+          },
+          "hop_index": {
+            "type": "integer"
+          },
+          "reverse": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_DashboardProbeDirectionMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_DashboardProbeListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2305,6 +2340,36 @@
               "$ref": "#/components/schemas/core_DashboardProbePair"
             },
             "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "core_DashboardProbeNodeStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "ping": {
+            "type": "boolean"
+          },
+          "region": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -2327,8 +2392,17 @@
           "bidirectional": {
             "type": "boolean"
           },
+          "chain": {
+            "items": {
+              "$ref": "#/components/schemas/core_DashboardProbeNodeStatus"
+            },
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "group_name": {
             "type": "string"
           },
           "history": {
@@ -2396,6 +2470,12 @@
           "node2_region": {
             "type": "string"
           },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+            },
+            "type": "array"
+          },
           "parameters": {
             "$ref": "#/components/schemas/core_DiagnosticParameters"
           },
@@ -2426,6 +2506,9 @@
           "bidirectional": {
             "type": "boolean"
           },
+          "group_name": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -2434,6 +2517,12 @@
           },
           "node2": {
             "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+            },
+            "type": "array"
           },
           "parameters": {
             "$ref": "#/components/schemas/core_DiagnosticParameters"
@@ -2464,6 +2553,12 @@
                 "type": "null"
               }
             ]
+          },
+          "hops": {
+            "items": {
+              "$ref": "#/components/schemas/core_DashboardProbeHopMetrics"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -2687,6 +2782,12 @@
           },
           "node2": {
             "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+            },
+            "type": "array"
           },
           "parameters": {
             "$ref": "#/components/schemas/core_DiagnosticParameters"
@@ -18418,7 +18519,11 @@
                         "running": null
                       },
                       "bidirectional": false,
+                      "chain": [
+                        null
+                      ],
                       "created_at": "2026-11-10T12:00:00Z",
+                      "group_name": "example",
                       "history": [
                         null
                       ],
@@ -18444,6 +18549,9 @@
                       },
                       "node2_name": "example",
                       "node2_region": "example",
+                      "nodes": [
+                        null
+                      ],
                       "parameters": {
                         "bandwidth": null,
                         "count": null,
@@ -18531,6 +18639,7 @@
                 "auto_enabled": false,
                 "auto_interval_seconds": 1,
                 "bidirectional": false,
+                "group_name": "example",
                 "name": "example",
                 "node1": {
                   "address": "example",
@@ -18544,6 +18653,14 @@
                   "instance_id": "example",
                   "name": "example"
                 },
+                "nodes": [
+                  {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  }
+                ],
                 "parameters": {
                   "bandwidth": 1,
                   "count": 1,
@@ -18573,6 +18690,9 @@
                   "bidirectional": {
                     "type": "boolean"
                   },
+                  "group_name": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -18581,6 +18701,12 @@
                   },
                   "node2": {
                     "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "nodes": {
+                    "items": {
+                      "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                    },
+                    "type": "array"
                   },
                   "parameters": {
                     "$ref": "#/components/schemas/core_DiagnosticParameters"
@@ -18620,11 +18746,27 @@
                     "running": false
                   },
                   "bidirectional": false,
+                  "chain": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "granted": false,
+                      "instance_id": "example",
+                      "name": "example",
+                      "online": false,
+                      "ping": false,
+                      "region": "example"
+                    }
+                  ],
                   "created_at": "2026-11-10T12:00:00Z",
+                  "group_name": "example",
                   "history": [
                     {
                       "error": "example",
                       "forward": null,
+                      "hops": [
+                        null
+                      ],
                       "id": "resource_example",
                       "reverse": null,
                       "sampled_at": "2026-11-10T12:00:00Z",
@@ -18638,6 +18780,9 @@
                   "latest": {
                     "error": "example",
                     "forward": null,
+                    "hops": [
+                      null
+                    ],
                     "id": "resource_example",
                     "reverse": null,
                     "sampled_at": "2026-11-10T12:00:00Z",
@@ -18662,6 +18807,14 @@
                   },
                   "node2_name": "example",
                   "node2_region": "example",
+                  "nodes": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    }
+                  ],
                   "parameters": {
                     "bandwidth": 1,
                     "count": 1,
@@ -18832,6 +18985,7 @@
                 "auto_enabled": false,
                 "auto_interval_seconds": 1,
                 "bidirectional": false,
+                "group_name": "example",
                 "name": "example",
                 "node1": {
                   "address": "example",
@@ -18845,6 +18999,14 @@
                   "instance_id": "example",
                   "name": "example"
                 },
+                "nodes": [
+                  {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  }
+                ],
                 "parameters": {
                   "bandwidth": 1,
                   "count": 1,
@@ -18874,6 +19036,9 @@
                   "bidirectional": {
                     "type": "boolean"
                   },
+                  "group_name": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -18882,6 +19047,12 @@
                   },
                   "node2": {
                     "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "nodes": {
+                    "items": {
+                      "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                    },
+                    "type": "array"
                   },
                   "parameters": {
                     "$ref": "#/components/schemas/core_DiagnosticParameters"
@@ -18921,11 +19092,27 @@
                     "running": false
                   },
                   "bidirectional": false,
+                  "chain": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "granted": false,
+                      "instance_id": "example",
+                      "name": "example",
+                      "online": false,
+                      "ping": false,
+                      "region": "example"
+                    }
+                  ],
                   "created_at": "2026-11-10T12:00:00Z",
+                  "group_name": "example",
                   "history": [
                     {
                       "error": "example",
                       "forward": null,
+                      "hops": [
+                        null
+                      ],
                       "id": "resource_example",
                       "reverse": null,
                       "sampled_at": "2026-11-10T12:00:00Z",
@@ -18939,6 +19126,9 @@
                   "latest": {
                     "error": "example",
                     "forward": null,
+                    "hops": [
+                      null
+                    ],
                     "id": "resource_example",
                     "reverse": null,
                     "sampled_at": "2026-11-10T12:00:00Z",
@@ -18963,6 +19153,14 @@
                   },
                   "node2_name": "example",
                   "node2_region": "example",
+                  "nodes": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    }
+                  ],
                   "parameters": {
                     "bandwidth": 1,
                     "count": 1,
@@ -19076,11 +19274,27 @@
                     "running": false
                   },
                   "bidirectional": false,
+                  "chain": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "granted": false,
+                      "instance_id": "example",
+                      "name": "example",
+                      "online": false,
+                      "ping": false,
+                      "region": "example"
+                    }
+                  ],
                   "created_at": "2026-11-10T12:00:00Z",
+                  "group_name": "example",
                   "history": [
                     {
                       "error": "example",
                       "forward": null,
+                      "hops": [
+                        null
+                      ],
                       "id": "resource_example",
                       "reverse": null,
                       "sampled_at": "2026-11-10T12:00:00Z",
@@ -19094,6 +19308,9 @@
                   "latest": {
                     "error": "example",
                     "forward": null,
+                    "hops": [
+                      null
+                    ],
                     "id": "resource_example",
                     "reverse": null,
                     "sampled_at": "2026-11-10T12:00:00Z",
@@ -19118,6 +19335,14 @@
                   },
                   "node2_name": "example",
                   "node2_region": "example",
+                  "nodes": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    }
+                  ],
                   "parameters": {
                     "bandwidth": 1,
                     "count": 1,
@@ -19231,11 +19456,27 @@
                     "running": false
                   },
                   "bidirectional": false,
+                  "chain": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "granted": false,
+                      "instance_id": "example",
+                      "name": "example",
+                      "online": false,
+                      "ping": false,
+                      "region": "example"
+                    }
+                  ],
                   "created_at": "2026-11-10T12:00:00Z",
+                  "group_name": "example",
                   "history": [
                     {
                       "error": "example",
                       "forward": null,
+                      "hops": [
+                        null
+                      ],
                       "id": "resource_example",
                       "reverse": null,
                       "sampled_at": "2026-11-10T12:00:00Z",
@@ -19249,6 +19490,9 @@
                   "latest": {
                     "error": "example",
                     "forward": null,
+                    "hops": [
+                      null
+                    ],
                     "id": "resource_example",
                     "reverse": null,
                     "sampled_at": "2026-11-10T12:00:00Z",
@@ -19273,6 +19517,14 @@
                   },
                   "node2_name": "example",
                   "node2_region": "example",
+                  "nodes": [
+                    {
+                      "address": "example",
+                      "agent_id": "example",
+                      "instance_id": "example",
+                      "name": "example"
+                    }
+                  ],
                   "parameters": {
                     "bandwidth": 1,
                     "count": 1,
@@ -20356,6 +20608,9 @@
                         "instance_id": null,
                         "name": "example"
                       },
+                      "nodes": [
+                        null
+                      ],
                       "parameters": {
                         "bandwidth": null,
                         "count": null,
@@ -20462,6 +20717,14 @@
                   "instance_id": "example",
                   "name": "example"
                 },
+                "nodes": [
+                  {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  }
+                ],
                 "parameters": {
                   "bandwidth": 1,
                   "count": 1,
@@ -20490,6 +20753,12 @@
                   },
                   "node2": {
                     "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "nodes": {
+                    "items": {
+                      "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                    },
+                    "type": "array"
                   },
                   "parameters": {
                     "$ref": "#/components/schemas/core_DiagnosticParameters"
@@ -20531,6 +20800,14 @@
                       "instance_id": "example",
                       "name": "example"
                     },
+                    "nodes": [
+                      {
+                        "address": null,
+                        "agent_id": null,
+                        "instance_id": null,
+                        "name": "example"
+                      }
+                    ],
                     "parameters": {
                       "bandwidth": 1,
                       "count": 1,
@@ -20744,6 +21021,14 @@
                       "instance_id": "example",
                       "name": "example"
                     },
+                    "nodes": [
+                      {
+                        "address": null,
+                        "agent_id": null,
+                        "instance_id": null,
+                        "name": "example"
+                      }
+                    ],
                     "parameters": {
                       "bandwidth": 1,
                       "count": 1,
@@ -22101,6 +22386,7 @@
                   },
                   "dashboard": {
                     "probe_filter": "all",
+                    "topo_group": "example",
                     "topo_probe_filter": "all",
                     "topo_view_mode": "flow",
                     "traffic_month": "example",
@@ -22305,7 +22591,7 @@
                       },
                       "dashboard": {
                         "additionalProperties": false,
-                        "maxProperties": 7,
+                        "maxProperties": 8,
                         "minProperties": 1,
                         "properties": {
                           "probe_filter": {
@@ -22315,10 +22601,15 @@
                             ],
                             "type": "string"
                           },
+                          "topo_group": {
+                            "maxLength": 64,
+                            "type": "string"
+                          },
                           "topo_probe_filter": {
                             "enum": [
                               "all",
                               "bad",
+                              "chain",
                               "mesh",
                               "ext"
                             ],

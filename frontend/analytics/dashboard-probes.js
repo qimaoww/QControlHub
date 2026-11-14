@@ -156,6 +156,56 @@ function directionBlock({ key = "fwd", title, fromName, fromAddress, toName, toA
   );
 }
 
+function resolvedPairEndpoints(pair) {
+  if (Array.isArray(pair?.chain) && pair.chain.length >= 2) {
+    return pair.chain.map((hop, idx) => ({
+      agent_id: hop.agent_id || "",
+      instance_id: hop.instance_id || "",
+      name: hop.name || (idx === 0 ? pair.node1_name : idx === pair.chain.length - 1 ? pair.node2_name : "") || hop.address || hop.agent_id || `节点 ${idx + 1}`,
+      region: hop.region || (idx === 0 ? pair.node1_region : idx === pair.chain.length - 1 ? pair.node2_region : "") || "",
+      address: hop.address || "",
+    }));
+  }
+  if (Array.isArray(pair?.nodes) && pair.nodes.length >= 2) {
+    return pair.nodes.map((hop, idx) => ({
+      agent_id: hop.agent_id || "",
+      instance_id: hop.instance_id || "",
+      name: hop.name || (idx === 0 ? pair.node1_name : idx === pair.nodes.length - 1 ? pair.node2_name : "") || hop.address || hop.agent_id || `节点 ${idx + 1}`,
+      region: idx === 0 ? (pair.node1_region || "") : idx === pair.nodes.length - 1 ? (pair.node2_region || "") : "",
+      address: hop.address || "",
+    }));
+  }
+  const n1 = pair?.node1 || {};
+  const n2 = pair?.node2 || {};
+  return [
+    {
+      agent_id: n1.agent_id || "",
+      instance_id: n1.instance_id || "",
+      name: pair?.node1_name || n1.name || n1.agent_id || n1.address || "节点 A",
+      region: pair?.node1_region || "",
+      address: n1.address || "",
+    },
+    {
+      agent_id: n2.agent_id || "",
+      instance_id: n2.instance_id || "",
+      name: pair?.target_mode === "ip" ? (n2.address || "自定义 IP") : (pair?.node2_name || n2.name || n2.agent_id || n2.address || "节点 B"),
+      region: pair?.target_mode === "ip" ? "" : (pair?.node2_region || ""),
+      address: n2.address || "",
+    },
+  ];
+}
+
+function summarizeHopMetricText(dir, availability, activeState) {
+  const info = probeDirectionStatus(dir, availability, activeState);
+  if (!dir) return { text: info.available === false ? "离线" : info.label, tone: info.tone || "" };
+  if (dir.state === "running" || dir.state === "preparing") return { text: "探测中", tone: "warn" };
+  if (dir.state === "failed" || dir.error) return { text: dir.error || "失败", tone: "bad" };
+  if (!dir.reached || dir.loss_percent >= 100) return { text: "不可达 · 100%丢包", tone: "bad" };
+  const ms = typeof dir.avg_ms === "number" && Number.isFinite(dir.avg_ms) ? `${dir.avg_ms.toFixed(1)} ms` : "—";
+  const loss = dir.loss_percent > 0 ? ` · ${fmtLoss(dir.loss_percent)}丢包` : "";
+  return { text: `${ms}${loss}`, tone: info.tone || "ok" };
+}
+
 export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes, getProbesState, reloadProbes }) {
   const canExecute = () => ctx.can("tasks.execute");
   const canView = () => ctx.can("agents.read") && ctx.can("tasks.read");
@@ -222,35 +272,65 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   }
   ctx.signal.addEventListener("abort", () => modalBox?.close(), { once: true });
 
-  function openProbeDialog(pair = null) {
+  function openProbeDialog(pair = null, opts = {}) {
     if (!canExecute()) return;
+    const MAX_HOPS = 10;
     const isEdit = Boolean(pair?.id);
     const params = pair?.parameters || {};
     const initialMode = pair?.target_mode === "ip" ? "ip" : "node";
+    const existingGroups = [...new Set(
+      (getProbes()?.pairs || [])
+        .map((item) => String(item?.group_name || "").trim())
+        .filter(Boolean),
+    )].sort((a, b) => a.localeCompare(b, "zh-CN"));
 
-    const nameInput = field("探测名称", "name", pair?.name || "", { maxlength: 80, placeholder: "可选" });
-    const modeField = field("目标模式", "target_mode", initialMode, {
-      options: [["node", "托管节点"], ["ip", "自定义 IP"]],
+    const existingNodes = Array.isArray(pair?.nodes) && pair.nodes.length >= 2
+      ? pair.nodes
+      : pair
+        ? [pair.node1, pair.node2]
+        : [];
+    const hopsState = existingNodes.length >= 2
+      ? existingNodes.map((ep) => ({
+          key: ep?.agent_id ? nodeKey(ep) : "",
+          address: ep?.address || "",
+        }))
+      : [
+          { key: "", address: "" },
+          { key: "", address: "" },
+        ];
+    if (initialMode === "ip" && hopsState.length < 2) {
+      hopsState.push({ key: "", address: "" });
+    }
+
+    const nameInput = field("探测名称", "name", pair?.name || "", {
+      maxlength: 80,
+      placeholder: "可选，如 亚太全程链路",
     });
-    const node1Field = field("起点节点", "node1_key", pair ? nodeKey(pair.node1) : "", {
+    const groupInput = field("监测分组", "group_name", pair?.group_name || opts?.groupName || "", {
+      maxlength: 40,
+      placeholder: "可选，同组链路将在拓扑中归组展示",
+      suggestions: existingGroups,
+    });
+    const modeField = field("监测模式", "target_mode", initialMode, {
+      options: [
+        ["node", "托管节点全链路 (支持 A→B→C→D 多跳)"],
+        ["ip", "自定义目标 IP (单跳)"],
+      ],
+    });
+
+    const ipSrcNodeField = field("起点节点", "ip_src_key", hopsState[0]?.key || "", {
       options: [["", "读取中…"]],
-      required: true,
     });
-    const addr1Field = field("起点地址", "node1_addr", pair?.node1?.address || "", {
-      options: pair?.node1?.address ? [[pair.node1.address, pair.node1.address]] : [["", "请选择"]],
-      required: true,
-    });
-    const node2Field = field("对端节点", "node2_key", pair && initialMode === "node" ? nodeKey(pair.node2) : "", {
-      options: [["", "读取中…"]],
-    });
-    const addr2Field = field("对端地址", "node2_addr", pair && initialMode === "node" ? pair?.node2?.address || "" : "", {
-      options: pair?.node2?.address ? [[pair.node2.address, pair.node2.address]] : [["", "请选择"]],
+    const ipSrcAddrField = field("起点地址", "ip_src_addr", hopsState[0]?.address || "", {
+      options: hopsState[0]?.address ? [[hopsState[0].address, hopsState[0].address]] : [["", "请选择"]],
     });
     const customIPField = field("对端 IP", "node2_ip", pair && initialMode === "ip" ? pair?.node2?.address || "" : "", {
       placeholder: "IPv4 / IPv6",
     });
-    const bidirField = field("双向链路测量", "bidirectional", Boolean(pair?.bidirectional), {
+
+    const bidirField = field("去程与回程双向测量", "bidirectional", pair ? Boolean(pair.bidirectional) : true, {
       type: "checkbox",
+      hint: "启用后按序双向实测每跳去程与回程延迟、丢包率",
     });
 
     const countField = field("探测次数", "count", params.count || 5, { type: "number", min: 1, max: 100, required: true });
@@ -262,12 +342,37 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     const readHint = muted("读取节点中…");
 
     const modeSelect = modeField.querySelector("select");
-    const n1Select = node1Field.querySelector("select");
-    const a1Select = addr1Field.querySelector("select");
-    const n2Select = node2Field.querySelector("select");
-    const a2Select = addr2Field.querySelector("select");
+    const ipSrcNodeSelect = ipSrcNodeField.querySelector("select");
+    const ipSrcAddrSelect = ipSrcAddrField.querySelector("select");
     const ipInput = customIPField.querySelector("input");
     const bidirInput = bidirField.querySelector("input");
+
+    const chainCountBadge = badge(`${hopsState.length} / ${MAX_HOPS} 节点`);
+    const hopListHost = node("div", { className: "a-dash-probe-hop-list" });
+    const chainPreview = node("p", { className: "a-muted a-dash-probe-chain-preview" });
+    let addHopBtn;
+    const chainBuilder = node("div", { className: "a-dash-probe-chain-builder" },
+      node("div", { className: "a-dash-probe-chain-head" },
+        node("div", { className: "a-dash-probe-chain-title" },
+          node("strong", {}, "全程监测节点顺序"),
+          chainCountBadge,
+        ),
+        addHopBtn = button("+ 追加途经节点", () => {
+          if (hopsState.length >= MAX_HOPS) return;
+          const usedKeys = new Set(hopsState.map((h) => h.key).filter(Boolean));
+          const candidate = orderedNodes.find((item) => !usedKeys.has(nodeKey(item))) || null;
+          hopsState.push({ key: candidate ? nodeKey(candidate) : "", address: "" });
+          renderChainRows();
+        }, { className: "a-button", "data-refresh-key": "add-hop" }),
+      ),
+      hopListHost,
+      chainPreview,
+    );
+    const customIPGrid = node("div", { className: "a-form-grid" },
+      ipSrcNodeField,
+      ipSrcAddrField,
+      customIPField,
+    );
 
     let orderedNodes = [];
     const nodeByKey = new Map();
@@ -280,49 +385,133 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       else selectEl.value = items.find(([, , dis]) => !dis)?.[0] || "";
     };
 
-    const syncNode2Addrs = () => {
-      const a1 = a1Select.value;
-      const n2 = nodeByKey.get(n2Select.value);
-      const allAddrs = n2?.capabilities?.addresses || [];
-      const compat = a1 ? allAddrs.filter((addr) => isIPv6(addr) === isIPv6(a1)) : allAddrs;
-      const shown = compat.length ? compat : [];
-      syncOptions(
-        a2Select,
-        shown.length ? shown.map((addr) => [addr, addr]) : [["", allAddrs.length ? "无匹配 IP 协议族地址" : "节点无可用单播地址", true]],
-        pair?.node2?.address,
-      );
-    };
-
-    const syncNode2 = () => {
-      const n1 = nodeByKey.get(n1Select.value);
-      const targets = orderedNodes.filter((item) => item.agent_id !== n1?.agent_id);
-      const items = targets.map((item) => {
+    const nodeOptionItems = (excludeKeys) => orderedNodes
+      .filter((item) => !excludeKeys.has(nodeKey(item)))
+      .map((item) => {
         const key = nodeKey(item);
-        const suffix = !item.online ? " · 离线" : item.instance_id && item.instance_id !== "main" ? ` · ${item.context || item.instance_id}` : "";
+        const suffix = !item.online
+          ? " · 离线"
+          : item.instance_id && item.instance_id !== "main"
+            ? ` · ${item.context || item.instance_id}`
+            : "";
         return [key, `${item.name}${suffix}`, false];
       });
-      syncOptions(n2Select, items.length ? items : [["", "暂无其他托管节点", true]], n2Select.value || (pair ? nodeKey(pair.node2) : ""));
-      syncNode2Addrs();
+
+    const compatibleAddrsForHop = (agentItem, baseAddr) => {
+      const allAddrs = agentItem?.capabilities?.addresses || [];
+      if (!baseAddr) return allAddrs;
+      return allAddrs.filter((addr) => isIPv6(addr) === isIPv6(baseAddr));
     };
 
-    const syncNode1Addrs = () => {
-      const n1 = nodeByKey.get(n1Select.value);
+    const updatePreviewText = () => {
+      const names = hopsState.map((hop, idx) => {
+        const item = nodeByKey.get(hop.key);
+        return item?.name || existingNodes[idx]?.name || `第 ${idx + 1} 站`;
+      });
+      const bidir = !bidirInput.disabled && bidirInput.checked;
+      chainPreview.textContent = bidir
+        ? `去程: ${names.join(" → ")} ｜ 回程: ${[...names].reverse().join(" → ")}`
+        : `去程: ${names.join(" → ")}`;
+      chainCountBadge.textContent = `${hopsState.length} / ${MAX_HOPS} 节点`;
+      if (addHopBtn) addHopBtn.disabled = hopsState.length >= MAX_HOPS || (orderedNodes.length > 0 && hopsState.length >= orderedNodes.length);
+    };
+
+    const renderChainRows = () => {
+      const rows = hopsState.map((hop, idx) => {
+        const otherKeys = new Set(hopsState.filter((_, i) => i !== idx).map((h) => h.key).filter(Boolean));
+        const availableItems = nodeOptionItems(otherKeys);
+        const nodeSelect = node("select", { name: `hop_node_${idx}`, "data-hop-index": String(idx), required: modeSelect.value !== "ip" });
+        nodeSelect.prepend(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")));
+        syncOptions(
+          nodeSelect,
+          availableItems.length ? availableItems : [["", orderedNodes.length ? "无更多可选节点" : "读取节点中…", true]],
+          hop.key,
+        );
+        if (nodeSelect.value && nodeByKey.has(nodeSelect.value)) hop.key = nodeSelect.value;
+
+        const addrSelect = node("select", { name: `hop_addr_${idx}`, "data-hop-addr-index": String(idx), required: modeSelect.value !== "ip" });
+        addrSelect.prepend(node("button", { type: "button", tabindex: "-1" }, node("selectedcontent")));
+
+        const syncRowAddrs = (baseAddr) => {
+          const item = nodeByKey.get(hop.key);
+          const allAddrs = item?.capabilities?.addresses || [];
+          const compat = idx === 0 ? allAddrs : compatibleAddrsForHop(item, baseAddr);
+          const addrItems = compat.length
+            ? compat.map((addr) => [addr, addr, false])
+            : [["", allAddrs.length ? "无匹配 IP 协议族地址" : (orderedNodes.length ? "节点无可用单播地址" : (hop.address || "请选择")), !hop.address || allAddrs.length > 0]];
+          syncOptions(addrSelect, addrItems, hop.address);
+          if (addrSelect.value) hop.address = addrSelect.value;
+          else if (orderedNodes.length) hop.address = "";
+        };
+
+        const baseAddr = idx === 0 ? "" : hopsState[0]?.address || "";
+        syncRowAddrs(baseAddr);
+
+        nodeSelect.addEventListener("change", () => {
+          hop.key = nodeSelect.value;
+          hop.address = "";
+          renderChainRows();
+        });
+        addrSelect.addEventListener("change", () => {
+          hop.address = addrSelect.value;
+          if (idx === 0) renderChainRows();
+          else updatePreviewText();
+        });
+
+        const roleLabel = idx === 0 ? "起点" : idx === hopsState.length - 1 ? "终点" : `第 ${idx + 1} 站`;
+        return node("div", { className: "a-dash-probe-hop-row", "data-hop-row": String(idx) },
+          node("span", { className: "a-badge a-dash-probe-hop-idx" }, roleLabel),
+          node("div", { className: "a-dash-probe-hop-fields" },
+            node("div", { className: "a-field" },
+              node("label", { className: "a-field-label" }, idx === 0 ? "节点" : "下一跳节点"),
+              nodeSelect,
+            ),
+            node("div", { className: "a-field" },
+              node("label", { className: "a-field-label" }, "探测地址"),
+              addrSelect,
+            ),
+          ),
+          node("div", { className: "a-actions a-dash-probe-hop-ops" },
+            button("↑", () => {
+              if (idx <= 0) return;
+              [hopsState[idx - 1], hopsState[idx]] = [hopsState[idx], hopsState[idx - 1]];
+              renderChainRows();
+            }, { className: "a-button", disabled: idx === 0, title: "上移节点" }),
+            button("↓", () => {
+              if (idx >= hopsState.length - 1) return;
+              [hopsState[idx], hopsState[idx + 1]] = [hopsState[idx + 1], hopsState[idx]];
+              renderChainRows();
+            }, { className: "a-button", disabled: idx === hopsState.length - 1, title: "下移节点" }),
+            button("移除", () => {
+              if (hopsState.length <= 2) return;
+              hopsState.splice(idx, 1);
+              renderChainRows();
+            }, { className: "a-button", tone: "danger", disabled: hopsState.length <= 2, title: "移除此跳节点" }),
+          ),
+        );
+      });
+      hopListHost.replaceChildren(...rows);
+      updatePreviewText();
+    };
+
+    const syncCustomIPSrcAddrs = () => {
+      const n1 = nodeByKey.get(ipSrcNodeSelect.value);
       const addrs = n1?.capabilities?.addresses || [];
       syncOptions(
-        a1Select,
-        addrs.length ? addrs.map((addr) => [addr, addr]) : [["", "节点无可用单播地址", true]],
-        a1Select.value || pair?.node1?.address,
+        ipSrcAddrSelect,
+        addrs.length ? addrs.map((addr) => [addr, addr]) : [["", orderedNodes.length ? "节点无可用单播地址" : "请选择", true]],
+        ipSrcAddrSelect.value || hopsState[0]?.address,
       );
-      syncNode2();
     };
+
+    ipSrcNodeSelect.addEventListener("change", syncCustomIPSrcAddrs);
 
     const syncMode = () => {
       const custom = modeSelect.value === "ip";
-      node2Field.hidden = custom;
-      addr2Field.hidden = custom;
-      customIPField.hidden = !custom;
-      n2Select.required = !custom;
-      a2Select.required = !custom;
+      chainBuilder.hidden = custom;
+      customIPGrid.hidden = !custom;
+      ipSrcNodeSelect.required = custom;
+      ipSrcAddrSelect.required = custom;
       ipInput.required = custom;
       bidirField.hidden = custom;
       if (custom) {
@@ -331,26 +520,19 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       } else {
         bidirInput.disabled = false;
       }
+      renderChainRows();
     };
 
-    n1Select.addEventListener("change", syncNode1Addrs);
-    a1Select.addEventListener("change", syncNode2Addrs);
-    n2Select.addEventListener("change", syncNode2Addrs);
+    bidirInput.addEventListener("change", updatePreviewText);
     modeSelect.addEventListener("change", syncMode);
     syncMode();
 
     let box;
     const form = ctx.form([
       readHint,
-      nameInput,
-      node("div", { className: "a-form-grid" },
-        node1Field,
-        addr1Field,
-        modeField,
-        node2Field,
-        addr2Field,
-        customIPField,
-      ),
+      node("div", { className: "a-form-grid" }, nameInput, groupInput, modeField),
+      chainBuilder,
+      customIPGrid,
       bidirField,
       node("div", { className: "a-form-grid" },
         countField,
@@ -361,50 +543,72 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       ),
       autoEnabledField,
     ], isEdit ? "保存修改" : "添加链路", async (values, formEl) => {
-      const n1 = nodeByKey.get(values.node1_key);
-      if (!n1) throw new Error("请选择有效的起点节点。");
-      if (!values.node1_addr) throw new Error("请选择起点节点的探测地址。");
       const custom = values.target_mode === "ip";
-      let n2Endpoint;
+      let payload;
       if (custom) {
+        const n1 = nodeByKey.get(values.ip_src_key);
+        if (!n1) throw new Error("请选择有效的起点节点。");
+        if (!values.ip_src_addr) throw new Error("请选择起点节点的探测地址。");
         const ip = String(values.node2_ip || "").trim();
         if (!isValidProbeIPAddress(ip)) throw new Error("请输入有效的 IPv4 或 IPv6 单播目标地址。");
-        if (isIPv6(ip) !== isIPv6(values.node1_addr)) throw new Error("对端 IP 须与起点地址使用相同 IP 地址族。");
-        n2Endpoint = { address: ip, name: ip };
+        if (isIPv6(ip) !== isIPv6(values.ip_src_addr)) throw new Error("对端 IP 须与起点地址使用相同 IP 地址族。");
+        payload = {
+          name: String(values.name || "").trim(),
+          group_name: String(values.group_name || "").trim(),
+          target_mode: "ip",
+          node1: {
+            agent_id: n1.agent_id,
+            instance_id: n1.instance_id || "",
+            name: n1.name,
+            address: values.ip_src_addr,
+          },
+          node2: { address: ip, name: ip },
+          bidirectional: false,
+        };
       } else {
-        const n2 = nodeByKey.get(values.node2_key);
-        if (!n2) throw new Error("请选择有效的对端节点。");
-        if (!values.node2_addr) throw new Error("对端节点缺少匹配协议族的可用地址。");
-        n2Endpoint = {
-          agent_id: n2.agent_id,
-          instance_id: n2.instance_id || "",
-          name: n2.name,
-          address: values.node2_addr,
+        if (hopsState.length < 2) throw new Error("全程监测至少需要 2 个节点。");
+        if (hopsState.length > MAX_HOPS) throw new Error(`单条全程监测链路最多支持 ${MAX_HOPS} 个节点。`);
+        const seenAgents = new Set();
+        let baseIs6 = null;
+        const endpoints = hopsState.map((hop, idx) => {
+          const item = nodeByKey.get(hop.key);
+          if (!item) throw new Error(`请选择有效的第 ${idx + 1} 跳节点。`);
+          if (seenAgents.has(item.agent_id)) throw new Error("同一条全程监测链路中不能包含重复节点。");
+          seenAgents.add(item.agent_id);
+          if (!hop.address) throw new Error(`第 ${idx + 1} 跳节点缺少匹配协议族的可用地址。`);
+          const v6 = isIPv6(hop.address);
+          if (baseIs6 === null) baseIs6 = v6;
+          else if (v6 !== baseIs6) throw new Error("全链路节点必须使用相同 IP 地址族。");
+          return {
+            agent_id: item.agent_id,
+            instance_id: item.instance_id || "",
+            name: item.name,
+            address: hop.address,
+          };
+        });
+        payload = {
+          name: String(values.name || "").trim(),
+          group_name: String(values.group_name || "").trim(),
+          target_mode: "",
+          node1: endpoints[0],
+          node2: endpoints[endpoints.length - 1],
+          nodes: endpoints,
+          bidirectional: Boolean(formEl.elements.bidirectional.checked),
         };
       }
-      const payload = {
-        name: String(values.name || "").trim(),
-        target_mode: custom ? "ip" : "",
-        node1: {
-          agent_id: n1.agent_id,
-          instance_id: n1.instance_id || "",
-          name: n1.name,
-          address: values.node1_addr,
-        },
-        node2: n2Endpoint,
-        bidirectional: !custom && Boolean(formEl.elements.bidirectional.checked),
-        parameters: {
-          tool: "ping",
-          protocol: "icmp",
-          count: Number(values.count),
-          interval_ms: Number(values.interval_ms),
-          timeout_ms: Number(values.timeout_ms),
-          size: Number(values.size),
-        },
-        auto_enabled: Boolean(formEl.elements.auto_enabled.checked),
-        auto_interval_seconds: Number(values.auto_interval_seconds),
-        ...(isEdit ? { revision: Number(pair.revision || 0) } : {}),
+
+      payload.parameters = {
+        tool: "ping",
+        protocol: "icmp",
+        count: Number(values.count),
+        interval_ms: Number(values.interval_ms),
+        timeout_ms: Number(values.timeout_ms),
+        size: Number(values.size),
       };
+      payload.auto_enabled = Boolean(formEl.elements.auto_enabled.checked);
+      payload.auto_interval_seconds = Number(values.auto_interval_seconds);
+      if (isEdit) payload.revision = Number(pair.revision || 0);
+
       await ctx.api(isEdit ? `/dashboard/probes/${pathID(pair.id)}` : "/dashboard/probes", {
         method: isEdit ? "PUT" : "POST",
         body: payload,
@@ -427,13 +631,10 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
       );
       nodeByKey.clear();
       orderedNodes.forEach((item) => nodeByKey.set(nodeKey(item), item));
-      const n1Items = orderedNodes.map((item) => [
-        nodeKey(item),
-        `${item.name}${!item.online ? " · 离线" : item.instance_id && item.instance_id !== "main" ? ` · ${item.context || item.instance_id}` : ""}`,
-        false,
-      ]);
-      syncOptions(n1Select, n1Items.length ? n1Items : [["", "暂无已接入诊断节点", true]], pair ? nodeKey(pair.node1) : "");
-      syncNode1Addrs();
+      const srcItems = nodeOptionItems(new Set());
+      syncOptions(ipSrcNodeSelect, srcItems.length ? srcItems : [["", "暂无已接入诊断节点", true]], hopsState[0]?.key || "");
+      syncCustomIPSrcAddrs();
+      renderChainRows();
       readHint.hidden = true;
     };
 
@@ -465,9 +666,11 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
             method: "PUT",
             body: {
               name: pair.name || "",
+              group_name: pair.group_name || "",
               target_mode: pair.target_mode || "",
               node1: pair.node1,
               node2: pair.node2,
+              ...(pair.target_mode !== "ip" && Array.isArray(pair.nodes) && pair.nodes.length >= 2 ? { nodes: pair.nodes } : {}),
               bidirectional: Boolean(pair.bidirectional),
               parameters: pair.parameters,
               auto_enabled: !pair.auto_enabled,
@@ -490,7 +693,10 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
   const isPairAbnormal = (pair) => {
     if (pair?.availability?.ready === false) return true;
     const dirs = [pair?.latest?.forward, pair?.bidirectional ? pair?.latest?.reverse : null].filter(Boolean);
-    return dirs.some((d) => ["warn", "bad"].includes(probeDirectionStatus(d, pair.availability, pair.active_state).tone));
+    if (dirs.some((d) => ["warn", "bad"].includes(probeDirectionStatus(d, pair.availability, pair.active_state).tone))) return true;
+    const hops = Array.isArray(pair?.latest?.hops) ? pair.latest.hops : [];
+    return hops.some((hop) => ["warn", "bad"].includes(probeDirectionStatus(hop?.forward, pair.availability, pair.active_state).tone)
+      || (pair?.bidirectional && ["warn", "bad"].includes(probeDirectionStatus(hop?.reverse, pair.availability, pair.active_state).tone)));
   };
 
   const focusProbeCard = (probeID) => {
@@ -517,7 +723,7 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     if (!force && sig === lastPaintSignature) return;
     lastPaintSignature = sig;
 
-    const showFilter = abnormalPairs.length > 0 && abnormalPairs.length < pairs.length;
+    const showFilter = pairs.length > 0 && (abnormalPairs.length > 0 || filterMode === "abnormal");
     patch(summaryNode, node("div", { className: "a-actions", role: "status" },
       pairs.length ? keyed("count", badge(`自动 ${summary.enabled}/${summary.total}`)) : null,
       summary.running > 0 ? keyed("running", badge(`进行中 ${summary.running}`, "warn")) : null,
@@ -564,13 +770,17 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
 
     const colMode = visiblePairs.length <= 1 ? "1" : "2";
     const cards = visiblePairs.map((pair, pairIdx) => {
-      const aName = pair.node1_name || pair.node1?.name || pair.node1?.agent_id || "节点 A";
-      const bName = pair.target_mode === "ip"
-        ? pair.node2?.address || "自定义 IP"
-        : pair.node2_name || pair.node2?.name || pair.node2?.agent_id || "节点 B";
-      const aFlag = nodeRegionFlag(ctx, { id: pair.node1?.agent_id, region_code: pair.node1_region });
-      const bFlag = pair.target_mode === "ip" ? null : nodeRegionFlag(ctx, { id: pair.node2?.agent_id, region_code: pair.node2_region });
-      const title = pair.name || `${aName} ${pair.bidirectional ? "↔" : "→"} ${bName}`;
+      const endpoints = resolvedPairEndpoints(pair);
+      const isChain = endpoints.length > 2;
+      const startEp = endpoints[0] || {};
+      const endEp = endpoints[endpoints.length - 1] || {};
+      const aName = startEp.name || "节点 A";
+      const bName = endEp.name || "节点 B";
+      const aFlag = nodeRegionFlag(ctx, { id: startEp.agent_id, region_code: startEp.region });
+      const bFlag = pair.target_mode === "ip" ? null : nodeRegionFlag(ctx, { id: endEp.agent_id, region_code: endEp.region });
+      const arrow = pair.bidirectional ? " ⇄ " : " → ";
+      const routeTitle = endpoints.map((ep) => ep.name).join(arrow);
+      const title = pair.name || routeTitle;
       const isRunning = Boolean(pair.availability?.running || ["preparing", "running", "stopping", "cleanup_pending"].includes(pair.active_state));
       const isFocused = Boolean(focusProbeID && pair.id === focusProbeID);
 
@@ -583,7 +793,13 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         .filter(Boolean)
         .map((d) => probeDirectionStatus(d, pair.availability, pair.active_state).label);
       const showOuterReason = Boolean(!pair.availability?.ready && pair.availability?.reason && !laneReasons.includes(pair.availability.reason));
-      const specText = `${pair.bidirectional ? "双向" : "单向"} · ICMP ×${pair.parameters?.count || 5} · ${pair.auto_enabled ? `${pair.auto_interval_seconds}s` : "暂停"}`;
+      const hopSpec = isChain ? `${endpoints.length} 站 ${endpoints.length - 1} 跳` : "";
+      const specText = [
+        hopSpec,
+        pair.bidirectional ? "去/回双程" : "单向",
+        `ICMP ×${pair.parameters?.count || 5}`,
+        pair.auto_enabled ? `${pair.auto_interval_seconds}s` : "暂停",
+      ].filter(Boolean).join(" · ");
       const trendLabel = trend
         ? (pair.bidirectional
             ? "实线 去程 · 虚线 回程"
@@ -592,13 +808,44 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
               : `近 ${fwdSeries.length} 次 · 丢包`)
         : (showOuterReason ? pair.availability.reason : "—");
 
+      const hopItems = isChain
+        ? endpoints.slice(0, -1).map((fromEp, hopIdx) => {
+            const toEp = endpoints[hopIdx + 1];
+            const hopData = Array.isArray(pair.latest?.hops)
+              ? (pair.latest.hops.find((h) => h.hop_index === hopIdx) || pair.latest.hops[hopIdx])
+              : null;
+            const fwdSummary = summarizeHopMetricText(hopData?.forward, pair.availability, pair.active_state);
+            const revSummary = pair.bidirectional
+              ? summarizeHopMetricText(hopData?.reverse, pair.availability, pair.active_state)
+              : null;
+            const hopTone = fwdSummary.tone === "bad" || revSummary?.tone === "bad"
+              ? "bad"
+              : fwdSummary.tone === "warn" || revSummary?.tone === "warn"
+                ? "warn"
+                : fwdSummary.tone === "ok" && (!revSummary || revSummary.tone === "ok")
+                  ? "ok"
+                  : "";
+            return node("div", { className: `a-dash-probe-hop-item${hopTone ? ` is-${hopTone}` : ""}` },
+              node("span", { className: "a-dash-probe-hop-seg" }, `${hopIdx + 1}. ${fromEp.name}${pair.bidirectional ? " ⇄ " : " → "}${toEp.name}`),
+              node("span", { className: "a-dash-probe-hop-metrics" },
+                `去 ${fwdSummary.text}${revSummary ? ` · 回 ${revSummary.text}` : ""}`,
+              ),
+            );
+          })
+        : null;
+
       return node("article", {
         className: `a-card a-dash-probe-card${isFocused ? " is-focused" : ""}`,
         "data-refresh-key": pair.id,
       },
         node("div", { className: "a-dash-probe-head" },
           node("div", { className: "a-dash-probe-title" },
+            node("div", { className: "a-dash-probe-tags" },
+              pair.group_name ? badge(pair.group_name, "") : null,
+              isChain ? badge(`全程 ${endpoints.length} 站`, "") : null,
+            ),
             node("h3", {}, title),
+            pair.name ? node("p", { className: "a-muted a-dash-probe-route" }, routeTitle) : null,
             muted(specText),
           ),
           keyed("status", isRunning ? badge("探测中", "warn") : pair.availability?.ready === false ? badge("不可用", "warn") : badge(pair.auto_enabled ? "监控中" : "已暂停", pair.auto_enabled ? "ok" : "")),
@@ -606,11 +853,11 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
         node("div", { className: "a-dash-probe-lanes" },
           directionBlock({
             key: "fwd",
-            title: "去程",
+            title: isChain ? "去程全程" : "去程",
             fromName: aName,
-            fromAddress: pair.node1?.address || "—",
+            fromAddress: startEp.address || pair.node1?.address || "—",
             toName: bName,
-            toAddress: pair.target_mode === "ip" ? "" : (pair.node2?.address || "—"),
+            toAddress: pair.target_mode === "ip" ? "" : (endEp.address || pair.node2?.address || "—"),
             fromFlag: aFlag,
             toFlag: bFlag,
             dir: pair.latest?.forward,
@@ -618,17 +865,18 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
           }),
           pair.bidirectional ? directionBlock({
             key: "rev",
-            title: "回程",
+            title: isChain ? "回程全程" : "回程",
             fromName: bName,
-            fromAddress: pair.node2?.address || "—",
+            fromAddress: endEp.address || pair.node2?.address || "—",
             toName: aName,
-            toAddress: pair.node1?.address || "—",
+            toAddress: startEp.address || pair.node1?.address || "—",
             fromFlag: bFlag,
             toFlag: aFlag,
             dir: pair.latest?.reverse,
             pair,
           }) : null,
         ),
+        hopItems ? node("div", { className: "a-dash-probe-hops" }, hopItems) : null,
         node("div", { className: "a-dash-probe-spark" },
           trend?.svg ? keyed("spark-svg", trend.svg) : null,
           node("div", { className: "a-chart-meta", "data-refresh-key": "spark-meta" },
@@ -651,8 +899,19 @@ export function createDashboardProbesSection(ctx, { date, getOrderIDs, getProbes
     patch(gridHost, node("div", { className: "a-dash-probe-grid", "data-cols": colMode }, cards));
   }
 
-  function openModal(targetProbeID = "") {
+  function openModal(targetProbeID = "", options = {}) {
     if (!canView()) return;
+    if (options?.create) {
+      openProbeDialog(null, { groupName: options.groupName || "" });
+      return;
+    }
+    if (options?.edit && targetProbeID) {
+      const target = (getProbes()?.pairs || []).find((item) => item.id === targetProbeID);
+      if (target) {
+        openProbeDialog(target);
+        return;
+      }
+    }
     focusProbeID = String(targetProbeID || "");
     paint(true);
     if (!modalBox || !modalBox.open) {
