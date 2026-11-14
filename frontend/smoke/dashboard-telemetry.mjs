@@ -10,6 +10,7 @@ import {
   probeHistorySeries,
   rankDashboardTrafficView,
   sanitizePanelSample,
+  selectMostActiveNodes,
   summarizeClientConnectionsPulse,
   summarizeDashboardProbes,
   summarizeDashboardTrafficPeaks,
@@ -220,6 +221,21 @@ export async function run() {
       { status: "canceled" },
     ],
   }), { total: 4, succeeded: 1, running: 1, failed: 2 });
+
+  const fleet = [
+    { id: "off", status: "offline", metrics: { network_available: true, network_rx_bps: 999999, network_tx_bps: 999999, cpu_available: true, cpu_percent: 99 }, runtime: { xray: { installed: true, service_status: "active" } } },
+    { id: "idle-low", status: "online", metrics: { network_available: true, network_rx_bps: 0, network_tx_bps: 0, cpu_available: true, cpu_percent: 5 }, runtime: {} },
+    { id: "idle-core-a", status: "online", metrics: { network_available: true, network_rx_bps: 0, network_tx_bps: 0, cpu_available: true, cpu_percent: 10 }, runtime: { mihomo: { installed: true, service_status: "active" } } },
+    { id: "busy-mid", status: "online", metrics: { network_available: true, network_rx_bps: 4000, network_tx_bps: 1000, cpu_available: true, cpu_percent: 12 }, runtime: { xray: { installed: true, service_status: "active" } } },
+    { id: "busy-top", status: "online", metrics: { network_available: true, network_rx_bps: 8000, network_tx_bps: 4000, cpu_available: true, cpu_percent: 20 }, runtime: { mihomo: { installed: true, service_status: "active" } } },
+    { id: "idle-core-b", status: "online", metrics: { network_available: true, network_rx_bps: 0, network_tx_bps: 0, cpu_available: true, cpu_percent: 10 }, runtime: { singbox: { installed: true, service_status: "active" } } },
+    { id: "idle-cpu", status: "online", metrics: { network_available: true, network_rx_bps: 0, network_tx_bps: 0, cpu_available: true, cpu_percent: 35 }, runtime: {} },
+  ];
+  assert.deepEqual(
+    selectMostActiveNodes(fleet, { limit: 5 }).map((a) => a.id),
+    ["busy-top", "busy-mid", "idle-core-a", "idle-core-b", "idle-cpu"],
+    "selectMostActiveNodes ranks online throughput, active cores, cpu, and preserves tie order within top 5",
+  );
 
   console.log("Dashboard telemetry model smoke passed");
 }

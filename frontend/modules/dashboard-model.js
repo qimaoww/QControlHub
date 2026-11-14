@@ -449,6 +449,33 @@ export function summarizeExpiringCertificates(response, now = Date.now(), days =
   return { totalOwned, expiringSoon, abnormal, urgent: urgent.slice(0, 3) };
 }
 
+export function selectMostActiveNodes(agents = [], { limit = 5 } = {}) {
+  const list = Array.isArray(agents) ? agents.filter(Boolean) : [];
+  if (!list.length) return [];
+  const cap = limit === "all" ? list.length : Math.max(1, Number(limit) || 5);
+  return list
+    .map((agent, index) => {
+      const online = agent.status === "online" ? 1 : 0;
+      const throughput = online && panelNetworkRatesValid(agent.metrics)
+        ? agent.metrics.network_rx_bps + agent.metrics.network_tx_bps
+        : 0;
+      const activeCores = online
+        ? Object.values(agent.runtime || {}).filter((item) => item?.installed && item?.service_status === "active").length
+        : 0;
+      const cpu = online ? (panelMetricUsage(agent.metrics, "cpu") ?? 0) : 0;
+      return { agent, online, throughput, activeCores, cpu, index };
+    })
+    .sort((a, b) => (
+      b.online - a.online ||
+      b.throughput - a.throughput ||
+      b.activeCores - a.activeCores ||
+      b.cpu - a.cpu ||
+      a.index - b.index
+    ))
+    .slice(0, cap)
+    .map((item) => item.agent);
+}
+
 export function summarizeIPQualityFleet(history) {
   const records = Array.isArray(history?.records) ? history.records : [];
   let succeeded = 0, running = 0, failed = 0;

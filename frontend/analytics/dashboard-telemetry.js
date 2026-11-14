@@ -1,6 +1,7 @@
 import {
   isClockSyncAbnormal,
   panelMetricUsage,
+  selectMostActiveNodes,
   summarizeClientConnectionsPulse,
   summarizeExpiringCertificates,
   summarizeIPQualityFleet,
@@ -61,10 +62,12 @@ function drawPulseSVG({ width, height }, pulse) {
 }
 
 export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents, agentsReady, canMetrics, bytes, date, status }) {
+  const visibleAgents = selectMostActiveNodes(agents, { limit: 5 });
   const skewedCount = agents.filter((a) => isClockSyncAbnormal(a.metrics?.clock_sync)).length;
   const onlineCount = agents.filter((a) => a.status === "online").length;
 
   patch(nodeSummary, node("div", { className: "a-actions" },
+    agents.length > visibleAgents.length ? badge(`活跃 Top ${visibleAgents.length}`) : null,
     agents.length ? badge(`${onlineCount}/${agents.length} 在线`, onlineCount === agents.length ? "ok" : onlineCount > 0 ? "warn" : "bad") : null,
     skewedCount > 0 ? badge(`时钟异常 ${skewedCount}`, "warn") : null,
     link("管理节点", "#node-settings"),
@@ -92,7 +95,7 @@ export function paintNodeTelemetryMatrix({ ctx, nodeSummary, matrixHost, agents,
         muted("操作"),
       );
 
-  const rows = agents.map((agent) => {
+  const rows = visibleAgents.map((agent) => {
     const cpu = panelMetricUsage(agent.metrics, "cpu");
     const mem = panelMetricUsage(agent.metrics, "memory");
     const cpuStale = agent.status !== "online" || cpu == null;
