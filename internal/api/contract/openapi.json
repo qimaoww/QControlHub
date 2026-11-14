@@ -2200,6 +2200,297 @@
         },
         "type": "object"
       },
+      "core_DashboardProbeAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "node1_granted": {
+            "type": "boolean"
+          },
+          "node1_online": {
+            "type": "boolean"
+          },
+          "node1_ping": {
+            "type": "boolean"
+          },
+          "node2_granted": {
+            "type": "boolean"
+          },
+          "node2_online": {
+            "type": "boolean"
+          },
+          "node2_ping": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "core_DashboardProbeDirectionMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "loss_percent": {
+            "type": "number"
+          },
+          "max_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "min_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reached": {
+            "type": "boolean"
+          },
+          "received": {
+            "type": "integer"
+          },
+          "sent": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "stdev_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "core_DashboardProbeListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "pairs": {
+            "items": {
+              "$ref": "#/components/schemas/core_DashboardProbePair"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "core_DashboardProbePair": {
+        "additionalProperties": false,
+        "properties": {
+          "active_state": {
+            "type": "string"
+          },
+          "auto_enabled": {
+            "type": "boolean"
+          },
+          "auto_interval_seconds": {
+            "type": "integer"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/core_DashboardProbeAvailability"
+          },
+          "bidirectional": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/core_DashboardProbeSample"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_session_id": {
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_DashboardProbeSample"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "node1": {
+            "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "node1_name": {
+            "type": "string"
+          },
+          "node1_region": {
+            "type": "string"
+          },
+          "node2": {
+            "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "node2_name": {
+            "type": "string"
+          },
+          "node2_region": {
+            "type": "string"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/core_DiagnosticParameters"
+          },
+          "revision": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target_mode": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DashboardProbePairRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_enabled": {
+            "type": "boolean"
+          },
+          "auto_interval_seconds": {
+            "type": "integer"
+          },
+          "bidirectional": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node1": {
+            "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "node2": {
+            "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/core_DiagnosticParameters"
+          },
+          "revision": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target_mode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_DashboardProbeSample": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "forward": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_DashboardProbeDirectionMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "reverse": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_DashboardProbeDirectionMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sampled_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_Deployment": {
         "additionalProperties": false,
         "properties": {
@@ -18102,6 +18393,964 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/dashboard/probes": {
+      "get": {
+        "operationId": "listDashboardProbePairs_api_v1_dashboard_probes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "pairs": [
+                    {
+                      "active_state": "example",
+                      "auto_enabled": false,
+                      "auto_interval_seconds": 1,
+                      "availability": {
+                        "node1_granted": null,
+                        "node1_online": null,
+                        "node1_ping": null,
+                        "node2_granted": null,
+                        "node2_online": null,
+                        "node2_ping": null,
+                        "ready": null,
+                        "reason": null,
+                        "running": null
+                      },
+                      "bidirectional": false,
+                      "created_at": "2026-11-10T12:00:00Z",
+                      "history": [
+                        null
+                      ],
+                      "id": "resource_example",
+                      "last_run_at": "2026-11-10T12:00:00Z",
+                      "last_session_id": "example",
+                      "latest": null,
+                      "name": "example",
+                      "next_run_at": "2026-11-10T12:00:00Z",
+                      "node1": {
+                        "address": null,
+                        "agent_id": null,
+                        "instance_id": null,
+                        "name": "example"
+                      },
+                      "node1_name": "example",
+                      "node1_region": "example",
+                      "node2": {
+                        "address": null,
+                        "agent_id": null,
+                        "instance_id": null,
+                        "name": "example"
+                      },
+                      "node2_name": "example",
+                      "node2_region": "example",
+                      "parameters": {
+                        "bandwidth": null,
+                        "count": null,
+                        "duration": null,
+                        "interval_ms": null,
+                        "max_hops": null,
+                        "port": null,
+                        "protocol": null,
+                        "provider": null,
+                        "size": null,
+                        "streams": null,
+                        "timeout_ms": null,
+                        "tool": null
+                      },
+                      "revision": 1,
+                      "target_mode": "example",
+                      "updated_at": "2026-11-10T12:00:00Z"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DashboardProbeListResponse"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询仪表盘 A/B 探测对",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      },
+      "post": {
+        "operationId": "createDashboardProbePair_api_v1_dashboard_probes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "auto_enabled": false,
+                "auto_interval_seconds": 1,
+                "bidirectional": false,
+                "name": "example",
+                "node1": {
+                  "address": "example",
+                  "agent_id": "example",
+                  "instance_id": "example",
+                  "name": "example"
+                },
+                "node2": {
+                  "address": "example",
+                  "agent_id": "example",
+                  "instance_id": "example",
+                  "name": "example"
+                },
+                "parameters": {
+                  "bandwidth": 1,
+                  "count": 1,
+                  "duration": 1,
+                  "interval_ms": 1,
+                  "max_hops": 1,
+                  "port": 1,
+                  "protocol": "example",
+                  "provider": "example",
+                  "size": 1,
+                  "streams": 1,
+                  "timeout_ms": 1,
+                  "tool": "example"
+                },
+                "revision": 1,
+                "target_mode": "example"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "auto_enabled": {
+                    "type": "boolean"
+                  },
+                  "auto_interval_seconds": {
+                    "type": "integer"
+                  },
+                  "bidirectional": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "node1": {
+                    "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "node2": {
+                    "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "parameters": {
+                    "$ref": "#/components/schemas/core_DiagnosticParameters"
+                  },
+                  "revision": {
+                    "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "target_mode": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "active_state": "example",
+                  "auto_enabled": false,
+                  "auto_interval_seconds": 1,
+                  "availability": {
+                    "node1_granted": false,
+                    "node1_online": false,
+                    "node1_ping": false,
+                    "node2_granted": false,
+                    "node2_online": false,
+                    "node2_ping": false,
+                    "ready": false,
+                    "reason": "example",
+                    "running": false
+                  },
+                  "bidirectional": false,
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "history": [
+                    {
+                      "error": "example",
+                      "forward": null,
+                      "id": "resource_example",
+                      "reverse": null,
+                      "sampled_at": "2026-11-10T12:00:00Z",
+                      "session_id": "example",
+                      "state": "example"
+                    }
+                  ],
+                  "id": "resource_example",
+                  "last_run_at": "2026-11-10T12:00:00Z",
+                  "last_session_id": "example",
+                  "latest": {
+                    "error": "example",
+                    "forward": null,
+                    "id": "resource_example",
+                    "reverse": null,
+                    "sampled_at": "2026-11-10T12:00:00Z",
+                    "session_id": "example",
+                    "state": "example"
+                  },
+                  "name": "example",
+                  "next_run_at": "2026-11-10T12:00:00Z",
+                  "node1": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node1_name": "example",
+                  "node1_region": "example",
+                  "node2": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node2_name": "example",
+                  "node2_region": "example",
+                  "parameters": {
+                    "bandwidth": 1,
+                    "count": 1,
+                    "duration": 1,
+                    "interval_ms": 1,
+                    "max_hops": 1,
+                    "port": 1,
+                    "protocol": "example",
+                    "provider": "example",
+                    "size": 1,
+                    "streams": 1,
+                    "timeout_ms": 1,
+                    "tool": "example"
+                  },
+                  "revision": 1,
+                  "target_mode": "example",
+                  "updated_at": "2026-11-10T12:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DashboardProbePair"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "新增仪表盘 A/B 探测对",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/dashboard/probes/{id}": {
+      "delete": {
+        "operationId": "deleteDashboardProbePair_api_v1_dashboard_probes_{id}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；无内容响应为 204。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "删除仪表盘 A/B 探测对",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      },
+      "put": {
+        "operationId": "updateDashboardProbePair_api_v1_dashboard_probes_{id}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "auto_enabled": false,
+                "auto_interval_seconds": 1,
+                "bidirectional": false,
+                "name": "example",
+                "node1": {
+                  "address": "example",
+                  "agent_id": "example",
+                  "instance_id": "example",
+                  "name": "example"
+                },
+                "node2": {
+                  "address": "example",
+                  "agent_id": "example",
+                  "instance_id": "example",
+                  "name": "example"
+                },
+                "parameters": {
+                  "bandwidth": 1,
+                  "count": 1,
+                  "duration": 1,
+                  "interval_ms": 1,
+                  "max_hops": 1,
+                  "port": 1,
+                  "protocol": "example",
+                  "provider": "example",
+                  "size": 1,
+                  "streams": 1,
+                  "timeout_ms": 1,
+                  "tool": "example"
+                },
+                "revision": 1,
+                "target_mode": "example"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "auto_enabled": {
+                    "type": "boolean"
+                  },
+                  "auto_interval_seconds": {
+                    "type": "integer"
+                  },
+                  "bidirectional": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "node1": {
+                    "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "node2": {
+                    "$ref": "#/components/schemas/core_DiagnosticEndpoint"
+                  },
+                  "parameters": {
+                    "$ref": "#/components/schemas/core_DiagnosticParameters"
+                  },
+                  "revision": {
+                    "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "target_mode": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "active_state": "example",
+                  "auto_enabled": false,
+                  "auto_interval_seconds": 1,
+                  "availability": {
+                    "node1_granted": false,
+                    "node1_online": false,
+                    "node1_ping": false,
+                    "node2_granted": false,
+                    "node2_online": false,
+                    "node2_ping": false,
+                    "ready": false,
+                    "reason": "example",
+                    "running": false
+                  },
+                  "bidirectional": false,
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "history": [
+                    {
+                      "error": "example",
+                      "forward": null,
+                      "id": "resource_example",
+                      "reverse": null,
+                      "sampled_at": "2026-11-10T12:00:00Z",
+                      "session_id": "example",
+                      "state": "example"
+                    }
+                  ],
+                  "id": "resource_example",
+                  "last_run_at": "2026-11-10T12:00:00Z",
+                  "last_session_id": "example",
+                  "latest": {
+                    "error": "example",
+                    "forward": null,
+                    "id": "resource_example",
+                    "reverse": null,
+                    "sampled_at": "2026-11-10T12:00:00Z",
+                    "session_id": "example",
+                    "state": "example"
+                  },
+                  "name": "example",
+                  "next_run_at": "2026-11-10T12:00:00Z",
+                  "node1": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node1_name": "example",
+                  "node1_region": "example",
+                  "node2": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node2_name": "example",
+                  "node2_region": "example",
+                  "parameters": {
+                    "bandwidth": 1,
+                    "count": 1,
+                    "duration": 1,
+                    "interval_ms": 1,
+                    "max_hops": 1,
+                    "port": 1,
+                    "protocol": "example",
+                    "provider": "example",
+                    "size": 1,
+                    "streams": 1,
+                    "timeout_ms": 1,
+                    "tool": "example"
+                  },
+                  "revision": 1,
+                  "target_mode": "example",
+                  "updated_at": "2026-11-10T12:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DashboardProbePair"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "更新仪表盘 A/B 探测对",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/dashboard/probes/{id}/run": {
+      "post": {
+        "operationId": "runDashboardProbePair_api_v1_dashboard_probes_{id}_run",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "active_state": "example",
+                  "auto_enabled": false,
+                  "auto_interval_seconds": 1,
+                  "availability": {
+                    "node1_granted": false,
+                    "node1_online": false,
+                    "node1_ping": false,
+                    "node2_granted": false,
+                    "node2_online": false,
+                    "node2_ping": false,
+                    "ready": false,
+                    "reason": "example",
+                    "running": false
+                  },
+                  "bidirectional": false,
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "history": [
+                    {
+                      "error": "example",
+                      "forward": null,
+                      "id": "resource_example",
+                      "reverse": null,
+                      "sampled_at": "2026-11-10T12:00:00Z",
+                      "session_id": "example",
+                      "state": "example"
+                    }
+                  ],
+                  "id": "resource_example",
+                  "last_run_at": "2026-11-10T12:00:00Z",
+                  "last_session_id": "example",
+                  "latest": {
+                    "error": "example",
+                    "forward": null,
+                    "id": "resource_example",
+                    "reverse": null,
+                    "sampled_at": "2026-11-10T12:00:00Z",
+                    "session_id": "example",
+                    "state": "example"
+                  },
+                  "name": "example",
+                  "next_run_at": "2026-11-10T12:00:00Z",
+                  "node1": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node1_name": "example",
+                  "node1_region": "example",
+                  "node2": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node2_name": "example",
+                  "node2_region": "example",
+                  "parameters": {
+                    "bandwidth": 1,
+                    "count": 1,
+                    "duration": 1,
+                    "interval_ms": 1,
+                    "max_hops": 1,
+                    "port": 1,
+                    "protocol": "example",
+                    "provider": "example",
+                    "size": 1,
+                    "streams": 1,
+                    "timeout_ms": 1,
+                    "tool": "example"
+                  },
+                  "revision": 1,
+                  "target_mode": "example",
+                  "updated_at": "2026-11-10T12:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DashboardProbePair"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "触发仪表盘 A/B 探测",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/dashboard/probes/{id}/stop": {
+      "post": {
+        "operationId": "stopDashboardProbePair_api_v1_dashboard_probes_{id}_stop",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "active_state": "example",
+                  "auto_enabled": false,
+                  "auto_interval_seconds": 1,
+                  "availability": {
+                    "node1_granted": false,
+                    "node1_online": false,
+                    "node1_ping": false,
+                    "node2_granted": false,
+                    "node2_online": false,
+                    "node2_ping": false,
+                    "ready": false,
+                    "reason": "example",
+                    "running": false
+                  },
+                  "bidirectional": false,
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "history": [
+                    {
+                      "error": "example",
+                      "forward": null,
+                      "id": "resource_example",
+                      "reverse": null,
+                      "sampled_at": "2026-11-10T12:00:00Z",
+                      "session_id": "example",
+                      "state": "example"
+                    }
+                  ],
+                  "id": "resource_example",
+                  "last_run_at": "2026-11-10T12:00:00Z",
+                  "last_session_id": "example",
+                  "latest": {
+                    "error": "example",
+                    "forward": null,
+                    "id": "resource_example",
+                    "reverse": null,
+                    "sampled_at": "2026-11-10T12:00:00Z",
+                    "session_id": "example",
+                    "state": "example"
+                  },
+                  "name": "example",
+                  "next_run_at": "2026-11-10T12:00:00Z",
+                  "node1": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node1_name": "example",
+                  "node1_region": "example",
+                  "node2": {
+                    "address": "example",
+                    "agent_id": "example",
+                    "instance_id": "example",
+                    "name": "example"
+                  },
+                  "node2_name": "example",
+                  "node2_region": "example",
+                  "parameters": {
+                    "bandwidth": 1,
+                    "count": 1,
+                    "duration": 1,
+                    "interval_ms": 1,
+                    "max_hops": 1,
+                    "port": 1,
+                    "protocol": "example",
+                    "provider": "example",
+                    "size": 1,
+                    "streams": 1,
+                    "timeout_ms": 1,
+                    "tool": "example"
+                  },
+                  "revision": 1,
+                  "target_mode": "example",
+                  "updated_at": "2026-11-10T12:00:00Z"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_DashboardProbePair"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "停止仪表盘 A/B 探测",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "tasks.read",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": []
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/deployments": {
       "get": {
         "operationId": "listDeployments_api_v1_deployments",
@@ -20851,7 +22100,13 @@
                     "time_mode": "today"
                   },
                   "dashboard": {
-                    "traffic_month": "example"
+                    "probe_filter": "all",
+                    "topo_probe_filter": "all",
+                    "topo_view_mode": "flow",
+                    "traffic_month": "example",
+                    "traffic_rank_limit": "5",
+                    "traffic_rank_period": "month",
+                    "traffic_rank_scope": "all"
                   },
                   "ip-quality": {
                     "agent": "example",
@@ -21050,12 +22305,57 @@
                       },
                       "dashboard": {
                         "additionalProperties": false,
-                        "maxProperties": 1,
+                        "maxProperties": 7,
                         "minProperties": 1,
                         "properties": {
+                          "probe_filter": {
+                            "enum": [
+                              "all",
+                              "abnormal"
+                            ],
+                            "type": "string"
+                          },
+                          "topo_probe_filter": {
+                            "enum": [
+                              "all",
+                              "bad",
+                              "mesh",
+                              "ext"
+                            ],
+                            "type": "string"
+                          },
+                          "topo_view_mode": {
+                            "enum": [
+                              "flow",
+                              "map"
+                            ],
+                            "type": "string"
+                          },
                           "traffic_month": {
                             "maxLength": 7,
                             "pattern": "^\\d{4}-\\d{2}$",
+                            "type": "string"
+                          },
+                          "traffic_rank_limit": {
+                            "enum": [
+                              "5",
+                              "10",
+                              "all"
+                            ],
+                            "type": "string"
+                          },
+                          "traffic_rank_period": {
+                            "enum": [
+                              "month",
+                              "cycle"
+                            ],
+                            "type": "string"
+                          },
+                          "traffic_rank_scope": {
+                            "enum": [
+                              "all",
+                              "current"
+                            ],
                             "type": "string"
                           }
                         },

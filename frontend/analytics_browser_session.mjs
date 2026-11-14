@@ -28,7 +28,9 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#dashboard` }, page);
   await wait(page, "document.querySelector('.a-top h1')?.textContent==='仪表盘' && !document.querySelector('[aria-busy=true]')");
   assert.equal(await evaluate(page, `document.querySelectorAll('link[href*="app.css"],.workspace-main,.app-dock').length`), 0);
-  assert.equal(await evaluate(page, "document.querySelectorAll('.a-stat').length"), 8);
+  assert.equal(await evaluate(page, "document.querySelectorAll('.a-dash-cmd-cell').length"), 4);
+  assert.equal(await evaluate(page, "document.querySelectorAll('.a-dash-dial-cell').length"), 3);
+  assert.equal(await evaluate(page, "document.querySelectorAll('.a-dash-ledger-cell').length"), 4);
   assert.ok(await evaluate(page, "document.querySelector('.a-chart')?.getAttribute('aria-label').includes('流量')"));
   await evaluate(page, "document.fonts.ready.then(()=>true)");
   assert.ok(await evaluate(page, `document.fonts.check('500 14px "Analytics Sans"')`));

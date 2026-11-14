@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 102
+const currentSchemaVersion = 103
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1280,4 +1280,41 @@ CREATE TABLE IF NOT EXISTS network_diagnostic_sessions (
 );
 CREATE INDEX IF NOT EXISTS network_diagnostic_active_idx ON network_diagnostic_sessions(deadline)
  WHERE state IN ('preparing','running','stopping','cleanup_pending');
+CREATE TABLE IF NOT EXISTS dashboard_probe_pairs (
+ id text PRIMARY KEY,
+ owner_id text NOT NULL,
+ name varchar(80) NOT NULL DEFAULT '',
+ target_mode varchar(16) NOT NULL DEFAULT '' CHECK (target_mode IN ('','ip')),
+ node1_agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ node1_instance_id text NOT NULL DEFAULT '',
+ node1_address text NOT NULL,
+ node2_agent_id text NOT NULL DEFAULT '',
+ node2_instance_id text NOT NULL DEFAULT '',
+ node2_address text NOT NULL,
+ bidirectional boolean NOT NULL DEFAULT false,
+ parameters jsonb NOT NULL,
+ auto_enabled boolean NOT NULL DEFAULT false,
+ auto_interval_seconds integer NOT NULL DEFAULT 60 CHECK (auto_interval_seconds BETWEEN 15 AND 3600),
+ last_session_id text NOT NULL DEFAULT '',
+ last_run_at timestamptz,
+ next_run_at timestamptz,
+ revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
+ created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_owner_idx ON dashboard_probe_pairs(owner_id, created_at ASC, id ASC);
+CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_due_idx ON dashboard_probe_pairs(next_run_at) WHERE auto_enabled;
+CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_session_idx ON dashboard_probe_pairs(last_session_id) WHERE last_session_id <> '';
+CREATE TABLE IF NOT EXISTS dashboard_probe_samples (
+ id text PRIMARY KEY,
+ pair_id text NOT NULL REFERENCES dashboard_probe_pairs(id) ON DELETE CASCADE,
+ session_id text NOT NULL,
+ state text NOT NULL CHECK (state IN ('succeeded','failed','canceled')),
+ forward jsonb,
+ reverse jsonb,
+ error text NOT NULL DEFAULT '',
+ sampled_at timestamptz NOT NULL,
+ UNIQUE(pair_id, session_id)
+);
+CREATE INDEX IF NOT EXISTS dashboard_probe_samples_pair_idx ON dashboard_probe_samples(pair_id, sampled_at DESC, id DESC);
 `

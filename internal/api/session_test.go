@@ -188,3 +188,71 @@ func TestLegacySessionsExposeDistinctStableWorkspaceIDs(t *testing.T) {
 		t.Fatal("separate tokens share browser preferences")
 	}
 }
+
+func TestCookieSessionMissesDoNotTripLoginRateLimit(t *testing.T) {
+	token := strings.Repeat("a", 32)
+	server := New(nil, Config{AdminTokenDigest: sha256.Sum256([]byte(token))})
+	staleCookie := &http.Cookie{Name: server.cookieName(), Value: "stale-restart-cookie"}
+	remote := "198.51.100.25:43210"
+
+	for i := 0; i < 12; i++ {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+		request.RemoteAddr = remote
+		request.AddCookie(staleCookie)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("stale cookie request %d status = %d, want %d (%s)", i, response.Code, http.StatusUnauthorized, response.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["detail"] != "session expired" {
+			t.Fatalf("stale cookie detail = %q, want session expired", body["detail"])
+		}
+	}
+
+	unauthenticated := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+	unauthenticated.RemoteAddr = remote
+	unauthRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthRec, unauthenticated)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want %d", unauthRec.Code, http.StatusUnauthorized)
+	}
+	var unauthBody map[string]string
+	if err := json.Unmarshal(unauthRec.Body.Bytes(), &unauthBody); err != nil {
+		t.Fatal(err)
+	}
+	if unauthBody["detail"] != "authentication required" {
+		t.Fatalf("unauthenticated detail = %q, want authentication required", unauthBody["detail"])
+	}
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"token":"`+token+`"}`))
+	loginReq.RemoteAddr = remote
+	loginRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login after stale cookies status = %d, want %d (%s)", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+
+	bearerRemote := "198.51.100.26:43210"
+	for i := 0; i < 8; i++ {
+		badBearer := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+		badBearer.RemoteAddr = bearerRemote
+		badBearer.Header.Set("Authorization", "Bearer wrong-legacy-token")
+		badRec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(badRec, badBearer)
+		if badRec.Code != http.StatusUnauthorized {
+			t.Fatalf("bad bearer attempt %d status = %d, want %d", i, badRec.Code, http.StatusUnauthorized)
+		}
+	}
+	blocked := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+	blocked.RemoteAddr = bearerRemote
+	blocked.Header.Set("Authorization", "Bearer wrong-legacy-token")
+	blockedRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(blockedRec, blocked)
+	if blockedRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("9th bad bearer status = %d, want %d", blockedRec.Code, http.StatusTooManyRequests)
+	}
+}

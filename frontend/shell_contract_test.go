@@ -21,7 +21,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		}
 		previous = position
 	}
-	for _, route := range []string{"dashboard", "node-settings", "live-config", "archive-config", "client-access", "substore-sync", "certificates", "tasks", "core-logs", "client-connections", "traffic", "system-bbr", "ip-quality", "settings", "users", "my-quota", "themes"} {
+	for _, route := range []string{"dashboard", "topology", "node-settings", "live-config", "archive-config", "client-access", "substore-sync", "certificates", "tasks", "core-logs", "client-connections", "traffic", "system-bbr", "ip-quality", "settings", "users", "my-quota", "themes"} {
 		if strings.Count(navigation, `["`+route+`",`) != 1 {
 			t.Errorf("native navigation must expose exactly one %s destination", route)
 		}

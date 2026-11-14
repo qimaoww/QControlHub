@@ -213,6 +213,8 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 		`DELETE FROM traffic_batch_requests WHERE account_id=$1`,
 		`DELETE FROM user_panel_settings WHERE owner_id=$1`,
 		`DELETE FROM ip_quality_schedules WHERE owner_id=$1`,
+		`DELETE FROM api_key_work WHERE kind='dashboard-probe' AND work_id IN (SELECT id FROM dashboard_probe_pairs WHERE owner_id=$1)`,
+		`DELETE FROM dashboard_probe_pairs WHERE owner_id=$1`,
 		`DELETE FROM user_substore_settings WHERE owner_id=$1`,
 		`DELETE FROM substore_sync_targets WHERE owner_id=$1`,
 	} {

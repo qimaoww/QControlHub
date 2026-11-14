@@ -52,3 +52,4 @@ await import("./route_modules_smoke.mjs");
 await import("./ip_quality_smoke.mjs");
 await import("./session_watch_smoke.mjs");
 await (await import("./smoke/agent-time-zone.mjs")).run();
+await (await import("./smoke/dashboard-telemetry.mjs")).run();

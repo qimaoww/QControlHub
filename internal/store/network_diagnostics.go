@@ -156,11 +156,23 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		return core.DiagnosticSession{}, err
 	}
 	defer tx.Rollback(ctx)
+	now := time.Now().UTC()
+	session, err := createDiagnosticTx(ctx, tx, in, now, now.Add(10*time.Minute))
+	if err != nil {
+		return core.DiagnosticSession{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return core.DiagnosticSession{}, err
+	}
+	return session, nil
+}
+
+func createDiagnosticTx(ctx context.Context, tx pgx.Tx, in core.DiagnosticRequest, now, deadline time.Time) (core.DiagnosticSession, error) {
 	fail := func(e error) (core.DiagnosticSession, error) { return core.DiagnosticSession{}, e }
-	if err = lockAgentUser(ctx, tx); err != nil {
+	if err := lockAgentUser(ctx, tx); err != nil {
 		return fail(err)
 	}
-	if err = requireTaskPermission(ctx, tx, core.ActionStatus, false); err != nil {
+	if err := requireTaskPermission(ctx, tx, core.ActionStatus, false); err != nil {
 		return fail(err)
 	}
 	if in.RequestID == "" || len(in.RequestID) > 80 || strings.ContainsAny(in.RequestID, "\n\r\x00") {
@@ -192,6 +204,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		ids = append(ids, in.Node2.AgentID)
 	}
 	slices.Sort(ids)
+	var err error
 	for _, id := range ids {
 		var found string
 		if err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&found); err != nil {
@@ -264,7 +277,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	if a.Is6() != b.Is6() {
 		return fail(fmt.Errorf("%w: 两端必须使用同一地址族", ErrInvalid))
 	}
-	if in.Bidirectional && in.Parameters.Tool != "mtr" && in.Parameters.Tool != "traceroute" {
+	if in.Bidirectional && in.Parameters.Tool != "ping" && in.Parameters.Tool != "mtr" && in.Parameters.Tool != "traceroute" {
 		return fail(ErrInvalid)
 	}
 	var existing []byte
@@ -293,8 +306,8 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	if err != nil {
 		return fail(err)
 	}
-	now := time.Now().UTC()
-	deadline := now.Add(10 * time.Minute)
+	now = now.UTC()
+	deadline = deadline.UTC()
 	session := core.DiagnosticSession{ID: id, OwnerID: scopeForConfig(ctx).OwnerID, Request: in, State: "preparing", Results: map[string]core.DiagnosticResult{}, CreatedAt: now, Deadline: deadline}
 	if in.Parameters.Tool == "iperf3" && in.Parameters.Protocol == "tcp" && in.Parameters.Bandwidth == 0 {
 		for _, ep := range endpoints {
@@ -327,9 +340,6 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 				}
 			}
 		}
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return fail(err)
 	}
 	return session, nil
 }
@@ -676,8 +686,10 @@ func syncDiagnosticTask(ctx context.Context, tx pgx.Tx, d core.DiagnosticSession
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO task_diagnostics(task_id,attempt,output,error,source) VALUES($1,1,$2,$3,'network-diagnostic') ON CONFLICT DO NOTHING`, d.ID, string(b), detail)
-	return err
+	if _, err = tx.Exec(ctx, `INSERT INTO task_diagnostics(task_id,attempt,output,error,source) VALUES($1,1,$2,$3,'network-diagnostic') ON CONFLICT DO NOTHING`, d.ID, string(b), detail); err != nil {
+		return err
+	}
+	return syncDashboardProbeSampleTx(ctx, tx, d)
 }
 
 func diagnosticTaskAccessClause(ctx context.Context, args *[]any) string {
