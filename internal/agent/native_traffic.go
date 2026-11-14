@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -17,6 +18,54 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/encoding/protowire"
 )
+
+const maxCachedNativeStatsClients = 16
+
+var (
+	nativeStatsClientsMu sync.Mutex
+	nativeStatsClients   = map[string]*grpc.ClientConn{}
+)
+
+func nativeStatsClientConn(address string) (*grpc.ClientConn, error) {
+	nativeStatsClientsMu.Lock()
+	defer nativeStatsClientsMu.Unlock()
+	if conn := nativeStatsClients[address]; conn != nil {
+		return conn, nil
+	}
+	if len(nativeStatsClients) >= maxCachedNativeStatsClients {
+		for existingAddr, existingConn := range nativeStatsClients {
+			_ = existingConn.Close()
+			delete(nativeStatsClients, existingAddr)
+			if len(nativeStatsClients) < maxCachedNativeStatsClients {
+				break
+			}
+		}
+	}
+	conn, err := grpc.NewClient("passthrough:///"+address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, err
+	}
+	nativeStatsClients[address] = conn
+	return conn, nil
+}
+
+func evictNativeStatsClientConn(address string, target *grpc.ClientConn) {
+	nativeStatsClientsMu.Lock()
+	defer nativeStatsClientsMu.Unlock()
+	if conn := nativeStatsClients[address]; conn == target {
+		delete(nativeStatsClients, address)
+		_ = conn.Close()
+	}
+}
+
+func closeAllNativeStatsClients() {
+	nativeStatsClientsMu.Lock()
+	defer nativeStatsClientsMu.Unlock()
+	for addr, conn := range nativeStatsClients {
+		_ = conn.Close()
+		delete(nativeStatsClients, addr)
+	}
+}
 
 // Both cores expose the same read-only QueryStats wire shape. Keep the small
 // interoperable codec here instead of linking either proxy core into qagent.
@@ -138,14 +187,14 @@ func queryNativeTrafficAt(ctx context.Context, engine core.Engine, verifiedAddre
 	// loopback-only and belong to a verified managed process.
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	connection, err := grpc.NewClient("passthrough:///"+address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := nativeStatsClientConn(address)
 	if err != nil {
 		return nil, err
 	}
-	defer connection.Close()
 	var result nativeStatsResponse
 	err = connection.Invoke(ctx, "/"+service+"/QueryStats", &nativeStatsRequest{}, &result, grpc.ForceCodec(nativeStatsCodec{}), grpc.MaxCallRecvMsgSize(4<<20))
 	if err != nil {
+		evictNativeStatsClientConn(address, connection)
 		return nil, fmt.Errorf("%s statistics: %w", engine, err)
 	}
 	return result.Counters, nil

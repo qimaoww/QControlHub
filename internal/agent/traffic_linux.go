@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,9 +16,12 @@ import (
 )
 
 const (
-	trafficTableName       = "qcontrolhub"
-	trafficCollectionEvery = time.Second
-	trafficStateMaxBytes   = 2 << 20
+	trafficTableName          = "qcontrolhub"
+	trafficCollectionEvery    = time.Second
+	trafficMaxIdleCollect     = 5 * time.Second
+	trafficEmptyCollectEvery  = 30 * time.Second
+	trafficCheckpointInterval = 15 * time.Second
+	trafficStateMaxBytes      = 2 << 20
 )
 
 type trafficCounterBackend interface {
@@ -46,6 +48,7 @@ type trafficRecord struct {
 	LifetimeReceivedBytes uint64                  `json:"lifetime_received_bytes,omitempty"`
 	LifetimeSentBytes     uint64                  `json:"lifetime_sent_bytes,omitempty"`
 	QuotaBaselineBytes    uint64                  `json:"quota_baseline_bytes,omitempty"`
+	NeedsServerQuotaSync  bool                    `json:"needs_server_quota_sync,omitempty"`
 	KernelCounters        map[string]uint64       `json:"kernel_counters,omitempty"`
 }
 
@@ -68,9 +71,14 @@ type TrafficManager struct {
 	records               map[string]*trafficRecord
 	snapshot              []core.PortTrafficUsage
 	dirty                 bool
+	urgentDirty           bool
 	rulesDirty            bool
 	bootID                string
 	now                   func() time.Time
+	checkpointEvery       time.Duration
+	metricsInterval       time.Duration
+	lastPersistedAt       time.Time
+	wakeCh                chan struct{}
 	awaitingPolicies      bool
 	recoveryEngines       []core.Engine
 	recoveryPorts         map[core.Engine][]int
@@ -80,13 +88,36 @@ func NewTrafficManager(agentStatePath string) *TrafficManager {
 	return NewTrafficManagerForServiceManager(agentStatePath, defaultSystemdServiceManager())
 }
 
+var trafficBootIDReader = readKernelBootID
+
+func rotateLostTrafficEpoch(record *trafficRecord) error {
+	epoch, err := randomSuffix(16)
+	if err != nil {
+		return err
+	}
+	record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
+	record.CounterEpoch = epoch
+	record.ReceivedBytes, record.SentBytes = 0, 0
+	record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0
+	record.LastKernelReceived, record.LastKernelSent = 0, 0
+	record.KernelCounters = make(map[string]uint64)
+	record.Accounting = nil
+	record.NeedsServerQuotaSync = true
+	return nil
+}
+
 func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *ServiceManager) *TrafficManager {
 	manager := &TrafficManager{
-		statePath: filepath.Join(filepath.Dir(agentStatePath), "traffic-state.json"),
-		backend:   newNFTBackendForServiceManager(serviceManager), records: make(map[string]*trafficRecord), now: time.Now,
+		statePath:       filepath.Join(filepath.Dir(agentStatePath), "traffic-state.json"),
+		backend:         newNFTBackendForServiceManager(serviceManager),
+		records:         make(map[string]*trafficRecord),
+		now:             time.Now,
+		checkpointEvery: trafficCheckpointInterval,
+		metricsInterval: trafficCollectionEvery,
+		wakeCh:          make(chan struct{}, 1),
 	}
-	if bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id"); err == nil {
-		manager.bootID = strings.TrimSpace(string(bootID))
+	if bootID, err := trafficBootIDReader(); err == nil {
+		manager.bootID = bootID
 	}
 	state, err := loadTrafficState(manager.statePath)
 	validState := false
@@ -95,10 +126,14 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 			validState = true
 			manager.records = state.Records
 			if state.BootID != "" && state.BootID != manager.bootID {
-				for _, record := range manager.records {
-					record.LastKernelReceived, record.LastKernelSent = 0, 0
-					record.KernelCounters = nil
+				for _, id := range sortedTrafficRecordIDs(manager.records) {
+					if err := rotateLostTrafficEpoch(manager.records[id]); err != nil {
+						slog.Warn("rotate port traffic epoch after boot change", "policy_id", id, "error", err)
+					}
 				}
+				manager.dirty = true
+				manager.urgentDirty = true
+				manager.rulesDirty = true
 			}
 		} else {
 			slog.Warn("ignore invalid port traffic state", "error", err)
@@ -128,11 +163,93 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 	return manager
 }
 
+func (manager *TrafficManager) SetMetricsInterval(interval time.Duration) {
+	if manager == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = trafficCollectionEvery
+	}
+	manager.mu.Lock()
+	changed := manager.metricsInterval != interval
+	manager.metricsInterval = interval
+	manager.mu.Unlock()
+	if changed {
+		manager.notifyCollect()
+	}
+}
+
+func (manager *TrafficManager) notifyCollect() {
+	if manager == nil || manager.wakeCh == nil {
+		return
+	}
+	select {
+	case manager.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (manager *TrafficManager) nextCollectIntervalLocked(now time.Time) time.Duration {
+	if len(manager.records) == 0 && !manager.rulesDirty && !manager.awaitingPolicies {
+		return trafficEmptyCollectEvery
+	}
+	if manager.awaitingPolicies || manager.rulesDirty || manager.urgentDirty {
+		return trafficCollectionEvery
+	}
+	target := manager.metricsInterval
+	if target <= 0 {
+		target = trafficCollectionEvery
+	} else if target > trafficMaxIdleCollect {
+		target = trafficMaxIdleCollect
+	}
+	if target <= trafficCollectionEvery {
+		return trafficCollectionEvery
+	}
+	sharedUsedByQuota := make(map[string]uint64)
+	for _, record := range manager.records {
+		if record.AccountingError != "" {
+			return trafficCollectionEvery
+		}
+		if !record.PeriodEnd.IsZero() && record.PeriodEnd.Sub(now) <= 30*time.Second {
+			return trafficCollectionEvery
+		}
+		if (record.ReceiveBPS + record.SendBPS) >= 512<<10 {
+			return trafficCollectionEvery
+		}
+		if record.Policy.AutoBlock {
+			used := saturatedTrafficAdd(trafficUsed(record), record.QuotaBaselineBytes)
+			if nearTrafficQuotaLimit(used, record.Policy.LimitBytes) {
+				return trafficCollectionEvery
+			}
+		}
+		if quota := record.Policy.SharedQuota; quota != nil && quota.LimitBytes > 0 {
+			if _, seen := sharedUsedByQuota[quota.ID]; !seen {
+				sharedUsedByQuota[quota.ID] = sharedTrafficUsed(manager.records, quota.ID)
+			}
+			used := max(quota.UsedBytes, sharedUsedByQuota[quota.ID])
+			if nearTrafficQuotaLimit(used, quota.LimitBytes) {
+				return trafficCollectionEvery
+			}
+		}
+	}
+	return target
+}
+
+func nearTrafficQuotaLimit(used, limit uint64) bool {
+	if limit == 0 || limit <= 50<<20 || used >= limit || limit-used < 16<<20 {
+		return true
+	}
+	return used >= (limit/4)*3
+}
+
 func (manager *TrafficManager) Start(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	if manager == nil {
 		close(done)
 		return done
+	}
+	if manager.wakeCh == nil {
+		manager.wakeCh = make(chan struct{}, 1)
 	}
 	go func() {
 		defer close(done)
@@ -146,8 +263,20 @@ func (manager *TrafficManager) Start(ctx context.Context) <-chan struct{} {
 			}
 		}
 		manager.collect(ctx, true)
-		ticker := time.NewTicker(trafficCollectionEvery)
-		defer ticker.Stop()
+		manager.mu.Lock()
+		initialInterval := manager.nextCollectIntervalLocked(manager.now().UTC())
+		manager.mu.Unlock()
+		timer := time.NewTimer(initialInterval)
+		defer timer.Stop()
+		resetTimer := func(d time.Duration) {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(d)
+		}
 		for {
 			select {
 			case <-ctx.Done():
@@ -156,15 +285,21 @@ func (manager *TrafficManager) Start(ctx context.Context) <-chan struct{} {
 				shutdown, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 				manager.mu.Lock()
 				_ = manager.collectLocked(shutdown, false)
-				if err := manager.saveLocked(); err != nil {
+				if err := manager.saveWithForceLocked(true); err != nil {
 					slog.Warn("persist final port traffic counters", "error", err)
 				}
 				manager.mu.Unlock()
 				cancel()
 				return
-			case <-ticker.C:
+			case <-timer.C:
+				manager.collect(ctx, false)
+			case <-manager.wakeCh:
 				manager.collect(ctx, false)
 			}
+			manager.mu.Lock()
+			nextInterval := manager.nextCollectIntervalLocked(manager.now().UTC())
+			manager.mu.Unlock()
+			resetTimer(nextInterval)
 		}
 	}()
 	return done
@@ -248,7 +383,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 	unchanged := len(policies) == len(manager.records)
 	for _, policy := range policies {
 		record := manager.records[policy.ID]
-		if record == nil || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
+		if record == nil || record.NeedsServerQuotaSync || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
 			record.Policy.Name != policy.Name || record.Policy.Engine != policy.Engine ||
 			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock ||
 			!sameSharedQuota(record.Policy.SharedQuota, policy.SharedQuota) {
@@ -282,6 +417,21 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			copy := *record
 			record = &copy
 		}
+		needsQuotaSync := record.NeedsServerQuotaSync
+		sameServerPeriod := false
+		if needsQuotaSync {
+			start, end, periodErr := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
+			if periodErr == nil && policy.PeriodStart != nil && policy.PeriodEnd != nil &&
+				policy.PeriodStart.Equal(start) && policy.PeriodEnd.Equal(end) {
+				sameServerPeriod = true
+				serverUsed := saturatedTrafficAdd(policy.ReceivedBytes, policy.SentBytes)
+				if serverUsed > record.QuotaBaselineBytes {
+					record.QuotaBaselineBytes = serverUsed
+				}
+				record.PeriodStart, record.PeriodEnd = start, end
+			}
+			record.NeedsServerQuotaSync = false
+		}
 		if policy.SharedQuota != nil {
 			record.ShareUsedBytes = max(sharedUsed, policy.SharedQuota.PortUsedBytes)
 			quota := policy.SharedQuota
@@ -294,6 +444,8 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 					pendingTX = record.LifetimeSentBytes - quota.LifetimeSentBytes
 				}
 				record.ShareUsedBytes = saturatedTrafficAdd(quota.PortUsedBytes, saturatedTrafficAdd(pendingRX, pendingTX))
+			} else if needsQuotaSync && sameServerPeriod {
+				record.ShareUsedBytes = max(sharedUsed, saturatedTrafficAdd(quota.PortUsedBytes, trafficUsed(record)))
 			}
 		} else {
 			record.ShareUsedBytes = 0
@@ -415,12 +567,15 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 	manager.recoveryEngines = nil
 	manager.recoveryPorts = nil
 	manager.dirty = true
+	manager.urgentDirty = true
 	if err := manager.collectLocked(ctx, true); err != nil {
 		slog.Warn("apply port traffic policies", "error", err)
 		if len(groups) > 0 {
+			manager.notifyCollect()
 			return err // Never execute a shared task without working enforcement.
 		}
 	}
+	manager.notifyCollect()
 	return nil
 }
 
@@ -464,6 +619,8 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	manager.recoveryPorts = nil
 	manager.records = make(map[string]*trafficRecord)
 	manager.dirty = true
+	manager.urgentDirty = true
+	defer manager.notifyCollect()
 	return manager.collectLocked(ctx, true)
 }
 

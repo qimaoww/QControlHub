@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,26 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func (c *Client) cachedPrivateKey(credential string) (ed25519.PrivateKey, error) {
+	c.authKeyMu.Lock()
+	if c.authKeyRaw == credential && len(c.authKeyCached) == ed25519.PrivateKeySize {
+		cached := c.authKeyCached
+		c.authKeyMu.Unlock()
+		return cached, nil
+	}
+	c.authKeyMu.Unlock()
+
+	privateKey, err := authn.DecodePrivateKey(credential)
+	if err != nil {
+		return nil, err
+	}
+	c.authKeyMu.Lock()
+	c.authKeyRaw = credential
+	c.authKeyCached = privateKey
+	c.authKeyMu.Unlock()
+	return privateKey, nil
+}
 
 func (c *Client) doJSON(ctx context.Context, method, path, credential, id string, input, output any) error {
 	_, err := c.doJSONStatus(ctx, method, path, credential, id, input, output)
@@ -37,7 +58,7 @@ func (c *Client) doJSONStatus(ctx context.Context, method, path, credential, id 
 		return 0, err
 	}
 	if id != "" {
-		privateKey, err := authn.DecodePrivateKey(credential)
+		privateKey, err := c.cachedPrivateKey(credential)
 		if err != nil {
 			return 0, err
 		}

@@ -87,9 +87,9 @@ func AfterRequestCommit(ctx context.Context, callback func()) bool {
 	}
 	return false
 }
-func (s *Store) signalTaskReadyAfterCommit(ctx context.Context, agentID string) {
-	if AfterRequestCommit(ctx, func() { s.signalTaskReady(agentID) }) {
+func runAfterCommit(ctx context.Context, callback func()) {
+	if AfterRequestCommit(ctx, callback) {
 		return
 	}
-	s.signalTaskReady(agentID)
+	callback()
 }

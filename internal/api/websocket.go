@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,14 +43,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Warn("load agent policy settings", "agent_id", id, "error", settingsErr)
 		panelSettings = core.DefaultPanelSettings()
 	}
-	agentPolicy := core.AgentPolicy{
-		HeartbeatIntervalSeconds: uint32(panelSettings.AgentHeartbeatIntervalSeconds),
-		MetricsIntervalSeconds:   uint32(panelSettings.AgentMetricsIntervalSeconds),
-		CoreLogMaxMiB:            uint32(panelSettings.AgentCoreLogMaxMiB),
-		CoreLogRotateCount:       uint32(panelSettings.AgentCoreLogRotateCount),
-	}
-	effectivePublicIPProbe := s.publicIPProbe
-	effectivePublicIPProbe.IntervalSeconds = uint32(panelSettings.PublicIPProbeIntervalSeconds)
+	agentPolicy, effectivePublicIPProbe := buildAgentSessionPolicy(s.publicIPProbe, panelSettings)
 	ctx, cancelConnection := context.WithCancel(request.Context())
 	defer cancelConnection()
 	connectionID, err := core.NewID("wss")
@@ -58,6 +52,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	}
 	trafficRefresh := s.registerConnection(id, connectionID, cancelConnection)
 	timeZoneRefresh := s.agentTimeZoneRefreshChannel(id, connectionID)
+	policyRefresh := s.agentPolicyRefreshChannel(id, connectionID)
 	defer s.unregisterConnection(id, connectionID)
 	if err := s.store.UpdateAgentObservedPublicIP(ctx, id, observedPublicIP); err != nil {
 		// Address discovery is best-effort and must never take an authenticated
@@ -93,7 +88,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	if err := writeWire(ctx, connection, trafficPolicyHello(trafficPolicies, false)); err != nil {
 		return
 	}
-	taskTicker := time.NewTicker(2 * time.Second)
+	taskTicker := time.NewTicker(wsIdleControlReconcileInterval)
 	defer taskTicker.Stop()
 	heartbeatTimeout := time.Duration(panelSettings.AgentOfflineThresholdSeconds+5) * time.Second
 	heartbeatDeadline := time.NewTimer(heartbeatTimeout)
@@ -107,6 +102,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		}
 		heartbeatDeadline.Reset(heartbeatTimeout)
 	}
+	var lastSentChallenges []core.HTTPChallenge
+	var lastStoredMetrics *core.HostMetrics
+	var lastMetricsTrust store.PublicIPProbeTrust
+	var lastMetricsStoredAt time.Time
+	var lastTrafficUsage []core.PortTrafficUsage
+	nowInit := time.Now()
+	allInboundBucket := newWSRateBucket(wsInboundGlobalRatePerSec, wsInboundGlobalBurst, nowInit)
+	telemetryBucket := newWSRateBucket(wsInboundTelemetryRatePerSec, wsInboundTelemetryBurst, nowInit)
+	var droppedTelemetry int
+	var compactTelemetryCapable bool
+	var telemetryResyncNeeded bool
 	var inFlightTask string
 	var inFlightAction core.Action
 	// Dispatch is deferred until this connection has supplied a heartbeat that
@@ -234,6 +240,41 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		return nil
 	}
 	taskReady := s.store.TaskReady(id)
+	diagReady := s.store.DiagnosticReady(id)
+	challengeReady := s.store.CertificateChallengeReady(id)
+	reconcileDiagnostics := func() error {
+		if !heartbeatReceived || !networkDiagnostics {
+			return nil
+		}
+		commands, err := s.store.AgentDiagnosticCommands(ctx, id)
+		if err != nil {
+			slog.Warn("reconcile diagnostics", "error", err)
+			return err
+		}
+		if len(commands) > 0 {
+			if err = writeWire(ctx, connection, core.WireMessage{Type: core.WireDiagnostics, Diagnostics: commands}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	reconcileCertificateChallenges := func() error {
+		if !heartbeatReceived || !agentHasFeatureFromStore {
+			return nil
+		}
+		routes, routeErr := s.store.AgentCertificateChallenges(ctx, id)
+		if routeErr != nil {
+			return routeErr
+		}
+		if sameHTTPChallenges(lastSentChallenges, routes) {
+			return nil
+		}
+		if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCertificateChallenges, CertificateChallenges: routes}); err != nil {
+			return err
+		}
+		lastSentChallenges = slices.Clone(routes)
+		return nil
+	}
 	if err := dispatchTask(); err != nil {
 		slog.Error("dispatch initial task for websocket", "agent_id", id, "error", err)
 		return
@@ -242,12 +283,40 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	for {
 		select {
 		case <-trafficRefresh:
+			lastTrafficUsage = nil
 			policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
 			if err != nil {
 				return
 			}
 			if err := writeWire(ctx, connection, trafficPolicyHello(policies, heartbeatReceived)); err != nil {
 				return
+			}
+			if err := reconcileCertificateChallenges(); err != nil {
+				return
+			}
+		case <-policyRefresh:
+			updatedSettings, settingsErr := s.store.AgentPanelSettings(ctx, id)
+			if settingsErr != nil {
+				slog.Warn("reload agent policy settings", "agent_id", id, "error", settingsErr)
+				continue
+			}
+			panelSettings = updatedSettings
+			agentPolicy, effectivePublicIPProbe = buildAgentSessionPolicy(s.publicIPProbe, panelSettings)
+			heartbeatTimeout = time.Duration(panelSettings.AgentOfflineThresholdSeconds+5) * time.Second
+			resetHeartbeatDeadline()
+			if heartbeatReceived {
+				if managedPublicIPProbe {
+					probeConfig := effectivePublicIPProbe
+					if err := writeWire(ctx, connection, core.WireMessage{Type: core.WirePublicIPProbe, PublicIPProbe: &probeConfig}); err != nil {
+						return
+					}
+				}
+				if managedAgentPolicy {
+					policyCopy := agentPolicy
+					if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireAgentPolicy, AgentPolicy: &policyCopy}); err != nil {
+						return
+					}
+				}
 			}
 		case <-timeZoneRefresh:
 			if err := sendAgentTimeZone(false); err != nil {
@@ -265,6 +334,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			_ = connection.Close(websocket.StatusPolicyViolation, "heartbeat timeout")
 			return
 		case message := <-incoming:
+			now := time.Now()
+			if !allInboundBucket.allow(now) {
+				slog.Warn("agent websocket inbound frame flood", "agent_id", id, "type", message.Type)
+				_ = connection.Close(websocket.StatusPolicyViolation, "inbound frame rate limit exceeded")
+				return
+			}
 			switch message.Type {
 			case core.WireManagedCertificateReport:
 				if !heartbeatReceived || message.ManagedCertificateReport == nil {
@@ -286,6 +361,24 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid heartbeat")
 					return
 				}
+				if heartbeatReceived && !telemetryBucket.allow(now) {
+					droppedTelemetry++
+					if droppedTelemetry >= wsMaxDroppedTelemetryFrames {
+						slog.Warn("agent websocket telemetry flood", "agent_id", id, "type", message.Type)
+						_ = connection.Close(websocket.StatusPolicyViolation, "telemetry frame rate limit exceeded")
+						return
+					}
+					if compactTelemetryCapable && !telemetryResyncNeeded {
+						telemetryResyncNeeded = true
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTelemetryResync}); err != nil {
+							return
+						}
+					}
+					continue
+				}
+				droppedTelemetry = 0
+				telemetryResyncNeeded = false
+				compactTelemetryCapable = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureCompactTelemetry)
 				networkDiagnostics = agentHasFeature(message.Heartbeat.Features, core.AgentFeatureNetworkDiagnostics)
 				if err := s.store.UpdateDiagnosticCapabilities(ctx, id, message.Heartbeat.Diagnostics); err != nil {
 					return
@@ -311,6 +404,14 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
 					return
 				}
+				if len(message.Heartbeat.TrafficUsage) > 0 {
+					lastTrafficUsage = clonePortTrafficUsageSlice(message.Heartbeat.TrafficUsage)
+				}
+				if message.Heartbeat.Metrics != nil {
+					lastStoredMetrics = mergeCompactHostMetrics(lastStoredMetrics, *message.Heartbeat.Metrics)
+					lastMetricsTrust = trust
+					lastMetricsStoredAt = now
+				}
 				resetHeartbeatDeadline()
 				if capabilityChanged {
 					_ = connection.Close(websocket.StatusPolicyViolation, "agent features changed during session")
@@ -323,6 +424,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					managedProcessTimeZone = reportedProcessTimeZone
 					sharedEnginesSupported = reportedSharedEngines
 					independentEgressSupported = reportedIndependentEgress
+					s.setConnectionManagedPolicy(id, connectionID, managedAgentPolicy)
 					// Until this heartbeat, cached features could have belonged
 					// to a newer Agent. Only now may shared ports be unblocked.
 					policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
@@ -360,6 +462,23 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 						slog.Error("dispatch after first heartbeat", "agent_id", id, "error", err)
 						return
 					}
+					if err := reconcileDiagnostics(); err != nil {
+						return
+					}
+					if err := reconcileCertificateChallenges(); err != nil {
+						return
+					}
+					if agentHasManagedCertificates {
+						sources, sourceErr := s.store.AgentManagedCertificateSources(ctx, id)
+						if sourceErr == nil {
+							if len(sources) > 0 {
+								if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireManagedCertificateSources, ManagedCertificateSources: sources}); err != nil {
+									return
+								}
+							}
+							lastManagedScan = now
+						}
+					}
 				} else if err := reconcileTimeZoneMetrics(message.Heartbeat.Metrics); err != nil {
 					return
 				}
@@ -368,17 +487,51 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid metrics")
 					return
 				}
+				if heartbeatReceived && !telemetryBucket.allow(now) {
+					droppedTelemetry++
+					if droppedTelemetry >= wsMaxDroppedTelemetryFrames {
+						slog.Warn("agent websocket telemetry flood", "agent_id", id, "type", message.Type)
+						_ = connection.Close(websocket.StatusPolicyViolation, "telemetry frame rate limit exceeded")
+						return
+					}
+					if compactTelemetryCapable && (!telemetryResyncNeeded || message.TelemetryFullSync) {
+						telemetryResyncNeeded = true
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTelemetryResync}); err != nil {
+							return
+						}
+					}
+					continue
+				}
+				droppedTelemetry = 0
+				if message.TelemetryFullSync {
+					telemetryResyncNeeded = false
+				}
 				message.Metrics.ObservedPublicIP = observedPublicIP
-				if err := s.store.UpdateAgentMetricsWithPublicIPProbeTrust(ctx, id, *message.Metrics, publicIPProbeTrust()); err != nil {
-					slog.Error("store agent metrics", "agent_id", id, "error", err)
-					return
+				trust := publicIPProbeTrust()
+				keepaliveMax := min(wsMaxUnchangedMetricsKeepalive, max(time.Second, time.Duration(panelSettings.AgentOfflineThresholdSeconds)*time.Second/2))
+				shouldPersistMetrics := lastStoredMetrics == nil ||
+					message.TelemetryFullSync ||
+					!sameHostMetricsSnapshot(*lastStoredMetrics, *message.Metrics) ||
+					lastMetricsTrust != trust ||
+					now.Sub(lastMetricsStoredAt) >= keepaliveMax
+				if shouldPersistMetrics {
+					if err := s.store.UpdateAgentMetricsWithPublicIPProbeTrust(ctx, id, *message.Metrics, trust); err != nil {
+						slog.Error("store agent metrics", "agent_id", id, "error", err)
+						return
+					}
+					lastStoredMetrics = mergeCompactHostMetrics(lastStoredMetrics, *message.Metrics)
+					lastMetricsTrust = trust
+					lastMetricsStoredAt = now
 				}
 				if err := reconcileTimeZoneMetrics(message.Metrics); err != nil {
 					return
 				}
-				if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
-					slog.Error("store agent traffic metrics", "agent_id", id, "error", err)
-					return
+				if len(message.TrafficUsage) > 0 && (message.TelemetryFullSync || !samePortTrafficUsageSlice(lastTrafficUsage, message.TrafficUsage)) {
+					if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, now.UTC()); err != nil {
+						slog.Error("store agent traffic metrics", "agent_id", id, "error", err)
+						return
+					}
+					lastTrafficUsage = clonePortTrafficUsageSlice(message.TrafficUsage)
 				}
 				resetHeartbeatDeadline()
 			case core.WireCoreLogs:
@@ -400,10 +553,11 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					return
 				}
 				if len(message.TrafficUsage) > 0 {
-					if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
+					if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, now.UTC()); err != nil {
 						slog.Warn("flush task traffic result", "agent_id", id, "error", err)
 						return
 					}
+					lastTrafficUsage = clonePortTrafficUsageSlice(message.TrafficUsage)
 				}
 				if err := s.completeAgentTask(ctx, id, message.Result.TaskID, &message.Result.Result); err != nil {
 					slog.Warn("store task result", "agent_id", id, "task_id", message.Result.TaskID, "error", err)
@@ -450,18 +604,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				slog.Error("dispatch signaled task for websocket", "agent_id", id, "error", err)
 				return
 			}
+		case <-diagReady:
+			if err := reconcileDiagnostics(); err != nil {
+				return
+			}
+		case <-challengeReady:
+			if err := reconcileCertificateChallenges(); err != nil {
+				return
+			}
 		case <-taskTicker.C:
-			if heartbeatReceived && networkDiagnostics {
-				commands, err := s.store.AgentDiagnosticCommands(ctx, id)
-				if err != nil {
-					slog.Warn("reconcile diagnostics", "error", err)
-					return
-				}
-				if len(commands) > 0 {
-					if err = writeWire(ctx, connection, core.WireMessage{Type: core.WireDiagnostics, Diagnostics: commands}); err != nil {
-						return
-					}
-				}
+			if err := reconcileDiagnostics(); err != nil {
+				return
 			}
 			if !timeZoneAckDeadline.IsZero() && !time.Now().Before(timeZoneAckDeadline) {
 				_ = s.store.SetAgentTimeZoneStatus(ctx, id, timeZoneAckRevision, "failed", "Agent 响应超时，请重试")
@@ -477,14 +630,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					}
 					lastManagedScan = time.Now()
 				}
-				routes, routeErr := s.store.AgentCertificateChallenges(ctx, id)
-				if routeErr != nil {
+				if err := reconcileCertificateChallenges(); err != nil {
 					return
-				}
-				if agentHasFeatureFromStore {
-					if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCertificateChallenges, CertificateChallenges: routes}); err != nil {
-						return
-					}
 				}
 			}
 			if err := dispatchTask(); err != nil {

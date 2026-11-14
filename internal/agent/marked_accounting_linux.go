@@ -84,7 +84,11 @@ func collectMarkedAccounting(counters map[string]uint64, record *trafficRecord, 
 			}
 		}
 	}
-	accounting.Counters = make(map[string]uint64, len(record.KernelCounters))
+	if accounting.Counters == nil {
+		accounting.Counters = make(map[string]uint64, len(record.KernelCounters))
+	} else {
+		clear(accounting.Counters)
+	}
 	for key, value := range record.KernelCounters {
 		accounting.Counters[key] = value
 	}

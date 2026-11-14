@@ -74,6 +74,7 @@ type CoreLogCollector struct {
 	transitions          map[core.Engine]*coreLogSourceTransition
 	nextFileEpoch        uint64
 	sourceReady          map[core.Engine]chan struct{}
+	ready                chan struct{}
 	coreLogMaxBytes      int64
 	coreLogRotateCount   int
 	fileBudgetDivisor    int
@@ -164,6 +165,7 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		transitions: make(map[core.Engine]*coreLogSourceTransition), sourceReady: make(map[core.Engine]chan struct{}),
 		coreLogMaxBytes: defaultCoreLogMaxBytes, coreLogRotateCount: defaultCoreLogRotateCount,
 		fileBudgetDivisor: 1,
+		ready:             make(chan struct{}, 1),
 	}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
 		collector.fileSources = coreLogFileSources(specs...)

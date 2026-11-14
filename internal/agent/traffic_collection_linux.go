@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -88,6 +89,13 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			desired[id] = &next
 			continue
 		}
+		if !tableExists && record.CounterEpoch != "" &&
+			(len(record.KernelCounters) > 0 || record.LastKernelReceived > 0 || record.LastKernelSent > 0) {
+			if err := rotateLostTrafficEpoch(record); err != nil {
+				return manager.setUnavailableLocked(err)
+			}
+			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
+		}
 		hasSource := manager.nativeSource != nil && !shared || shared && manager.sharedSource != nil
 		nativeAllowed := hasSource && nativeAccountingScopeAllowed(record.Policy, snapshot)
 		// A transient source failure must freeze an established native baseline,
@@ -107,7 +115,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.CounterEpoch, record.Accounting = epoch, nil
 			record.KernelCounters = make(map[string]uint64)
 			record.ReceivedBytes, record.SentBytes, record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0, 0, 0
-			manager.dirty, manager.rulesDirty = true, true
+			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
 		}
 		if record.CounterEpoch == "" {
 			epoch, err := randomSuffix(16)
@@ -116,7 +124,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			}
 			record.CounterEpoch = epoch
 			record.LifetimeReceivedBytes, record.LifetimeSentBytes = record.ReceivedBytes, record.SentBytes
-			manager.dirty, manager.rulesDirty = true, true
+			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
 		}
 		periodStart, periodEnd, periodErr := core.TrafficPeriodAt(record.Policy.CycleAnchor, record.Policy.Cycle, now)
 		if periodErr != nil {
@@ -170,8 +178,14 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				}
 				if previousEpoch != record.CounterEpoch {
 					manager.rulesDirty = true
+					manager.dirty = true
+					manager.urgentDirty = true
+				} else if !trafficAccountingPersistedEqual(previousRecord.Accounting, record.Accounting) {
+					manager.dirty = true
+					if trafficAccountingStructChanged(previousRecord.Accounting, record.Accounting) {
+						manager.urgentDirty = true
+					}
 				}
-				manager.dirty = true
 			}
 			record.AccountingError = ""
 			if err != nil {
@@ -232,6 +246,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.ReceiveBPS, record.SendBPS = 0, 0
 			record.PeriodStart, record.PeriodEnd = periodStart, periodEnd
 			manager.dirty = true
+			manager.urgentDirty = true
 		} else if record.Blocked && record.Accounting == nil && !hasNamedTrafficCounters(counters, record) {
 			// Only legacy anonymous counters count rejected attempts. Named
 			// counters stop at the actual drop rule; their final increment is
@@ -252,13 +267,18 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.SendBPS = trafficRate(sentDelta, seconds)
 		}
 		record.LastCollectedAt = now
-		manager.dirty = manager.dirty || receivedDelta > 0 || sentDelta > 0
+		if receivedDelta > 0 || sentDelta > 0 || !maps.Equal(previousRecord.KernelCounters, record.KernelCounters) ||
+			record.LastKernelReceived != previousRecord.LastKernelReceived || record.LastKernelSent != previousRecord.LastKernelSent {
+			manager.dirty = true
+		}
 		blocked := record.Policy.AutoBlock && saturatedTrafficAdd(trafficUsed(record), record.QuotaBaselineBytes) >= record.Policy.LimitBytes
 		next := *record
 		next.Blocked = blocked
 		desired[id] = &next
 		if blocked != record.Blocked {
 			manager.rulesDirty = true
+			manager.dirty = true
+			manager.urgentDirty = true
 		}
 	}
 	// One aggregate decision after sampling every port. Billing a full quota
@@ -268,6 +288,8 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.Blocked = !quota.AllowsEngine(record.Policy.Engine) || (quota.LimitBytes > 0 && sharedTrafficUsed(desired, quota.ID) >= quota.LimitBytes)
 			if record.Blocked != manager.records[id].Blocked {
 				manager.rulesDirty = true
+				manager.dirty = true
+				manager.urgentDirty = true
 			}
 		}
 	}
@@ -278,7 +300,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		if err := manager.backend.Replace(ctx, script); err != nil {
 			// Counting can still succeed while enforcement is broken. Keep
 			// those observed bytes durable even through repeated apply errors.
-			if saveErr := manager.saveLocked(); saveErr != nil {
+			if saveErr := manager.saveWithForceLocked(true); saveErr != nil {
 				err = errors.Join(err, fmt.Errorf("persist traffic counters: %w", saveErr))
 			} else if errors.Is(ctx.Err(), context.Canceled) {
 				return manager.collectLocked(ctx, forceRules)
@@ -290,10 +312,37 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		}
 		manager.rulesDirty = false
 		manager.dirty = true
+		manager.urgentDirty = true
 	}
 	manager.refreshSnapshotLocked(true, "")
 	if err := manager.saveLocked(); err != nil {
 		return manager.setUnavailableLocked(fmt.Errorf("persist traffic counters: %w", err))
 	}
 	return nil
+}
+
+func trafficAccountingStructChanged(a, b *core.TrafficAccounting) bool {
+	if a == nil && b == nil {
+		return false
+	}
+	if a == nil || b == nil {
+		return true
+	}
+	return a.Source != b.Source || a.Inbound != b.Inbound || a.Mark != b.Mark ||
+		a.ProcessEpoch != b.ProcessEpoch || !slices.Equal(a.Outbounds, b.Outbounds)
+}
+
+func trafficAccountingPersistedEqual(a, b *core.TrafficAccounting) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if trafficAccountingStructChanged(a, b) {
+		return false
+	}
+	return a.ClientReceived == b.ClientReceived && a.ClientSent == b.ClientSent &&
+		a.TargetReceived == b.TargetReceived && a.TargetSent == b.TargetSent &&
+		maps.Equal(a.Counters, b.Counters)
 }

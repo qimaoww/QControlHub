@@ -3,9 +3,7 @@
 package hostmetrics
 
 import (
-	"bufio"
 	"errors"
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -13,56 +11,104 @@ import (
 )
 
 func parseMemoryUsage(contents string) (uint64, uint64, error) {
-	values := make(map[string]uint64)
-	present := make(map[string]bool)
-	scanner := bufio.NewScanner(strings.NewReader(contents))
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
+	return parseMemoryUsageData(contents)
+}
+
+func parseMemoryUsageData[T ~[]byte | ~string](contents T) (uint64, uint64, error) {
+	var memTotal, memFree, buffers, cached, sReclaimable, shmem uint64
+	var hasTotal, hasFree, hasBuffers, hasCached, hasSReclaimable, hasShmem bool
+	seenTargets := 0
+
+	pos := 0
+	for {
+		line, nextPos, ok := nextLineSlice(contents, pos)
+		if !ok {
+			break
+		}
+		pos = nextPos
+		key, fieldPos, hasKey := nextASCIIField(line, 0)
+		if !hasKey {
 			continue
 		}
-		key := strings.TrimSuffix(fields[0], ":")
-		switch key {
-		case "MemTotal", "MemFree", "Buffers", "Cached", "SReclaimable", "Shmem":
-			value, err := strconv.ParseUint(fields[1], 10, 64)
-			if err != nil || value > math.MaxUint64/1024 {
-				return 0, 0, errors.New("/proc/meminfo contains an invalid counter")
+		if len(key) > 0 && key[len(key)-1] == ':' {
+			key = key[:len(key)-1]
+		}
+		var slot *uint64
+		var present *bool
+		switch len(key) {
+		case 5:
+			if equalBytesString(key, "Shmem") {
+				slot, present = &shmem, &hasShmem
 			}
-			values[key] = value * 1024
-			present[key] = true
+		case 6:
+			if equalBytesString(key, "Cached") {
+				slot, present = &cached, &hasCached
+			}
+		case 7:
+			if equalBytesString(key, "MemFree") {
+				slot, present = &memFree, &hasFree
+			} else if equalBytesString(key, "Buffers") {
+				slot, present = &buffers, &hasBuffers
+			}
+		case 8:
+			if equalBytesString(key, "MemTotal") {
+				slot, present = &memTotal, &hasTotal
+			}
+		case 12:
+			if equalBytesString(key, "SReclaimable") {
+				slot, present = &sReclaimable, &hasSReclaimable
+			}
+		}
+		if slot == nil {
+			continue
+		}
+		rawValue, _, hasVal := nextASCIIField(line, fieldPos)
+		if !hasVal {
+			continue
+		}
+		value, err := parseUintASCII(rawValue)
+		if err != nil || value > math.MaxUint64/1024 {
+			return 0, 0, errors.New("/proc/meminfo contains an invalid counter")
+		}
+		*slot = value * 1024
+		if !*present {
+			*present = true
+			seenTargets++
+			if seenTargets == 6 {
+				break
+			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return 0, 0, err
-	}
-	total := values["MemTotal"]
-	if total == 0 {
+	if memTotal == 0 {
 		return 0, 0, errors.New("/proc/meminfo has no MemTotal")
 	}
-	for _, key := range []string{"MemFree", "Buffers", "Cached"} {
-		if !present[key] {
-			return 0, 0, fmt.Errorf("/proc/meminfo has no %s", key)
-		}
+	if !hasFree {
+		return 0, 0, errors.New("/proc/meminfo has no MemFree")
+	}
+	if !hasBuffers {
+		return 0, 0, errors.New("/proc/meminfo has no Buffers")
+	}
+	if !hasCached {
+		return 0, 0, errors.New("/proc/meminfo has no Cached")
 	}
 	// Cached includes tmpfs/shared-memory pages. Keep Shmem in used memory and
 	// exclude only the file-backed portion that can act as reclaimable cache.
-	cached := values["Cached"]
-	if shmem := values["Shmem"]; shmem < cached {
+	if shmem < cached {
 		cached -= shmem
 	} else {
 		cached = 0
 	}
-	reclaimable := values["MemFree"]
-	for _, value := range []uint64{values["Buffers"], cached, values["SReclaimable"]} {
+	reclaimable := memFree
+	for _, value := range [3]uint64{buffers, cached, sReclaimable} {
 		if math.MaxUint64-reclaimable < value {
 			return 0, 0, errors.New("/proc/meminfo reclaimable memory overflow")
 		}
 		reclaimable += value
 	}
-	if reclaimable > total {
-		reclaimable = total
+	if reclaimable > memTotal {
+		reclaimable = memTotal
 	}
-	return total - reclaimable, total, nil
+	return memTotal - reclaimable, memTotal, nil
 }
 
 func fallbackMemoryUsage() (uint64, uint64, error) {

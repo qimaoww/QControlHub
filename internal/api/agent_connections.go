@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
@@ -9,9 +10,17 @@ import (
 func (s *Server) registerConnection(agentID, connectionID string, cancel context.CancelFunc) chan struct{} {
 	trafficRefresh := make(chan struct{}, 1)
 	timeZoneRefresh := make(chan struct{}, 1)
+	policyRefresh := make(chan struct{}, 1)
 	s.connectionsMu.Lock()
 	previous, exists := s.connections[agentID]
-	s.connections[agentID] = liveConnection{id: connectionID, cancel: cancel, trafficRefresh: trafficRefresh, timeZoneRefresh: timeZoneRefresh}
+	s.connections[agentID] = liveConnection{
+		id:              connectionID,
+		cancel:          cancel,
+		trafficRefresh:  trafficRefresh,
+		timeZoneRefresh: timeZoneRefresh,
+		policyRefresh:   policyRefresh,
+		managedPolicy:   &atomic.Bool{},
+	}
 	s.connectionsMu.Unlock()
 	if exists {
 		previous.cancel()
@@ -19,35 +28,76 @@ func (s *Server) registerConnection(agentID, connectionID string, cancel context
 	return trafficRefresh
 }
 
-func (s *Server) agentTimeZoneRefreshChannel(agentID, connectionID string) chan struct{} {
+func (s *Server) connectionChannel(agentID, connectionID string, pick func(liveConnection) chan struct{}) chan struct{} {
 	s.connectionsMu.Lock()
 	defer s.connectionsMu.Unlock()
 	if connection, ok := s.connections[agentID]; ok && connection.id == connectionID {
-		return connection.timeZoneRefresh
+		return pick(connection)
 	}
 	return nil
 }
 
-func (s *Server) refreshAgentTimeZone(agentID string) {
+func (s *Server) agentTimeZoneRefreshChannel(agentID, connectionID string) chan struct{} {
+	return s.connectionChannel(agentID, connectionID, func(c liveConnection) chan struct{} { return c.timeZoneRefresh })
+}
+
+func (s *Server) agentPolicyRefreshChannel(agentID, connectionID string) chan struct{} {
+	return s.connectionChannel(agentID, connectionID, func(c liveConnection) chan struct{} { return c.policyRefresh })
+}
+
+func (s *Server) setConnectionManagedPolicy(agentID, connectionID string, managed bool) {
+	s.connectionsMu.Lock()
+	connection, ok := s.connections[agentID]
+	s.connectionsMu.Unlock()
+	if ok && connection.id == connectionID && connection.managedPolicy != nil {
+		connection.managedPolicy.Store(managed)
+	}
+}
+
+func signalConnectionChannel(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Server) signalLiveConnection(agentID string, pick func(liveConnection) chan struct{}) {
 	s.connectionsMu.Lock()
 	defer s.connectionsMu.Unlock()
 	if connection, ok := s.connections[agentID]; ok {
-		select {
-		case connection.timeZoneRefresh <- struct{}{}:
-		default:
-		}
+		signalConnectionChannel(pick(connection))
 	}
+}
+
+func (s *Server) refreshAgentTimeZone(agentID string) {
+	s.signalLiveConnection(agentID, func(c liveConnection) chan struct{} { return c.timeZoneRefresh })
 }
 
 // Refresh policies in-place: reconnect discovery would also add unselected ports.
 func (s *Server) refreshAgentTrafficPolicies(agentID string) {
+	s.signalLiveConnection(agentID, func(c liveConnection) chan struct{} { return c.trafficRefresh })
+}
+
+// RefreshAgentPolicy pushes updated Agent policy in-place for managed-policy
+// Agents, falling back to disconnect/reconnect only for legacy Agents without
+// dynamic policy hot-reload support.
+func (s *Server) RefreshAgentPolicy(agentID string) {
 	s.connectionsMu.Lock()
-	defer s.connectionsMu.Unlock()
-	if connection, ok := s.connections[agentID]; ok {
-		select {
-		case connection.trafficRefresh <- struct{}{}:
-		default:
-		}
+	connection, exists := s.connections[agentID]
+	if exists && connection.managedPolicy != nil && connection.managedPolicy.Load() {
+		signalConnectionChannel(connection.policyRefresh)
+		s.connectionsMu.Unlock()
+		return
+	}
+	if exists {
+		delete(s.connections, agentID)
+	}
+	s.connectionsMu.Unlock()
+	if exists {
+		connection.cancel()
 	}
 }
 

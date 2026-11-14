@@ -21,14 +21,27 @@ type Store struct {
 	connectionSyncMu sync.Mutex
 	connectionSync   map[string]*connectionSnapshot
 
-	certificateResolver certificates.DNSResolver
-	certificateDNSHTTP  *http.Client
-	pool                storePool
-	cryptor             *configCryptor
-	notificationTokenMu sync.RWMutex
-	notificationTokens  map[string][]core.Permission
-	taskWakeMu          sync.Mutex
-	taskWakes           map[string]chan struct{}
+	certificateResolver      certificates.DNSResolver
+	certificateDNSHTTP       *http.Client
+	pool                     storePool
+	cryptor                  *configCryptor
+	notificationTokenMu      sync.RWMutex
+	notificationTokens       map[string][]core.Permission
+	taskSignals              agentSignalHub
+	diagSignals              agentSignalHub
+	certSignals              agentSignalHub
+	pubKeyCacheMu            sync.RWMutex
+	pubKeyCache              map[string]cachedAgentPublicKey
+	pubKeyCacheGen           map[string]uint64
+	afterAgentPublicKeyQuery func(context.Context, string)
+}
+
+func (s *Store) SetAgentPublicKeyQueryHookForTesting(hook func(context.Context, string)) {
+	s.afterAgentPublicKeyQuery = hook
+}
+
+func (s *Store) InvalidateAgentPublicKeyCacheForTesting(agentID string) {
+	s.invalidateAgentPublicKeyAfterCommit(context.Background(), agentID)
 }
 
 type storeExecutor interface {

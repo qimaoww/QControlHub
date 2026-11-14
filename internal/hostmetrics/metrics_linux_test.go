@@ -166,3 +166,60 @@ func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
 		t.Fatalf("live default-route interface addresses are missing: %+v", second.NetworkInterfaces)
 	}
 }
+
+func TestParseProcNetDevCounters(t *testing.T) {
+	t.Parallel()
+	sample := "Inter-|   Receive                                                |  Transmit\n" +
+		" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n" +
+		"    lo: 1000       10    0    0    0     0          0         0     2000       10    0    0    0     0       0          0\n" +
+		"  eth0: 1234567890   100 0 0 0 0 0 0 9876543210 200 0 0 0 0 0 0\n" +
+		" ens18:9001       50 0 0 0 0 0 0 42        10 0 0 0 0 0 0\n"
+	rx, tx, ok := parseProcNetDevCounters(sample, []string{"eth0", "ens18"})
+	if !ok || rx != 1234576891 || tx != 9876543252 {
+		t.Fatalf("parseProcNetDevCounters() = (%d, %d, %v)", rx, tx, ok)
+	}
+	if _, _, ok := parseProcNetDevCounters(sample, []string{"eth0", "missing0"}); ok {
+		t.Fatal("parseProcNetDevCounters accepted missing interface")
+	}
+	if _, _, ok := parseProcNetDevCounters(sample+"\neth0: 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n", []string{"eth0"}); ok {
+		t.Fatal("parseProcNetDevCounters accepted duplicate interface row")
+	}
+}
+
+func TestCollectorCachesAndInvalidatesInterfaces(t *testing.T) {
+	collector := NewCollector()
+	first, err := collector.Collect(context.Background())
+	if err != nil && !HasData(first) {
+		t.Fatalf("first collect: %v", err)
+	}
+	if !collector.previous.interfacesValid || len(collector.previous.interfaces) == 0 {
+		t.Fatalf("expected routed interfaces cache to be populated: %+v", collector.previous.interfaces)
+	}
+	cachedAt := collector.previous.interfacesAt
+	second, err := collector.Collect(context.Background())
+	if err != nil && !HasData(second) {
+		t.Fatalf("second collect: %v", err)
+	}
+	if !collector.previous.interfacesAt.Equal(cachedAt) {
+		t.Fatalf("expected cached interface timestamp %v to be reused, got %v", cachedAt, collector.previous.interfacesAt)
+	}
+	collector.InvalidateInterfaces()
+	if collector.previous.interfacesValid {
+		t.Fatal("InvalidateInterfaces did not clear interfacesValid")
+	}
+}
+
+func BenchmarkCollectorCollect(b *testing.B) {
+	collector := NewCollector()
+	ctx := context.Background()
+	if _, err := collector.Collect(ctx); err != nil {
+		b.Fatalf("warmup Collect: %v", err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := collector.Collect(ctx); err != nil {
+			b.Fatalf("Collect: %v", err)
+		}
+	}
+}

@@ -8,19 +8,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const maxCoreLogInstances = 256
+const (
+	maxCoreLogInstances            = 256
+	sharedLogValidationCacheWindow = 30 * time.Second
+)
 
 type coreLogInstanceRun struct {
-	collector *CoreLogCollector
-	cancel    context.CancelFunc
-	spec      EngineSpec
-	engine    core.Engine
-	shareID   string
+	collector            *CoreLogCollector
+	cancel               context.CancelFunc
+	spec                 EngineSpec
+	engine               core.Engine
+	shareID              string
+	validatedAt          time.Time
+	validatedFingerprint string
+}
+
+func sharedLogSourceFingerprint(kind string, spec EngineSpec) string {
+	if kind != ServiceManagerSystemd {
+		return serviceUnitFingerprint(kind, openRCInitRoot, rcServicePath, spec.Service)
+	}
+	fp := serviceUnitFingerprint(ServiceManagerSystemd, existingDiscoveryManagedUnitRoot, systemctlPath, spec.Service)
+	if prefix, _, ok := strings.Cut(spec.Service, "@"); ok && prefix != "" {
+		fp += "|t:" + serviceUnitFingerprint(ServiceManagerSystemd, existingDiscoveryManagedUnitRoot, systemctlPath, prefix+"@.service")
+	}
+	return fp
 }
 
 // Separate collectors retain separate cursors and health, while all instances
@@ -88,7 +105,16 @@ func (c *CoreLogCollector) prepareSharedLogSource(ctx context.Context, engine co
 	child.instanceID = share
 	child.instanceService = spec.Service
 	childCtx, cancel := context.WithCancel(runCtx)
-	c.instances[key] = &coreLogInstanceRun{child, cancel, spec, engine, share}
+	fp := sharedLogSourceFingerprint(c.executor.serviceManager().Kind(), spec)
+	c.instances[key] = &coreLogInstanceRun{
+		collector:            child,
+		cancel:               cancel,
+		spec:                 spec,
+		engine:               engine,
+		shareID:              share,
+		validatedAt:          time.Now(),
+		validatedFingerprint: fp,
+	}
 	c.rebalanceInstanceBudgetsLocked()
 	c.runWait.Add(1)
 	go func() { defer c.runWait.Done(); child.Run(childCtx) }()
@@ -133,6 +159,20 @@ func (c *CoreLogCollector) refreshSharedLogSources(ctx context.Context) {
 			}
 			key := string(engine) + "/" + entry.Name()
 			seen[key] = true
+			fp := sharedLogSourceFingerprint(c.executor.serviceManager().Kind(), spec)
+			skipValidation := false
+			c.instancesMu.Lock()
+			existingRun := c.instances[key]
+			_, hadFailure := c.instanceFailures[key]
+			if existingRun != nil && !hadFailure && existingRun.validatedFingerprint == fp && time.Since(existingRun.validatedAt) < sharedLogValidationCacheWindow {
+				skipValidation = true
+			}
+			c.instancesMu.Unlock()
+			if skipValidation {
+				if err := validateProtectedDirectoryChain(filepath.Dir(spec.ConfigPath)); err == nil {
+					continue
+				}
+			}
 			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			err = c.prepareSharedLogSource(checkCtx, engine, spec)
 			cancel()
@@ -150,6 +190,10 @@ func (c *CoreLogCollector) refreshSharedLogSources(ctx context.Context) {
 				c.instancesMu.Unlock()
 			} else {
 				c.instancesMu.Lock()
+				if run := c.instances[key]; run != nil {
+					run.validatedAt = time.Now()
+					run.validatedFingerprint = fp
+				}
 				delete(c.instanceFailures, key)
 				c.instancesMu.Unlock()
 			}
