@@ -5,6 +5,7 @@ import {
   isClockSyncAbnormal,
   isValidProbeIPAddress,
   mergePanelMetricsHistory,
+  niceTrafficScaleMax,
   panelNetworkRatesValid,
   probeDirectionStatus,
   probeHistorySeries,
@@ -13,6 +14,7 @@ import {
   selectMostActiveNodes,
   summarizeClientConnectionsPulse,
   summarizeDashboardProbes,
+  summarizeDashboardTrafficBreakdown,
   summarizeDashboardTrafficPeaks,
   summarizeExpiringCertificates,
   summarizeIPQualityFleet,
@@ -236,6 +238,28 @@ export async function run() {
     ["busy-top", "busy-mid", "idle-core-a", "idle-core-b", "idle-cpu"],
     "selectMostActiveNodes ranks online throughput, active cores, cpu, and preserves tie order within top 5",
   );
+
+  assert.equal(niceTrafficScaleMax(0), 3);
+  assert.equal(niceTrafficScaleMax(5.5 * 1024 ** 3), 6 * 1024 ** 3, "5.5 GB scales cleanly to 6 GB (divisible by 3)");
+  assert.equal(niceTrafficScaleMax(94.9 * 1024 ** 3), 105 * 1024 ** 3, "94.9 GB scales cleanly to 105 GB (divisible by 3)");
+  const bd = summarizeDashboardTrafficBreakdown([
+    { day: "2026-08-01", received_bytes: 300, sent_bytes: 100 },
+    { day: "2026-08-02", received_bytes: 0, sent_bytes: 0 },
+    { day: "2026-08-03", received_bytes: 60, sent_bytes: 40 },
+    { day: "2026-08-09", received_bytes: 9999, sent_bytes: 9999 },
+  ], "2026-08", "2026-08-03T12:00:00Z");
+  assert.deepEqual(bd, {
+    isCurrentMonth: true,
+    todayReceiveBytes: 60,
+    todaySentBytes: 40,
+    averageReceiveBytes: 120,
+    averageSentBytes: 140 / 3,
+    peakDay: "2026-08-01",
+    peakReceiveBytes: 300,
+    peakSentBytes: 100,
+    activeDays: 2,
+    elapsedDays: 3,
+  });
 
   console.log("Dashboard telemetry model smoke passed");
 }

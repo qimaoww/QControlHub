@@ -454,6 +454,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   await refresh();
   await waitFor(() => tip.textContent.replace(/\s/g, "").includes("接收2.4GB"), "daily tooltip did not update its current sample");
   assert(document.querySelector(".a-tooltip") === tip && bands()[0] === firstDay, "poll recreated the hovered day or tooltip");
+  assert(traffic().querySelector(".a-dash-chart-inspect")?.textContent.includes(firstDate) && traffic().querySelector(".a-dash-chart-inspect")?.textContent.replace(/\s/g, "").includes("2.4GB"), "chart inspect readout did not update on hovered refresh");
   fixture.trafficMultiplier = 1;
   await refresh();
   firstDay.focus();
@@ -468,7 +469,7 @@ export async function testDashboardRuntime(mode, preview = false) {
 
   const assertLayout = () => {
     assert(document.documentElement.scrollWidth <= innerWidth + 1, `viewport overflow ${innerWidth}`);
-    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
       assert(element.scrollWidth <= element.clientWidth + 1, `content overflow ${element.className}`);
     }
     for (const element of document.querySelectorAll('[aria-label="节点运行状态"]')) {

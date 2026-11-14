@@ -7,7 +7,7 @@ import { formatDate } from "./appearance.js";
 import { bindSourceEditorTools } from "./source-editor.js";
 import { readableConfigSource } from '../modules/code-format.js';
 import { editAgentSharing } from "./sharing.js";
-import { aggregateDashboardTrafficDays, mergePanelMetricsHistory, summarizeDashboardNodes, summarizeDashboardTraffic, summarizeDashboardTrafficPeaks, utcMonth } from "../modules/dashboard-model.js";
+import { aggregateDashboardTrafficDays, mergePanelMetricsHistory, niceTrafficScaleMax, summarizeDashboardNodes, summarizeDashboardTraffic, summarizeDashboardTrafficBreakdown, summarizeDashboardTrafficPeaks, utcMonth } from "../modules/dashboard-model.js";
 import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
@@ -30,28 +30,41 @@ export const actionName = value => ({
   "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
 })[value] || value;
 
-function responsiveChart(days, signal) {
+function responsiveChart(days, signal, onInspect) {
   const container = node("div", { className: "a-chart-container" });
   let currentDays = days, selectedDay = '', previous = "", width = Math.max(280, innerWidth - (innerWidth > 896 ? 256 : 0) - 96);
   const render = () => {
-    const signature = JSON.stringify([Math.round(width), currentDays]);
+    const plotWidth = Math.max(280, Math.round(width));
+    const signature = JSON.stringify([plotWidth, currentDays]);
     if (signature === previous) return;
     previous = signature;
     if (!currentDays.some(day => day.day === selectedDay)) selectedDay = '';
-    const fresh = chart(currentDays, Math.max(280, width), selectedDay, day => { selectedDay = day; });
+    const fresh = chart(currentDays, plotWidth, selectedDay, day => { selectedDay = day; }, onInspect);
     if (container.firstChild) patch(container.firstChild, fresh); else container.append(fresh);
+    const active = selectedDay ? currentDays.find(day => day.day === selectedDay) : null;
+    onInspect?.(active || null, currentDays);
   };
   render();
   container.updateDays = value => { currentDays = value; render(); };
-  const observer = new ResizeObserver(entries => { width = entries[0].contentRect.width; render(); });
+  container.refreshInspect = () => {
+    const active = selectedDay ? currentDays.find(day => day.day === selectedDay) : null;
+    onInspect?.(active || null, currentDays);
+  };
+  const observer = new ResizeObserver(entries => {
+    const nextWidth = Math.max(280, Math.round(entries[0].contentRect.width));
+    if (nextWidth === Math.round(width)) return;
+    width = nextWidth;
+    render();
+  });
   observer.observe(container);
   signal.addEventListener("abort", () => observer.disconnect(), { once: true });
   return container;
 }
 
-function chart(days, width, selectedDay, selectDay) {
-  const height = 224, left = 62, right = 18, top = 16, bottom = 26;
-  const max = Math.max(3, ...days.flatMap(day => [day.received_bytes, day.sent_bytes]));
+function chart(days, width, selectedDay, selectDay, onInspect) {
+  const height = 208, left = width < 420 ? 52 : 58, right = 24, top = 16, bottom = 26;
+  const rawMax = Math.max(0, ...days.flatMap(day => [day.received_bytes, day.sent_bytes]));
+  const max = niceTrafficScaleMax(rawMax);
   const points = key => days.map((day, index) => [left + index / Math.max(1, days.length - 1) * (width - left - right),
     height - bottom - day[key] / max * (height - top - bottom)]);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -74,8 +87,9 @@ function chart(days, width, selectedDay, selectDay) {
   if (days.length) {
     const rxPoints = points('received_bytes');
     const txPoints = points('sent_bytes');
+    const stride = width < 420 ? 7 : 5;
     days.forEach((day, index) => {
-      if (index % 5 === 0 || index === days.length - 1) {
+      if (index === 0 || (index % stride === 0 && index <= days.length - 4) || index === days.length - 1) {
         const vx = rxPoints[index][0].toFixed(1);
         add("line", { x1: vx, y1: top, x2: vx, y2: height - bottom, stroke: "#efeff1", "stroke-dasharray": "2 3" });
         add("text", { x: vx, y: height - 6, "text-anchor": "middle" }, day.day.slice(5));
@@ -83,13 +97,13 @@ function chart(days, width, selectedDay, selectDay) {
     });
     const defs = add("defs", {});
     const grad = add("linearGradient", { id: "a-chart-rx-grad", x1: "0", y1: "0", x2: "0", y2: "1" }, "", defs);
-    add("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.12" }, "", grad);
+    add("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.14" }, "", grad);
     add("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.01" }, "", grad);
-    for (const [key, label, stroke, dash] of [['received_bytes', '接收', '#18181b', ''], ['sent_bytes', '发送', '#62626b', '5 4']]) {
+    for (const [key, label, stroke, dash] of [['received_bytes', '接收', '#18181b', ''], ['sent_bytes', '发送', '#52525b', '5 4']]) {
       const series = points(key);
       const line = series.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
       if (!dash) add("path", { d: `${line}L${series.at(-1)[0]} ${height - bottom}H${left}Z`, fill: "url(#a-chart-rx-grad)" });
-      add("path", { d: line, stroke, "stroke-width": dash ? "1.6" : "2", 'stroke-dasharray': dash, fill: "none", 'data-series': key, 'aria-label': label });
+      add("path", { d: line, stroke, "stroke-width": dash ? "1.6" : "2", 'stroke-dasharray': dash, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: "none", 'data-series': key, 'aria-label': label });
       if (days.length === 1) add('circle', { cx: series[0][0], cy: series[0][1], r: 3, fill: stroke });
     }
     let peakIdx = 0;
@@ -97,7 +111,17 @@ function chart(days, width, selectedDay, selectDay) {
       if ((d.received_bytes + d.sent_bytes) > (days[peakIdx].received_bytes + days[peakIdx].sent_bytes)) peakIdx = idx;
     });
     if (days[peakIdx] && (days[peakIdx].received_bytes + days[peakIdx].sent_bytes) > 0) {
-      add("circle", { cx: rxPoints[peakIdx][0].toFixed(1), cy: rxPoints[peakIdx][1].toFixed(1), r: 3.5, fill: "#fff", stroke: "#18181b", "stroke-width": "2" });
+      const px = rxPoints[peakIdx][0].toFixed(1);
+      add("line", { class: "a-chart-peak-guide", x1: px, y1: top, x2: px, y2: height - bottom });
+      add("circle", { cx: px, cy: txPoints[peakIdx][1].toFixed(1), r: 2.75, fill: "#fff", stroke: "#52525b", "stroke-width": "1.5" });
+      add("circle", { cx: px, cy: rxPoints[peakIdx][1].toFixed(1), r: 3.25, fill: "#18181b", stroke: "#fff", "stroke-width": "1.5" });
+    } else {
+      add("text", {
+        class: "a-chart-empty-hint",
+        x: ((left + width - right) / 2).toFixed(1),
+        y: ((top + height - bottom) / 2 + 4).toFixed(1),
+        "text-anchor": "middle",
+      }, "暂无流量采样");
     }
     const crosshair = add("line", { class: "a-chart-crosshair", x1: 0, x2: 0, y1: top, y2: height - bottom, opacity: "0" });
     const rxDot = add("circle", { class: "a-chart-dot-rx", cx: 0, cy: 0, r: 3.5, opacity: "0" });
@@ -129,21 +153,26 @@ function chart(days, width, selectedDay, selectDay) {
       const end = index === days.length - 1 ? width - right : (xValues[index] + xValues[index + 1]) / 2;
       const label = `${day.day} · UTC · 接收 ${bytes(day.received_bytes)} · 发送 ${bytes(day.sent_bytes)} · 合计 ${bytes(day.received_bytes + day.sent_bytes)}`;
       const band = add('rect', { x: start, y: top, width: end - start, height: height - top - bottom,
-        fill: 'currentColor', 'fill-opacity': selectedDay === day.day ? '.035' : '0', 'pointer-events': 'all',
+        fill: 'currentColor', 'fill-opacity': selectedDay === day.day ? '.05' : '0', 'pointer-events': 'all',
         'data-chart-day': day.day, 'data-refresh-key': `chart-day-${day.day}`, title: label, role: 'button',
         'aria-label': label, tabindex: selectedDay === day.day || !selectedDay && index === 0 ? '0' : '-1' });
       const select = owner => {
         selectDay(owner.dataset.chartDay);
         updateCrosshair(index);
+        onInspect?.(day, days);
         owner.closest('svg').querySelectorAll('[data-chart-day]').forEach(item => {
-          item.setAttribute('fill-opacity', item === owner ? '.035' : '0'); item.setAttribute('tabindex', item === owner ? '0' : '-1');
+          item.setAttribute('fill-opacity', item === owner ? '.05' : '0'); item.setAttribute('tabindex', item === owner ? '0' : '-1');
         });
       };
-      listen(band, 'pointerenter', event => select(event.currentTarget));
+      listen(band, 'pointerover', event => {
+        if (event.pointerType === 'touch') return;
+        select(event.currentTarget);
+      });
       listen(band, 'focus', event => select(event.currentTarget));
       listen(band, 'pointerleave', event => {
         if (document.activeElement === event.currentTarget) return;
         selectDay(''); updateCrosshair(-1); event.currentTarget.setAttribute('fill-opacity', '0');
+        onInspect?.(null, days);
       });
       listen(band, 'pointerup', event => {
         event.currentTarget.focus({ preventScroll: true });
@@ -201,37 +230,85 @@ export async function dashboardPage(ctx) {
   const nodeMatrix = node("div", { className: "a-dash-matrix", "aria-label": "节点运行状态" });
   const nodes = can("agents.read") && section("节点运行状态", nodeMatrix, nodeSummary);
 
-  const plot = responsiveChart([], ctx.signal);
-  const trafficSummary = (receive, sent, summary = {}, peaks = {}, trafficMonth = month) => node("div", { className: "a-dash-traffic-ledger" },
-    node("div", { className: "a-dash-ledger-cell is-primary", "data-refresh-key": "月累计流量" },
-      node("div", { className: "a-dash-ledger-head" }, muted("月累计流量")),
-      node("strong", {}, receive == null ? "—" : bytes(receive + sent)),
-      node("div", { className: "a-dash-ledger-foot" },
-        node("div", { className: "a-dash-ledger-duplex" },
-          node("span", { className: "a-dash-rx" }, `↓ ${receive == null ? "—" : bytes(receive)}`),
-          node("span", { className: "a-dash-tx" }, `↑ ${sent == null ? "—" : bytes(sent)}`)),
-        trafficSplitBar(receive || 0, sent || 0, (receive || 0) + (sent || 0)))),
-    node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "UTC 今日" },
-      node("div", { className: "a-dash-ledger-head" }, muted(summary.isCurrentMonth === false ? "统计月份" : "UTC 今日")),
-      node("strong", {}, summary.isCurrentMonth === false ? trafficMonth : summary.todayBytes == null ? "—" : bytes(summary.todayBytes)),
-      node("div", { className: "a-dash-ledger-foot" }, muted(summary.isCurrentMonth === false ? "历史归档" : trafficMonth))),
-    node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "日均用量" },
-      node("div", { className: "a-dash-ledger-head" }, muted("日均用量")),
-      node("strong", {}, summary.averageBytes == null ? "—" : bytes(summary.averageBytes)),
-      node("div", { className: "a-dash-ledger-foot" }, muted(summary.elapsedDays ? `共 · ${summary.elapsedDays} 天` : "—"))),
-    node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "峰值带宽" },
-      node("div", { className: "a-dash-ledger-head" }, muted("日峰值")),
-      node("strong", {}, summary.peakDay ? `${bytes(summary.peakBytes)}` : "—"),
-      node("div", { className: "a-dash-ledger-foot" },
-        summary.peakDay
-          ? [
-              muted(summary.peakDay),
-              node("div", { className: "a-dash-ledger-duplex" },
+  const inspectPrimary = node("span", { className: "a-dash-inspect-primary" }, "每日收发趋势");
+  const inspectDetail = node("span", { className: "a-muted a-dash-inspect-detail" }, "");
+  let currentBreakdown = {};
+  const setInspectText = (day) => {
+    let primaryText = "每日收发趋势";
+    let detailText = "";
+    if (day) {
+      const total = Number(day.received_bytes || 0) + Number(day.sent_bytes || 0);
+      primaryText = `${day.day} · 合计 ${bytes(total)}`;
+      const peakBPS = Math.max(Number(day.peak_receive_bps || 0), Number(day.peak_send_bps || 0));
+      detailText = `↓ ${bytes(day.received_bytes)} · ↑ ${bytes(day.sent_bytes)}${peakBPS > 0 ? ` · 峰值 ↓ ${bytes(day.peak_receive_bps || 0)}/s` : ""}`;
+    } else if (currentBreakdown.peakDay) {
+      const total = (currentBreakdown.peakReceiveBytes || 0) + (currentBreakdown.peakSentBytes || 0);
+      primaryText = `峰值 ${currentBreakdown.peakDay.slice(5)} · ${bytes(total)}`;
+      detailText = `↓ ${bytes(currentBreakdown.peakReceiveBytes || 0)} · ↑ ${bytes(currentBreakdown.peakSentBytes || 0)}`;
+    } else {
+      detailText = "暂无采样";
+    }
+    if (inspectPrimary.textContent !== primaryText) inspectPrimary.textContent = primaryText;
+    if (inspectDetail.textContent !== detailText) inspectDetail.textContent = detailText;
+  };
+  const plot = responsiveChart([], ctx.signal, (day) => setInspectText(day));
+  const trafficSummary = (receive, sent, summary = {}, breakdown = {}, peaks = {}, trafficMonth = month) => {
+    const total = (receive || 0) + (sent || 0);
+    const rxPct = receive != null && total > 0 ? Math.round(receive / total * 100) : null;
+    const ratioTag = rxPct != null ? `${rxPct}% / ${100 - rxPct}%` : "—";
+    const todayDeltaTag = summary.isCurrentMonth === false
+      ? "历史归档"
+      : summary.averageBytes > 0 && summary.todayBytes != null
+        ? (() => {
+            const pct = Math.round(((summary.todayBytes - summary.averageBytes) / summary.averageBytes) * 100);
+            return pct === 0 ? "持平均值" : `较均 ${pct > 0 ? "+" : ""}${pct}%`;
+          })()
+        : "UTC";
+    return node("div", { className: "a-dash-traffic-ledger" },
+      node("div", { className: "a-dash-ledger-cell is-primary", "data-refresh-key": "月累计流量" },
+        node("div", { className: "a-dash-ledger-head" },
+          muted("月累计流量"),
+          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, ratioTag)),
+        node("strong", {}, receive == null ? "—" : bytes(total)),
+        node("div", { className: "a-dash-ledger-foot" },
+          node("div", { className: "a-dash-ledger-duplex" },
+            node("span", { className: "a-dash-rx" }, `↓ ${receive == null ? "—" : bytes(receive)}`),
+            node("span", { className: "a-dash-tx" }, `↑ ${sent == null ? "—" : bytes(sent)}`)),
+          trafficSplitBar(receive || 0, sent || 0, total))),
+      node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "UTC 今日" },
+        node("div", { className: "a-dash-ledger-head" },
+          muted(summary.isCurrentMonth === false ? "统计月份" : "UTC 今日"),
+          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, todayDeltaTag)),
+        node("strong", {}, summary.isCurrentMonth === false ? trafficMonth : summary.todayBytes == null ? "—" : bytes(summary.todayBytes)),
+        node("div", { className: "a-dash-ledger-foot" },
+          summary.isCurrentMonth === false
+            ? node("div", { className: "a-dash-ledger-duplex" },
+                muted(`活跃 ${breakdown.activeDays ?? 0}/${summary.elapsedDays ?? 0} 天`))
+            : node("div", { className: "a-dash-ledger-duplex" },
+                node("span", { className: "a-dash-rx" }, `↓ ${breakdown.todayReceiveBytes == null ? "—" : bytes(breakdown.todayReceiveBytes)}`),
+                node("span", { className: "a-dash-tx" }, `↑ ${breakdown.todaySentBytes == null ? "—" : bytes(breakdown.todaySentBytes)}`)))),
+      node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "日均用量" },
+        node("div", { className: "a-dash-ledger-head" },
+          muted("日均用量"),
+          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, summary.elapsedDays ? `· ${summary.elapsedDays} 天` : "—")),
+        node("strong", {}, summary.averageBytes == null ? "—" : bytes(summary.averageBytes)),
+        node("div", { className: "a-dash-ledger-foot" },
+          node("div", { className: "a-dash-ledger-duplex" },
+            node("span", { className: "a-dash-rx" }, `↓ ${breakdown.averageReceiveBytes == null ? "—" : bytes(breakdown.averageReceiveBytes)}`),
+            node("span", { className: "a-dash-tx" }, `↑ ${breakdown.averageSentBytes == null ? "—" : bytes(breakdown.averageSentBytes)}`)))),
+      node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "峰值带宽" },
+        node("div", { className: "a-dash-ledger-head" },
+          muted("单日峰值"),
+          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, summary.peakDay ? summary.peakDay.slice(5) : "—")),
+        node("strong", {}, summary.peakDay ? bytes(summary.peakBytes) : "—"),
+        node("div", { className: "a-dash-ledger-foot" },
+          summary.peakDay || peaks.peakReceiveBPS || peaks.peakSendBPS
+            ? node("div", { className: "a-dash-ledger-duplex", title: "全月最高瞬时接收/发送速率峰值" },
                 node("span", { className: "a-dash-rx" }, `↓ ${bytes(peaks.peakReceiveBPS || 0)}/s`),
-                node("span", { className: "a-dash-tx" }, `↑ ${bytes(peaks.peakSendBPS || 0)}/s`)),
-            ]
-          : muted("—"))),
-  );
+                node("span", { className: "a-dash-tx" }, `↑ ${bytes(peaks.peakSendBPS || 0)}/s`))
+            : muted("—"))),
+    );
+  };
   const trafficTotals = trafficSummary();
   const trafficState = muted("读取中…");
   trafficState.setAttribute("role", "status");
@@ -274,13 +351,17 @@ export async function dashboardPage(ctx) {
   const trafficCard = can("traffic.read") && section("流量概况", node("div", { className: "a-dash-traffic-wrap" },
     node("div", { className: "a-dash-subbar a-dash-traffic-bar" }, monthField, detailsButton),
     trafficTotals,
-    node("div", { className: "a-card-body a-dash-traffic-plot" }, plot,
+    node("div", { className: "a-card-body a-dash-traffic-plot" },
+      node("div", { className: "a-dash-chart-inspect" }, inspectPrimary, inspectDetail),
+      node("div", { className: "a-dash-chart-box" }, plot),
       node("div", { className: "a-chart-meta" },
         node("span", { className: "a-chart-legend" },
           node("span", { className: "a-chart-key-rx" }),
           muted("接收"),
           node("span", { className: "a-chart-key-tx" }),
-          muted("发送")),
+          muted("发送"),
+          node("span", { className: "a-chart-key-peak" }),
+          muted("峰值日")),
         trafficPeriod)),
   ), trafficState);
   trafficCard?.classList?.add("a-dash-traffic-card");
@@ -442,15 +523,20 @@ export async function dashboardPage(ctx) {
     if (traffic) {
       const days = aggregateDashboardTrafficDays(traffic.days, traffic.month).filter(day => day.day <= today);
       const summary = summarizeDashboardTraffic(days, traffic.month);
+      const breakdown = summarizeDashboardTrafficBreakdown(days, traffic.month);
+      currentBreakdown = breakdown;
       const peaks = summarizeDashboardTrafficPeaks(days);
       trafficPeriod.textContent = `${traffic.month} · UTC`;
       detailPeriod.textContent = `${traffic.month} · UTC`;
       const receive = days.reduce((sum, day) => sum + day.received_bytes, 0), sent = days.reduce((sum, day) => sum + day.sent_bytes, 0);
-      patch(trafficTotals, trafficSummary(receive, sent, summary, peaks, traffic.month));
+      patch(trafficTotals, trafficSummary(receive, sent, summary, breakdown, peaks, traffic.month));
       detailTable.updateRows(days.map(day => [day.day, bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.received_bytes + day.sent_bytes), `${bytes(day.peak_receive_bps)}/s`, `${bytes(day.peak_send_bps)}/s`]));
       plot.updateDays(days);
+      plot.refreshInspect?.();
       rankingCard?.paint();
     } else if (trafficStatus === "denied") {
+      currentBreakdown = {};
+      setInspectText(null);
       trafficTotals.replaceChildren(); plot.updateDays([]); detailTable.updateRows([]);
       rankingCard?.paint();
     }

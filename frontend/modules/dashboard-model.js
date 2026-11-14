@@ -486,3 +486,58 @@ export function summarizeIPQualityFleet(history) {
   }
   return { total: records.length, succeeded, running, failed };
 }
+
+const NICE_BYTE_STEPS_BY3 = [
+  1.5, 3, 4.5, 6, 7.5, 9, 12, 15, 18, 24, 30, 36, 45, 60, 75, 90,
+  105, 120, 150, 180, 240, 300, 360, 450, 600, 750, 900, 1050,
+];
+
+export function niceTrafficScaleMax(maxBytes) {
+  const raw = Number(maxBytes);
+  if (!Number.isFinite(raw) || raw <= 0) return 3;
+  const target = raw * 1.06;
+  if (target <= 3) return 3;
+  const exp = Math.min(4, Math.max(0, Math.floor(Math.log(target) / Math.log(1024))));
+  const unit = 1024 ** exp;
+  const scaled = target / unit;
+  for (const step of NICE_BYTE_STEPS_BY3) {
+    if (step >= scaled) return Math.round(step * unit);
+  }
+  return Math.ceil(scaled / 300) * 300 * unit;
+}
+
+export function summarizeDashboardTrafficBreakdown(days, month, now = new Date()) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const currentMonth = today.slice(0, 7);
+  const elapsed = (Array.isArray(days) ? days : []).filter((d) => d.day <= today);
+  let rxTotal = 0;
+  let txTotal = 0;
+  let activeDays = 0;
+  let peakRow = null;
+  let peakTotal = 0;
+  for (const day of elapsed) {
+    const rx = Number(day.received_bytes || 0);
+    const tx = Number(day.sent_bytes || 0);
+    const total = rx + tx;
+    rxTotal += rx;
+    txTotal += tx;
+    if (total > 0) activeDays += 1;
+    if (total > peakTotal) {
+      peakTotal = total;
+      peakRow = day;
+    }
+  }
+  const todayRow = month === currentMonth ? elapsed.find((d) => d.day === today) : null;
+  return {
+    isCurrentMonth: month === currentMonth,
+    todayReceiveBytes: month === currentMonth ? Number(todayRow?.received_bytes || 0) : null,
+    todaySentBytes: month === currentMonth ? Number(todayRow?.sent_bytes || 0) : null,
+    averageReceiveBytes: elapsed.length ? rxTotal / elapsed.length : null,
+    averageSentBytes: elapsed.length ? txTotal / elapsed.length : null,
+    peakDay: peakRow?.day || null,
+    peakReceiveBytes: peakRow ? Number(peakRow.received_bytes || 0) : 0,
+    peakSentBytes: peakRow ? Number(peakRow.sent_bytes || 0) : 0,
+    activeDays,
+    elapsedDays: elapsed.length,
+  };
+}
