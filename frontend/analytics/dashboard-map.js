@@ -7,16 +7,18 @@ import {
   IDLE_FLOW_COLOR,
   INK_COLOR,
   OK_COLOR,
+  RUNNING_COLOR,
   SOFT_INK_COLOR,
+  WARN_COLOR,
   buildProbePillLabel,
   buildProbeShortAlertLabel,
   buildTopologySelectionIndex,
   clipLabel,
   clusterTopologyNodes,
-  createTopologyDefs,
   flowSpeedClass,
   formatLoss,
   formatMsCompact,
+  isProbeRunning,
   isProbeUnreachable,
   placeCollisionFreePill,
   quadPointAt,
@@ -29,6 +31,41 @@ import {
 
 export const WORLD_SPAN = PACIFIC_MAP_BOUNDS.width - PACIFIC_MAP_BOUNDS.padX * 2;
 export const MAX_MAP_SCALE = 6.0;
+
+const WIDE_ASCII_RE = /^[MWGOQDHNUCSKRBAZ%@]$/;
+const NARROW_ASCII_RE = /^[./\s,|:\-·•()[\]]$/;
+
+/** Estimates rendered SVG pixel width for bold Noto Sans SC + tabular-nums labels. */
+function estimateSvgTextPx(text, fontSizePx = 11) {
+  let px = 0;
+  for (const ch of String(text || "")) {
+    if (ch.charCodeAt(0) > 255) {
+      px += fontSizePx * 1.04;
+    } else if (WIDE_ASCII_RE.test(ch)) {
+      px += fontSizePx * 0.72;
+    } else if (NARROW_ASCII_RE.test(ch)) {
+      px += fontSizePx * 0.40;
+    } else {
+      px += fontSizePx * 0.62;
+    }
+  }
+  return px;
+}
+
+function clipTextToPx(text, fontSizePx, maxPx) {
+  const s = String(text || "");
+  if (estimateSvgTextPx(s, fontSizePx) <= maxPx) return s;
+  const ellW = estimateSvgTextPx("…", fontSizePx);
+  let acc = "";
+  let w = 0;
+  for (const ch of s) {
+    const cw = estimateSvgTextPx(ch, fontSizePx);
+    if (w + cw + ellW > maxPx) return acc ? `${acc}…` : "…";
+    acc += ch;
+    w += cw;
+  }
+  return acc || s;
+}
 
 export function getMapWrapSpan(width = PACIFIC_MAP_BOUNDS.width, scale = 1) {
   const vw = Math.max(100, Number(width) || PACIFIC_MAP_BOUNDS.width);
@@ -64,43 +101,40 @@ export function clampMapZoomTransform(z, width = PACIFIC_MAP_BOUNDS.width, heigh
   return { scale, tx, ty };
 }
 
-/**
- * Computes an automatic centered focus zoom transform for any map view (single group or filtered domain).
- * Uses circular shortest-arc horizontal span so border regions (Western Europe, Americas, transatlantic)
- * always center cleanly inside the viewport at a comfortable scale.
- */
-export function computeMapFocusZoom(model, { width = PACIFIC_MAP_BOUNDS.width, height = PACIFIC_MAP_BOUNDS.height, isMobile = false } = {}) {
-  const vw = Math.max(100, Number(width) || PACIFIC_MAP_BOUNDS.width);
-  const vh = Math.max(100, Number(height) || PACIFIC_MAP_BOUNDS.height);
-  if (!model || !Array.isArray(model.nodes) || !model.nodes.length) {
-    return { scale: 1, tx: 0, ty: 0 };
+function getSafeViewportBox(vw, vh, { isMobile = false, hasChainTotal = false, hasExternal = false } = {}) {
+  if (isMobile) {
+    const left = 26;
+    const right = Math.max(left + 80, vw - 26);
+    const top = 30;
+    const bottom = Math.max(top + 80, vh - (hasChainTotal ? 34 : 26) - (hasExternal ? 6 : 0));
+    return {
+      left,
+      right,
+      top,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+      cx: (left + right) / 2,
+      cy: (top + bottom) / 2,
+    };
   }
-  const baseScaleX = vw / PACIFIC_MAP_BOUNDS.width;
-  const baseScaleY = vh / PACIFIC_MAP_BOUNDS.height;
-  const baseWrapSpan = WORLD_SPAN * baseScaleX;
-  let unmatchedIdx = 0;
-  const pts = model.nodes.map((n) => {
-    const pre = resolveNodeGeoPoint(n, 0);
-    const geo = pre.matched ? pre : resolveNodeGeoPoint(n, unmatchedIdx++);
-    const bx = geo.x * baseScaleX;
-    const modX = ((bx % baseWrapSpan) + baseWrapSpan) % baseWrapSpan;
-    return { id: n.id, x: modX, y: geo.y * baseScaleY };
-  });
+  const left = 68;
+  const right = Math.max(left + 200, vw - 76);
+  const top = 42;
+  const bottom = Math.max(top + 140, vh - (hasChainTotal ? 58 : 40) - (hasExternal ? 10 : 0));
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    cx: (left + right) / 2,
+    cy: (top + bottom) / 2,
+  };
+}
 
-  const maxAutoScale = isMobile ? 3.1 : 3.6;
-
-  if (pts.length === 1) {
-    const p = pts[0];
-    const scale = isMobile ? 2.2 : 2.5;
-    const targetY = (model.externalTargets?.length ? 0.44 : 0.50) * vh;
-    return clampMapZoomTransform({
-      scale,
-      tx: vw * 0.5 - p.x * scale,
-      ty: targetY - p.y * scale,
-    }, vw, vh, MAX_MAP_SCALE);
-  }
-
-  // Shortest circular arc on [0, baseWrapSpan)
+function circularHorizontalSpan(pts, baseWrapSpan) {
   const sortedX = [...pts].map((p) => p.x).sort((a, b) => a - b);
   let maxGap = -1;
   let maxGapIdx = 0;
@@ -122,25 +156,72 @@ export function computeMapFocusZoom(model, { width = PACIFIC_MAP_BOUNDS.width, h
     if (p.y < minY) minY = p.y;
     if (p.y > maxY) maxY = p.y;
   }
-  const dy = maxY - minY;
-  const cy = (minY + maxY) / 2;
+  return {
+    dx,
+    cx,
+    dy: Math.max(0, maxY - minY),
+    cy: (minY + maxY) / 2,
+  };
+}
 
-  const padX = vw * (isMobile ? 0.28 : 0.24);
-  const padY = vh * (isMobile ? 0.34 : 0.25);
-  const spanX = Math.max(vw * 0.14, dx + padX);
-  const spanY = Math.max(vh * 0.16, dy + padY);
-  const fitScale = Math.min(vw / spanX, vh / spanY);
+/**
+ * Computes an automatic centered focus zoom transform for any map view (single group or filtered domain).
+ * Deduces a safe viewport frame excluding HUD, top-right controls, bottom-left total badge, and bottom-right legend,
+ * and adds label padding around peripheral nodes so labels stay cleanly inside the visible stage.
+ */
+export function computeMapFocusZoom(model, { width = PACIFIC_MAP_BOUNDS.width, height, mapHeight, isMobile = false } = {}) {
+  const vw = Math.max(100, Number(width) || PACIFIC_MAP_BOUNDS.width);
+  const vh = Math.max(100, Number(height ?? mapHeight) || PACIFIC_MAP_BOUNDS.height);
+  if (!model || !Array.isArray(model.nodes) || !model.nodes.length) {
+    return { scale: 1, tx: 0, ty: 0 };
+  }
+  const baseScaleX = vw / PACIFIC_MAP_BOUNDS.width;
+  const baseScaleY = vh / PACIFIC_MAP_BOUNDS.height;
+  const baseWrapSpan = WORLD_SPAN * baseScaleX;
+  let unmatchedIdx = 0;
+  const pts = model.nodes.map((n) => {
+    const pre = resolveNodeGeoPoint(n, 0);
+    const geo = pre.matched ? pre : resolveNodeGeoPoint(n, unmatchedIdx++);
+    const bx = geo.x * baseScaleX;
+    const modX = ((bx % baseWrapSpan) + baseWrapSpan) % baseWrapSpan;
+    return { id: n.id, x: modX, y: geo.y * baseScaleY };
+  });
+
+  const safe = getSafeViewportBox(vw, vh, {
+    isMobile,
+    hasChainTotal: Boolean(model.singleGroup),
+    hasExternal: Boolean(model.externalTargets?.length),
+  });
+  const maxAutoScale = isMobile ? 3.1 : 3.6;
+
+  if (pts.length === 1) {
+    const p = pts[0];
+    const scale = isMobile ? 2.2 : 2.5;
+    const targetY = model.externalTargets?.length ? (safe.top + safe.height * 0.43) : safe.cy;
+    return clampMapZoomTransform({
+      scale,
+      tx: safe.cx - p.x * scale,
+      ty: targetY - p.y * scale,
+    }, vw, vh, MAX_MAP_SCALE);
+  }
+
+  const { dx, cx, dy, cy } = circularHorizontalSpan(pts, baseWrapSpan);
+
+  const padX = isMobile ? (vw * 0.19 + 22) : (vw * 0.15 + 46);
+  const padY = isMobile ? (vh * 0.19 + 16) : (vh * 0.16 + 28);
+  const spanX = Math.max(safe.width * 0.14, dx + padX);
+  const spanY = Math.max(safe.height * 0.16, dy + padY);
+  const fitScale = Math.min(safe.width / spanX, safe.height / spanY);
   const scale = Math.max(1, Math.min(maxAutoScale, Math.round(fitScale * 100) / 100));
 
   if (scale <= 1.05 && dx > baseWrapSpan * 0.68) {
     return { scale: 1, tx: 0, ty: 0 };
   }
   const effScale = scale <= 1.05 ? 1 : scale;
-  const targetY = vh * (isMobile ? 0.49 : 0.50);
   return clampMapZoomTransform({
     scale: effScale,
-    tx: vw * 0.5 - cx * effScale,
-    ty: effScale <= 1.001 ? 0 : targetY - cy * effScale,
+    tx: safe.cx - cx * effScale,
+    ty: effScale <= 1.001 ? 0 : safe.cy - cy * effScale,
   }, vw, vh, MAX_MAP_SCALE);
 }
 
@@ -167,8 +248,141 @@ function wrapsOverlap(box, occupied, wrapSpan, padX = 3, padY = 2.5) {
   return false;
 }
 
-/** Computes non-overlapping tag candidates ranked away from neighbor clusters, unconstrained horizontally for world wrapping. */
-function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bounds, wrapSpan = 0) {
+function countWrappedOverlaps(box, zones, wrapSpan, padX = 1.5, padY = 1.5) {
+  let count = 0;
+  for (const o of zones) {
+    if (o.screenFixed || !wrapSpan || wrapSpan <= 0) {
+      if (rectsOverlap(box, o, padX, padY)) count += 1;
+      continue;
+    }
+    if (
+      rectsOverlap(box, o, padX, padY)
+      || rectsOverlap({ ...box, x: box.x - wrapSpan }, o, padX, padY)
+      || rectsOverlap({ ...box, x: box.x + wrapSpan }, o, padX, padY)
+    ) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Generates midpoint protection zones (at least 14px radius -> 28x28) and uniform curve
+ * sampling boxes on t in [0.12, 0.88] so node tags and pills avoid cutting across arcs.
+ */
+function buildArcAvoidanceZones(arcGeom, probeLinks, {
+  midRadius = 14,
+  sampleSize = 14,
+  sampleStep = 0.08,
+  tStart = 0.12,
+  tEnd = 0.88,
+} = {}) {
+  const midZones = [];
+  const arcZones = [];
+  const midByProbeID = new Map();
+  const halfSample = sampleSize / 2;
+
+  for (const probe of (probeLinks || [])) {
+    const geom = arcGeom.get(probe.id);
+    if (!geom) continue;
+    const screenFixed = Boolean(probe.isExternal);
+    const midBox = {
+      x: geom.mid.x - midRadius,
+      y: geom.mid.y - midRadius,
+      w: midRadius * 2,
+      h: midRadius * 2,
+      probeID: probe.id,
+      kind: "mid",
+      screenFixed,
+    };
+    midZones.push(midBox);
+    midByProbeID.set(probe.id, midBox);
+
+    for (const seg of (geom.segments || [])) {
+      for (let t = tStart; t <= tEnd + 1e-6; t += sampleStep) {
+        const clampedT = Math.min(tEnd, t);
+        const pt = quadPointAt(seg.x1, seg.y1, seg.cx, seg.cy, seg.x2, seg.y2, clampedT);
+        arcZones.push({
+          x: pt.x - halfSample,
+          y: pt.y - halfSample,
+          w: sampleSize,
+          h: sampleSize,
+          probeID: probe.id,
+          kind: "arc",
+          screenFixed,
+        });
+      }
+    }
+  }
+
+  return { midZones, arcZones, midByProbeID };
+}
+
+function normalizeAngle(rad) {
+  let a = rad % (Math.PI * 2);
+  if (a >= Math.PI) a -= Math.PI * 2;
+  if (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+function angleDiff(a, b) {
+  return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+}
+
+function computeClusterEdgeAngles(clusters, probeLinks, arcGeom) {
+  const clusterByNodeID = new Map();
+  for (const cl of clusters) {
+    for (const m of cl.members) {
+      clusterByNodeID.set(m.node.id, cl.key);
+    }
+  }
+  const anglesByCluster = new Map();
+  for (const cl of clusters) anglesByCluster.set(cl.key, []);
+
+  const pushAngle = (key, dx, dy) => {
+    if (!key || !anglesByCluster.has(key)) return;
+    if (Math.hypot(dx, dy) < 0.05) return;
+    anglesByCluster.get(key).push(normalizeAngle(Math.atan2(dy, dx)));
+  };
+
+  for (const probe of (probeLinks || [])) {
+    const geom = arcGeom.get(probe.id);
+    if (!geom || !geom.segments?.length) continue;
+    const firstSeg = geom.segments[0];
+    const lastSeg = geom.segments[geom.segments.length - 1];
+
+    const fromKey = clusterByNodeID.get(probe.from);
+    if (fromKey) {
+      const dx = Math.hypot(firstSeg.cx - firstSeg.x1, firstSeg.cy - firstSeg.y1) > 0.2
+        ? firstSeg.cx - firstSeg.x1
+        : firstSeg.x2 - firstSeg.x1;
+      const dy = Math.hypot(firstSeg.cx - firstSeg.x1, firstSeg.cy - firstSeg.y1) > 0.2
+        ? firstSeg.cy - firstSeg.y1
+        : firstSeg.y2 - firstSeg.y1;
+      pushAngle(fromKey, dx, dy);
+    }
+
+    if (!probe.isExternal) {
+      const toKey = clusterByNodeID.get(probe.to);
+      if (toKey) {
+        const dx = Math.hypot(lastSeg.cx - lastSeg.x2, lastSeg.cy - lastSeg.y2) > 0.2
+          ? lastSeg.cx - lastSeg.x2
+          : lastSeg.x1 - lastSeg.x2;
+        const dy = Math.hypot(lastSeg.cx - lastSeg.x2, lastSeg.cy - lastSeg.y2) > 0.2
+          ? lastSeg.cy - lastSeg.y2
+          : lastSeg.y1 - lastSeg.y2;
+        pushAngle(toKey, dx, dy);
+      }
+    }
+  }
+  return anglesByCluster;
+}
+
+/**
+ * Computes tangent-sector-aware, edge-anchored tag candidates ranked away from neighbor
+ * clusters and incident link exit vectors.
+ */
+function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bounds, wrapSpan = 0, edgeAngles = []) {
   const ax = cluster.x;
   const ay = cluster.y;
 
@@ -196,33 +410,208 @@ function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bou
   if (ay - bounds.minY < 62) repY += 0.018;
   if (bounds.maxY - ay < 62) repY -= 0.018;
 
-  const baseAngle = (Math.abs(repX) + Math.abs(repY)) > 0.0005
-    ? Math.atan2(repY, repX)
-    : -Math.PI * 0.25;
+  const hasRepulsion = (Math.abs(repX) + Math.abs(repY)) > 0.0005;
+  const repAngle = hasRepulsion ? Math.atan2(repY, repX) : -Math.PI * 0.25;
 
-  const angleOffsets = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, Math.PI];
-  const rings = [r + 11, r + 24, r + 40, r + 58];
+  let gapCenter = repAngle;
+  if (edgeAngles.length === 1) {
+    gapCenter = normalizeAngle(edgeAngles[0] + Math.PI);
+  } else if (edgeAngles.length > 1) {
+    const sorted = [...edgeAngles].map(normalizeAngle).sort((a, b) => a - b);
+    let maxGap = -1;
+    let bestStart = sorted[0];
+    for (let i = 0; i < sorted.length; i++) {
+      const next = i + 1 < sorted.length ? sorted[i + 1] : sorted[0] + Math.PI * 2;
+      const gap = next - sorted[i];
+      if (gap > maxGap) {
+        maxGap = gap;
+        bestStart = sorted[i];
+      }
+    }
+    gapCenter = normalizeAngle(bestStart + maxGap / 2);
+  }
+
+  const baseAngle = edgeAngles.length ? gapCenter : repAngle;
+  const rawAngleList = [
+    baseAngle,
+    baseAngle + Math.PI / 6,
+    baseAngle - Math.PI / 6,
+    baseAngle + Math.PI / 3,
+    baseAngle - Math.PI / 3,
+    baseAngle + Math.PI / 2,
+    baseAngle - Math.PI / 2,
+    baseAngle + (2 * Math.PI) / 3,
+    baseAngle - (2 * Math.PI) / 3,
+    baseAngle + (5 * Math.PI) / 6,
+    baseAngle - (5 * Math.PI) / 6,
+    baseAngle + Math.PI,
+    0,
+    Math.PI,
+    Math.PI / 2,
+    -Math.PI / 2,
+  ];
+  const uniqueAngles = [];
+  for (const a of rawAngleList) {
+    const norm = normalizeAngle(a);
+    if (!uniqueAngles.some((prev) => angleDiff(prev, norm) < 0.14)) {
+      uniqueAngles.push(norm);
+    }
+  }
+
+  const rings = [r + 10, r + 22, r + 37, r + 54];
   const candidates = [];
 
   for (let ringIdx = 0; ringIdx < rings.length; ringIdx++) {
     const dist = rings[ringIdx];
-    for (let dirIdx = 0; dirIdx < angleOffsets.length; dirIdx++) {
-      const theta = baseAngle + angleOffsets[dirIdx];
+    for (let dirIdx = 0; dirIdx < uniqueAngles.length; dirIdx++) {
+      const theta = uniqueAngles[dirIdx];
       const ux = Math.cos(theta);
       const uy = Math.sin(theta);
-      const cx = ax + ux * (dist + boxW * 0.34);
-      const cy = ay + uy * (dist + boxH * 0.32);
-      const bx = cx - boxW / 2;
-      const by = Math.max(bounds.minY, Math.min(bounds.maxY - boxH, cy - boxH / 2));
-      candidates.push({
-        x: bx,
-        y: by,
-        leader: ringIdx >= 2,
-        sectorPenalty: ringIdx * 18 + dirIdx * 1.4,
-      });
+      const anchorX = ax + ux * dist;
+      const anchorY = ay + uy * dist;
+
+      const horizontalVariants = [];
+      if (ux > 0.25) {
+        // Rightward sector: anchor left edge outside node and extend right
+        horizontalVariants.push({
+          bx: Math.max(ax + r + 3.5, anchorX),
+          by: anchorY - boxH / 2,
+          alignBias: 0,
+        });
+      } else if (ux < -0.25) {
+        // Leftward sector: anchor right edge outside node and extend left
+        horizontalVariants.push({
+          bx: Math.min(ax - r - 3.5, anchorX) - boxW,
+          by: anchorY - boxH / 2,
+          alignBias: 0,
+        });
+      } else {
+        // Top/bottom quadrants: generate center, left-aligned, and right-aligned variants
+        const baseY = uy < 0 ? anchorY - boxH : anchorY;
+        horizontalVariants.push(
+          { bx: anchorX - boxW / 2, by: baseY, alignBias: 0 },
+          { bx: ax + 2, by: baseY, alignBias: 3.5 },
+          { bx: ax - 2 - boxW, by: baseY, alignBias: 3.5 },
+        );
+      }
+
+      const inViewportX = bounds.minX != null && bounds.maxX != null && ax >= bounds.minX - 18 && ax <= bounds.maxX + 18;
+      for (const variant of horizontalVariants) {
+        const bx = variant.bx;
+        const by = Math.max(bounds.minY, Math.min(bounds.maxY - boxH, variant.by));
+        if (inViewportX && bx < bounds.minX) continue;
+        if (inViewportX && bx + boxW > bounds.maxX) continue;
+
+        const boxCx = bx + boxW / 2;
+        const boxCy = by + boxH / 2;
+        const boxTheta = Math.atan2(boxCy - ay, boxCx - ax);
+
+        let edgeSectorPenalty = 0;
+        for (const ea of edgeAngles) {
+          const d1 = angleDiff(theta, ea);
+          const d2 = angleDiff(boxTheta, ea);
+          const dMin = Math.min(d1, d2);
+          if (dMin < 0.49) {
+            edgeSectorPenalty += 135 + (0.49 - dMin) * 160;
+          }
+        }
+        if (edgeAngles.length) {
+          edgeSectorPenalty += angleDiff(boxTheta, gapCenter) * 7.5;
+        }
+        if (hasRepulsion) {
+          edgeSectorPenalty += angleDiff(boxTheta, repAngle) * 5.0;
+        }
+
+        const nearEdgeX = Math.max(bx, Math.min(bx + boxW, ax));
+        const nearEdgeY = Math.max(by, Math.min(by + boxH, ay));
+        const edgeDist = Math.hypot(nearEdgeX - ax, nearEdgeY - ay);
+        const leader = ringIdx >= 1 && edgeDist > r + 9;
+
+        candidates.push({
+          x: bx,
+          y: by,
+          edgeX: nearEdgeX,
+          edgeY: nearEdgeY,
+          leader,
+          sectorPenalty: ringIdx * 20 + dirIdx * 1.1 + variant.alignBias + edgeSectorPenalty,
+        });
+      }
     }
   }
+
+  candidates.sort((a, b) => a.sectorPenalty - b.sectorPenalty);
   return candidates;
+}
+
+function pickBestTagPlacement(candidates, tagW, tagH, hardOccupied, arcZones, wrapSpan, padX, padY) {
+  let bestZeroArc = null;
+  let bestFallback = null;
+  let bestFallbackScore = Infinity;
+
+  for (const c of candidates) {
+    const box = { x: c.x, y: c.y, w: tagW, h: tagH };
+    if (wrapsOverlap(box, hardOccupied, wrapSpan, padX, padY)) continue;
+
+    const arcHits = arcZones.length ? countWrappedOverlaps(box, arcZones, wrapSpan, 1.5, 1.5) : 0;
+    if (arcHits === 0) {
+      if (!bestZeroArc || c.sectorPenalty < bestZeroArc.sectorPenalty) {
+        bestZeroArc = { ...c, box };
+      }
+    } else {
+      const score = arcHits * 150 + c.sectorPenalty;
+      if (score < bestFallbackScore) {
+        bestFallbackScore = score;
+        bestFallback = { ...c, box };
+      }
+    }
+  }
+  return bestZeroArc || bestFallback;
+}
+
+function placeProbePillSmart(geom, pillW, pillH, hardOccupied, midZones, unreachMidZones, arcZones, pillBounds, {
+  isAmbient = false,
+  leaderSegments = null,
+} = {}) {
+  const tiers = [
+    [...hardOccupied, ...midZones, ...arcZones],
+    [...hardOccupied, ...midZones],
+    [...hardOccupied, ...unreachMidZones],
+    [...hardOccupied],
+  ];
+
+  const isBoxClear = (placed, obstacles) => {
+    const box = { x: placed.cx - pillW / 2, y: placed.cy - pillH / 2, w: pillW, h: pillH };
+    return !obstacles.some((o) => rectsOverlap(box, o, 2.5, 2));
+  };
+
+  let chosen = null;
+  for (let i = 0; i < tiers.length; i++) {
+    const segCopy = leaderSegments ? [...leaderSegments] : undefined;
+    const trial = placeCollisionFreePill(
+      geom.mid.x,
+      geom.mid.y,
+      pillW,
+      pillH,
+      [...tiers[i]],
+      pillBounds,
+      [geom.mid],
+      { leaderSegments: segCopy, reserveW: pillW },
+    );
+    const mustAvoid = i <= 1 ? [...hardOccupied, ...midZones] : i === 2 ? [...hardOccupied, ...unreachMidZones] : hardOccupied;
+    if (isBoxClear(trial, mustAvoid) || i === tiers.length - 1) {
+      chosen = trial;
+      break;
+    }
+  }
+
+  if (chosen) {
+    const box = { x: chosen.cx - pillW / 2, y: chosen.cy - pillH / 2, w: pillW, h: pillH };
+    if (isAmbient) hardOccupied.push(box);
+    if (leaderSegments && Math.hypot(chosen.cx - geom.mid.x, chosen.cy - geom.mid.y) > 4) {
+      leaderSegments.push({ a: geom.mid, b: { x: chosen.cx, y: chosen.cy } });
+    }
+  }
+  return chosen;
 }
 
 /**
@@ -248,6 +637,7 @@ function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW =
       const x = rowStartX + colIdx * (chipW + chipGap);
       const rawTitle = String(ext.name || ext.address || ext.id || "");
       const subText = ext.address && ext.address !== rawTitle ? ext.address : "";
+      const maxTitlePx = Math.max(48, chipW - 18);
       chips.push({
         ext,
         x,
@@ -256,9 +646,9 @@ function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW =
         h: chipH,
         cx: x + chipW / 2,
         cy: y + chipH / 2,
-        title: clipLabel(rawTitle, maxUnits),
+        title: clipTextToPx(rawTitle, 11, maxTitlePx),
         fullTitle: rawTitle,
-        subText: subText ? clipLabel(subText, Math.max(12, maxUnits - 2)) : `${ext.linkCount || 1} 链路`,
+        subText: clipTextToPx(subText || `${ext.linkCount || 1} 链路`, 10.5, maxTitlePx),
       });
     });
   }
@@ -310,7 +700,14 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
         const cy = Math.max(minY, Math.min(port.y - 6, (pA.y + port.y) / 2 + ny * mag * sign));
         const d = `M ${pA.x.toFixed(1)} ${pA.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)}, ${port.x.toFixed(1)} ${port.y.toFixed(1)}`;
         const mid = quadPointAt(pA.x, pA.y, cx, cy, port.x, port.y, 0.5);
-        geomByProbeID.set(probe.id, { d, segments: [{ x1: pA.x, y1: pA.y, cx, cy, x2: port.x, y2: port.y }], mid, wrapped: false });
+        geomByProbeID.set(probe.id, {
+          d,
+          segments: [{ x1: pA.x, y1: pA.y, cx, cy, x2: port.x, y2: port.y }],
+          mid,
+          port,
+          wrapped: false,
+          groupKey,
+        });
       });
       continue;
     }
@@ -330,7 +727,13 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
         const cx = pA.x;
         const cy = Math.max(minY, pA.y - offset);
         const d = `M ${(pA.x - 4).toFixed(1)} ${pA.y.toFixed(1)} Q ${cx.toFixed(1)} ${(cy - 10).toFixed(1)}, ${(pA.x + 4).toFixed(1)} ${pA.y.toFixed(1)}`;
-        geomByProbeID.set(probe.id, { d, segments: [{ x1: pA.x - 4, y1: pA.y, cx, cy: cy - 10, x2: pA.x + 4, y2: pA.y }], mid: { x: cx, y: cy }, wrapped: false });
+        geomByProbeID.set(probe.id, {
+          d,
+          segments: [{ x1: pA.x - 4, y1: pA.y, cx, cy: cy - 10, x2: pA.x + 4, y2: pA.y }],
+          mid: { x: cx, y: cy },
+          wrapped: false,
+          groupKey,
+        });
       });
       continue;
     }
@@ -538,7 +941,7 @@ function appendMapTagFlag(g, flagInfo, x, y, w, h) {
       rx: String(rx),
       fill: "none",
       stroke: "#d4d4d8",
-      "stroke-width": "0.6",
+      "stroke-width": "1",
     }),
   );
 }
@@ -639,7 +1042,7 @@ function summarizeSingleChainTotals(g, dirMode) {
   return { summaryText, compactText, showLoss, displayLoss };
 }
 
-function buildChainTotalOverlay(g, dirMode, { mapHeight, compact, occupiedList }) {
+function buildChainTotalOverlay(g, dirMode, { mapHeight, compact, occupiedList, maxWidth = null }) {
   if (!g) return null;
   const { summaryText, compactText, showLoss, displayLoss } = summarizeSingleChainTotals(g, dirMode);
   const lossVal = showLoss && displayLoss != null && Number.isFinite(Number(displayLoss)) ? Number(displayLoss) : null;
@@ -647,15 +1050,30 @@ function buildChainTotalOverlay(g, dirMode, { mapHeight, compact, occupiedList }
     ? (lossVal > 0 ? ` · 丢包${compact ? "" : " "}${formatLoss(lossVal)}` : (compact ? "" : " · 0% 丢包"))
     : "";
 
-  const pal = tonePalette(g.overall?.statusBadge?.tone || "");
+  const rawTone = g.running ? "running" : (g.overall?.statusBadge?.tone || "");
+  const pal = tonePalette(rawTone);
 
   if (compact) {
-    const hopTag = g.isMultiHop ? `${g.hopCount}跳总计` : "全链";
-    const label = `${hopTag} · ${compactText}${lossBadge}`;
+    const hopTag = g.isMultiHop ? `${g.hopCount}跳` : "全链";
+    const capW = maxWidth != null ? Math.max(94, Math.min(240, maxWidth)) : 228;
+    const availTxtPx = capW - 16;
+    let rawLabel = `${hopTag} · ${compactText}${lossBadge}`;
+    if (estimateSvgTextPx(rawLabel, 9.5) > availTxtPx) {
+      const compactLoss = lossVal != null && lossVal > 0 ? ` ${formatLoss(lossVal)}` : "";
+      const shortened = compactText.replace(/ms\/回/, "/回");
+      const alt = `${hopTag} ${shortened}${compactLoss}`;
+      if (estimateSvgTextPx(alt, 9.5) <= availTxtPx) {
+        rawLabel = alt;
+      } else {
+        const ultraShort = `${hopTag} ${shortened.replace(/去|回/g, "")}${compactLoss}`;
+        rawLabel = estimateSvgTextPx(ultraShort, 9.5) < estimateSvgTextPx(alt, 9.5) ? ultraShort : alt;
+      }
+    }
+    const label = clipTextToPx(rawLabel, 9.5, availTxtPx);
     const h = 21;
     const x = 8;
-    const y = mapHeight - h - 7;
-    const w = Math.max(94, Math.min(238, visualUnits(label) * 5.2 + 16));
+    const y = mapHeight - h - 6;
+    const w = Math.max(88, Math.min(capW, Math.ceil(estimateSvgTextPx(label, 9.5) + 16)));
     occupiedList.push({ x, y, w, h, screenFixed: true });
 
     const grp = createSVGEl("g", { class: "a-dash-topo-chain-total", "data-refresh-key": "map-chain-total" });
@@ -681,15 +1099,16 @@ function buildChainTotalOverlay(g, dirMode, { mapHeight, compact, occupiedList }
   const titleLine = g.isMultiHop
     ? `全链路总延迟 · ${g.hopCount} 跳合计`
     : "全链路延迟 · 端到端";
-  const valueLine = `${summaryText}${lossBadge}`;
+  const capDeskW = 440;
+  const valueLine = clipTextToPx(`${summaryText}${lossBadge}`, 12, capDeskW - 24);
   const h = 38;
   const x = 14;
-  const y = mapHeight - h - 11;
+  const y = mapHeight - h - 10;
   const w = Math.max(
-    158,
+    164,
     Math.min(
-      348,
-      Math.max(visualUnits(titleLine) * 5.5, visualUnits(valueLine) * 6.5) + 24,
+      capDeskW,
+      Math.ceil(Math.max(estimateSvgTextPx(titleLine, 9.5), estimateSvgTextPx(valueLine, 12)) + 24),
     ),
   );
   occupiedList.push({ x, y, w, h, screenFixed: true });
@@ -763,6 +1182,404 @@ const clusterHealthTone = (cluster) => {
   return anyIssue ? BAD_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
 };
 
+function appendPulsePair(pulseLayer, segD, {
+  pal,
+  spd,
+  isWarn = false,
+  isRunning = false,
+  isReverse = false,
+  peers,
+  hl,
+  isExternal = false,
+  compact = false,
+  refreshKey,
+}) {
+  const dirCls = isReverse ? " is-reverse" : "";
+  const warnCls = isWarn ? " is-warn" : "";
+  const runCls = isRunning ? " is-running" : "";
+  const pulseW = compact ? 1.85 : 2.2;
+  const coreW = compact ? 0.92 : 1.05;
+  const mainDash = isWarn ? "6 34" : "8 32";
+
+  pulseLayer.append(
+    createSVGEl("path", {
+      d: segD,
+      fill: "none",
+      stroke: pal.pulse,
+      "stroke-width": pulseW.toFixed(2),
+      "stroke-dasharray": mainDash,
+      "stroke-linecap": "round",
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": isWarn ? "0.90" : "0.92",
+      "data-dim-opacity": "0.18",
+      opacity: hl === false ? "0.18" : (isWarn ? "0.90" : "0.92"),
+      ...(isExternal ? { "data-ext-probe": "1" } : {}),
+      class: `a-dash-topo-flow-pulse ${spd}${dirCls}${warnCls}${runCls}`,
+      "data-refresh-key": `${refreshKey}-main`,
+    }),
+    createSVGEl("path", {
+      d: segD,
+      fill: "none",
+      stroke: pal.pulseCore || "#ffffff",
+      "stroke-width": coreW.toFixed(2),
+      "stroke-dasharray": "4 36",
+      "stroke-linecap": "round",
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": "0.95",
+      "data-dim-opacity": "0.22",
+      opacity: hl === false ? "0.22" : "0.95",
+      ...(isExternal ? { "data-ext-probe": "1" } : {}),
+      class: `a-dash-topo-flow-pulse is-core ${spd}${dirCls}${warnCls}${runCls}`,
+      "data-refresh-key": `${refreshKey}-core`,
+    }),
+  );
+}
+
+function renderClusterTagElement({
+  cluster,
+  boxX,
+  boxY,
+  tagW,
+  tagH,
+  flagInfo,
+  flagW,
+  flagH,
+  displayTag,
+  active,
+  hl,
+  peers,
+  compact,
+  hoverOnly = false,
+  helpers,
+}) {
+  const key = cluster.key;
+  const anyIssue = cluster.members.some((m) => !m.node.isOnline || Boolean(m.node.issue));
+  const anyOnline = cluster.members.some((m) => m.node.isOnline);
+  const fullTip = cluster.members.map((m) => `${m.node.name}${m.node.issue ? ` (${m.node.issue})` : ""}`).join(" / ");
+  const leftPad = compact ? 4.5 : 5.5;
+  const flagSlot = flagInfo ? flagW + (compact ? 5 : 6) : 0;
+
+  const baseClass = hoverOnly
+    ? "a-dash-topo-node a-dash-topo-map-tag is-hover-only"
+    : `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`;
+
+  const attrs = hoverOnly
+    ? {
+        class: baseClass,
+        "data-refresh-key": `${compact ? "m-" : "map-"}tag-${key}`,
+        "data-hover-tag-for": key,
+        opacity: "0",
+        "aria-hidden": "true",
+      }
+    : {
+        class: baseClass,
+        "data-refresh-key": `${compact ? "m-" : "map-"}tag-${key}`,
+        "data-topo-peers": peers.join(" "),
+        "data-base-opacity": "1",
+        "data-dim-opacity": "0.32",
+        opacity: hl === false ? "0.32" : "1",
+        "aria-label": fullTip,
+      };
+
+  const g = createSVGEl("g", attrs);
+  g.append(
+    createSVGEl("rect", {
+      x: boxX.toFixed(1),
+      y: boxY.toFixed(1),
+      width: tagW.toFixed(1),
+      height: tagH,
+      rx: compact ? 4 : 4.5,
+      fill: "#ffffff",
+      stroke: active ? INK_COLOR : anyIssue ? BAD_COLOR : anyOnline ? "#d4d4d8" : BORDER_COLOR,
+      "stroke-width": active ? (compact ? "1.5" : "1.7") : (compact ? "0.9" : "1"),
+      class: "a-dash-topo-card",
+    }),
+  );
+
+  if (flagInfo) {
+    appendMapTagFlag(g, flagInfo, boxX + leftPad, boxY + (tagH - flagH) / 2, flagW, flagH);
+  }
+
+  g.append(
+    createSVGEl("text", {
+      x: (boxX + (compact ? 4.5 : 6.5) + flagSlot).toFixed(1),
+      y: (boxY + (compact ? 11.4 : 13.8)).toFixed(1),
+      class: "a-dash-topo-map-tag-text",
+      fill: anyIssue ? BAD_COLOR : anyOnline ? INK_COLOR : SOFT_INK_COLOR,
+    }, displayTag),
+  );
+
+  g.append(createSVGEl("title", {}, fullTip));
+  if (!hoverOnly) {
+    helpers.bindInteractive(g, key);
+  }
+  return g;
+}
+
+function renderClusterBeaconElement({
+  cluster,
+  r,
+  active,
+  hl,
+  peers,
+  singleMode,
+  compact,
+  pulseLayer,
+  beaconLayer,
+  helpers,
+}) {
+  const key = cluster.key;
+  const cx = cluster.x;
+  const cy = cluster.y;
+  const anyOnline = cluster.members.some((m) => m.node.isOnline);
+  const toneColor = clusterHealthTone(cluster);
+
+  if (anyOnline && helpers.allowMotion()) {
+    pulseLayer.append(createSVGEl("circle", {
+      cx: cx.toFixed(1),
+      cy: cy.toFixed(1),
+      r: (r + (compact ? 5.5 : 6.8)).toFixed(1),
+      fill: "none",
+      stroke: toneColor,
+      "stroke-width": compact ? "1" : "1.1",
+      class: "a-dash-topo-beacon-pulse",
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": "0.42",
+      "data-dim-opacity": "0.14",
+      opacity: hl === false ? "0.14" : "0.42",
+    }));
+  }
+
+  const g = createSVGEl("g", {
+    class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
+    "data-refresh-key": `${compact ? "m-" : "map-"}beacon-${key}`,
+    "data-topo-peers": peers.join(" "),
+    "data-base-opacity": "1",
+    "data-dim-opacity": "0.32",
+    opacity: hl === false ? "0.32" : "1",
+    "aria-label": cluster.members.map((m) => m.node.name).join(" / "),
+  });
+
+  g.append(createSVGEl("circle", {
+    cx: cx.toFixed(1),
+    cy: cy.toFixed(1),
+    r: (r + (compact ? 8 : 7.5)).toFixed(1),
+    fill: "transparent",
+  }));
+
+  if (singleMode || active || hl === true) {
+    g.append(createSVGEl("circle", {
+      cx: cx.toFixed(1),
+      cy: cy.toFixed(1),
+      r: (r + (compact ? 2.8 : 3.4)).toFixed(1),
+      fill: "none",
+      stroke: active ? INK_COLOR : toneColor,
+      "stroke-width": compact ? "0.85" : "0.95",
+      "stroke-dasharray": "2 2",
+      opacity: "0.65",
+    }));
+  }
+
+  g.append(createSVGEl("circle", {
+    cx: cx.toFixed(1),
+    cy: cy.toFixed(1),
+    r: r.toFixed(1),
+    fill: "#ffffff",
+    stroke: active ? INK_COLOR : toneColor,
+    "stroke-width": active || hl === true ? (compact ? "2.4" : "2.6") : (compact ? "1.8" : "2.1"),
+    class: "a-dash-topo-card",
+  }));
+
+  if (cluster.isCluster) {
+    g.append(createSVGEl("text", {
+      x: cx.toFixed(1),
+      y: (cy + (compact ? 3.0 : 3.5)).toFixed(1),
+      "text-anchor": "middle",
+      class: "a-dash-topo-micro",
+      fill: toneColor,
+    }, String(cluster.members.length)));
+  }
+
+  g.append(createSVGEl("title", {}, cluster.members.map((m) => m.node.name).join(" / ")));
+  helpers.bindInteractive(g, key);
+  beaconLayer.append(g);
+}
+
+function renderLinksAndPills({
+  model,
+  arcGeom,
+  selIndex,
+  singleMode,
+  dirMode,
+  ambientSet,
+  staticOccupied,
+  midZones,
+  unreachMidZones,
+  arcZones,
+  pillBoundsBase,
+  pillLimitX,
+  compact,
+  helpers,
+  probeLayer,
+  pulseLayer,
+  leaderLayer,
+  pillLayer,
+}) {
+  const leaderSegments = [];
+  const renderOrder = [...model.probeLinks].sort((a, b) => {
+    const score = { ok: 1, "": 1, idle: 1, running: 2, warn: 2, bad: 3 };
+    return (score[a.tone] || 0) - (score[b.tone] || 0);
+  });
+
+  renderOrder.forEach((probe) => {
+    const geom = arcGeom.get(probe.id);
+    if (!geom) return;
+
+    const eKey = `probe:${probe.id}`;
+    const peers = selIndex.probePeers(probe);
+    const hl = helpers.isHighlightedEdge(peers);
+    const probeRunning = isProbeRunning(probe);
+    const fullUnreachable = isProbeUnreachable(probe);
+    const effectiveTone = probeRunning ? "running" : (probe.tone || "");
+    const pal = tonePalette(effectiveTone);
+    const isBad = effectiveTone === "bad";
+    const isWarn = effectiveTone === "warn";
+
+    const baseOpacity = singleMode ? 0.72 : (isBad ? 0.84 : isWarn ? 0.76 : probe.isExternal ? 0.50 : 0.50);
+    const opacity = hl === true ? 1 : hl === false ? 0.28 : baseOpacity;
+
+    const g = createSVGEl("g", {
+      "data-refresh-key": `${compact ? "m-" : ""}map-arc-${probe.id}`,
+      "data-topo-peers": peers.join(" "),
+      "data-base-opacity": String(baseOpacity),
+      "data-dim-opacity": "0.28",
+      ...(probe.isExternal ? { "data-ext-probe": "1" } : {}),
+      opacity: opacity.toFixed(2),
+    });
+
+    const strokeW = (
+      hl === true
+        ? (compact ? 2.4 : 2.6)
+        : singleMode
+          ? (compact ? 1.9 : 2.05)
+          : isBad
+            ? (compact ? 1.9 : 2.0)
+            : (compact ? 1.4 : 1.5)
+    ).toFixed(2);
+    const allowAnim = helpers.allowMotion() && (singleMode || hl === true || probeRunning || isWarn || isBad);
+
+    const reverseOnly = dirMode === "reverse" && probe.bidirectional && !probe.unavailableReverse;
+    const basePathD = reverseOnly
+      ? geom.segments.map((s) => `M ${s.x2.toFixed(1)} ${s.y2.toFixed(1)} Q ${s.cx.toFixed(1)} ${s.cy.toFixed(1)}, ${s.x1.toFixed(1)} ${s.y1.toFixed(1)}`).join(" ")
+      : geom.d;
+    const dash = probeRunning ? "6 4" : isBad ? (compact ? "4 3" : "5 3") : probe.isExternal ? "2 3" : null;
+
+    g.append(createSVGEl("path", {
+      d: basePathD,
+      fill: "none",
+      stroke: pal.stroke,
+      "stroke-width": strokeW,
+      "stroke-dasharray": dash,
+      "stroke-linecap": "round",
+      class: probeRunning ? `a-dash-topo-probe-running${reverseOnly ? " is-reverse" : ""}` : null,
+    }));
+
+    if (allowAnim && !fullUnreachable && !isBad && !probe.unavailableReverse) {
+      const activeLat = reverseOnly ? (probe.revLatencyMS ?? probe.latencyMS) : probe.latencyMS;
+      const spd = probeRunning ? "is-speed-fast" : flowSpeedClass(activeLat);
+      geom.segments.forEach((seg, segIdx) => {
+        const segD = `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
+        appendPulsePair(pulseLayer, segD, {
+          pal,
+          spd,
+          isWarn,
+          isRunning: probeRunning,
+          isReverse: reverseOnly,
+          peers,
+          hl,
+          isExternal: probe.isExternal,
+          compact,
+          refreshKey: `${compact ? "m-" : ""}map-pulse-${probe.id}-${segIdx}`,
+        });
+      });
+    }
+
+    const hit = createSVGEl("path", {
+      d: geom.d,
+      fill: "none",
+      stroke: "transparent",
+      "stroke-width": compact ? "14" : "12",
+      class: "a-dash-topo-probe-item",
+    });
+    helpers.bindInteractive(hit, eKey);
+    g.append(hit);
+    probeLayer.append(g);
+
+    const isAmbient = ambientSet.has(probe.id);
+    const rawPillLabel = !singleMode && compact && isAmbient && hl !== true
+      ? buildProbeShortAlertLabel(probe)
+      : buildProbePillLabel(probe, true, compact, dirMode);
+
+    const pillFontPx = compact ? 9.2 : 10.5;
+    const pillLeftPad = compact ? 13 : 16.5;
+    const pillRightPad = compact ? 9 : 11.5;
+    const maxPillW = compact ? 184 : 244;
+    const pillLabel = clipTextToPx(rawPillLabel, pillFontPx, maxPillW - pillLeftPad - pillRightPad);
+    const pillH = compact ? 15.5 : 19.5;
+    const rawPillW = Math.ceil(pillLeftPad + estimateSvgTextPx(pillLabel, pillFontPx) + pillRightPad);
+    const pillW = Math.max(compact ? 42 : 48, Math.min(maxPillW, rawPillW));
+
+    let pMinX = probe.isExternal ? pillLimitX.min : Math.max(pillLimitX.min, geom.mid.x - (compact ? 170 : 210));
+    let pMaxX = probe.isExternal ? pillLimitX.max : Math.min(pillLimitX.max, geom.mid.x + (compact ? 170 : 210));
+    if (pMaxX - pMinX < pillW) {
+      pMinX = pillLimitX.min;
+      pMaxX = pillLimitX.max;
+    }
+    const pillBounds = { ...pillBoundsBase, minX: pMinX, maxX: pMaxX };
+
+    const placed = placeProbePillSmart(
+      geom,
+      pillW,
+      pillH,
+      staticOccupied,
+      midZones,
+      unreachMidZones,
+      arcZones,
+      pillBounds,
+      { isAmbient, leaderSegments },
+    );
+
+    if (placed && (placed.shifted || Math.hypot(placed.cx - geom.mid.x, placed.cy - geom.mid.y) > 15)) {
+      helpers.appendProbeLeader(
+        leaderLayer,
+        { ...placed, shifted: true },
+        pal,
+        peers,
+        hl,
+        compact,
+        !isAmbient,
+        probe.id,
+      );
+    }
+
+    const pillEl = helpers.createProbePillGroup({
+      probe,
+      cx: placed.cx,
+      cy: placed.cy,
+      pillW,
+      fullW: pillW,
+      pillH,
+      label: pillLabel,
+      pal,
+      compact,
+      peers,
+      focusOnly: !isAmbient,
+    });
+    if (probe.isExternal) pillEl.setAttribute("data-ext-probe", "1");
+    pillLayer.append(pillEl);
+  });
+}
+
 /**
  * Duplicates world-space topology layers at horizontal offsets ±wrapSpan so circular dragging
  * never clips nodes/arcs off one edge before entering cleanly from the opposite edge.
@@ -791,6 +1608,34 @@ function appendWrapTileCopies(zoomGroup, layerGroups, { wrapSpan, viewportWidth,
           entityEl.setAttribute("tabindex", "-1");
         }
       });
+      if (viewportWidth > 0) {
+        // Strip wrapped card/pill/beacon clones that straddle viewport edges (e.g. when wrapSpan <= viewportWidth)
+        // so static edge borders never show sliced duplicate tags or half beacons.
+        clonedLayer.querySelectorAll(".a-dash-topo-map-tag, .a-dash-topo-probe-item").forEach((cardEl) => {
+          const rect = cardEl.querySelector("rect.a-dash-topo-card, rect.a-dash-topo-probe-pill");
+          if (rect) {
+            const rx = parseFloat(rect.getAttribute("x") || "");
+            const rw = parseFloat(rect.getAttribute("width") || "");
+            if (!Number.isFinite(rx) || !Number.isFinite(rw)) return;
+            const left = rx + shiftX;
+            const right = left + rw;
+            if ((left < 4 && right > -2) || (left < viewportWidth + 2 && right > viewportWidth - 4)) {
+              cardEl.remove();
+            }
+            return;
+          }
+          const circle = cardEl.querySelector("circle.a-dash-topo-card");
+          if (circle) {
+            const cx = parseFloat(circle.getAttribute("cx") || "");
+            const cr = parseFloat(circle.getAttribute("r") || "5");
+            if (!Number.isFinite(cx)) return;
+            const sx = cx + shiftX;
+            if ((sx - cr < 4 && sx + cr > -2) || (sx - cr < viewportWidth + 2 && sx + cr > viewportWidth - 4)) {
+              cardEl.remove();
+            }
+          }
+        });
+      }
       tileG.append(clonedLayer);
     }
     if (viewportWidth > 0) zoomGroup.append(tileG);
@@ -806,6 +1651,7 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
   const effScaleY = baseScaleY * z.scale;
   const wrapSpan = getMapWrapSpan(w, z.scale);
   const singleMode = Boolean(model?.singleGroup);
+  const dirMode = model?.metricDir === "forward" || model?.metricDir === "reverse" ? model.metricDir : "both";
 
   const dockArea = placeExternalDockTargets(model.externalTargets, w, 10, mapHeight + 8, {
     minChipW: Math.min(138, Math.floor((w - 28) / 2)),
@@ -827,7 +1673,7 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
 
   const defsPrefix = helpers.defsPrefix || "a-topo";
   const clipId = `${helpers.clipId || (singleMode ? "a-topo-map-clip-single" : "a-topo-map-clip-all")}-mob`;
-  const defs = createTopologyDefs(defsPrefix);
+  const defs = createSVGEl("defs", { "data-refresh-key": `${defsPrefix}-defs` });
   const bgGroupTransform = `translate(${z.tx.toFixed(2)} ${z.ty.toFixed(2)}) scale(${effScaleX.toFixed(4)} ${effScaleY.toFixed(4)})`;
   const oceanBase = buildStaticOceanLayer(defs, { width: w, mapHeight, clipId });
   const backdrop = buildPacificBackdropGroup(defs, {
@@ -870,254 +1716,216 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
     coordByID,
     chipByID,
     clusters,
-    { minX: 8, maxX: w - 8, minY: 32, maxY: mapHeight - 10 },
+    { minX: 8, maxX: w - 8, minY: 30, maxY: mapHeight - 10 },
     { wrapSpan, bowScaleY: baseScaleY },
   );
+  const { midZones, arcZones } = buildArcAvoidanceZones(arcGeom, model.probeLinks, {
+    midRadius: 14,
+    sampleSize: 11,
+    sampleStep: 0.09,
+  });
+  const unreachMidZones = midZones.filter((mz) => {
+    const p = model.probeLinks.find((item) => item.id === mz.probeID);
+    return p && (isProbeUnreachable(p) || p.tone === "bad");
+  });
+  const edgeAnglesByCluster = computeClusterEdgeAngles(clusters, model.probeLinks, arcGeom);
 
   const linkLayer = createSVGEl("g", { class: "a-dash-topo-map-links", "data-refresh-key": "map-layer-links" });
   const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true", "data-refresh-key": "map-layer-pulses" });
+  const leaderLayer = createSVGEl("g", { class: "a-dash-topo-map-leaders", "data-refresh-key": "map-layer-leaders" });
   const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons", "data-refresh-key": "map-layer-beacons" });
   const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags", "data-refresh-key": "map-layer-tags" });
   const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills", "data-refresh-key": "map-layer-pills" });
 
+  const hudLayer = createSVGEl("g", {
+    class: "a-dash-topo-map-hud",
+    "clip-path": `url(#${clipId})`,
+    "data-refresh-key": "map-layer-hud",
+  });
+
   const ambientSet = singleMode
     ? new Set(model.probeLinks.map((p) => p.id))
     : selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 4 });
+  const totalBadCount = model.probeLinks.filter((p) => p.tone === "bad" || p.tone === "warn").length;
+  const shownAlertCount = model.probeLinks.filter((p) => (p.tone === "bad" || p.tone === "warn") && ambientSet.has(p.id)).length;
+  const unshownAlertCount = Math.max(0, totalBadCount - shownAlertCount);
+
   const occupiedTags = [
     { x: 0, y: 0, w, h: 26, screenFixed: true },
     { x: Math.max(0, w - 122), y: 24, w: 118, h: 30, screenFixed: true },
     ...clusters.map((c) => ({ x: c.x - 9, y: c.y - 9, w: 18, h: 18 })),
   ];
-  const mobDirMode = model?.metricDir === "forward" || model?.metricDir === "reverse" ? model.metricDir : "both";
-  const mobChainTotalBadge = singleMode ? buildChainTotalOverlay(model.singleGroup, mobDirMode, { mapHeight, compact: true, occupiedList: occupiedTags }) : null;
+  const mobChainTotalBadge = singleMode
+    ? buildChainTotalOverlay(model.singleGroup, dirMode, {
+        mapHeight,
+        compact: true,
+        occupiedList: occupiedTags,
+        maxWidth: Math.max(120, w - 20),
+      })
+    : null;
+
+  const tagHardOccupied = [...occupiedTags, ...midZones];
 
   const sortedForTags = [...clusters].sort((a, b) => {
+    const aPinned = helpers.activeKey() === a.key ? 1 : 0;
+    const bPinned = helpers.activeKey() === b.key ? 1 : 0;
+    if (bPinned !== aPinned) return bPinned - aPinned;
     const aCl = a.isCluster ? 1 : 0;
     const bCl = b.isCluster ? 1 : 0;
     if (bCl !== aCl) return bCl - aCl;
-    const aIssue = a.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
-    const bIssue = b.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
-    if (bIssue !== aIssue) return bIssue - aIssue;
+    const aIss = a.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
+    const bIss = b.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
+    if (bIss !== aIss) return bIss - aIss;
     return b.members.length - a.members.length;
   });
 
-  sortedForTags.slice(0, 10).forEach((cluster) => {
+  const tagBounds = { minX: 8, maxX: w - 8, minY: 27, maxY: mapHeight - 6 };
+  const hiddenClusterCount = [];
+  const tagSpecs = new Map();
+
+  sortedForTags.forEach((cluster) => {
     const key = cluster.key;
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
     const hl = helpers.isHighlightedEdge(peers);
-    const anyIssue = cluster.members.some((m) => !m.node.isOnline || Boolean(m.node.issue));
-    const anyOnline = cluster.members.some((m) => m.node.isOnline);
+    const active = helpers.activeKey() === key;
     const rawTagText = resolveMapNodeLabel(cluster, singleMode ? model.singleGroup : null);
     const flagInfo = resolveClusterFlagInfo(cluster);
     const flagW = flagInfo ? 12 : 0;
     const flagH = 8.5;
-    const flagSlot = flagInfo ? flagW + 4 : 0;
-    const tagText = clipLabel(rawTagText, 24);
-    const tagW = Math.max(40, Math.min(168, visualUnits(tagText) * 5.3 + 10 + flagSlot));
+    const flagSlot = flagInfo ? flagW + 5 : 0;
+    const leftPad = 4.5;
+    const rightPad = 5.5;
+    const maxMobTagW = 156;
+    const tagText = clipTextToPx(rawTagText, 9.2, maxMobTagW - leftPad - flagSlot - rightPad);
+    const tagW = Math.max(42, Math.min(maxMobTagW, Math.ceil(leftPad + flagSlot + estimateSvgTextPx(tagText, 9.2) + rightPad)));
     const tagH = 16;
-    const r = cluster.isCluster ? 6.5 : 4.2;
-    const candidates = buildDensityAwareTagCandidates(cluster, clusters, tagW, tagH, r, {
-      minY: 28, maxY: mapHeight - 6,
-    }, wrapSpan);
-    const pick = candidates.find((c) => !wrapsOverlap({ x: c.x, y: c.y, w: tagW, h: tagH }, occupiedTags, wrapSpan, 2, 2));
-    if (!pick) return;
-    occupiedTags.push({ x: pick.x, y: pick.y, w: tagW, h: tagH });
-    const g = createSVGEl("g", {
-      class: `a-dash-topo-node a-dash-topo-map-tag ${helpers.activeKey() === key ? "is-active" : ""}`,
-      "data-refresh-key": `m-tag-${key}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "1",
-      "data-dim-opacity": "0.32",
-      opacity: hl === false ? "0.32" : "1",
-    });
-    g.append(
-      createSVGEl("rect", {
-        x: pick.x.toFixed(1),
-        y: pick.y.toFixed(1),
-        width: tagW.toFixed(1),
-        height: tagH,
-        rx: 4,
-        fill: "#ffffff",
-        stroke: anyIssue ? BAD_COLOR : anyOnline ? "#d4d4d8" : BORDER_COLOR,
-        "stroke-width": "0.9",
-        class: "a-dash-topo-card",
-      }),
+    const r = cluster.isCluster ? Math.min(7.5, 4.8 + cluster.members.length * 0.8) : 4.2;
+    const candidates = buildDensityAwareTagCandidates(
+      cluster,
+      clusters,
+      tagW,
+      tagH,
+      r,
+      tagBounds,
+      wrapSpan,
+      edgeAnglesByCluster.get(key) || [],
     );
-    if (flagInfo) {
-      appendMapTagFlag(g, flagInfo, pick.x + 4, pick.y + (tagH - flagH) / 2, flagW, flagH);
+    tagSpecs.set(key, { cluster, peers, hl, active, flagInfo, flagW, flagH, tagText, tagW, tagH, candidates });
+
+    const chosen = pickBestTagPlacement(candidates, tagW, tagH, tagHardOccupied, arcZones, wrapSpan, 2, 2);
+    if (!chosen) {
+      hiddenClusterCount.push(cluster);
+      return;
     }
-    g.append(
-      createSVGEl("text", {
-        x: (pick.x + 4.5 + flagSlot).toFixed(1),
-        y: (pick.y + 11.4).toFixed(1),
-        class: "a-dash-topo-map-tag-text",
-        fill: anyIssue ? BAD_COLOR : anyOnline ? INK_COLOR : SOFT_INK_COLOR,
-      }, tagText),
-    );
-    helpers.bindInteractive(g, key);
-    tagLayer.append(g);
+
+    occupiedTags.push(chosen.box);
+    tagHardOccupied.push(chosen.box);
+
+    if (chosen.leader) {
+      leaderLayer.append(createSVGEl("line", {
+        x1: cluster.x.toFixed(1),
+        y1: cluster.y.toFixed(1),
+        x2: chosen.edgeX.toFixed(1),
+        y2: chosen.edgeY.toFixed(1),
+        stroke: "#94a3b8",
+        "stroke-width": "0.9",
+        "stroke-dasharray": "2 2",
+        "stroke-linecap": "round",
+        class: "a-dash-topo-tag-leader",
+        "data-topo-peers": peers.join(" "),
+        "data-base-opacity": "0.86",
+        "data-dim-opacity": "0.22",
+        opacity: hl === false ? "0.22" : "0.86",
+      }));
+    }
+
+    tagLayer.append(renderClusterTagElement({
+      cluster,
+      boxX: chosen.x,
+      boxY: chosen.y,
+      tagW,
+      tagH,
+      flagInfo,
+      flagW,
+      flagH,
+      displayTag: tagText,
+      active,
+      hl,
+      peers,
+      compact: true,
+      hoverOnly: false,
+      helpers,
+    }));
   });
 
-  model.probeLinks.forEach((probe) => {
-    const geom = arcGeom.get(probe.id);
-    if (!geom) return;
-    const peers = selIndex.probePeers(probe);
-    const hl = helpers.isHighlightedEdge(peers);
-    const isBad = probe.tone === "bad";
-    const isWarn = probe.tone === "warn";
-    const pal = tonePalette(probe.tone);
-    const baseOpacity = singleMode ? 0.92 : (isBad ? 0.9 : isWarn ? 0.8 : probe.isExternal ? 0.54 : 0.50);
-    const opacity = hl === true ? 1 : hl === false ? 0.30 : baseOpacity;
-
-    const g = createSVGEl("g", {
-      "data-refresh-key": `m-map-arc-${probe.id}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": String(baseOpacity),
-      "data-dim-opacity": "0.30",
-      ...(probe.isExternal ? { "data-ext-probe": "1" } : {}),
-      opacity: opacity.toFixed(2),
-    });
-    const strokeW = (hl === true ? 2.4 : singleMode ? 2.0 : isBad ? 2.0 : 1.4).toFixed(2);
-    g.append(createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: pal.stroke,
-      "stroke-width": strokeW,
-      "stroke-dasharray": probe.running ? "6 4" : isBad ? "4 3" : probe.isExternal ? "2 3" : null,
-      "stroke-linecap": "round",
-      "marker-end": isBad ? `url(#${defsPrefix}-arrow-bad)` : isWarn ? `url(#${defsPrefix}-arrow-warn)` : probe.tone === "ok" ? `url(#${defsPrefix}-arrow-ok)` : `url(#${defsPrefix}-arrow-idle)`,
-      class: probe.running ? "a-dash-topo-probe-running" : null,
-    }));
-
-    if (helpers.allowMotion() && !isProbeUnreachable(probe) && !probe.unavailableReverse && !probe.running && (singleMode || hl === true || probe.tone === "ok")) {
-      const spd = flowSpeedClass(probe.latencyMS);
-      geom.segments.forEach((seg, segIdx) => {
-        const segD = `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
-        pulseLayer.append(createSVGEl("path", {
-          d: segD,
-          fill: "none",
-          stroke: pal.stroke,
-          "stroke-width": "1.5",
-          "stroke-dasharray": isWarn ? "3 17" : "5 15",
-          "data-topo-peers": peers.join(" "),
-          "data-base-opacity": "0.52",
-          "data-dim-opacity": "0.18",
-          opacity: hl === false ? "0.18" : "0.52",
-          ...(probe.isExternal ? { "data-ext-probe": "1" } : {}),
-          class: `a-dash-topo-flow-pulse ${spd}`,
-          "data-refresh-key": `m-map-pulse-${probe.id}-${segIdx}`,
-        }));
-      });
-    }
-
-    const hitPath = createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: "transparent",
-      "stroke-width": "14",
-      class: "a-dash-topo-probe-item",
-    });
-    helpers.bindInteractive(hitPath, `probe:${probe.id}`);
-    g.append(hitPath);
-    linkLayer.append(g);
-
-    const isAmbient = ambientSet.has(probe.id);
-    const label = !singleMode && isAmbient && hl !== true
-      ? buildProbeShortAlertLabel(probe)
-      : buildProbePillLabel(probe, true, true);
-    const pillW = Math.max(40, Math.min(116, visualUnits(label) * 5.4 + 16));
-    const pillH = 15.5;
-    const pillBounds = probe.isExternal
-      ? { minX: 8, maxX: w - 8, minY: 32, maxY: mapHeight - 10 }
-      : { minX: geom.mid.x - 160, maxX: geom.mid.x + 160, minY: 32, maxY: mapHeight - 10 };
-    const placed = placeCollisionFreePill(geom.mid.x, geom.mid.y, pillW, pillH, occupiedTags, pillBounds, [geom.mid]);
-    if (placed.shifted) {
-      helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, true, !isAmbient, probe.id);
-    }
-    const pillEl = helpers.createProbePillGroup({
-      probe,
-      cx: placed.cx,
-      cy: placed.cy,
-      pillW,
-      fullW: pillW,
-      pillH,
-      label,
-      pal,
+  hiddenClusterCount.forEach((cluster) => {
+    const spec = tagSpecs.get(cluster.key);
+    if (!spec) return;
+    const rawCand = spec.candidates[0] || {
+      x: cluster.x - spec.tagW / 2,
+      y: cluster.y - spec.tagH - 10,
+    };
+    const fallbackX = Math.max(tagBounds.minX, Math.min(tagBounds.maxX - spec.tagW, rawCand.x));
+    const fallbackY = Math.max(tagBounds.minY, Math.min(tagBounds.maxY - spec.tagH, rawCand.y));
+    tagLayer.append(renderClusterTagElement({
+      cluster,
+      boxX: fallbackX,
+      boxY: fallbackY,
+      tagW: spec.tagW,
+      tagH: spec.tagH,
+      flagInfo: spec.flagInfo,
+      flagW: spec.flagW,
+      flagH: spec.flagH,
+      displayTag: spec.tagText,
+      active: false,
+      hl: null,
+      peers: spec.peers,
       compact: true,
-      peers,
-      focusOnly: !isAmbient,
-    });
-    if (probe.isExternal) pillEl.setAttribute("data-ext-probe", "1");
-    pillLayer.append(pillEl);
+      hoverOnly: true,
+      helpers,
+    }));
+  });
+
+  renderLinksAndPills({
+    model,
+    arcGeom,
+    selIndex,
+    singleMode,
+    dirMode,
+    ambientSet,
+    staticOccupied: occupiedTags,
+    midZones,
+    unreachMidZones,
+    arcZones,
+    pillBoundsBase: { minY: 28, maxY: mapHeight - 8 },
+    pillLimitX: { min: 8, max: w - 8 },
+    compact: true,
+    helpers,
+    probeLayer: linkLayer,
+    pulseLayer,
+    leaderLayer,
+    pillLayer,
   });
 
   clusters.forEach((cluster) => {
     const key = cluster.key;
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
-    const anyOnline = cluster.members.some((m) => m.node.isOnline);
     const active = helpers.activeKey() === key;
     const hl = helpers.isHighlightedEdge(peers);
-    const toneColor = clusterHealthTone(cluster);
     const r = cluster.isCluster ? Math.min(7.5, 4.8 + cluster.members.length * 0.8) : 4.2;
 
-    const g = createSVGEl("g", {
-      class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-      "data-refresh-key": `m-beacon-${key}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "1",
-      "data-dim-opacity": "0.32",
-      opacity: hl === false ? "0.32" : "1",
+    renderClusterBeaconElement({
+      cluster,
+      r,
+      active,
+      hl,
+      peers,
+      singleMode,
+      compact: true,
+      pulseLayer,
+      beaconLayer,
+      helpers,
     });
-
-    if (anyOnline && helpers.allowMotion()) {
-      pulseLayer.append(createSVGEl("circle", {
-        cx: cluster.x.toFixed(1),
-        cy: cluster.y.toFixed(1),
-        r: (r + 5.5).toFixed(1),
-        fill: "none",
-        stroke: toneColor,
-        "stroke-width": "1",
-        class: "a-dash-topo-beacon-pulse",
-        "data-topo-peers": peers.join(" "),
-        "data-base-opacity": "0.38",
-        "data-dim-opacity": "0.12",
-        opacity: hl === false ? "0.12" : "0.38",
-      }));
-    }
-    g.append(createSVGEl("circle", { cx: cluster.x.toFixed(1), cy: cluster.y.toFixed(1), r: 15, fill: "transparent" }));
-    if (singleMode || active || hl === true) {
-      g.append(createSVGEl("circle", {
-        cx: cluster.x.toFixed(1),
-        cy: cluster.y.toFixed(1),
-        r: (r + 2.8).toFixed(1),
-        fill: "none",
-        stroke: active ? INK_COLOR : toneColor,
-        "stroke-width": "0.85",
-        "stroke-dasharray": "2 2",
-        opacity: "0.62",
-      }));
-    }
-    g.append(createSVGEl("circle", {
-      cx: cluster.x.toFixed(1),
-      cy: cluster.y.toFixed(1),
-      r: r.toFixed(1),
-      fill: "#ffffff",
-      stroke: active ? INK_COLOR : toneColor,
-      "stroke-width": active || hl === true ? "2.4" : "1.8",
-      class: "a-dash-topo-card",
-    }));
-    if (cluster.isCluster) {
-      g.append(createSVGEl("text", {
-        x: cluster.x.toFixed(1),
-        y: (cluster.y + 3).toFixed(1),
-        "text-anchor": "middle",
-        class: "a-dash-topo-micro",
-        fill: toneColor,
-      }, String(cluster.members.length)));
-    }
-    g.append(createSVGEl("title", {}, cluster.isCluster ? `${cluster.label} (${cluster.members.length} 节点)` : cluster.primary.node.name));
-    helpers.bindInteractive(g, key);
-    beaconLayer.append(g);
   });
 
   const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock", "data-refresh-key": "map-layer-dock" });
@@ -1126,6 +1934,7 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
     const peers = selIndex.extPeers(extID);
     const hl = helpers.isHighlightedEdge(peers);
     const active = helpers.activeKey() === extID;
+
     const g = createSVGEl("g", {
       class: `a-dash-topo-dock-chip ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
       "data-refresh-key": `m-dock-${extID}`,
@@ -1133,9 +1942,28 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
       "data-base-opacity": "1",
       "data-dim-opacity": "0.34",
       opacity: hl === false ? "0.34" : "1",
+      "aria-label": `公网目标 ${chip.fullTitle} · ${chip.ext.linkCount || 1} 链路`,
     });
     g.append(
-      createSVGEl("rect", { x: chip.x.toFixed(1), y: chip.y.toFixed(1), width: chip.w.toFixed(1), height: chip.h, rx: 6, fill: "#ffffff", stroke: active ? INK_COLOR : "#d4d4d8", "stroke-width": active ? "1.6" : "1", class: "a-dash-topo-card" }),
+      createSVGEl("rect", {
+        x: chip.x.toFixed(1),
+        y: chip.y.toFixed(1),
+        width: chip.w.toFixed(1),
+        height: chip.h,
+        rx: 6,
+        fill: "#ffffff",
+        stroke: active ? INK_COLOR : "#d4d4d8",
+        "stroke-width": active ? "1.6" : "1",
+        class: "a-dash-topo-card",
+      }),
+      createSVGEl("circle", {
+        cx: chip.cx.toFixed(1),
+        cy: chip.y.toFixed(1),
+        r: 2.2,
+        fill: "#ffffff",
+        stroke: SOFT_INK_COLOR,
+        "stroke-width": "1.1",
+      }),
       createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 14.5).toFixed(1), class: "a-dash-topo-map-tag-text", fill: INK_COLOR }, chip.title),
       createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 25.5).toFixed(1), class: "a-dash-topo-micro", fill: SOFT_INK_COLOR }, chip.subText),
     );
@@ -1144,25 +1972,28 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
     dockLayer.append(g);
   });
 
-  zoomGroup.append(backdrop, linkLayer, pulseLayer, beaconLayer, tagLayer, pillLayer);
-  appendWrapTileCopies(zoomGroup, [linkLayer, pulseLayer, beaconLayer, tagLayer, pillLayer], {
+  zoomGroup.append(backdrop, linkLayer, pulseLayer, leaderLayer, beaconLayer, tagLayer, pillLayer);
+  appendWrapTileCopies(zoomGroup, [linkLayer, pulseLayer, leaderLayer, beaconLayer, tagLayer, pillLayer], {
     wrapSpan,
     viewportWidth: w,
     helpers,
   });
   stageClipGroup.append(oceanBase, zoomGroup);
 
-  const hudLayer = createSVGEl("g", {
-    class: "a-dash-topo-map-hud",
-    "clip-path": `url(#${clipId})`,
-    "data-refresh-key": "map-layer-hud",
-  });
-  const mobLeftText = singleMode
-    ? `${model.onlineNodes}/${model.totalNodes} 在线 · ${model.singleGroup.hopCount}跳`
-    : `${model.onlineNodes}/${model.totalNodes} 在线 · ${model.probeChains.length}组`;
-  const mobRightText = singleMode
-    ? (model.singleGroup?.overall?.statusBadge?.label || "拖拽平移")
-    : buildMapHudLatencyLine(model, true);
+  const mobLeftText = clipTextToPx(
+    singleMode
+      ? `${model.onlineNodes}/${model.totalNodes} 在线 · ${model.singleGroup.hopCount}跳`
+      : `${model.onlineNodes}/${model.totalNodes} 在线 · ${model.probeChains.length}组`,
+    9.5,
+    w * 0.56 - 14,
+  );
+  const mobRightText = clipTextToPx(
+    singleMode
+      ? (model.singleGroup?.overall?.statusBadge?.label || "拖拽平移")
+      : buildMapHudLatencyLine(model, true),
+    9.5,
+    w * 0.42 - 14,
+  );
   hudLayer.append(
     createSVGEl("rect", { x: 0, y: 0, width: w, height: 24, fill: "rgba(255,255,255,0.90)" }),
     createSVGEl("line", { x1: 0, y1: 24, x2: w, y2: 24, stroke: BORDER_COLOR, "stroke-width": "0.8" }),
@@ -1177,8 +2008,8 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
 
 /**
  * Renders the 1160px Paper & Ink Pacific Ocean topology SVG (desktop) or compact mobile map SVG.
- * Pure network-monitoring semantics: online/diagnostic capability beacons, continuous wrapped arcs,
- * clean latency/loss pills, end-to-end total latency badge, external dock, and seamless horizontal wrapping.
+ * Pure network-monitoring semantics: two-layer health beacons, continuous wrapped arcs & dual tracks,
+ * tangent-sector & arc-aware placement, leader-layer callouts, public dock gates, and seamless wrapping.
  */
 export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = null, helpers }) {
   if (isMobile) {
@@ -1188,6 +2019,7 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
   const vw = PACIFIC_MAP_BOUNDS.width;
   const mapHeight = PACIFIC_MAP_BOUNDS.height;
   const singleMode = Boolean(model?.singleGroup);
+  const dirMode = model?.metricDir === "forward" || model?.metricDir === "reverse" ? model.metricDir : "both";
   const z = clampMapZoomTransform(zoomTransform, vw, mapHeight, MAX_MAP_SCALE);
   const wrapSpan = getMapWrapSpan(vw, z.scale);
 
@@ -1211,7 +2043,7 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
 
   const defsPrefix = helpers.defsPrefix || "a-topo";
   const clipId = helpers.clipId || (singleMode ? "a-topo-map-clip-single" : "a-topo-map-clip-all");
-  const defs = createTopologyDefs(defsPrefix);
+  const defs = createSVGEl("defs", { "data-refresh-key": `${defsPrefix}-defs` });
   const hasTransform = Math.abs(z.tx) > 0.05 || Math.abs(z.ty) > 0.05 || z.scale > 1.001;
   const bgTransform = hasTransform
     ? `translate(${z.tx.toFixed(2)} ${z.ty.toFixed(2)}) scale(${z.scale.toFixed(4)})`
@@ -1260,23 +2092,54 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
     { minX: 16, maxX: vw - 16, minY: 34, maxY: mapHeight - 16 },
     { wrapSpan, bowScaleY: 1 },
   );
+  const { midZones, arcZones } = buildArcAvoidanceZones(arcGeom, model.probeLinks, {
+    midRadius: 14,
+    sampleSize: 14,
+    sampleStep: 0.08,
+  });
+  const unreachMidZones = midZones.filter((mz) => {
+    const p = model.probeLinks.find((item) => item.id === mz.probeID);
+    return p && (isProbeUnreachable(p) || p.tone === "bad");
+  });
+  const edgeAnglesByCluster = computeClusterEdgeAngles(clusters, model.probeLinks, arcGeom);
 
   const probeLayer = createSVGEl("g", { class: "a-dash-topo-map-probes", "data-refresh-key": "map-layer-probes" });
   const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true", "data-refresh-key": "map-layer-pulses" });
+  const leaderLayer = createSVGEl("g", { class: "a-dash-topo-map-leaders", "data-refresh-key": "map-layer-leaders" });
   const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons", "data-refresh-key": "map-layer-beacons" });
   const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags", "data-refresh-key": "map-layer-tags" });
   const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills", "data-refresh-key": "map-layer-pills" });
+
+  const hudLayer = createSVGEl("g", {
+    class: "a-dash-topo-map-hud",
+    "clip-path": `url(#${clipId})`,
+    "data-refresh-key": "map-layer-hud",
+  });
+
+  const showAllAmbient = singleMode || model.probeLinks.length <= 7;
+  const ambientSet = showAllAmbient
+    ? new Set(model.probeLinks.map((p) => p.id))
+    : selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 6 });
+  const totalBadCount = model.probeLinks.filter((p) => p.tone === "bad" || p.tone === "warn").length;
+  const shownAlertCount = model.probeLinks.filter((p) => (p.tone === "bad" || p.tone === "warn") && ambientSet.has(p.id)).length;
+  const unshownAlertCount = Math.max(0, totalBadCount - shownAlertCount);
 
   const staticOccupied = [
     { x: 0, y: 0, w: vw, h: 30, screenFixed: true },
     { x: vw - 220, y: 28, w: 210, h: 36, screenFixed: true },
   ];
-  const deskDirMode = model?.metricDir === "forward" || model?.metricDir === "reverse" ? model.metricDir : "both";
-  const deskChainTotalBadge = singleMode ? buildChainTotalOverlay(model.singleGroup, deskDirMode, { mapHeight, compact: false, occupiedList: staticOccupied }) : null;
+  const deskChainTotalBadge = singleMode
+    ? buildChainTotalOverlay(model.singleGroup, dirMode, { mapHeight, compact: false, occupiedList: staticOccupied })
+    : null;
+  if (unshownAlertCount > 0 || clusters.length > 6) {
+    staticOccupied.push({ x: 8, y: mapHeight - 28, w: 320, h: 22, screenFixed: true });
+  }
   clusters.forEach((c) => {
     const br = c.isCluster ? Math.min(9.5, 5.6 + c.members.length * 0.9) : 5.2;
     staticOccupied.push({ x: c.x - br - 3, y: c.y - br - 3, w: (br + 3) * 2, h: (br + 3) * 2 });
   });
+
+  const tagHardOccupied = [...staticOccupied, ...midZones];
 
   const tagPriority = [...clusters].sort((a, b) => {
     const aPinned = helpers.activeKey() === a.key ? 1 : 0;
@@ -1291,95 +2154,134 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
     return b.members.length - a.members.length;
   });
 
-  const tagBounds = { minY: 32, maxY: mapHeight - 14 };
+  const tagBounds = { minX: 12, maxX: vw - 12, minY: 32, maxY: mapHeight - 14 };
   const hiddenClusterCount = [];
+  const tagSpecs = new Map();
 
   tagPriority.forEach((cluster) => {
     const key = cluster.key;
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
     const hl = helpers.isHighlightedEdge(peers);
     const active = helpers.activeKey() === key;
-    const anyOnline = cluster.members.some((m) => m.node.isOnline);
-    const anyIssue = cluster.members.some((m) => !m.node.isOnline || Boolean(m.node.issue));
     const r = cluster.isCluster ? Math.min(9.0, 5.6 + cluster.members.length * 0.85) : 5.0;
 
     const baseTagText = resolveMapNodeLabel(cluster, singleMode ? model.singleGroup : null);
     const flagInfo = resolveClusterFlagInfo(cluster);
     const flagW = flagInfo ? 14 : 0;
     const flagH = 10;
-    const flagSlot = flagInfo ? flagW + 5 : 0;
-    const displayTag = clipLabel(baseTagText, 28);
-    const tagW = Math.max(48, Math.min(220, visualUnits(displayTag) * 6.2 + 14 + flagSlot));
+    const flagSlot = flagInfo ? flagW + 6 : 0;
+    const leftPad = 5.5;
+    const rightPad = 7;
+    const maxDeskTagW = 198;
+    const displayTag = clipTextToPx(baseTagText, 11, maxDeskTagW - leftPad - flagSlot - rightPad);
+    const tagW = Math.max(50, Math.min(maxDeskTagW, Math.ceil(leftPad + flagSlot + estimateSvgTextPx(displayTag, 11) + rightPad)));
     const tagH = 20;
 
-    const candidates = buildDensityAwareTagCandidates(cluster, clusters, tagW, tagH, r, tagBounds, wrapSpan);
-    let chosen = null;
-    let bestScore = Infinity;
-    for (const c of candidates) {
-      const box = { x: c.x, y: c.y, w: tagW, h: tagH };
-      if (wrapsOverlap(box, staticOccupied, wrapSpan, 3, 2.5)) continue;
-      if (c.sectorPenalty < bestScore) {
-        bestScore = c.sectorPenalty;
-        chosen = { ...c, box };
-      }
-    }
+    const candidates = buildDensityAwareTagCandidates(
+      cluster,
+      clusters,
+      tagW,
+      tagH,
+      r,
+      tagBounds,
+      wrapSpan,
+      edgeAnglesByCluster.get(key) || [],
+    );
+    tagSpecs.set(key, { cluster, peers, hl, active, flagInfo, flagW, flagH, displayTag, tagW, tagH, candidates });
 
+    const chosen = pickBestTagPlacement(candidates, tagW, tagH, tagHardOccupied, arcZones, wrapSpan, 3, 2.5);
     if (!chosen) {
       hiddenClusterCount.push(cluster);
       return;
     }
 
     staticOccupied.push(chosen.box);
-    const g = createSVGEl("g", {
-      class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-      "data-refresh-key": `map-tag-${key}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "1",
-      "data-dim-opacity": "0.32",
-      opacity: hl === false ? "0.32" : "1",
-    });
+    tagHardOccupied.push(chosen.box);
 
     if (chosen.leader) {
-      const lx = Math.max(chosen.x, Math.min(chosen.x + tagW, cluster.x));
-      const ly = Math.max(chosen.y, Math.min(chosen.y + tagH, cluster.y));
-      g.append(createSVGEl("line", {
+      leaderLayer.append(createSVGEl("line", {
         x1: cluster.x.toFixed(1),
         y1: cluster.y.toFixed(1),
-        x2: lx.toFixed(1),
-        y2: ly.toFixed(1),
-        stroke: "#a1a1aa",
+        x2: chosen.edgeX.toFixed(1),
+        y2: chosen.edgeY.toFixed(1),
+        stroke: "#94a3b8",
         "stroke-width": "0.95",
-        "stroke-dasharray": "2 2",
+        "stroke-dasharray": "2.2 2.2",
+        "stroke-linecap": "round",
+        class: "a-dash-topo-tag-leader",
+        "data-topo-peers": peers.join(" "),
+        "data-base-opacity": "0.86",
+        "data-dim-opacity": "0.22",
+        opacity: hl === false ? "0.22" : "0.86",
       }));
     }
 
-    g.append(
-      createSVGEl("rect", {
-        x: chosen.x.toFixed(1),
-        y: chosen.y.toFixed(1),
-        width: tagW.toFixed(1),
-        height: tagH,
-        rx: 4.5,
-        fill: "#ffffff",
-        stroke: active ? INK_COLOR : anyIssue ? BAD_COLOR : anyOnline ? "#d4d4d8" : BORDER_COLOR,
-        "stroke-width": active ? "1.7" : "1",
-        class: "a-dash-topo-card",
-      }),
-    );
-    if (flagInfo) {
-      appendMapTagFlag(g, flagInfo, chosen.x + 5.5, chosen.y + (tagH - flagH) / 2, flagW, flagH);
-    }
-    g.append(
-      createSVGEl("text", {
-        x: (chosen.x + 6.5 + flagSlot).toFixed(1),
-        y: (chosen.y + 13.8).toFixed(1),
-        class: "a-dash-topo-map-tag-text",
-        fill: anyIssue ? BAD_COLOR : anyOnline ? INK_COLOR : SOFT_INK_COLOR,
-      }, displayTag),
-    );
-    g.append(createSVGEl("title", {}, cluster.members.map((m) => `${m.node.name}${m.node.issue ? ` (${m.node.issue})` : ""}`).join(" / ")));
-    helpers.bindInteractive(g, key);
-    tagLayer.append(g);
+    tagLayer.append(renderClusterTagElement({
+      cluster,
+      boxX: chosen.x,
+      boxY: chosen.y,
+      tagW,
+      tagH,
+      flagInfo,
+      flagW,
+      flagH,
+      displayTag,
+      active,
+      hl,
+      peers,
+      compact: false,
+      hoverOnly: false,
+      helpers,
+    }));
+  });
+
+  hiddenClusterCount.forEach((cluster) => {
+    const spec = tagSpecs.get(cluster.key);
+    if (!spec) return;
+    const rawCand = spec.candidates[0] || {
+      x: cluster.x - spec.tagW / 2,
+      y: cluster.y - spec.tagH - 12,
+    };
+    const fallbackX = Math.max(tagBounds.minX, Math.min(tagBounds.maxX - spec.tagW, rawCand.x));
+    const fallbackY = Math.max(tagBounds.minY, Math.min(tagBounds.maxY - spec.tagH, rawCand.y));
+    tagLayer.append(renderClusterTagElement({
+      cluster,
+      boxX: fallbackX,
+      boxY: fallbackY,
+      tagW: spec.tagW,
+      tagH: spec.tagH,
+      flagInfo: spec.flagInfo,
+      flagW: spec.flagW,
+      flagH: spec.flagH,
+      displayTag: spec.displayTag,
+      active: false,
+      hl: null,
+      peers: spec.peers,
+      compact: false,
+      hoverOnly: true,
+      helpers,
+    }));
+  });
+
+  renderLinksAndPills({
+    model,
+    arcGeom,
+    selIndex,
+    singleMode,
+    dirMode,
+    ambientSet,
+    staticOccupied,
+    midZones,
+    unreachMidZones,
+    arcZones,
+    pillBoundsBase: { minY: 34, maxY: mapHeight - 14 },
+    pillLimitX: { min: 18, max: vw - 18 },
+    compact: false,
+    helpers,
+    probeLayer,
+    pulseLayer,
+    leaderLayer,
+    pillLayer,
   });
 
   clusters.forEach((cluster) => {
@@ -1387,198 +2289,23 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
     const hl = helpers.isHighlightedEdge(peers);
     const active = helpers.activeKey() === key;
-    const anyOnline = cluster.members.some((m) => m.node.isOnline);
-    const toneColor = clusterHealthTone(cluster);
     const r = cluster.isCluster ? Math.min(9.0, 5.6 + cluster.members.length * 0.85) : 5.0;
 
-    const g = createSVGEl("g", {
-      class: `a-dash-topo-node a-dash-topo-map-tag ${active ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-      "data-refresh-key": `map-beacon-${key}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "1",
-      "data-dim-opacity": "0.32",
-      opacity: hl === false ? "0.32" : "1",
-    });
-
-    if (anyOnline && helpers.allowMotion()) {
-      pulseLayer.append(createSVGEl("circle", {
-        cx: cluster.x.toFixed(1),
-        cy: cluster.y.toFixed(1),
-        r: (r + 6.8).toFixed(1),
-        fill: "none",
-        stroke: toneColor,
-        "stroke-width": "1.1",
-        class: "a-dash-topo-beacon-pulse",
-        "data-topo-peers": peers.join(" "),
-        "data-base-opacity": "0.42",
-        "data-dim-opacity": "0.14",
-        opacity: hl === false ? "0.14" : "0.42",
-      }));
-    }
-
-    g.append(createSVGEl("circle", { cx: cluster.x.toFixed(1), cy: cluster.y.toFixed(1), r: (r + 7.5).toFixed(1), fill: "transparent" }));
-    if (singleMode || active || hl === true) {
-      g.append(createSVGEl("circle", {
-        cx: cluster.x.toFixed(1),
-        cy: cluster.y.toFixed(1),
-        r: (r + 3.4).toFixed(1),
-        fill: "none",
-        stroke: active ? INK_COLOR : toneColor,
-        "stroke-width": "0.95",
-        "stroke-dasharray": "2 2",
-        opacity: "0.65",
-      }));
-    }
-    g.append(createSVGEl("circle", {
-      cx: cluster.x.toFixed(1),
-      cy: cluster.y.toFixed(1),
-      r: r.toFixed(1),
-      fill: "#ffffff",
-      stroke: active ? INK_COLOR : toneColor,
-      "stroke-width": active || hl === true ? "2.6" : "2.1",
-      class: "a-dash-topo-card",
-    }));
-
-    if (cluster.isCluster) {
-      g.append(createSVGEl("text", {
-        x: cluster.x.toFixed(1),
-        y: (cluster.y + 3.5).toFixed(1),
-        "text-anchor": "middle",
-        class: "a-dash-topo-micro",
-        fill: toneColor,
-      }, String(cluster.members.length)));
-    }
-    g.append(createSVGEl("title", {}, cluster.members.map((m) => m.node.name).join(" / ")));
-    helpers.bindInteractive(g, key);
-    beaconLayer.append(g);
-  });
-
-  const showAllAmbient = singleMode || model.probeLinks.length <= 7;
-  const ambientSet = showAllAmbient
-    ? new Set(model.probeLinks.map((p) => p.id))
-    : selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 6 });
-
-  const totalBadCount = model.probeLinks.filter((p) => p.tone === "bad" || p.tone === "warn").length;
-  const shownAlertCount = model.probeLinks.filter((p) => (p.tone === "bad" || p.tone === "warn") && ambientSet.has(p.id)).length;
-  const unshownAlertCount = Math.max(0, totalBadCount - shownAlertCount);
-
-  const leaderSegments = [];
-  const activeSel = helpers.activeKey();
-
-  const renderOrder = [...model.probeLinks].sort((a, b) => {
-    const score = { ok: 1, idle: 1, warn: 2, bad: 3 };
-    return (score[a.tone] || 0) - (score[b.tone] || 0);
-  });
-
-  renderOrder.forEach((probe) => {
-    const geom = arcGeom.get(probe.id);
-    if (!geom) return;
-
-    const eKey = `probe:${probe.id}`;
-    const peers = selIndex.probePeers(probe);
-    const hl = helpers.isHighlightedEdge(peers);
-    const pal = tonePalette(probe.tone);
-    const isBad = probe.tone === "bad";
-    const isWarn = probe.tone === "warn";
-    const baseOpacity = singleMode ? 0.94 : (isBad ? 0.92 : isWarn ? 0.86 : probe.isExternal ? 0.56 : 0.52);
-    const opacity = hl === true ? 1 : hl === false ? 0.28 : baseOpacity;
-
-    const g = createSVGEl("g", {
-      "data-refresh-key": `map-arc-${probe.id}`,
-      "data-topo-peers": peers.join(" "),
-      "data-base-opacity": String(baseOpacity),
-      "data-dim-opacity": "0.28",
-      ...(probe.isExternal ? { "data-ext-probe": "1" } : {}),
-      opacity: opacity.toFixed(2),
-    });
-
-    const strokeW = (hl === true ? 2.6 : singleMode ? 2.15 : isBad ? 2.0 : 1.5).toFixed(2);
-    g.append(createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: pal.stroke,
-      "stroke-width": strokeW,
-      "stroke-dasharray": probe.running ? "6 4" : isBad ? "5 3" : probe.isExternal ? "2 3" : null,
-      "stroke-linecap": "round",
-      "marker-end": isBad ? `url(#${defsPrefix}-arrow-bad)` : isWarn ? `url(#${defsPrefix}-arrow-warn)` : probe.tone === "ok" ? `url(#${defsPrefix}-arrow-ok)` : `url(#${defsPrefix}-arrow-idle)`,
-      class: probe.running ? "a-dash-topo-probe-running" : null,
-    }));
-
-    if (helpers.allowMotion() && !isProbeUnreachable(probe) && !probe.unavailableReverse && !probe.running && (singleMode || hl === true || probe.tone === "ok")) {
-      const spd = flowSpeedClass(probe.latencyMS);
-      geom.segments.forEach((seg, segIdx) => {
-        const segD = `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
-        pulseLayer.append(createSVGEl("path", {
-          d: segD,
-          fill: "none",
-          stroke: pal.stroke,
-          "stroke-width": "1.6",
-          "stroke-dasharray": isWarn ? "3 17" : "5 15",
-          "data-topo-peers": peers.join(" "),
-          "data-base-opacity": "0.55",
-          "data-dim-opacity": "0.18",
-          opacity: hl === false ? "0.18" : "0.55",
-          ...(probe.isExternal ? { "data-ext-probe": "1" } : {}),
-          class: `a-dash-topo-flow-pulse ${spd}`,
-          "data-refresh-key": `map-pulse-${probe.id}-${segIdx}`,
-        }));
-      });
-    }
-
-    const hit = createSVGEl("path", {
-      d: geom.d,
-      fill: "none",
-      stroke: "transparent",
-      "stroke-width": "12",
-      class: "a-dash-topo-probe-item",
-    });
-    helpers.bindInteractive(hit, eKey);
-    g.append(hit);
-    probeLayer.append(g);
-
-    const isAmbient = ambientSet.has(probe.id);
-    const pillLabel = buildProbePillLabel(probe, true, false);
-    const pillH = 19.5;
-    const fullW = Math.max(46, Math.min(138, visualUnits(pillLabel) * 6.0 + 18));
-
-    const pillOccupied = isAmbient ? staticOccupied : [...staticOccupied];
-    const pillBounds = probe.isExternal
-      ? { minX: 20, maxX: vw - 20, minY: 34, maxY: mapHeight - 14 }
-      : { minX: geom.mid.x - 190, maxX: geom.mid.x + 190, minY: 34, maxY: mapHeight - 14 };
-    const placed = placeCollisionFreePill(
-      geom.mid.x,
-      geom.mid.y,
-      fullW,
-      pillH,
-      pillOccupied,
-      pillBounds,
-      [geom.mid],
-      { leaderSegments, reserveW: fullW },
-    );
-
-    if (placed.shifted || isAmbient) {
-      if (Math.hypot(placed.cx - geom.mid.x, placed.cy - geom.mid.y) > 16) {
-        helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, false, !isAmbient, probe.id);
-      }
-    }
-
-    const pillEl = helpers.createProbePillGroup({
-      probe,
-      cx: placed.cx,
-      cy: placed.cy,
-      pillW: fullW,
-      fullW,
-      pillH,
-      label: pillLabel,
-      pal,
-      compact: false,
+    renderClusterBeaconElement({
+      cluster,
+      r,
+      active,
+      hl,
       peers,
-      focusOnly: !isAmbient,
+      singleMode,
+      compact: false,
+      pulseLayer,
+      beaconLayer,
+      helpers,
     });
-    if (probe.isExternal) pillEl.setAttribute("data-ext-probe", "1");
-    pillLayer.append(pillEl);
   });
 
+  const activeSel = helpers.activeKey();
   const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock", "data-refresh-key": "map-layer-dock" });
   if (dockArea.rowCount > 0) {
     dockLayer.append(createSVGEl("line", { x1: 18, y1: mapHeight + 2, x2: vw - 18, y2: mapHeight + 2, stroke: BORDER_COLOR, "stroke-width": "1" }));
@@ -1595,6 +2322,7 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
         "data-base-opacity": "1",
         "data-dim-opacity": "0.34",
         opacity: hl === false ? "0.34" : "1",
+        "aria-label": `公网目标 ${chip.fullTitle}${chip.ext.address ? ` (${chip.ext.address})` : ""} · ${chip.ext.linkCount || 1} 链路`,
       });
       g.append(
         createSVGEl("rect", {
@@ -1608,7 +2336,14 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
           "stroke-width": active ? "1.8" : "1",
           class: "a-dash-topo-card",
         }),
-        createSVGEl("circle", { cx: chip.cx.toFixed(1), cy: chip.y.toFixed(1), r: 2.5, fill: "#ffffff", stroke: SOFT_INK_COLOR, "stroke-width": "1.2" }),
+        createSVGEl("circle", {
+          cx: chip.cx.toFixed(1),
+          cy: chip.y.toFixed(1),
+          r: 2.5,
+          fill: "#ffffff",
+          stroke: SOFT_INK_COLOR,
+          "stroke-width": "1.2",
+        }),
         createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 15).toFixed(1), class: "a-dash-topo-map-tag-text", fill: INK_COLOR }, chip.title),
         createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 28).toFixed(1), class: "a-dash-topo-ext-sub", fill: SOFT_INK_COLOR }, chip.subText),
       );
@@ -1618,25 +2353,28 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
     });
   }
 
-  zoomGroup.append(backdrop, probeLayer, pulseLayer, beaconLayer, tagLayer, pillLayer);
-  appendWrapTileCopies(zoomGroup, [probeLayer, pulseLayer, beaconLayer, tagLayer, pillLayer], {
+  zoomGroup.append(backdrop, probeLayer, pulseLayer, leaderLayer, beaconLayer, tagLayer, pillLayer);
+  appendWrapTileCopies(zoomGroup, [probeLayer, pulseLayer, leaderLayer, beaconLayer, tagLayer, pillLayer], {
     wrapSpan,
     viewportWidth: vw,
     helpers,
   });
   stageClipGroup.append(oceanBase, zoomGroup);
 
-  const hudLayer = createSVGEl("g", {
-    class: "a-dash-topo-map-hud",
-    "clip-path": `url(#${clipId})`,
-    "data-refresh-key": "map-layer-hud",
-  });
-  const deskLeftText = singleMode
-    ? `${model.onlineNodes}/${model.totalNodes} 节点在线 · ${model.singleGroup.hopCount} 跳链路`
-    : `${model.onlineNodes}/${model.totalNodes} 节点在线 · ${model.probeChains.length} 监测组`;
-  const deskRightText = singleMode
-    ? "拖拽左右循环 · 双击或 Ctrl+滚轮缩放"
-    : buildMapHudLatencyLine(model, false);
+  const deskLeftText = clipTextToPx(
+    singleMode
+      ? `${model.onlineNodes}/${model.totalNodes} 节点在线 · ${model.singleGroup.hopCount} 跳链路`
+      : `${model.onlineNodes}/${model.totalNodes} 节点在线 · ${model.probeChains.length} 监测组`,
+    10.5,
+    380,
+  );
+  const deskRightText = clipTextToPx(
+    singleMode
+      ? "拖拽左右循环 · 双击或 Ctrl+滚轮缩放"
+      : buildMapHudLatencyLine(model, false),
+    11,
+    390,
+  );
   hudLayer.append(
     createSVGEl("rect", { x: 0, y: 0, width: vw, height: 28, fill: "rgba(255,255,255,0.92)" }),
     createSVGEl("line", { x1: 0, y1: 28, x2: vw, y2: 28, stroke: BORDER_COLOR, "stroke-width": "0.9" }),

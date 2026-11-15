@@ -1,5 +1,5 @@
 import { createSVGEl } from "./dashboard-panel.js";
-import { probeHistorySeries } from "../modules/dashboard-model.js";
+import { isProbeRunning as isModelProbeRunning, probeHistorySeries } from "../modules/dashboard-model.js";
 import { geoRegionDetails } from "../modules/region-model.js";
 import { PACIFIC_MAP_BOUNDS, projectPacificGeo } from "./pacific-map-data.js";
 
@@ -10,13 +10,84 @@ export const BAD_COLOR = "#a41a2b";
 export const IDLE_FLOW_COLOR = "#a1a1aa";
 export const OK_COLOR = "#155731";
 export const WARN_COLOR = "#b45309";
+export const RUNNING_COLOR = "#0284c7";
 export const CO_LOCATED_RADIUS_PX = 5.5;
 
 export function tonePalette(tone) {
-  if (tone === "ok") return { stroke: "#155731", fill: "#eef9f0", border: "#c9e8d2", ink: "#155731" };
-  if (tone === "warn") return { stroke: "#b45309", fill: "#fff8e9", border: "#efddbb", ink: "#754511" };
-  if (tone === "bad") return { stroke: "#a41a2b", fill: "#fff2f3", border: "#f2cdd2", ink: "#a41a2b" };
-  return { stroke: "#71717a", fill: "#f4f4f5", border: "#e4e4e7", ink: "#52525b" };
+  if (tone === "ok") {
+    return {
+      stroke: "#155731",
+      fill: "#eef9f0",
+      border: "#c9e8d2",
+      ink: "#155731",
+      pulse: "#22c55e",
+      pulseCore: "#dcfce7",
+      activeDot: "#4ade80",
+    };
+  }
+  if (tone === "warn") {
+    return {
+      stroke: "#b45309",
+      fill: "#fff8e9",
+      border: "#efddbb",
+      ink: "#754511",
+      pulse: "#f59e0b",
+      pulseCore: "#fef3c7",
+      activeDot: "#fbbf24",
+    };
+  }
+  if (tone === "bad") {
+    return {
+      stroke: "#a41a2b",
+      fill: "#fff2f3",
+      border: "#f2cdd2",
+      ink: "#a41a2b",
+      pulse: "#ef4444",
+      pulseCore: "#fee2e2",
+      activeDot: "#f87171",
+    };
+  }
+  if (tone === "running") {
+    return {
+      stroke: "#0284c7",
+      fill: "#f0f9ff",
+      border: "#bae6fd",
+      ink: "#0369a1",
+      pulse: "#38bdf8",
+      pulseCore: "#e0f2fe",
+      activeDot: "#38bdf8",
+    };
+  }
+  return {
+    stroke: "#71717a",
+    fill: "#f4f4f5",
+    border: "#e4e4e7",
+    ink: "#52525b",
+    pulse: "#a1a1aa",
+    pulseCore: "#f4f4f5",
+    activeDot: "#a1a1aa",
+  };
+}
+
+export function isProbeRunning(probe) {
+  if (!probe) return false;
+  if (probe.running) return true;
+  return isModelProbeRunning(probe);
+}
+
+export function resolveChainTone(probe) {
+  if (!probe) return "";
+  if (isProbeRunning(probe)) return "running";
+  const rawTone = probe.tone ?? probe.overall?.statusBadge?.tone ?? probe.overall?.tone ?? probe.status?.tone ?? "";
+  if (rawTone === "ok" || rawTone === "warn" || rawTone === "bad" || rawTone === "running") {
+    return rawTone;
+  }
+  return "";
+}
+
+export function resolveArrowMarkerID(prefix = "a-topo", tone = "", small = false) {
+  const norm = tone === "ok" || tone === "warn" || tone === "bad" || tone === "running" ? tone : "idle";
+  return `${prefix}-arrow-${small ? "sm-" : ""}${norm}`;
 }
 
 export function visualUnits(text) {
@@ -106,7 +177,7 @@ export function buildProbePillLabel(probe, compact = false, dense = false, metri
   if (!probe) return "—";
   const dirMode = metricDir || probe.metricDir || "both";
   const prefix = "";
-  if (probe.running) return `${prefix}探测中…`;
+  if (isProbeRunning(probe)) return `${prefix}探测中…`;
   if (probe.unavailableReverse || (dirMode === "reverse" && !probe.bidirectional)) return `${prefix}单向`;
   if (isProbeUnreachable(probe)) {
     if (compact) return `${prefix}不可达`;
@@ -114,42 +185,89 @@ export function buildProbePillLabel(probe, compact = false, dense = false, metri
       ? `${prefix}不可达 · 100%`
       : `${prefix}${probe.metricLabel || "不可达"}`;
   }
+  const fmtPct = (v) => Number(v).toFixed(Number(v) % 1 ? 1 : 0);
   const slash = compact || dense ? "/" : " / ";
-  const hasPrimary = probe.latencyMS != null && Number.isFinite(Number(probe.latencyMS));
-  const hasRev = dirMode === "both" && Boolean(probe.bidirectional) && probe.revLatencyMS != null && Number.isFinite(Number(probe.revLatencyMS));
+  const hasPrimary = probe.latencyMS != null && Number.isFinite(Number(probe.latencyMS))
+    && !(probe.fwdLossPercent != null && Number(probe.fwdLossPercent) >= 100 && Number(probe.latencyMS) <= 0);
+  const hasRev = dirMode === "both" && Boolean(probe.bidirectional) && probe.revLatencyMS != null && Number.isFinite(Number(probe.revLatencyMS))
+    && !(probe.revLossPercent != null && Number(probe.revLossPercent) >= 100 && Number(probe.revLatencyMS) <= 0);
+
+  if (dirMode === "both" && probe.bidirectional && (hasPrimary || hasRev)) {
+    const fLoss = probe.fwdLossPercent != null && Number.isFinite(Number(probe.fwdLossPercent)) ? Number(probe.fwdLossPercent) : null;
+    const rLoss = probe.revLossPercent != null && Number.isFinite(Number(probe.revLossPercent)) ? Number(probe.revLossPercent) : null;
+    const fUnreach = !hasPrimary && fLoss != null;
+    const rUnreach = !hasRev && rLoss != null;
+    const isAsymLoss = (fLoss != null && rLoss != null && Math.round(fLoss * 10) !== Math.round(rLoss * 10) && (fLoss > 0 || rLoss > 0))
+      || (hasPrimary !== hasRev);
+    if (isAsymLoss && !dense) {
+      const dirSpace = compact ? "" : " ";
+      const dirSep = " / ";
+      const fPart = hasPrimary
+        ? `去${dirSpace}${formatMsCompact(Number(probe.latencyMS))}${fLoss != null && fLoss > 0 ? `·${fmtPct(fLoss)}%` : ""}`
+        : `去${dirSpace}${fUnreach ? "×" : "—"}`;
+      const rPart = hasRev
+        ? `回${dirSpace}${formatMsCompact(Number(probe.revLatencyMS))}${rLoss != null && rLoss > 0 ? `·${fmtPct(rLoss)}%` : ""}`
+        : `回${dirSpace}${rUnreach ? "×" : "—"}`;
+      return `${prefix}${fPart}${dirSep}${rPart}`;
+    }
+  }
+
   let rtt = "";
+  let dirLoss = probe.lossPercent;
+  let dirJitterHigh = Boolean(probe.jitterHigh);
+  let dirLatencyHigh = Boolean(probe.latencyHigh);
+
   if (dirMode === "reverse") {
-    if (!hasPrimary) return `${prefix}${probe.metricLabel || "待采样"}`;
-    rtt = compact ? `回${formatMsCompact(probe.latencyMS)}` : `回 ${formatMsCompact(probe.latencyMS)}`;
+    const revVal = probe.metricDir !== "reverse" && probe.revLatencyMS != null ? probe.revLatencyMS : probe.latencyMS;
+    const revLossVal = probe.metricDir !== "reverse" && probe.revLossPercent != null ? probe.revLossPercent : probe.lossPercent;
+    const revOk = revVal != null && Number.isFinite(Number(revVal))
+      && !(revLossVal != null && Number(revLossVal) >= 100 && Number(revVal) <= 0);
+    if (!revOk) return `${prefix}${probe.metricLabel || "待采样"}`;
+    rtt = compact ? `回${formatMsCompact(Number(revVal))}` : `回 ${formatMsCompact(Number(revVal))}`;
+    if (probe.metricDir !== "reverse" && probe.revLossPercent != null) dirLoss = probe.revLossPercent;
+    if (probe.metricDir !== "reverse" && probe.revJitterHigh !== undefined) dirJitterHigh = Boolean(probe.revJitterHigh);
   } else if (dirMode === "forward") {
     if (!hasPrimary) return `${prefix}${probe.metricLabel || "待采样"}`;
-    rtt = compact ? (probe.bidirectional ? `去${formatMsCompact(probe.latencyMS)}` : formatMsCompact(probe.latencyMS)) : (!probe.bidirectional ? formatMsCompact(probe.latencyMS) : `去 ${formatMsCompact(probe.latencyMS)}`);
+    rtt = compact
+      ? (probe.bidirectional ? `去${formatMsCompact(Number(probe.latencyMS))}` : formatMsCompact(Number(probe.latencyMS)))
+      : (!probe.bidirectional ? formatMsCompact(Number(probe.latencyMS)) : `去 ${formatMsCompact(Number(probe.latencyMS))}`);
+    if (probe.metricDir !== "forward" && probe.fwdLossPercent != null) dirLoss = probe.fwdLossPercent;
+    if (probe.metricDir !== "forward" && probe.fwdJitterHigh !== undefined) dirJitterHigh = Boolean(probe.fwdJitterHigh);
   } else if (probe.bidirectional && (hasPrimary || hasRev)) {
     const fKnown = hasPrimary || probe.fwdLossPercent != null;
     const rKnown = hasRev || probe.revLossPercent != null;
-    const f = hasPrimary ? formatMsCompact(probe.latencyMS) : (fKnown ? "×" : "—");
-    const r = hasRev ? formatMsCompact(probe.revLatencyMS) : (rKnown ? "×" : "");
+    const f = hasPrimary ? formatMsCompact(Number(probe.latencyMS)) : (fKnown ? "×" : "—");
+    const r = hasRev ? formatMsCompact(Number(probe.revLatencyMS)) : (rKnown ? "×" : "");
     rtt = dense || !r ? f : `${f}${slash}${r}`;
   } else if (hasPrimary) {
-    rtt = formatMsCompact(probe.latencyMS);
+    rtt = formatMsCompact(Number(probe.latencyMS));
   } else {
     return `${prefix}${probe.metricLabel || "待采样"}`;
   }
-  if (probe.lossPercent == null) return `${prefix}${rtt}`;
-  const lossNum = probe.lossPercent.toFixed(probe.lossPercent % 1 ? 1 : 0);
-  if (compact) return probe.lossPercent > 0 ? `${prefix}${rtt} · ${lossNum}%` : `${prefix}${rtt}`;
-  return probe.lossPercent > 0 ? `${prefix}${rtt} · 丢包${lossNum}%` : `${prefix}${rtt} · 0%`;
+
+  if (dirLoss == null) return `${prefix}${rtt}`;
+  const lossVal = Number(dirLoss);
+  const lossNum = fmtPct(lossVal);
+  if (lossVal > 0) {
+    return compact ? `${prefix}${rtt} · ${lossNum}%` : `${prefix}${rtt} · 丢包${lossNum}%`;
+  }
+  const base = compact ? `${prefix}${rtt}` : `${prefix}${rtt} · 0%`;
+  if (dirJitterHigh) return `${base}${compact ? " · 抖" : " · 高抖动"}`;
+  if (dirLatencyHigh) return `${base}${compact ? " · 慢" : " · 高延迟"}`;
+  return base;
 }
 
 export function buildProbeShortAlertLabel(probe) {
   if (!probe) return "异常";
   const prefix = "";
-  if (probe.running) return `${prefix}探测中…`;
+  if (isProbeRunning(probe)) return `${prefix}探测中…`;
   if (isProbeUnreachable(probe)) return `${prefix}不可达`;
   if (probe.lossPercent != null && probe.lossPercent > 0) {
     const lossNum = probe.lossPercent.toFixed(probe.lossPercent % 1 ? 1 : 0);
     return `${prefix}丢包${lossNum}%`;
   }
+  if (probe.jitterHigh) return `${prefix}高抖动`;
+  if (probe.latencyHigh) return `${prefix}高延迟`;
   return `${prefix}${probe.metricLabel || "异常"}`;
 }
 
@@ -717,25 +835,32 @@ export function placeCollisionFreePill(targetX, targetY, w, h, occupied, bounds,
 
 export function createTopologyDefs(prefix = "a-topo") {
   const defs = createSVGEl("defs", { "data-refresh-key": `${prefix}-defs` });
-  const addArrow = (id, color) => {
+  const addArrow = (id, color, size = 5.2) => {
     const marker = createSVGEl("marker", {
       id,
       "data-refresh-key": id,
       viewBox: "0 0 10 10",
       refX: "8.2",
       refY: "5",
-      markerWidth: "5.2",
-      markerHeight: "5.2",
+      markerWidth: String(size),
+      markerHeight: String(size),
       orient: "auto-start-reverse",
     });
     marker.append(createSVGEl("path", { d: "M 0 1.8 L 8.5 5 L 0 8.2 z", fill: color }));
     defs.append(marker);
   };
 
-  addArrow(`${prefix}-arrow-ok`, OK_COLOR);
-  addArrow(`${prefix}-arrow-warn`, WARN_COLOR);
-  addArrow(`${prefix}-arrow-bad`, BAD_COLOR);
-  addArrow(`${prefix}-arrow-idle`, IDLE_FLOW_COLOR);
+  const tones = [
+    ["ok", OK_COLOR],
+    ["warn", WARN_COLOR],
+    ["bad", BAD_COLOR],
+    ["idle", IDLE_FLOW_COLOR],
+    ["running", RUNNING_COLOR],
+  ];
+  for (const [name, color] of tones) {
+    addArrow(`${prefix}-arrow-${name}`, color, 5.2);
+    addArrow(`${prefix}-arrow-sm-${name}`, color, 4.2);
+  }
 
   return defs;
 }

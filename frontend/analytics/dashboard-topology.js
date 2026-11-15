@@ -23,12 +23,13 @@ import {
   formatLoss,
   formatMs,
   formatMsCompact,
-  isProbeUnreachable,
+  isProbeRunning as isTopoProbeRunning,
   matchesActiveSelection,
   reconcileSelectionKey,
   renderHopConduitSVG,
   renderProbeHistoryChart,
   summarizeGroupMetricLine,
+  tonePalette,
 } from "./dashboard-topo-shared.js";
 
 import { listen, patch } from "./live-dom.js";
@@ -145,10 +146,14 @@ export function createDashboardTopologySection(ctx, {
   let topoMapShowAll = false;
   let mapPinnedKey = "";
   let mapHoveredKey = "";
+  let mapFocusedTagKey = "";
   let mapZoom = { scale: 1, tx: 0, ty: 0 };
   let mapDefaultZoom = { scale: 1, tx: 0, ty: 0 };
   let mapZoomScopeSig = "";
   let mapZoomCustom = false;
+  let zoomCommitTimer = null;
+  let activeRenderedZoom = null;
+  let previewContinuousTx = null;
   let isMapDragging = false;
   let suppressNextMapClick = false;
   let activeDrag = {
@@ -167,9 +172,17 @@ export function createDashboardTopologySection(ctx, {
   let lastFleetModel = null;
   let lastSingleMapModel = null;
 
+  const clearPendingZoomCommit = () => {
+    if (zoomCommitTimer) {
+      clearTimeout(zoomCommitTimer);
+      zoomCommitTimer = null;
+    }
+  };
+
   ctx.signal.addEventListener("abort", () => {
     disposed = true;
     paintScheduled = false;
+    clearPendingZoomCommit();
     lastActiveGroup = null;
     lastFleetModel = null;
     lastSingleMapModel = null;
@@ -206,6 +219,8 @@ export function createDashboardTopologySection(ctx, {
         flowInspectKey = "";
         mapPinnedKey = "";
         mapHoveredKey = "";
+        mapFocusedTagKey = "";
+        clearPendingZoomCommit();
         changed = true;
       }
       if (!topoDomainTouched && saved.domain_group !== undefined) {
@@ -214,6 +229,8 @@ export function createDashboardTopologySection(ctx, {
           topoDomainGroup = nextDomain;
           mapPinnedKey = "";
           mapHoveredKey = "";
+          mapFocusedTagKey = "";
+          clearPendingZoomCommit();
           changed = true;
         }
       }
@@ -278,8 +295,10 @@ export function createDashboardTopologySection(ctx, {
     dashGroupName = next;
     focusedItemKey = "";
     mapHoveredKey = "";
+    mapFocusedTagKey = "";
     mapZoomCustom = false;
     mapZoomScopeSig = "";
+    clearPendingZoomCommit();
     if (changed) paint(true);
   };
 
@@ -289,7 +308,9 @@ export function createDashboardTopologySection(ctx, {
     const changed = dashViewMode !== normalized;
     dashViewMode = normalized;
     mapHoveredKey = "";
+    mapFocusedTagKey = "";
     if (changed) {
+      clearPendingZoomCommit();
       ctx.preferences?.patch?.("dashboard", { topo_view_mode: normalized });
       paint(true);
     }
@@ -322,8 +343,10 @@ export function createDashboardTopologySection(ctx, {
     flowInspectKey = "";
     mapPinnedKey = "";
     mapHoveredKey = "";
+    mapFocusedTagKey = "";
     mapZoomCustom = false;
     mapZoomScopeSig = "";
+    clearPendingZoomCommit();
     if (Object.keys(patchFields).length) {
       ctx.preferences?.patch?.("topology", patchFields);
     }
@@ -338,10 +361,12 @@ export function createDashboardTopologySection(ctx, {
     if (changed) {
       mapPinnedKey = "";
       mapHoveredKey = "";
+      mapFocusedTagKey = "";
       focusedItemKey = "";
       flowInspectKey = "";
       mapZoomCustom = false;
       mapZoomScopeSig = "";
+      clearPendingZoomCommit();
       ctx.preferences?.patch?.("topology", { domain_group: normalized });
       paint(true);
     }
@@ -357,8 +382,10 @@ export function createDashboardTopologySection(ctx, {
     topoSelectedGroup = next;
     focusedItemKey = "";
     mapHoveredKey = "";
+    mapFocusedTagKey = "";
     mapZoomCustom = false;
     mapZoomScopeSig = "";
+    clearPendingZoomCommit();
     if (changed) paint(true);
   };
 
@@ -368,7 +395,9 @@ export function createDashboardTopologySection(ctx, {
     const changed = topoFocusViz !== normalized;
     topoFocusViz = normalized;
     mapHoveredKey = "";
+    mapFocusedTagKey = "";
     if (changed) {
+      clearPendingZoomCommit();
       ctx.preferences?.patch?.("topology", { focus_viz: normalized });
       paint(true);
     }
@@ -382,7 +411,9 @@ export function createDashboardTopologySection(ctx, {
     if (changed) {
       mapPinnedKey = "";
       mapHoveredKey = "";
+      mapFocusedTagKey = "";
       flowInspectKey = "";
+      clearPendingZoomCommit();
       ctx.preferences?.patch?.("topology", { status_filter: filter });
       paint(true);
     }
@@ -498,13 +529,15 @@ export function createDashboardTopologySection(ctx, {
     if (document.querySelector("dialog[open], .a-tooltip")) return;
     const scopeEl = cardEl || bodyHost;
     if (!scopeEl.contains(event.target) && !scopeEl.contains(document.activeElement)) return;
-    if (focusedItemKey || flowInspectKey || mapPinnedKey || mapHoveredKey) {
+    if (focusedItemKey || flowInspectKey || mapPinnedKey || mapHoveredKey || mapFocusedTagKey) {
       focusedItemKey = "";
       flowInspectKey = "";
       mapPinnedKey = "";
       mapHoveredKey = "";
+      mapFocusedTagKey = "";
       paint(true);
     } else if (mapZoomCustom) {
+      clearPendingZoomCommit();
       mapZoom = { ...mapDefaultZoom };
       mapZoomCustom = false;
       paint(true);
@@ -797,11 +830,12 @@ export function createDashboardTopologySection(ctx, {
   };
 
   const renderFleetMapInspect = (model) => {
-    const activeSel = mapHoveredKey || mapPinnedKey;
+    const activeSel = mapHoveredKey || mapFocusedTagKey || mapPinnedKey;
     const clearBtn = mapPinnedKey
       ? button("取消聚焦", () => {
           mapPinnedKey = "";
           mapHoveredKey = "";
+          mapFocusedTagKey = "";
           syncLiveMapSelection();
         }, { className: "a-button a-topo-mini-btn", "data-refresh-key": "map-unpin" })
       : null;
@@ -905,14 +939,14 @@ export function createDashboardTopologySection(ctx, {
     const svg = bodyHost.querySelector("svg.a-dash-topo-map-svg");
     if (!svg) return;
     const isSingle = Boolean(svg.closest(".a-topo-single-stage"));
-    const activeSel = isSingle
-      ? (mapHoveredKey || resolveSingleFocusKeyToMapKey(lastActiveGroup, focusedItemKey, lastSingleMapModel))
-      : (mapHoveredKey || mapPinnedKey);
     const pinnedSel = isSingle
       ? resolveSingleFocusKeyToMapKey(lastActiveGroup, focusedItemKey, lastSingleMapModel)
       : mapPinnedKey;
+    const activeSel = mapHoveredKey || mapFocusedTagKey || pinnedSel;
+    const revealKey = mapHoveredKey || mapFocusedTagKey || pinnedSel;
 
     svg.querySelectorAll("[data-topo-peers]").forEach((el) => {
+      if (el.classList.contains("is-hover-only") || el.hasAttribute("data-hover-tag-for")) return;
       const peers = (el.getAttribute("data-topo-peers") || "").split(" ").filter(Boolean);
       const match = matchesActiveSelection(peers, activeSel);
       const base = el.getAttribute("data-base-opacity") || "1";
@@ -926,7 +960,15 @@ export function createDashboardTopologySection(ctx, {
       const active = pinnedSel === key;
       el.setAttribute("aria-pressed", active ? "true" : "false");
       el.classList.toggle("is-active", active);
-      el.classList.toggle("is-hovered", Boolean(mapHoveredKey && mapHoveredKey === key));
+      el.classList.toggle("is-hovered", Boolean((mapHoveredKey && mapHoveredKey === key) || (mapFocusedTagKey && mapFocusedTagKey === key)));
+    });
+    svg.querySelectorAll("[data-hover-tag-for]").forEach((tag) => {
+      const targetKey = tag.getAttribute("data-hover-tag-for") || "";
+      const visible = Boolean(revealKey && targetKey === revealKey);
+      tag.classList.toggle("is-visible", visible);
+      if (visible) tag.setAttribute("data-hover-visible", "1");
+      else tag.removeAttribute("data-hover-visible");
+      tag.setAttribute("opacity", visible ? "1" : "0");
     });
 
     if (!isSingle && lastFleetModel) {
@@ -939,8 +981,8 @@ export function createDashboardTopologySection(ctx, {
     const isSingle = Boolean(singleGroup);
     const activeKey = () => (
       isSingle
-        ? (mapHoveredKey || resolveSingleFocusKeyToMapKey(singleGroup, focusedItemKey, model))
-        : (mapHoveredKey || mapPinnedKey)
+        ? (mapHoveredKey || mapFocusedTagKey || resolveSingleFocusKeyToMapKey(singleGroup, focusedItemKey, model))
+        : (mapHoveredKey || mapFocusedTagKey || mapPinnedKey)
     );
     const pinnedOnlyKey = () => (
       isSingle
@@ -967,6 +1009,19 @@ export function createDashboardTopologySection(ctx, {
           syncLiveMapSelection();
         }
       });
+      listen(el, "focusin", () => {
+        if (mapFocusedTagKey !== key) {
+          mapFocusedTagKey = key;
+          syncLiveMapSelection();
+        }
+      });
+      listen(el, "focusout", (event) => {
+        if (event.relatedTarget && el.contains(event.relatedTarget)) return;
+        if (mapFocusedTagKey === key) {
+          mapFocusedTagKey = "";
+          syncLiveMapSelection();
+        }
+      });
       const activate = (event) => {
         if (event.type === "click" && suppressNextMapClick) return;
         if (event.type === "keydown" && event.key !== "Enter" && event.key !== " ") return;
@@ -984,26 +1039,28 @@ export function createDashboardTopologySection(ctx, {
       listen(el, "keydown", activate);
     };
 
-    const appendProbeLeader = (layer, placed, pal, peers, hl, compact = false, focusOnly = false, probeID = "") => {
-      if (!placed.shifted) return;
+    const appendProbeLeader = (leaderLayer, placed, pal, peers, hl, compact = false, focusOnly = false, probeID = "") => {
+      if (!leaderLayer || !placed?.shifted) return;
       const baseStr = focusOnly ? "0" : "0.86";
       const dimStr = focusOnly ? "0" : "0.18";
       const op = focusOnly ? (hl === true ? "1" : "0") : (hl === false ? "0.18" : "0.86");
+      const leaderClass = focusOnly ? "a-dash-topo-probe-leader a-dash-topo-focus-only" : "a-dash-topo-probe-leader";
       const attrs = {
-        class: focusOnly ? "a-dash-topo-focus-only" : null,
+        class: leaderClass,
         "data-topo-peers": peers.join(" "),
         "data-base-opacity": baseStr,
         "data-dim-opacity": dimStr,
         opacity: op,
       };
-      layer.append(
+      leaderLayer.append(
         createSVGEl("line", {
           ...(probeID ? { "data-refresh-key": `probe-leader-line-${probeID}` } : {}),
           x1: placed.anchorX.toFixed(1),
           y1: placed.anchorY.toFixed(1),
           x2: placed.cx.toFixed(1),
           y2: placed.cy.toFixed(1),
-          stroke: pal.border,
+          stroke: pal.stroke,
+          "stroke-opacity": compact ? "0.58" : "0.66",
           "stroke-width": compact ? "0.95" : "1.1",
           "stroke-dasharray": "2 2",
           ...attrs,
@@ -1012,14 +1069,27 @@ export function createDashboardTopologySection(ctx, {
           ...(probeID ? { "data-refresh-key": `probe-leader-dot-${probeID}` } : {}),
           cx: placed.anchorX.toFixed(1),
           cy: placed.anchorY.toFixed(1),
-          r: compact ? 1.9 : 2.3,
+          r: compact ? 2.1 : 2.5,
           fill: pal.stroke,
+          stroke: "#ffffff",
+          "stroke-width": "1.2",
           ...attrs,
         }),
       );
     };
 
-    const createProbePillGroup = ({ probe, cx, cy, pillW, pillH, label, pal, compact = false, peers, focusOnly = false }) => {
+    const createProbePillGroup = ({
+      probe,
+      cx,
+      cy,
+      pillW,
+      pillH,
+      label,
+      pal,
+      compact = false,
+      peers,
+      focusOnly = false,
+    }) => {
       const eKey = topoEntityKey.probe(probe.id);
       const hl = isHighlightedEdge(peers);
       const selected = pinnedOnlyKey() === eKey;
@@ -1047,38 +1117,31 @@ export function createDashboardTopologySection(ctx, {
         rx: (pillH / 2).toFixed(1),
         fill: pal.fill,
         stroke: pal.border,
-        "stroke-width": selected || hl === true ? "1.8" : "1.1",
+        "stroke-width": selected || hl === true ? "1.85" : "1.1",
         class: "a-dash-topo-probe-pill",
       }));
+
       const dotX = cx - pillW / 2 + (compact ? 6.5 : 8.5);
-      if (isProbeUnreachable(probe) && probe.tone === "bad") {
-        const s = compact ? 1.8 : 2.1;
-        g.append(createSVGEl("path", {
-          class: "a-dash-topo-pill-dot",
-          d: `M ${(dotX - s).toFixed(1)} ${(cy - s).toFixed(1)} L ${(dotX + s).toFixed(1)} ${(cy + s).toFixed(1)} M ${(dotX + s).toFixed(1)} ${(cy - s).toFixed(1)} L ${(dotX - s).toFixed(1)} ${(cy + s).toFixed(1)}`,
-          fill: "none",
-          stroke: pal.stroke,
-          "stroke-width": "1.35",
-          "stroke-linecap": "round",
-        }));
-      } else {
-        g.append(createSVGEl("circle", {
-          class: "a-dash-topo-pill-dot",
-          cx: dotX.toFixed(1),
-          cy: cy.toFixed(1),
-          r: compact ? 2.1 : 2.5,
-          fill: pal.stroke,
-        }));
-      }
+      g.append(createSVGEl("circle", {
+        cx: dotX.toFixed(1),
+        cy: cy.toFixed(1),
+        r: compact ? 2.1 : 2.5,
+        fill: pal.stroke,
+      }));
+      const textX = dotX + (compact ? 5.2 : 6.5);
+
       g.append(createSVGEl("text", {
-        x: (dotX + (compact ? 5.2 : 6.5)).toFixed(1),
+        x: textX.toFixed(1),
         y: (cy + (compact ? 3.2 : 3.6)).toFixed(1),
         class: "a-dash-topo-pill-text",
         fill: pal.ink,
       }, label));
+
       bindInteractive(g, eKey);
       return g;
     };
+
+    const formatTime = (iso) => (iso ? date(iso) : "");
 
     return {
       clipId,
@@ -1089,6 +1152,8 @@ export function createDashboardTopologySection(ctx, {
       bindInteractive,
       createProbePillGroup,
       appendProbeLeader,
+      formatTime,
+      formatDate: formatTime,
     };
   };
 
@@ -1112,8 +1177,11 @@ export function createDashboardTopologySection(ctx, {
   };
 
   const buildMapStageElement = ({ model, singleGroup = null, scopeKey = "map", scopeExtra = "", isMobile = false, width = 880 } = {}) => {
+    clearPendingZoomCommit();
     const dims = ensureMapZoomForScope({ model, singleGroup, scopeKey, scopeExtra, isMobile, width });
     const renderedZoom = { ...mapZoom };
+    activeRenderedZoom = { ...renderedZoom };
+    previewContinuousTx = renderedZoom.tx;
     if (activeDrag.active || activeDrag.dragging) {
       activeDrag.renderedZoom = { ...renderedZoom };
       activeDrag.dims = { ...dims };
@@ -1149,8 +1217,9 @@ export function createDashboardTopologySection(ctx, {
         suppressNextMapClick = false;
         return;
       }
-      if (event.target.closest?.("[data-topo-entity], .a-dash-topo-map-tools")) return;
+      if (event.target.closest?.("[data-topo-entity], .a-dash-topo-map-tools, .a-dash-topo-map-overlay-actions")) return;
       mapHoveredKey = "";
+      mapFocusedTagKey = "";
       if (singleGroup) {
         if (focusedItemKey) {
           focusedItemKey = "";
@@ -1162,62 +1231,121 @@ export function createDashboardTopologySection(ctx, {
       }
     });
 
+    const computeZoomButtonState = () => {
+      const hasSelectionNow = Boolean(singleGroup ? focusedItemKey : mapPinnedKey);
+      const wrapSpanNow = getMapWrapSpan(dims.width, mapZoom.scale);
+      const txDeltaNow = wrapSpanNow > 0
+        ? Math.abs(((((mapZoom.tx - mapDefaultZoom.tx) % wrapSpanNow) + wrapSpanNow * 1.5) % wrapSpanNow) - wrapSpanNow * 0.5)
+        : Math.abs(mapZoom.tx - mapDefaultZoom.tx);
+      const isModified = mapZoomCustom && (
+        Math.abs(mapZoom.scale - mapDefaultZoom.scale) > 0.02 ||
+        txDeltaNow > 1.5 ||
+        Math.abs(mapZoom.ty - mapDefaultZoom.ty) > 1.5
+      );
+      const pctLabelNow = `${Math.round(mapZoom.scale * 100)}%`;
+      return {
+        zoomOutDisabled: mapZoom.scale <= 1.01,
+        zoomInDisabled: mapZoom.scale >= MAX_MAP_SCALE - 0.05,
+        resetDisabled: !isModified && !hasSelectionNow,
+        resetText: (isModified || hasSelectionNow) ? `重置 (${pctLabelNow})` : pctLabelNow,
+      };
+    };
+
+    const initialZoomState = computeZoomButtonState();
+    const zoomOutBtn = button("−", () => zoomBy(1 / 1.35), {
+      className: "a-button",
+      title: "缩小地图",
+      disabled: initialZoomState.zoomOutDisabled,
+      "data-refresh-key": "map-zoom-out",
+    });
+    const zoomResetBtn = button(initialZoomState.resetText, () => {
+      clearPendingZoomCommit();
+      mapHoveredKey = "";
+      mapFocusedTagKey = "";
+      mapZoom = { ...mapDefaultZoom };
+      mapZoomCustom = false;
+      if (singleGroup) focusedItemKey = "";
+      else mapPinnedKey = "";
+      paint(true);
+    }, {
+      className: "a-button",
+      title: singleGroup ? "恢复默认居中对焦视角" : "重置地图视角",
+      disabled: initialZoomState.resetDisabled,
+      "data-refresh-key": "map-zoom-reset",
+    });
+    const zoomInBtn = button("+", () => zoomBy(1.35), {
+      className: "a-button",
+      title: "放大地图",
+      disabled: initialZoomState.zoomInDisabled,
+      "data-refresh-key": "map-zoom-in",
+    });
+
     const zoomBy = (factor, anchorX = dims.width / 2, anchorY = dims.mapHeight / 2) => {
-      const nextScale = Math.max(1, Math.min(MAX_MAP_SCALE, mapZoom.scale * factor));
-      if (Math.abs(nextScale - mapZoom.scale) < 0.01) return;
-      const ratio = nextScale / mapZoom.scale;
+      const prevScale = mapZoom.scale;
+      const nextScale = Math.max(1, Math.min(MAX_MAP_SCALE, prevScale * factor));
+      if (Math.abs(nextScale - prevScale) < 0.01) return;
+      const ratio = nextScale / prevScale;
+      const prevContTx = previewContinuousTx ?? mapZoom.tx;
+      const nextContTx = anchorX - (anchorX - prevContTx) * ratio;
+      previewContinuousTx = nextContTx;
+
       mapZoom = clampMapZoomTransform({
         scale: nextScale,
-        tx: anchorX - (anchorX - mapZoom.tx) * ratio,
+        tx: nextContTx,
         ty: anchorY - (anchorY - mapZoom.ty) * ratio,
       }, dims.width, dims.mapHeight, MAX_MAP_SCALE);
       mapZoomCustom = true;
-      paint(true);
+
+      const liveSvg = bodyHost.querySelector(`svg[data-refresh-key="map-svg-${scopeKey}"]`) || svg;
+      const baseZoom = activeRenderedZoom || renderedZoom;
+      const k = mapZoom.scale / (baseZoom.scale || 1);
+      const wrap1 = getMapWrapSpan(dims.width, mapZoom.scale);
+      let dx = mapZoom.tx - k * baseZoom.tx;
+      if (wrap1 > 0) {
+        const rawDx = nextContTx - k * baseZoom.tx;
+        dx += Math.round((rawDx - dx) / wrap1) * wrap1;
+      }
+      const dy = mapZoom.ty - k * baseZoom.ty;
+
+      if (wrap1 > 0 && Math.abs(dx) > wrap1 * 0.45) {
+        clearPendingZoomCommit();
+        paint(true);
+        return;
+      }
+
+      const vp = liveSvg.querySelector(".a-dash-topo-map-viewport");
+      if (vp) {
+        vp.setAttribute("transform", `translate(${dx.toFixed(2)} ${dy.toFixed(2)}) scale(${k.toFixed(4)})`);
+      }
+      liveSvg.classList.toggle("is-zoomed", mapZoom.scale > 1.01);
+
+      const uiState = computeZoomButtonState();
+      const liveTools = bodyHost.querySelector(`[data-refresh-key="map-tools-${scopeKey}"]`);
+      const outEl = liveTools?.querySelector('[data-refresh-key="map-zoom-out"]') || zoomOutBtn;
+      const resetEl = liveTools?.querySelector('[data-refresh-key="map-zoom-reset"]') || zoomResetBtn;
+      const inEl = liveTools?.querySelector('[data-refresh-key="map-zoom-in"]') || zoomInBtn;
+      if (outEl) outEl.disabled = uiState.zoomOutDisabled;
+      if (inEl) inEl.disabled = uiState.zoomInDisabled;
+      if (resetEl) {
+        resetEl.disabled = uiState.resetDisabled;
+        resetEl.textContent = uiState.resetText;
+      }
+
+      clearPendingZoomCommit();
+      zoomCommitTimer = setTimeout(() => {
+        zoomCommitTimer = null;
+        if (!disposed && ctx.current() && !isMapDragging) {
+          paint(true);
+        }
+      }, 180);
     };
 
-    const hasSelection = Boolean(singleGroup ? focusedItemKey : mapPinnedKey);
-    const wrapSpanNow = getMapWrapSpan(dims.width, mapZoom.scale);
-    const txDelta = wrapSpanNow > 0
-      ? Math.abs(((((mapZoom.tx - mapDefaultZoom.tx) % wrapSpanNow) + wrapSpanNow * 1.5) % wrapSpanNow) - wrapSpanNow * 0.5)
-      : Math.abs(mapZoom.tx - mapDefaultZoom.tx);
-    const isZoomModified = mapZoomCustom && (
-      Math.abs(mapZoom.scale - mapDefaultZoom.scale) > 0.02 ||
-      txDelta > 1.5 ||
-      Math.abs(mapZoom.ty - mapDefaultZoom.ty) > 1.5
-    );
-    const pctLabel = `${Math.round(mapZoom.scale * 100)}%`;
     const toolsBar = node("div", {
       className: `a-dash-topo-map-tools${isMobile ? " is-mobile" : ""}`,
       role: "group",
       "aria-label": "地图缩放控制",
       "data-refresh-key": `map-tools-${scopeKey}`,
-    },
-      button("−", () => zoomBy(1 / 1.35), {
-        className: "a-button",
-        title: "缩小地图",
-        disabled: mapZoom.scale <= 1.01,
-        "data-refresh-key": "map-zoom-out",
-      }),
-      button(isZoomModified || hasSelection ? `重置 (${pctLabel})` : pctLabel, () => {
-        mapHoveredKey = "";
-        mapZoom = { ...mapDefaultZoom };
-        mapZoomCustom = false;
-        if (singleGroup) focusedItemKey = "";
-        else mapPinnedKey = "";
-        paint(true);
-      }, {
-        className: "a-button",
-        title: singleGroup ? "恢复默认居中对焦视角" : "重置地图视角",
-        disabled: !isZoomModified && !hasSelection,
-        "data-refresh-key": "map-zoom-reset",
-      }),
-      button("+", () => zoomBy(1.35), {
-        className: "a-button",
-        title: "放大地图",
-        disabled: mapZoom.scale >= MAX_MAP_SCALE - 0.05,
-        "data-refresh-key": "map-zoom-in",
-      }),
-    );
+    }, zoomOutBtn, zoomResetBtn, zoomInBtn);
     stage.append(toolsBar);
 
     const clientToSvgPoint = (targetSvg, clientX, clientY) => {
@@ -1238,6 +1366,7 @@ export function createDashboardTopologySection(ctx, {
       const pt = clientToSvgPoint(liveSvg, e.clientX, e.clientY);
       if (pt.y > dims.mapHeight) return;
       if (mapZoom.scale >= 4.5) {
+        clearPendingZoomCommit();
         mapZoom = { ...mapDefaultZoom };
         mapZoomCustom = false;
         paint(true);
@@ -1256,6 +1385,13 @@ export function createDashboardTopologySection(ctx, {
       const vbH = vb?.height || dims.mapHeight;
       const clickSvgY = ((e.clientY - rect.top) / rect.height) * vbH;
       if (clickSvgY > dims.mapHeight) return;
+
+      if (zoomCommitTimer) {
+        clearPendingZoomCommit();
+        paint(true);
+      }
+      const settledSvg = bodyHost.querySelector(`svg[data-refresh-key="map-svg-${scopeKey}"]`) || liveSvg;
+      const settledZoom = { ...(activeRenderedZoom || mapZoom) };
       activeDrag = {
         active: true,
         dragging: false,
@@ -1263,9 +1399,9 @@ export function createDashboardTopologySection(ctx, {
         pointerId: e.pointerId,
         startClient: { x: e.clientX, y: e.clientY },
         lastClient: { x: e.clientX, y: e.clientY },
-        renderedZoom: { ...renderedZoom },
+        renderedZoom: settledZoom,
         dims: { ...dims },
-        svgEl: liveSvg,
+        svgEl: settledSvg,
       };
     });
 
@@ -1894,7 +2030,7 @@ export function createDashboardTopologySection(ctx, {
     paintScheduled = false;
     paintForced = false;
     if (!canViewSurface() || disposed) return;
-    if (!force && isMapDragging) return;
+    if (!force && (isMapDragging || zoomCommitTimer)) return;
 
     const states = getStates();
     const probesState = states.get("probes") || "";
@@ -1977,8 +2113,10 @@ export function createDashboardTopologySection(ctx, {
       const fleetClusters = clusterTopologyNodes(fleetMapModel.nodes);
       mapPinnedKey = reconcileSelectionKey(mapPinnedKey, fleetMapModel, { clusters: fleetClusters, allowCluster: true });
       mapHoveredKey = reconcileSelectionKey(mapHoveredKey, fleetMapModel, { clusters: fleetClusters, allowCluster: true });
+      mapFocusedTagKey = reconcileSelectionKey(mapFocusedTagKey, fleetMapModel, { clusters: fleetClusters, allowCluster: true });
     } else {
       mapPinnedKey = "";
+      mapFocusedTagKey = "";
     }
 
     const waiting = canReadProbes() && (!states.has("probes") || probesState === "loading") && !rawPairs.length;
@@ -2110,7 +2248,9 @@ export function createDashboardTopologySection(ctx, {
         }));
       }
       patchChildren(bodyHost, bodyChildren);
-      if (dashViewMode === "map") syncLiveMapSelection();
+      if (dashViewMode === "map") {
+        syncLiveMapSelection();
+      }
       return;
     }
 
@@ -2172,9 +2312,11 @@ export function createDashboardTopologySection(ctx, {
               topoMapShowAll = true;
               mapPinnedKey = "";
               mapHoveredKey = "";
+              mapFocusedTagKey = "";
               focusedItemKey = "";
               mapZoomCustom = false;
               mapZoomScopeSig = "";
+              clearPendingZoomCommit();
               paint(true);
             }, {
               className: `a-topo-group-pill${fleetCompareActive ? " is-active" : ""}`,
@@ -2256,7 +2398,9 @@ export function createDashboardTopologySection(ctx, {
     }
 
     patchChildren(bodyHost, bodyChildren);
-    if (showMapCurrently) syncLiveMapSelection();
+    if (showMapCurrently) {
+      syncLiveMapSelection();
+    }
     const sortEl = bodyHost.querySelector('select[name="topo_sort_by"]');
     if (sortEl && document.activeElement !== sortEl && sortEl.value !== topoSortBy) {
       sortEl.value = topoSortBy;

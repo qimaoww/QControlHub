@@ -324,6 +324,22 @@ export function rankDashboardTrafficView({
   };
 }
 
+export function isHighJitter(dir) {
+  if (!dir?.reached) return false;
+  if (dir.stdev_ms == null || dir.stdev_ms === "") return false;
+  const stdev = Number(dir.stdev_ms);
+  if (!Number.isFinite(stdev)) return false;
+  const avg = dir.avg_ms != null && dir.avg_ms !== "" ? Number(dir.avg_ms) : NaN;
+  return (Number.isFinite(avg) && avg > 0 && stdev / avg >= 0.35 && stdev >= 15) || stdev >= 50;
+}
+
+export function isHighLatency(dir) {
+  if (!dir?.reached) return false;
+  if (dir.avg_ms == null || dir.avg_ms === "") return false;
+  const avg = Number(dir.avg_ms);
+  return Number.isFinite(avg) && avg >= 600;
+}
+
 export function probeDirectionStatus(dir, availability, activeState = "") {
   if (availability && availability.ready === false) {
     if (dir && (dir.state === "failed" || dir.error || !dir.reached || Number(dir.loss_percent) >= 100)) {
@@ -342,6 +358,8 @@ export function probeDirectionStatus(dir, availability, activeState = "") {
   if (!dir.reached || dir.loss_percent >= 100) return { label: "不可达", tone: "bad", available: true };
   if (dir.loss_percent >= 20) return { label: `高丢包 ${Number(dir.loss_percent).toFixed(0)}%`, tone: "bad", available: true };
   if (dir.loss_percent > 0) return { label: `丢包 ${Number(dir.loss_percent).toFixed(1)}%`, tone: "warn", available: true };
+  if (isHighJitter(dir)) return { label: "高抖动", tone: "warn", available: true };
+  if (isHighLatency(dir)) return { label: "高延迟", tone: "warn", available: true };
   return { label: "正常", tone: "ok", available: true };
 }
 
@@ -554,13 +572,16 @@ export function isProbeRunning(pair) {
 function normalizeDirectionMetrics(dir, availability, activeState = "") {
   const status = probeDirectionStatus(dir, availability, activeState);
   const hasDir = Boolean(dir);
-  const avgMS = dir?.reached && finiteNonNegative(Number(dir.avg_ms)) ? Number(dir.avg_ms) : null;
-  const minMS = dir?.reached && finiteNonNegative(Number(dir.min_ms)) ? Number(dir.min_ms) : null;
-  const maxMS = dir?.reached && finiteNonNegative(Number(dir.max_ms)) ? Number(dir.max_ms) : null;
-  const stdevMS = dir?.reached && finiteNonNegative(Number(dir.stdev_ms)) ? Number(dir.stdev_ms) : null;
-  const lossPercent = hasDir && finiteNonNegative(Number(dir.loss_percent)) ? Number(dir.loss_percent) : null;
-  const sent = hasDir && finiteNonNegative(Number(dir.sent)) ? Number(dir.sent) : null;
-  const received = hasDir && finiteNonNegative(Number(dir.received)) ? Number(dir.received) : null;
+  const avgMS = dir?.reached && dir.avg_ms != null && dir.avg_ms !== "" && finiteNonNegative(Number(dir.avg_ms)) ? Number(dir.avg_ms) : null;
+  const minMS = dir?.reached && dir.min_ms != null && dir.min_ms !== "" && finiteNonNegative(Number(dir.min_ms)) ? Number(dir.min_ms) : null;
+  const maxMS = dir?.reached && dir.max_ms != null && dir.max_ms !== "" && finiteNonNegative(Number(dir.max_ms)) ? Number(dir.max_ms) : null;
+  const stdevMS = dir?.reached && dir.stdev_ms != null && dir.stdev_ms !== "" && finiteNonNegative(Number(dir.stdev_ms)) ? Number(dir.stdev_ms) : null;
+  const lossPercent = hasDir && dir.loss_percent != null && dir.loss_percent !== "" && finiteNonNegative(Number(dir.loss_percent)) ? Number(dir.loss_percent) : null;
+  const sent = hasDir && dir.sent != null && dir.sent !== "" && finiteNonNegative(Number(dir.sent)) ? Number(dir.sent) : null;
+  const received = hasDir && dir.received != null && dir.received !== "" && finiteNonNegative(Number(dir.received)) ? Number(dir.received) : null;
+  const jitterHigh = Boolean(isHighJitter(dir));
+  const latencyHigh = Boolean(isHighLatency(dir));
+  const jitterRatio = (avgMS > 0 && stdevMS != null) ? stdevMS / avgMS : null;
   return {
     available: hasDir,
     state: dir?.state || "",
@@ -573,6 +594,9 @@ function normalizeDirectionMetrics(dir, availability, activeState = "") {
     sent,
     received,
     error: String(dir?.error || ""),
+    jitterHigh,
+    latencyHigh,
+    jitterRatio,
     status,
   };
 }
@@ -619,7 +643,21 @@ function buildGroupStatusBadge({ running, availability, forward, reverse, hops, 
     if (isUnreach) return { label: "不可达", tone: "bad" };
     return { label: "链路异常", tone: "bad" };
   }
-  if (worstTone === "warn") return { label: "丢包告警", tone: "warn" };
+  if (worstTone === "warn") {
+    const hasLoss = (forward.lossPercent ?? 0) > 0
+      || (bidirectional && (reverse?.lossPercent ?? 0) > 0)
+      || hops.some((h) => (h.worstLossPercent ?? 0) > 0);
+    if (hasLoss) return { label: "丢包告警", tone: "warn" };
+    const hasJitter = Boolean(forward.jitterHigh)
+      || (bidirectional && Boolean(reverse?.jitterHigh))
+      || hops.some((h) => Boolean(h.forward?.jitterHigh) || (h.bidirectional && Boolean(h.reverse?.jitterHigh)));
+    if (hasJitter) return { label: "高抖动", tone: "warn" };
+    const hasLatency = Boolean(forward.latencyHigh)
+      || (bidirectional && Boolean(reverse?.latencyHigh))
+      || hops.some((h) => Boolean(h.forward?.latencyHigh) || (h.bidirectional && Boolean(h.reverse?.latencyHigh)));
+    if (hasLatency) return { label: "高延迟", tone: "warn" };
+    return { label: "丢包告警", tone: "warn" };
+  }
   if (worstTone === "ok") return { label: "正常", tone: "ok" };
   return { label: "待采样", tone: "" };
 }
@@ -994,17 +1032,41 @@ function formatTopologyLinkMetric({ running, ready, reason, dirMode, bidirection
 }
 
 function directionalSlice(group, hopOrOverall, metricDir) {
-  const running = Boolean(group.running);
+  const dirModeActive = metricDir === "reverse" ? (hopOrOverall.reverse?.state || "") : (hopOrOverall.forward?.state || "");
+  const hopRunning = ACTIVE_PROBE_STATES.has(hopOrOverall.forward?.state)
+    || (Boolean(hopOrOverall.bidirectional ?? group.bidirectional) && ACTIVE_PROBE_STATES.has(hopOrOverall.reverse?.state))
+    || ACTIVE_PROBE_STATES.has(dirModeActive);
+  const running = Boolean(group.running || hopRunning);
   const bidirectional = Boolean(hopOrOverall.bidirectional ?? group.bidirectional);
   const fwd = hopOrOverall.forward || null;
   const rev = bidirectional ? (hopOrOverall.reverse || null) : null;
   const ready = hopOrOverall.ready !== undefined ? Boolean(hopOrOverall.ready) : Boolean(group.availability?.ready);
   const reason = hopOrOverall.unavailableReason || group.availability?.reason || "";
 
+  const fwdTone = fwd?.status?.tone || (running ? "warn" : (!ready ? "warn" : ""));
+  const revTone = bidirectional ? (rev?.status?.tone || (running ? "warn" : (!ready ? "warn" : ""))) : "";
+  const fwdJitterHigh = Boolean(fwd?.jitterHigh);
+  const revJitterHigh = Boolean(rev?.jitterHigh);
+  const jitterHigh = metricDir === "reverse"
+    ? Boolean(rev?.jitterHigh)
+    : metricDir === "forward" || !bidirectional
+      ? Boolean(fwd?.jitterHigh)
+      : Boolean(fwd?.jitterHigh || rev?.jitterHigh);
+  const latencyHigh = metricDir === "reverse"
+    ? Boolean(rev?.latencyHigh)
+    : metricDir === "forward" || !bidirectional
+      ? Boolean(fwd?.latencyHigh)
+      : Boolean(fwd?.latencyHigh || rev?.latencyHigh);
+  const autoEnabled = Boolean(group.autoEnabled);
+  const autoIntervalSeconds = Number(group.autoIntervalSeconds || 60);
+
   if (metricDir === "reverse") {
     if (!bidirectional) {
       return {
         tone: "",
+        running,
+        fwdTone,
+        revTone,
         statusLabel: "单向",
         metricLabel: "单向无回程",
         latencyMS: null,
@@ -1012,11 +1074,20 @@ function directionalSlice(group, hopOrOverall, metricDir) {
         fwdLossPercent: null,
         revLossPercent: null,
         lossPercent: null,
+        fwdJitterHigh,
+        revJitterHigh,
+        jitterHigh,
+        latencyHigh,
+        autoEnabled,
+        autoIntervalSeconds,
         unavailableReverse: true,
       };
     }
     return {
       tone: running ? "warn" : (rev?.status?.tone || (!ready ? "warn" : "")),
+      running,
+      fwdTone,
+      revTone,
       statusLabel: running ? "探测中" : (rev?.status?.label || (!ready ? (reason || "暂不可用") : "待采样")),
       metricLabel: formatTopologyLinkMetric({ running, ready, reason, dirMode: "reverse", bidirectional, fwd, rev }),
       latencyMS: rev?.avgMS ?? null,
@@ -1024,6 +1095,12 @@ function directionalSlice(group, hopOrOverall, metricDir) {
       fwdLossPercent: null,
       revLossPercent: rev?.lossPercent ?? null,
       lossPercent: rev?.lossPercent ?? null,
+      fwdJitterHigh,
+      revJitterHigh,
+      jitterHigh,
+      latencyHigh,
+      autoEnabled,
+      autoIntervalSeconds,
       unavailableReverse: false,
     };
   }
@@ -1031,6 +1108,9 @@ function directionalSlice(group, hopOrOverall, metricDir) {
   if (metricDir === "forward" || !bidirectional) {
     return {
       tone: running ? "warn" : (fwd?.status?.tone || (!ready ? "warn" : "")),
+      running,
+      fwdTone,
+      revTone,
       statusLabel: running ? "探测中" : (fwd?.status?.label || (!ready ? (reason || "暂不可用") : "待采样")),
       metricLabel: formatTopologyLinkMetric({ running, ready, reason, dirMode: "forward", bidirectional, fwd, rev }),
       latencyMS: fwd?.avgMS ?? null,
@@ -1038,6 +1118,12 @@ function directionalSlice(group, hopOrOverall, metricDir) {
       fwdLossPercent: fwd?.lossPercent ?? null,
       revLossPercent: null,
       lossPercent: fwd?.lossPercent ?? null,
+      fwdJitterHigh,
+      revJitterHigh,
+      jitterHigh,
+      latencyHigh,
+      autoEnabled,
+      autoIntervalSeconds,
       unavailableReverse: false,
     };
   }
@@ -1049,6 +1135,9 @@ function directionalSlice(group, hopOrOverall, metricDir) {
     : pickSeverityTone([fwd?.status?.tone, rev?.status?.tone, ready ? "" : "warn"]);
   return {
     tone,
+    running,
+    fwdTone,
+    revTone,
     statusLabel: running
       ? "探测中"
       : tone === "bad"
@@ -1062,6 +1151,12 @@ function directionalSlice(group, hopOrOverall, metricDir) {
     fwdLossPercent: fwd?.lossPercent ?? null,
     revLossPercent: rev?.lossPercent ?? null,
     lossPercent: worstLoss,
+    fwdJitterHigh,
+    revJitterHigh,
+    jitterHigh,
+    latencyHigh,
+    autoEnabled,
+    autoIntervalSeconds,
     unavailableReverse: false,
   };
 }
@@ -1123,11 +1218,13 @@ export function buildProbeTopologyModel({ groups = [], metricDir = "both", domai
         toName: hop.to.name,
         isExternal: hop.to?.kind === "ext",
         bidirectional: hop.bidirectional,
-        running: group.running,
+        running: Boolean(group.running || hopSlice.running),
         ready: hop.ready,
         unavailableReason: hop.unavailableReason || "",
         metricDir: dirMode,
         tone: hopSlice.tone,
+        fwdTone: hopSlice.fwdTone,
+        revTone: hopSlice.revTone,
         statusLabel: hopSlice.statusLabel,
         metricLabel: hopSlice.metricLabel,
         latencyMS: hopSlice.latencyMS,
@@ -1135,6 +1232,12 @@ export function buildProbeTopologyModel({ groups = [], metricDir = "both", domai
         fwdLossPercent: hopSlice.fwdLossPercent,
         revLossPercent: hopSlice.revLossPercent,
         lossPercent: hopSlice.lossPercent,
+        fwdJitterHigh: hopSlice.fwdJitterHigh,
+        revJitterHigh: hopSlice.revJitterHigh,
+        jitterHigh: hopSlice.jitterHigh,
+        latencyHigh: hopSlice.latencyHigh,
+        autoEnabled: hopSlice.autoEnabled,
+        autoIntervalSeconds: hopSlice.autoIntervalSeconds,
         unavailableReverse: hopSlice.unavailableReverse,
         forward: hop.forward,
         reverse: hop.reverse,
@@ -1158,6 +1261,8 @@ export function buildProbeTopologyModel({ groups = [], metricDir = "both", domai
       bidirectional: group.bidirectional,
       running: group.running,
       tone: chainSlice.tone,
+      fwdTone: chainSlice.fwdTone,
+      revTone: chainSlice.revTone,
       statusLabel: group.overall?.statusBadge?.label || chainSlice.statusLabel,
       metricLabel: chainSlice.metricLabel,
       latencyMS: chainSlice.latencyMS,
@@ -1165,13 +1270,17 @@ export function buildProbeTopologyModel({ groups = [], metricDir = "both", domai
       fwdLossPercent: chainSlice.fwdLossPercent,
       revLossPercent: chainSlice.revLossPercent,
       lossPercent: chainSlice.lossPercent,
+      fwdJitterHigh: chainSlice.fwdJitterHigh,
+      revJitterHigh: chainSlice.revJitterHigh,
+      jitterHigh: chainSlice.jitterHigh,
+      latencyHigh: chainSlice.latencyHigh,
       forward: group.overall?.forward,
       reverse: group.overall?.reverse,
       sampledAt: group.overall?.sampledAt || "",
       availabilityReady: group.availability?.ready !== false,
       reason: group.availability?.reason || "",
-      autoEnabled: group.autoEnabled,
-      autoIntervalSeconds: group.autoIntervalSeconds,
+      autoEnabled: chainSlice.autoEnabled,
+      autoIntervalSeconds: chainSlice.autoIntervalSeconds,
       revision: group.revision,
       group,
     };

@@ -1032,6 +1032,8 @@ strong, b { font-weight: 600; }
 .a-topo-dot.is-ok.is-live { box-shadow: 0 0 0 2px rgba(21, 87, 49, 0.16); }
 .a-topo-dot.is-warn { background: #b45309; }
 .a-topo-dot.is-bad { background: #a41a2b; }
+.a-topo-dot.is-running { background: #0284c7; }
+.a-topo-dot.is-running.is-live { box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.18); }
 .a-topo-switcher-box { min-width: 0; }
 .a-topo-switcher-row {
   display: flex;
@@ -1115,8 +1117,13 @@ strong, b { font-weight: 600; }
   font-weight: 600;
 }
 .a-topo-group-pill.is-active .a-topo-dot {
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.72);
+  background: #d4d4d8;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.36);
 }
+.a-topo-group-pill.is-active .a-topo-dot.is-ok { background: #4ade80; }
+.a-topo-group-pill.is-active .a-topo-dot.is-warn { background: #fbbf24; }
+.a-topo-group-pill.is-active .a-topo-dot.is-bad { background: #f87171; }
+.a-topo-group-pill.is-active .a-topo-dot.is-running { background: #38bdf8; }
 .a-topo-pill-name {
   min-width: 0;
   max-width: 18ch;
@@ -1145,6 +1152,7 @@ strong, b { font-weight: 600; }
 .a-topo-single-stage.is-tone-ok { border-left-color: #155731; }
 .a-topo-single-stage.is-tone-warn { border-left-color: #b45309; }
 .a-topo-single-stage.is-tone-bad { border-left-color: #a41a2b; }
+.a-topo-single-stage.is-tone-running { border-left-color: #0284c7; }
 .a-topo-single-head {
   display: flex;
   flex-wrap: wrap;
@@ -1388,6 +1396,7 @@ strong, b { font-weight: 600; }
 .a-topo-hop-pill[data-tone="ok"] { border-color: #c9e8d2; background: #eef9f0; color: #155731; }
 .a-topo-hop-pill[data-tone="warn"] { border-color: #efddbb; background: #fff8e9; color: #754511; }
 .a-topo-hop-pill[data-tone="bad"] { border-color: #f2cdd2; background: #fff2f3; color: #a41a2b; }
+.a-topo-hop-pill[data-tone="running"] { border-color: #bae6fd; background: #f0f9ff; color: #0369a1; }
 .a-topo-hop-rtt { font-weight: 600; }
 .a-topo-hop-rtt.is-rev { opacity: .92; }
 .a-topo-hop-loss { font-size: 10px; opacity: .88; }
@@ -1743,6 +1752,20 @@ strong, b { font-weight: 600; }
 .a-dash-topo-card {
   transition: stroke-color .15s var(--a-ease-state), filter .15s var(--a-ease-state);
 }
+.a-dash-topo-map-tag.is-hover-only {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .14s var(--a-ease-state);
+}
+.a-dash-topo-map-tag.is-hover-only.is-visible,
+.a-dash-topo-map-tag.is-hover-only[data-hover-visible="1"] {
+  opacity: 1;
+}
+.a-dash-topo-tag-leader,
+.a-dash-topo-probe-leader {
+  pointer-events: none;
+  transition: opacity .16s var(--a-ease-state);
+}
 .a-dash-topo-map-tag.is-active > rect.a-dash-topo-card,
 .a-dash-topo-map-tag.is-hovered > rect.a-dash-topo-card,
 .a-dash-topo-map-tag.is-highlighted > rect.a-dash-topo-card,
@@ -1782,6 +1805,7 @@ strong, b { font-weight: 600; }
 .a-dash-topo-chain-total-value { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; font-family: var(--font-ui); pointer-events: none; }
 .a-dash-topo-chain-total-value.is-mobile { font-size: 9.5px; font-weight: 600; }
 .a-dash-topo-ext-sub { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; pointer-events: none; }
+.a-dash-topo-flow-pulse { pointer-events: none; }
 .a-dash-topo-beacon-pulse {
   transform-box: fill-box;
   transform-origin: center;
@@ -1791,17 +1815,60 @@ strong, b { font-weight: 600; }
   from { stroke-dashoffset: 40; }
   to { stroke-dashoffset: 0; }
 }
+@keyframes a-topo-map-flow-rev {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 40; }
+}
+@keyframes a-topo-map-warn-breathe {
+  0%, 100% { stroke-opacity: 0.55; }
+  50% { stroke-opacity: 1; }
+}
 @keyframes a-dash-topo-radar {
   0% { transform: scale(1); opacity: 0.55; }
   100% { transform: scale(2.15); opacity: 0; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .a-dash-topo-flow-pulse { animation: a-topo-map-flow 1.8s linear infinite; }
+  .a-dash-topo-flow-pulse {
+    animation-name: a-topo-map-flow;
+    animation-duration: 1.8s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  .a-dash-topo-flow-pulse.is-reverse {
+    animation-name: a-topo-map-flow-rev;
+  }
+  .a-dash-topo-flow-pulse.is-warn {
+    animation-name: a-topo-map-flow, a-topo-map-warn-breathe;
+    animation-duration: 1.75s, 1.6s;
+    animation-timing-function: linear, ease-in-out;
+    animation-iteration-count: infinite, infinite;
+  }
+  .a-dash-topo-flow-pulse.is-warn.is-reverse {
+    animation-name: a-topo-map-flow-rev, a-topo-map-warn-breathe;
+  }
   .a-dash-topo-flow-pulse.is-speed-fast { animation-duration: 1.15s; }
   .a-dash-topo-flow-pulse.is-speed-med { animation-duration: 1.75s; }
   .a-dash-topo-flow-pulse.is-speed-slow { animation-duration: 2.45s; }
-  .a-dash-topo-probe-running { animation: a-topo-map-flow 1.3s linear infinite; }
-  .a-dash-topo-beacon-pulse { animation: a-dash-topo-radar 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+  .a-dash-topo-flow-pulse.is-warn.is-speed-fast { animation-duration: 1.15s, 1.6s; }
+  .a-dash-topo-flow-pulse.is-warn.is-speed-med { animation-duration: 1.75s, 1.6s; }
+  .a-dash-topo-flow-pulse.is-warn.is-speed-slow { animation-duration: 2.45s, 1.6s; }
+  .a-dash-topo-flow-pulse.is-running { animation-duration: 0.9s; }
+  .a-dash-topo-flow-pulse.is-warn.is-running { animation-duration: 0.9s, 1.6s; }
+  .a-dash-topo-probe-running {
+    animation-name: a-topo-map-flow;
+    animation-duration: 1.05s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  .a-dash-topo-probe-running.is-reverse {
+    animation-name: a-topo-map-flow-rev;
+  }
+  .a-dash-topo-beacon-pulse {
+    animation: a-dash-topo-radar 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+  .a-dash-topo-beacon-pulse.is-running {
+    animation-duration: 1.4s;
+  }
 }
 .a-dash-topo-focus-only {
   transition: opacity .16s var(--a-ease-state);

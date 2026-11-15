@@ -102,10 +102,10 @@ var preferenceCountry = preferenceRule{func(raw json.RawMessage) bool {
 
 var uiPreferenceRules = map[string]map[string]preferenceRule{
 	"dashboard": {
-		"traffic_month":       preferenceCalendar("2006-01", false),
-		"traffic_rank_period": preferenceEnum("month", "cycle"),
-		"traffic_rank_limit":  preferenceEnum("5", "10", "all"),
-		"traffic_rank_scope":  preferenceEnum("all", "current"),
+		"traffic_month":         preferenceCalendar("2006-01", false),
+		"traffic_rank_period":   preferenceEnum("month", "cycle"),
+		"traffic_rank_limit":    preferenceEnum("5", "10", "all"),
+		"traffic_rank_scope":    preferenceEnum("all", "current"),
 		"topo_group":            preferenceText(40),
 		"topo_view_mode":        preferenceEnum("flow", "map"),
 		"topo_show_history":     preferenceBool,
