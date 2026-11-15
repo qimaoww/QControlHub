@@ -151,6 +151,10 @@ func (g *generator) annotate(op object, handler, method, path string) {
 			required = []string{"event", "template"}
 		case "importAgentConfig":
 			required = []string{"snapshot_task_id", "name"}
+		case "createDashboardProbePair":
+			required = []string{"group_name"}
+		case "updateDashboardProbePair":
+			required = []string{"group_name", "revision"}
 		}
 		if len(required) > 0 {
 			copySchema["required"] = required
@@ -174,6 +178,8 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["description"] = "Key 转授权仅允许创建者所有的节点，不能借管理员角色转授他人节点；用户授权不能操作管理员或创建者。批量与旧授权逐项复核。"
 	case "saveServerInbound", "saveManagedOutbound", "saveConfigField", "savePresetSource":
 		op["description"] = "保存当前授权工作区配置，必要时同时受理异步任务；按返回配置和任务 ID 查询结果。snapshot 引用还要求 tasks.read，不能引用他人配置/证书。"
+	case "createDashboardProbePair", "updateDashboardProbePair":
+		op["description"] = "同一认证所有者下每个监测分组仅允许配置一条链路（支持 2 至 10 跳多跳链或自定义单跳 IP），同名分组返回 409 冲突；更新必须传入当前 revision，并发冲突返回 409。"
 	}
 	response := op["responses"].(object)
 	switch handler {

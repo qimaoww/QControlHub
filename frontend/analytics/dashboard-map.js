@@ -1,19 +1,18 @@
 import { createSVGEl } from "./dashboard-panel.js";
 import { PACIFIC_GRATICULES, PACIFIC_LAND_PATH, PACIFIC_MAP_BOUNDS } from "./pacific-map-data.js";
 import {
-  BLOCKED_COLOR,
-  EGRESS_COLOR,
+  BAD_COLOR,
+  BORDER_COLOR,
   IDLE_FLOW_COLOR,
-  INGRESS_COLOR,
+  INK_COLOR,
   OK_COLOR,
-  WARN_COLOR,
+  SOFT_INK_COLOR,
   buildProbePillLabel,
   buildProbeShortAlertLabel,
   buildTopologySelectionIndex,
   clipLabel,
   clusterTopologyNodes,
   createTopologyDefs,
-  flowDur,
   flowSpeedClass,
   formatMapCityLabel,
   isProbeUnreachable,
@@ -25,7 +24,6 @@ import {
   visualUnits,
 } from "./dashboard-topo-shared.js";
 
-let mapClipInstanceSeq = 0;
 
 /** Computes non-overlapping tag candidates ranked away from dense neighbor clusters using vector repulsion. */
 function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bounds) {
@@ -46,13 +44,11 @@ function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bou
     }
   }
 
-  // Gentle inward push near map borders so labels steer inside the canvas.
   if (ax - bounds.minX < 95) repX += 0.018;
   if (bounds.maxX - ax < 95) repX -= 0.018;
   if (ay - bounds.minY < 58) repY += 0.018;
   if (bounds.maxY - ay < 58) repY -= 0.018;
 
-  // Bias default vector slightly northeast when isolated for crisp cartographic legibility.
   const baseAngle = (Math.abs(repX) + Math.abs(repY)) > 0.0005
     ? Math.atan2(repY, repX)
     : -Math.PI * 0.22;
@@ -86,7 +82,7 @@ function buildDensityAwareTagCandidates(cluster, allClusters, boxW, boxH, r, bou
  * Computes bounded multi-row dock chip positions inside `[padX, width - padX]`, guaranteeing zero
  * horizontal overflow regardless of how many external targets exist.
  */
-function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW = 128, maxChipW = 216, chipH = 32, chipGap = 8, rowGap = 8, maxUnits = 20 } = {}) {
+function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW = 132, maxChipW = 224, chipH = 34, chipGap = 8, rowGap = 8, maxUnits = 20 } = {}) {
   const list = Array.isArray(targets) ? targets : [];
   if (!list.length) return { chips: [], rowCount: 0, bottomY: startY };
 
@@ -116,7 +112,7 @@ function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW =
         cy: y + chipH / 2,
         title: clipLabel(rawTitle, maxUnits),
         fullTitle: rawTitle,
-        subText: subText ? clipLabel(subText, Math.max(12, maxUnits - 2)) : `${ext.linkCount} 链路`,
+        subText: subText ? clipLabel(subText, Math.max(12, maxUnits - 2)) : `${ext.linkCount || 1} 链路`,
       });
     });
   }
@@ -130,7 +126,7 @@ function placeExternalDockTargets(targets, dockWidth, padX, startY, { minChipW =
 
 /**
  * Evaluates shortest geodesic curvature (including cross-seam edge wrapping when `|dx| > span/2`
- * between Eurasia and Eastern Americas) using purely coordinate geometry instead of pixel boxes.
+ * between Eurasia and Eastern Americas) using purely coordinate geometry.
  */
 function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBounds, scaleX = 1, scaleY = 1, zoomTransform = null) {
   const pairGroups = new Map();
@@ -193,7 +189,6 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
     const useWrap = Math.abs(rawDx) > cylSpan * 0.52;
 
     if (useWrap) {
-      // Split across the 22°W seam so Europe <-> North America arcs do not slash across Eurasia/Pacific.
       const wrapDx = rawDx > 0 ? rawDx - cylSpan : rawDx + cylSpan;
       const exitEdgeA = wrapDx < 0 ? leftEdge : rightEdge;
       const enterEdgeB = wrapDx < 0 ? rightEdge : leftEdge;
@@ -242,7 +237,6 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
     const chordDy = pB.y - pA.y;
     const chordLen = Math.hypot(chordDx, chordDy);
 
-    // Self-cluster or super short links get a compact local halo arc.
     if (chordLen < 12) {
       groupProbes.forEach((probe, idx) => {
         const offset = 18 + idx * 9;
@@ -256,7 +250,6 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
 
     const ux = chordDx / chordLen;
     const uy = chordDy / chordLen;
-    // Perpendicular unit normal; choose preferred sign oriented cleanly upward in canvas coordinates.
     let nx = -uy;
     let ny = ux;
     if (ny > 0.1 || (Math.abs(ny) <= 0.1 && nx > 0)) {
@@ -268,7 +261,7 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
     const scoreCandidate = (sign, mag) => {
       const cx = (pA.x + pB.x) / 2 + nx * sign * mag;
       const cy = Math.max(minY, Math.min(maxY, (pA.y + pB.y) / 2 + ny * sign * mag));
-      let penalty = sign < 0 ? 4 : 0; // slight preference for upward geodesic arch when clear
+      let penalty = sign < 0 ? 4 : 0;
       for (const sampleT of [0.25, 0.5, 0.75]) {
         const pt = quadPointAt(pA.x, pA.y, cx, cy, pB.x, pB.y, sampleT);
         if (pt.x < mapBounds.minX + 12 || pt.x > mapBounds.maxX - 12 || pt.y < minY + 6 || pt.y > maxY - 6) {
@@ -320,13 +313,12 @@ function computeCorridorLanes(probeLinks, coordByID, chipByID, allBeacons, mapBo
 }
 
 /**
- * Appends Pacific Ocean canvas + land vectors with an explicit parameter signature check so
- * `reconcileTable` never returns a stale `true` across dimension or instance changes.
+ * Paper & Ink Pacific Ocean canvas + land vectors (neutral warm-paper canvas & crisp hairline contours).
  */
 function appendPacificBackdrop(svg, defs, { width, mapHeight, clipId, graticuleTransform = "" }) {
   const backdropSig = `${width}:${mapHeight}:${clipId}:${graticuleTransform}`;
-  const clip = createSVGEl("clipPath", { id: clipId, "data-refresh-key": clipId, "data-clip-sig": backdropSig });
-  clip.append(createSVGEl("rect", { x: 0, y: 0, width, height: mapHeight, rx: 9 }));
+  const clip = createSVGEl("clipPath", { id: clipId, "data-refresh-key": "pacific-clip", "data-clip-sig": backdropSig });
+  clip.append(createSVGEl("rect", { x: 0, y: 0, width, height: mapHeight, rx: 8 }));
   clip.reconcileTable = (fresh) => fresh?.getAttribute?.("data-clip-sig") === clip.getAttribute("data-clip-sig");
   defs.append(clip);
 
@@ -338,10 +330,10 @@ function appendPacificBackdrop(svg, defs, { width, mapHeight, clipId, graticuleT
   });
   backdrop.reconcileTable = (fresh) => fresh?.getAttribute?.("data-backdrop-sig") === backdrop.getAttribute("data-backdrop-sig");
 
-  const ocean = createSVGEl("rect", { x: 0, y: 0, width, height: mapHeight, fill: "#f4f6f9" });
+  const ocean = createSVGEl("rect", { x: 0, y: 0, width, height: mapHeight, fill: "#f7f7f8" });
   const graticuleG = createSVGEl("g", {
     fill: "none",
-    stroke: "#e2e6ed",
+    stroke: BORDER_COLOR,
     "stroke-width": "0.65",
     "stroke-dasharray": "2.5 3.5",
     transform: graticuleTransform || null,
@@ -351,8 +343,8 @@ function appendPacificBackdrop(svg, defs, { width, mapHeight, clipId, graticuleT
 
   const landPath = createSVGEl("path", {
     d: PACIFIC_LAND_PATH,
-    fill: "#e8ecf2",
-    stroke: "#d3dae6",
+    fill: "#eaecef",
+    stroke: "#d4d4d8",
     "stroke-width": "0.85",
     "stroke-linejoin": "round",
     transform: graticuleTransform || null,
@@ -361,9 +353,6 @@ function appendPacificBackdrop(svg, defs, { width, mapHeight, clipId, graticuleT
   svg.append(defs, backdrop);
 }
 
-/**
- * Formats HUD latency monitoring summary (routes, measured segments, mean RTT & alerts).
- */
 function buildMapHudLatencyLine(model, compact = false) {
   const chains = model?.probeChains || [];
   const links = model?.probeLinks || [];
@@ -371,32 +360,45 @@ function buildMapHudLatencyLine(model, compact = false) {
   const rtts = links.map((p) => p.latencyMS).filter((v) => typeof v === "number" && Number.isFinite(v) && v >= 0);
   const avgRtt = rtts.length ? (rtts.reduce((s, v) => s + v, 0) / rtts.length) : null;
   const bad = Number(model?.abnormalLinks || 0);
+  if (model?.singleGroup) {
+    const g = model.singleGroup;
+    const avgTxt = avgRtt != null ? `均 ${avgRtt.toFixed(avgRtt >= 100 ? 0 : 1)}ms` : (g.overall?.statusBadge?.label || "待采样");
+    return compact
+      ? `${g.nodes.length} 站 · ${avgTxt}`
+      : `${g.groupName} · ${g.hopCount} 跳 · ${avgTxt}`;
+  }
   if (compact) {
     if (!routeCount) return "暂无延迟监测";
     return bad > 0
-      ? `监测 ${routeCount} · 告警 ${bad}`
+      ? `监测 ${routeCount} 组 · 告警 ${bad}`
       : avgRtt != null
-        ? `监测 ${routeCount} · 均 ${avgRtt.toFixed(avgRtt >= 100 ? 0 : 1)}ms`
-        : `监测 ${routeCount} 条`;
+        ? `监测 ${routeCount} 组 · 均 ${avgRtt.toFixed(avgRtt >= 100 ? 0 : 1)}ms`
+        : `监测 ${routeCount} 组`;
   }
-  if (!routeCount) return `在线 ${model?.onlineNodes || 0}/${model?.totalNodes || 0} · 暂无监测链路`;
-  const parts = [`监测链路 ${routeCount} 条`, `段 ${links.length}`];
+  if (!routeCount) return `在线 ${model?.onlineNodes || 0}/${model?.totalNodes || 0} · 暂无监测组`;
+  const parts = [`监测 ${routeCount} 组`, `${links.length} 段`];
   if (avgRtt != null) parts.push(`均值 ${avgRtt.toFixed(avgRtt >= 100 ? 0 : 1)}ms`);
   if (bad > 0) parts.push(`告警 ${bad}`);
   else parts.push("全链正常");
   return parts.join(" · ");
 }
 
-/** Compact Mobile Pacific Map preserving beacon tags, cluster tap expansion, bad link distinction & wrapped external dock. */
-function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
+const clusterHealthTone = (cluster) => {
+  const anyIssue = cluster.members.some((m) => !m.node.isOnline || Boolean(m.node.issue));
+  const anyOnline = cluster.members.some((m) => m.node.isOnline);
+  return anyIssue ? BAD_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
+};
+
+function renderMobilePacificMap({ width, model, helpers }) {
   const w = Math.max(300, Math.min(620, Math.round(width)));
   const mapHeight = Math.round(Math.max(210, Math.min(268, w * 0.68)));
   const scaleX = w / PACIFIC_MAP_BOUNDS.width;
   const scaleY = mapHeight / PACIFIC_MAP_BOUNDS.height;
+  const singleMode = Boolean(model?.singleGroup);
 
   const dockArea = placeExternalDockTargets(model.externalTargets, w, 10, mapHeight + 8, {
     minChipW: Math.min(138, Math.floor((w - 28) / 2)),
-    maxChipW: 200,
+    maxChipW: 204,
     chipH: 30,
     chipGap: 6,
     rowGap: 6,
@@ -409,19 +411,16 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
     viewBox: `0 0 ${w} ${totalHeight}`,
     role: "img",
     "data-topo-mode": "map",
-    "aria-label": "太平洋海缆地理拓扑图",
+    "aria-label": "太平洋海缆网络延迟拓扑图",
   });
 
-  const clipId = `a-topo-map-mob-clip-${++mapClipInstanceSeq}`;
-  const defs = createTopologyDefs("a-topo");
+  const defsPrefix = helpers.defsPrefix || "a-topo";
+  const clipId = `${helpers.clipId || (singleMode ? "a-topo-map-clip-single" : "a-topo-map-clip-all")}-mob`;
+  const defs = createTopologyDefs(defsPrefix);
   const bgGroupTransform = `scale(${scaleX.toFixed(4)} ${scaleY.toFixed(4)})`;
   appendPacificBackdrop(svg, defs, { width: w, mapHeight, clipId, graticuleTransform: bgGroupTransform });
 
-  const clusters = clusterTopologyNodes(model.nodes, {
-    radiusPx: 7.5,
-    scaleX,
-    scaleY,
-  });
+  const clusters = clusterTopologyNodes(model.nodes, { radiusPx: 7.5, scaleX, scaleY });
   const selIndex = buildTopologySelectionIndex(model, clusters);
   const coordByID = new Map();
   clusters.forEach((cl) => cl.members.forEach((m) => coordByID.set(m.node.id, { x: cl.x, y: cl.y })));
@@ -439,14 +438,15 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
     scaleY,
   );
 
-  const linkLayer = createSVGEl("g", { class: "a-dash-topo-map-links" });
-  const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true" });
-  const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons" });
-  const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags" });
-  const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills" });
+  const linkLayer = createSVGEl("g", { class: "a-dash-topo-map-links", "data-refresh-key": "map-layer-links" });
+  const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true", "data-refresh-key": "map-layer-pulses" });
+  const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons", "data-refresh-key": "map-layer-beacons" });
+  const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags", "data-refresh-key": "map-layer-tags" });
+  const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills", "data-refresh-key": "map-layer-pills" });
 
-  // Reserve HUD top bar + beacon circles, place priority cluster tags BEFORE alert pills so both remain legible.
-  const ambientBadSet = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 3 });
+  const ambientSet = singleMode
+    ? new Set(model.probeLinks.map((p) => p.id))
+    : selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 4 });
   const occupiedTags = [
     { x: 0, y: 0, w, h: 24 },
     ...clusters.map((c) => ({ x: c.x - 10, y: c.y - 10, w: 20, h: 20 })),
@@ -456,21 +456,17 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
     const aCl = a.isCluster ? 1 : 0;
     const bCl = b.isCluster ? 1 : 0;
     if (bCl !== aCl) return bCl - aCl;
-    const aBad = a.members.some((m) => m.node.blocked) ? 1 : 0;
-    const bBad = b.members.some((m) => m.node.blocked) ? 1 : 0;
-    if (bBad !== aBad) return bBad - aBad;
-    const aOnline = a.members.some((m) => m.node.isOnline) ? 1 : 0;
-    const bOnline = b.members.some((m) => m.node.isOnline) ? 1 : 0;
-    if (bOnline !== aOnline) return bOnline - aOnline;
+    const aIssue = a.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
+    const bIssue = b.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
+    if (bIssue !== aIssue) return bIssue - aIssue;
     return b.members.length - a.members.length;
   });
 
-  // Place compact city/cluster tags first cleanly on mobile map
   sortedForTags.slice(0, 10).forEach((cluster) => {
     const key = cluster.key;
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
     const hl = helpers.isHighlightedEdge(peers);
-    const anyBlocked = cluster.members.some((m) => m.node.blocked);
+    const anyIssue = cluster.members.some((m) => !m.node.isOnline || Boolean(m.node.issue));
     const anyOnline = cluster.members.some((m) => m.node.isOnline);
     const rawTagText = cluster.isCluster
       ? `${cluster.label} ×${cluster.members.length}`
@@ -500,7 +496,7 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
         height: tagH,
         rx: 3.5,
         fill: "#ffffff",
-        stroke: anyBlocked ? BLOCKED_COLOR : anyOnline ? "#d4d4d8" : "#e4e4e7",
+        stroke: anyIssue ? BAD_COLOR : anyOnline ? "#d4d4d8" : BORDER_COLOR,
         "stroke-width": "0.9",
         class: "a-dash-topo-card",
       }),
@@ -508,7 +504,7 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
         x: (pick.x + 4.5).toFixed(1),
         y: (pick.y + 10.6).toFixed(1),
         class: "a-dash-topo-map-tag-text",
-        fill: anyBlocked ? BLOCKED_COLOR : anyOnline ? "#18181b" : "#71717a",
+        fill: anyIssue ? BAD_COLOR : anyOnline ? INK_COLOR : SOFT_INK_COLOR,
       }, tagText),
     );
     helpers.bindInteractive(g, key);
@@ -523,7 +519,7 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
     const isBad = probe.tone === "bad";
     const isWarn = probe.tone === "warn";
     const pal = tonePalette(probe.tone);
-    const baseOpacity = isBad ? 0.9 : isWarn ? 0.78 : probe.isExternal ? 0.5 : 0.42;
+    const baseOpacity = singleMode ? 0.9 : (isBad ? 0.9 : isWarn ? 0.8 : probe.isExternal ? 0.52 : 0.48);
     const opacity = hl === true ? 1 : hl === false ? 0.14 : baseOpacity;
 
     const g = createSVGEl("g", {
@@ -532,15 +528,16 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
       "data-base-opacity": String(baseOpacity),
       opacity: opacity.toFixed(2),
     });
-    const strokeW = (hl === true ? 2.4 : isBad ? 2.0 : 1.35).toFixed(2);
+    const strokeW = (hl === true ? 2.4 : singleMode ? 2.0 : isBad ? 2.0 : 1.4).toFixed(2);
     g.append(createSVGEl("path", {
       d: geom.d,
       fill: "none",
       stroke: pal.stroke,
       "stroke-width": strokeW,
-      "stroke-dasharray": isBad ? "4 3" : probe.isExternal ? "2 3" : null,
+      "stroke-dasharray": probe.running ? "5 3" : isBad ? "4 3" : probe.isExternal ? "2 3" : null,
       "stroke-linecap": "round",
-      "marker-end": isBad ? "url(#a-topo-arrow-bad)" : isWarn ? "url(#a-topo-arrow-warn)" : probe.tone === "ok" ? "url(#a-topo-arrow-ok)" : "url(#a-topo-arrow-idle)",
+      "marker-end": isBad ? `url(#${defsPrefix}-arrow-bad)` : isWarn ? `url(#${defsPrefix}-arrow-warn)` : probe.tone === "ok" ? `url(#${defsPrefix}-arrow-ok)` : `url(#${defsPrefix}-arrow-idle)`,
+      class: probe.running ? "a-dash-topo-probe-running" : null,
     }));
 
     if (geom.seamMarks) {
@@ -553,24 +550,24 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
       d: geom.d,
       fill: "none",
       stroke: "transparent",
-      "stroke-width": "12",
+      "stroke-width": "14",
       class: "a-dash-topo-probe-item",
     });
-    helpers.bindInteractive(hitPath, `probe:${probe.id}`, { openProbeID: probe.probeID || probe.id });
+    helpers.bindInteractive(hitPath, `probe:${probe.id}`);
     g.append(hitPath);
     linkLayer.append(g);
 
-    const isFocused = hl === true || ambientBadSet.has(probe.id);
-    const label = ambientBadSet.has(probe.id) && hl !== true
+    const isAmbient = ambientSet.has(probe.id);
+    const label = !singleMode && isAmbient && hl !== true
       ? buildProbeShortAlertLabel(probe)
-      : buildProbePillLabel(probe, true, true);
-    const pillW = Math.max(44, Math.min(118, visualUnits(label) * 6.0 + 18));
+      : buildProbePillLabel(probe, !singleMode, true);
+    const pillW = Math.max(44, Math.min(128, visualUnits(label) * 6.0 + 18));
     const pillH = 16;
     const placed = placeCollisionFreePill(geom.mid.x, geom.mid.y, pillW, pillH, occupiedTags, {
       minX: 8, maxX: w - 8, minY: 28, maxY: mapHeight - 10,
     }, [geom.mid]);
     if (placed.shifted) {
-      helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, true, !ambientBadSet.has(probe.id));
+      helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, true, !isAmbient, probe.id);
     }
     pillLayer.append(helpers.createProbePillGroup({
       probe,
@@ -583,20 +580,17 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
       pal,
       compact: true,
       peers,
-      focusOnly: !ambientBadSet.has(probe.id),
-      ambientAlert: false,
+      focusOnly: !isAmbient,
     }));
   });
 
-  // Draw clusters / beacons
   clusters.forEach((cluster) => {
     const key = cluster.key;
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
     const anyOnline = cluster.members.some((m) => m.node.isOnline);
-    const anyBlocked = cluster.members.some((m) => m.node.blocked);
     const active = helpers.activeKey() === key;
     const hl = helpers.isHighlightedEdge(peers);
-    const toneColor = anyBlocked ? BLOCKED_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
+    const toneColor = clusterHealthTone(cluster);
     const r = cluster.isCluster ? Math.min(8.5, 5.2 + cluster.members.length * 0.9) : 4.8;
 
     const g = createSVGEl("g", {
@@ -622,20 +616,15 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
         opacity: hl === false ? "0.08" : "0.38",
       }));
     }
-    // Generous 16px touch hit target
-    g.append(createSVGEl("circle", {
-      cx: cluster.x.toFixed(1),
-      cy: cluster.y.toFixed(1),
-      r: 15,
-      fill: "transparent",
-    }));
+    g.append(createSVGEl("circle", { cx: cluster.x.toFixed(1), cy: cluster.y.toFixed(1), r: 15, fill: "transparent" }));
     g.append(createSVGEl("circle", {
       cx: cluster.x.toFixed(1),
       cy: cluster.y.toFixed(1),
       r: r.toFixed(1),
       fill: "#ffffff",
-      stroke: toneColor,
+      stroke: active ? INK_COLOR : toneColor,
       "stroke-width": active || hl === true ? "2.4" : "1.8",
+      class: "a-dash-topo-card",
     }));
     if (cluster.isCluster) {
       g.append(createSVGEl("text", {
@@ -651,8 +640,7 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
     beaconLayer.append(g);
   });
 
-  // External Dock Grid on Mobile
-  const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock" });
+  const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock", "data-refresh-key": "map-layer-dock" });
   dockArea.chips.forEach((chip) => {
     const extID = chip.ext.id;
     const peers = selIndex.extPeers(extID);
@@ -666,19 +654,19 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
       opacity: hl === false ? "0.24" : "1",
     });
     g.append(
-      createSVGEl("rect", { x: chip.x.toFixed(1), y: chip.y.toFixed(1), width: chip.w.toFixed(1), height: chip.h, rx: 6, fill: "#ffffff", stroke: active ? INGRESS_COLOR : "#d4d4d8", "stroke-width": active ? "1.6" : "1", class: "a-dash-topo-card" }),
-      createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 14.5).toFixed(1), class: "a-dash-topo-map-tag-text", fill: "#18181b" }, chip.title),
-      createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 25.5).toFixed(1), class: "a-dash-topo-micro", fill: "#71717a" }, chip.subText),
+      createSVGEl("rect", { x: chip.x.toFixed(1), y: chip.y.toFixed(1), width: chip.w.toFixed(1), height: chip.h, rx: 6, fill: "#ffffff", stroke: active ? INK_COLOR : "#d4d4d8", "stroke-width": active ? "1.6" : "1", class: "a-dash-topo-card" }),
+      createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 14.5).toFixed(1), class: "a-dash-topo-map-tag-text", fill: INK_COLOR }, chip.title),
+      createSVGEl("text", { x: (chip.x + 8).toFixed(1), y: (chip.y + 25.5).toFixed(1), class: "a-dash-topo-micro", fill: SOFT_INK_COLOR }, chip.subText),
     );
-    g.append(createSVGEl("title", {}, `${chip.fullTitle} (${chip.ext.linkCount} 条探测链路)`));
+    g.append(createSVGEl("title", {}, `${chip.fullTitle} (${chip.ext.linkCount || 1} 链路)`));
     helpers.bindInteractive(g, extID);
     dockLayer.append(g);
   });
 
-  const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud" });
+  const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud", "data-refresh-key": "map-layer-hud" });
   hudLayer.append(
     createSVGEl("text", { x: 10, y: 15, class: "a-dash-topo-map-coord" }, `158°E · ${model.onlineNodes}/${model.totalNodes} 在线`),
-    createSVGEl("text", { x: w - 10, y: 15, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudLatencyLine(model, true)),
+    createSVGEl("text", { x: w - 10, y: 15, "text-anchor": "end", class: "a-dash-topo-micro", fill: SOFT_INK_COLOR }, buildMapHudLatencyLine(model, true)),
   );
 
   svg.append(linkLayer, pulseLayer, beaconLayer, tagLayer, pillLayer, dockLayer, hudLayer);
@@ -686,21 +674,22 @@ function renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers }) {
 }
 
 /**
- * Renders the 1160px Pacific Ocean topology SVG (desktop) or compact mobile map SVG,
- * integrating shortest-path/seam-wrapping arcs, sector-repulsion city tags, collision-free
- * reserved alert pills, multi-row external dock, and optional SVG zoom/pan viewport transform.
+ * Renders the 1160px Paper & Ink Pacific Ocean topology SVG (desktop) or compact mobile map SVG.
+ * Pure network-monitoring semantics: online/diagnostic capability beacons, multi-hop numbered arcs,
+ * latency/loss pills, seam-wrapping across 22°W, external target dock, and inspect-only clicks.
  */
-export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta = {}, zoomTransform = null, helpers }) {
+export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = null, helpers }) {
   if (isMobile) {
-    return renderMobilePacificMap({ width, model, bytes, trafficMeta, helpers });
+    return renderMobilePacificMap({ width, model, helpers });
   }
 
   const vw = PACIFIC_MAP_BOUNDS.width;
   const mapHeight = PACIFIC_MAP_BOUNDS.height;
+  const singleMode = Boolean(model?.singleGroup);
 
   const dockArea = placeExternalDockTargets(model.externalTargets, vw, 18, mapHeight + 10, {
-    minChipW: 132,
-    maxChipW: 218,
+    minChipW: 136,
+    maxChipW: 224,
     chipH: 36,
     chipGap: 8,
     rowGap: 8,
@@ -713,18 +702,18 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     viewBox: `0 0 ${vw} ${totalHeight}`,
     role: "img",
     "data-topo-mode": "map",
-    "aria-label": "太平洋海缆与全网拓扑态势图",
+    "aria-label": "太平洋海缆网络延迟拓扑图",
   });
 
-  const clipId = `a-topo-map-clip-${++mapClipInstanceSeq}`;
-  const defs = createTopologyDefs("a-topo");
+  const defsPrefix = helpers.defsPrefix || "a-topo";
+  const clipId = helpers.clipId || (singleMode ? "a-topo-map-clip-single" : "a-topo-map-clip-all");
+  const defs = createTopologyDefs(defsPrefix);
   const zoomStr = zoomTransform && zoomTransform.scale > 1.001
     ? `translate(${zoomTransform.tx.toFixed(1)} ${zoomTransform.ty.toFixed(1)}) scale(${zoomTransform.scale.toFixed(3)})`
     : "";
 
-  // Wrap zoomable map stage separately from External Dock & HUD chrome.
-  const clip = createSVGEl("clipPath", { id: clipId, "data-refresh-key": clipId, "data-clip-sig": `${vw}:${mapHeight}:${clipId}` });
-  clip.append(createSVGEl("rect", { x: 0, y: 0, width: vw, height: mapHeight, rx: 9 }));
+  const clip = createSVGEl("clipPath", { id: clipId, "data-refresh-key": "pacific-clip", "data-clip-sig": `${vw}:${mapHeight}:${clipId}` });
+  clip.append(createSVGEl("rect", { x: 0, y: 0, width: vw, height: mapHeight, rx: 8 }));
   clip.reconcileTable = (fresh) => fresh?.getAttribute?.("data-clip-sig") === clip.getAttribute("data-clip-sig");
   defs.append(clip);
   svg.append(defs);
@@ -746,11 +735,11 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     "data-backdrop-sig": backdropSig,
   });
   backdrop.reconcileTable = (fresh) => fresh?.getAttribute?.("data-backdrop-sig") === backdrop.getAttribute("data-backdrop-sig");
-  const ocean = createSVGEl("rect", { x: 0, y: 0, width: vw, height: mapHeight, fill: "#f4f6f9" });
-  const graticuleG = createSVGEl("g", { fill: "none", stroke: "#e2e6ed", "stroke-width": "0.65", "stroke-dasharray": "2.5 3.5" });
+  const ocean = createSVGEl("rect", { x: 0, y: 0, width: vw, height: mapHeight, fill: "#f7f7f8" });
+  const graticuleG = createSVGEl("g", { fill: "none", stroke: BORDER_COLOR, "stroke-width": "0.65", "stroke-dasharray": "2.5 3.5" });
   PACIFIC_GRATICULES.meridians.forEach((m) => graticuleG.append(createSVGEl("path", { d: m.d })));
   PACIFIC_GRATICULES.parallels.forEach((p) => graticuleG.append(createSVGEl("path", { d: p.d })));
-  const landPath = createSVGEl("path", { d: PACIFIC_LAND_PATH, fill: "#e8ecf2", stroke: "#d3dae6", "stroke-width": "0.85", "stroke-linejoin": "round" });
+  const landPath = createSVGEl("path", { d: PACIFIC_LAND_PATH, fill: "#eaecef", stroke: "#d4d4d8", "stroke-width": "0.85", "stroke-linejoin": "round" });
   backdrop.append(ocean, graticuleG, landPath);
 
   const clusters = clusterTopologyNodes(model.nodes);
@@ -772,31 +761,29 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     zoomTransform,
   );
 
-  const flowLayer = createSVGEl("g", { class: "a-dash-topo-map-flows" });
-  const probeLayer = createSVGEl("g", { class: "a-dash-topo-map-probes" });
-  const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true" });
-  const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons" });
-  const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags" });
-  const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills" });
+  const probeLayer = createSVGEl("g", { class: "a-dash-topo-map-probes", "data-refresh-key": "map-layer-probes" });
+  const pulseLayer = createSVGEl("g", { class: "a-dash-topo-map-pulses", "aria-hidden": "true", "data-refresh-key": "map-layer-pulses" });
+  const beaconLayer = createSVGEl("g", { class: "a-dash-topo-map-beacons", "data-refresh-key": "map-layer-beacons" });
+  const tagLayer = createSVGEl("g", { class: "a-dash-topo-map-tags", "data-refresh-key": "map-layer-tags" });
+  const pillLayer = createSVGEl("g", { class: "a-dash-topo-map-pills", "data-refresh-key": "map-layer-pills" });
 
-  // Reserve static occupied obstacles: beacon circles & map corners (HUD bars)
   const staticOccupied = [
-    { x: 0, y: 0, w: 280, h: 30 },
-    { x: vw - 360, y: 0, w: 360, h: 30 },
+    { x: 0, y: 0, w: 300, h: 30 },
+    { x: vw - 380, y: 0, w: 380, h: 30 },
+    ...((!zoomTransform || zoomTransform.scale <= 1.01) ? [{ x: vw - 188, y: 28, w: 178, h: 36 }] : []),
   ];
   clusters.forEach((c) => {
     const br = c.isCluster ? Math.min(11, 6.2 + c.members.length * 1.1) : 6.2;
     staticOccupied.push({ x: c.x - br - 3, y: c.y - br - 3, w: (br + 3) * 2, h: (br + 3) * 2 });
   });
 
-  // 1. Place City / Cluster Tags using Density-Vector Repulsion (zooming/dense labels stay collision-free)
   const tagPriority = [...clusters].sort((a, b) => {
     const aPinned = helpers.activeKey() === a.key ? 1 : 0;
     const bPinned = helpers.activeKey() === b.key ? 1 : 0;
     if (bPinned !== aPinned) return bPinned - aPinned;
-    const aBad = a.members.some((m) => m.node.blocked) ? 1 : 0;
-    const bBad = b.members.some((m) => m.node.blocked) ? 1 : 0;
-    if (bBad !== aBad) return bBad - aBad;
+    const aIssue = a.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
+    const bIssue = b.members.some((m) => !m.node.isOnline || Boolean(m.node.issue)) ? 1 : 0;
+    if (bIssue !== aIssue) return bIssue - aIssue;
     const aOnline = a.members.some((m) => m.node.isOnline) ? 1 : 0;
     const bOnline = b.members.some((m) => m.node.isOnline) ? 1 : 0;
     if (bOnline !== aOnline) return bOnline - aOnline;
@@ -812,14 +799,17 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     const hl = helpers.isHighlightedEdge(peers);
     const active = helpers.activeKey() === key;
     const anyOnline = cluster.members.some((m) => m.node.isOnline);
-    const anyBlocked = cluster.members.some((m) => m.node.blocked);
+    const anyIssue = cluster.members.some((m) => !m.node.isOnline || Boolean(m.node.issue));
     const r = cluster.isCluster ? Math.min(11, 6.2 + cluster.members.length * 1.1) : 5.8;
 
-    const tagText = cluster.isCluster
+    const baseCity = cluster.isCluster
       ? `${cluster.label} ×${cluster.members.length}`
       : (cluster.primary.geo.matched ? cluster.label : formatMapCityLabel(cluster.primary.node.name, cluster.primary.node));
-    const displayTag = clipLabel(tagText, 16);
-    const tagW = Math.max(44, Math.min(138, visualUnits(displayTag) * 6.4 + 14));
+    const roleSuffix = singleMode && !cluster.isCluster && cluster.primary.node.role
+      ? ` (${cluster.primary.node.role})`
+      : "";
+    const displayTag = clipLabel(`${baseCity}${roleSuffix}`, 18);
+    const tagW = Math.max(44, Math.min(154, visualUnits(displayTag) * 6.4 + 14));
     const tagH = 19;
 
     const candidates = buildDensityAwareTagCandidates(cluster, clusters, tagW, tagH, r, tagBounds);
@@ -870,7 +860,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
         height: tagH,
         rx: 5,
         fill: "#ffffff",
-        stroke: active ? INGRESS_COLOR : anyBlocked ? BLOCKED_COLOR : anyOnline ? "#d4d4d8" : "#e4e4e7",
+        stroke: active ? INK_COLOR : anyIssue ? BAD_COLOR : anyOnline ? "#d4d4d8" : BORDER_COLOR,
         "stroke-width": active ? "1.6" : "1",
         class: "a-dash-topo-card",
       }),
@@ -878,23 +868,21 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
         x: (chosen.x + 7).toFixed(1),
         y: (chosen.y + 13).toFixed(1),
         class: "a-dash-topo-map-tag-text",
-        fill: anyBlocked ? BLOCKED_COLOR : anyOnline ? "#18181b" : "#71717a",
+        fill: anyIssue ? BAD_COLOR : anyOnline ? INK_COLOR : SOFT_INK_COLOR,
       }, displayTag),
     );
-    g.append(createSVGEl("title", {}, cluster.members.map((m) => m.node.name).join(" / ")));
+    g.append(createSVGEl("title", {}, cluster.members.map((m) => `${m.node.name}${m.node.issue ? ` (${m.node.issue})` : ""}`).join(" / ")));
     helpers.bindInteractive(g, key);
     tagLayer.append(g);
   });
 
-  // 2. Render Nodes / Clusters Beacons
   clusters.forEach((cluster) => {
     const key = cluster.key;
     const peers = cluster.isCluster ? selIndex.clusterPeers(key) : selIndex.nodePeers(cluster.primary.node.id);
     const hl = helpers.isHighlightedEdge(peers);
     const active = helpers.activeKey() === key;
     const anyOnline = cluster.members.some((m) => m.node.isOnline);
-    const anyBlocked = cluster.members.some((m) => m.node.blocked);
-    const toneColor = anyBlocked ? BLOCKED_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
+    const toneColor = clusterHealthTone(cluster);
     const r = cluster.isCluster ? Math.min(11, 6.2 + cluster.members.length * 1.1) : 5.8;
 
     const g = createSVGEl("g", {
@@ -921,18 +909,13 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       }));
     }
 
-    g.append(createSVGEl("circle", {
-      cx: cluster.x.toFixed(1),
-      cy: cluster.y.toFixed(1),
-      r: (r + 7).toFixed(1),
-      fill: "transparent",
-    }));
+    g.append(createSVGEl("circle", { cx: cluster.x.toFixed(1), cy: cluster.y.toFixed(1), r: (r + 7).toFixed(1), fill: "transparent" }));
     g.append(createSVGEl("circle", {
       cx: cluster.x.toFixed(1),
       cy: cluster.y.toFixed(1),
       r: r.toFixed(1),
       fill: "#ffffff",
-      stroke: active ? INGRESS_COLOR : toneColor,
+      stroke: active ? INK_COLOR : toneColor,
       "stroke-width": active || hl === true ? "2.6" : "2.1",
       class: "a-dash-topo-card",
     }));
@@ -951,15 +934,20 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     beaconLayer.append(g);
   });
 
-  // 3. Render Probe Arcs + Guaranteed Non-Colliding Alert Pills (fullW reserved upfront, zero silent drop of top alerts)
-  const ambientBadSet = selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 6 });
-  const totalBadCount = model.probeLinks.filter((p) => p.tone === "bad").length;
-  const unshownBadCount = Math.max(0, totalBadCount - ambientBadSet.size);
+  // Decide which pills stay visible natively: single-group mode or small slices show all; larger meshes highlight alerts first
+  const showAllAmbient = singleMode || model.probeLinks.length <= 7;
+  const ambientSet = showAllAmbient
+    ? new Set(model.probeLinks.map((p) => p.id))
+    : selectTopAmbientBadProbeIDs(model.probeLinks, { includeExternal: true, maxCount: 6 });
+
+  const totalBadCount = model.probeLinks.filter((p) => p.tone === "bad" || p.tone === "warn").length;
+  const shownAlertCount = model.probeLinks.filter((p) => (p.tone === "bad" || p.tone === "warn") && ambientSet.has(p.id)).length;
+  const unshownAlertCount = Math.max(0, totalBadCount - shownAlertCount);
+
   const pillBounds = { minX: 20, maxX: vw - 20, minY: 32, maxY: mapHeight - 12 };
   const leaderSegments = [];
   const activeSel = helpers.activeKey();
 
-  // Sort probes so bad/focused render on top
   const renderOrder = [...model.probeLinks].sort((a, b) => {
     const score = { ok: 1, idle: 1, warn: 2, bad: 3 };
     return (score[a.tone] || 0) - (score[b.tone] || 0);
@@ -969,14 +957,14 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
     const geom = arcGeom.get(probe.id);
     if (!geom) return;
 
-    const entityKey = `probe:${probe.id}`;
+    const eKey = `probe:${probe.id}`;
     const peers = selIndex.probePeers(probe);
     const hl = helpers.isHighlightedEdge(peers);
     const pal = tonePalette(probe.tone);
     const isBad = probe.tone === "bad";
     const isWarn = probe.tone === "warn";
-    const baseOpacity = isBad ? 0.92 : isWarn ? 0.8 : probe.isExternal ? 0.45 : 0.42;
-    const opacity = hl === true ? 1 : hl === false ? 0.12 : baseOpacity;
+    const baseOpacity = singleMode ? 0.92 : (isBad ? 0.92 : isWarn ? 0.84 : probe.isExternal ? 0.5 : 0.48);
+    const opacity = hl === true ? 1 : hl === false ? 0.14 : baseOpacity;
 
     const g = createSVGEl("g", {
       "data-refresh-key": `map-arc-${probe.id}`,
@@ -985,7 +973,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       opacity: opacity.toFixed(2),
     });
 
-    const strokeW = (hl === true ? 2.4 : isBad ? 2.0 : 1.45).toFixed(2);
+    const strokeW = (hl === true ? 2.5 : singleMode ? 2.0 : isBad ? 2.0 : 1.5).toFixed(2);
     g.append(createSVGEl("path", {
       d: geom.d,
       fill: "none",
@@ -993,7 +981,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       "stroke-width": strokeW,
       "stroke-dasharray": probe.running ? "6 4" : isBad ? "5 3" : probe.isExternal ? "2 3" : null,
       "stroke-linecap": "round",
-      "marker-end": isBad ? "url(#a-topo-arrow-bad)" : isWarn ? "url(#a-topo-arrow-warn)" : probe.tone === "ok" ? "url(#a-topo-arrow-ok)" : "url(#a-topo-arrow-idle)",
+      "marker-end": isBad ? `url(#${defsPrefix}-arrow-bad)` : isWarn ? `url(#${defsPrefix}-arrow-warn)` : probe.tone === "ok" ? `url(#${defsPrefix}-arrow-ok)` : `url(#${defsPrefix}-arrow-idle)`,
       class: probe.running ? "a-dash-topo-probe-running" : null,
     }));
 
@@ -1008,8 +996,8 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       });
     }
 
-    if (helpers.allowMotion() && !isProbeUnreachable(probe) && (probe.tone === "ok" || hl === true)) {
-      const spd = flowSpeedClass(0.55);
+    if (helpers.allowMotion() && !isProbeUnreachable(probe) && !probe.unavailableReverse && (probe.tone === "ok" || hl === true)) {
+      const spd = flowSpeedClass(probe.latencyMS);
       geom.segments.forEach((seg, segIdx) => {
         const segD = `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
         g.append(createSVGEl("path", {
@@ -1018,7 +1006,7 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
           stroke: pal.stroke,
           "stroke-width": "1.5",
           "stroke-dasharray": "4 16",
-          opacity: "0.45",
+          opacity: "0.48",
           class: `a-dash-topo-flow-pulse ${spd}`,
           "data-refresh-key": `map-pulse-${probe.id}-${segIdx}`,
         }));
@@ -1032,33 +1020,33 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       "stroke-width": "12",
       class: "a-dash-topo-probe-item",
     });
-    helpers.bindInteractive(hit, entityKey, { openProbeID: probe.probeID || probe.id });
+    helpers.bindInteractive(hit, eKey);
     g.append(hit);
     probeLayer.append(g);
 
-    // Reserve full pill width upfront for ambient alerts so hover/pin never causes neighbor overlap.
-    const isAmbientBad = ambientBadSet.has(probe.id);
+    const isAmbient = ambientSet.has(probe.id);
     const fullLabel = buildProbePillLabel(probe, false, false);
-    const compactLabel = isAmbientBad ? buildProbePillLabel(probe, true, false) : fullLabel;
+    const pillLabel = (!singleMode && isAmbient && model.probeLinks.length > 7)
+      ? buildProbePillLabel(probe, true, false)
+      : fullLabel;
     const pillH = 20;
-    const fullW = Math.max(58, Math.min(148, visualUnits(compactLabel) * 6.3 + 22));
-    const reserveW = fullW;
+    const fullW = Math.max(58, Math.min(168, visualUnits(pillLabel) * 6.3 + 22));
 
-    const pillOccupied = isAmbientBad ? staticOccupied : [...staticOccupied];
+    const pillOccupied = isAmbient ? staticOccupied : [...staticOccupied];
     const placed = placeCollisionFreePill(
       geom.mid.x,
       geom.mid.y,
-      reserveW,
+      fullW,
       pillH,
       pillOccupied,
       pillBounds,
       [geom.mid],
-      { leaderSegments, reserveW },
+      { leaderSegments, reserveW: fullW },
     );
 
-    if (placed.shifted || isAmbientBad) {
+    if (placed.shifted || isAmbient) {
       if (Math.hypot(placed.cx - geom.mid.x, placed.cy - geom.mid.y) > 16) {
-        helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, false, !isAmbientBad);
+        helpers.appendProbeLeader(pillLayer, placed, pal, peers, hl, false, !isAmbient, probe.id);
       }
     }
 
@@ -1069,20 +1057,17 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
       pillW: fullW,
       fullW,
       pillH,
-      label: compactLabel,
-      shortLabel: compactLabel,
+      label: pillLabel,
       pal,
       compact: false,
       peers,
-      focusOnly: !isAmbientBad,
-      ambientAlert: false,
+      focusOnly: !isAmbient,
     }));
   });
 
-  // External Dock sits below the clip/zoom map viewport so chips never clip or pan offscreen.
-  const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock" });
+  const dockLayer = createSVGEl("g", { class: "a-dash-topo-map-dock", "data-refresh-key": "map-layer-dock" });
   if (dockArea.rowCount > 0) {
-    dockLayer.append(createSVGEl("line", { x1: 18, y1: mapHeight + 2, x2: vw - 18, y2: mapHeight + 2, stroke: "#e4e4e7", "stroke-width": "1" }));
+    dockLayer.append(createSVGEl("line", { x1: 18, y1: mapHeight + 2, x2: vw - 18, y2: mapHeight + 2, stroke: BORDER_COLOR, "stroke-width": "1" }));
     dockArea.chips.forEach((chip) => {
       const extID = chip.ext.id;
       const peers = selIndex.extPeers(extID);
@@ -1104,37 +1089,37 @@ export function renderPacificMapSVG({ width, isMobile, model, bytes, trafficMeta
           height: chip.h,
           rx: 7,
           fill: "#ffffff",
-          stroke: active ? INGRESS_COLOR : "#d4d4d8",
+          stroke: active ? INK_COLOR : "#d4d4d8",
           "stroke-width": active ? "1.8" : "1",
           class: "a-dash-topo-card",
         }),
-        createSVGEl("circle", { cx: chip.cx.toFixed(1), cy: chip.y.toFixed(1), r: 2.5, fill: "#ffffff", stroke: EGRESS_COLOR, "stroke-width": "1.2" }),
-        createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 15).toFixed(1), class: "a-dash-topo-map-tag-text", fill: "#18181b" }, chip.title),
-        createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 28).toFixed(1), class: "a-dash-topo-ext-sub", fill: "#71717a" }, chip.subText),
+        createSVGEl("circle", { cx: chip.cx.toFixed(1), cy: chip.y.toFixed(1), r: 2.5, fill: "#ffffff", stroke: SOFT_INK_COLOR, "stroke-width": "1.2" }),
+        createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 15).toFixed(1), class: "a-dash-topo-map-tag-text", fill: INK_COLOR }, chip.title),
+        createSVGEl("text", { x: (chip.x + 10).toFixed(1), y: (chip.y + 28).toFixed(1), class: "a-dash-topo-ext-sub", fill: SOFT_INK_COLOR }, chip.subText),
       );
-      g.append(createSVGEl("title", {}, `${chip.fullTitle}${chip.ext.address ? ` (${chip.ext.address})` : ""} · ${chip.ext.linkCount} 条链路`));
+      g.append(createSVGEl("title", {}, `${chip.fullTitle}${chip.ext.address ? ` (${chip.ext.address})` : ""} · ${chip.ext.linkCount || 1} 链路`));
       helpers.bindInteractive(g, extID);
       dockLayer.append(g);
     });
   }
 
-  zoomGroup.append(backdrop, flowLayer, probeLayer, pulseLayer, beaconLayer, tagLayer, pillLayer);
+  zoomGroup.append(backdrop, probeLayer, pulseLayer, beaconLayer, tagLayer, pillLayer);
   stageClipGroup.append(zoomGroup);
 
-  const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud" });
+  const hudLayer = createSVGEl("g", { class: "a-dash-topo-map-hud", "data-refresh-key": "map-layer-hud" });
   hudLayer.append(
-    createSVGEl("text", { x: 16, y: 20, class: "a-dash-topo-map-coord" }, `158°E PACIFIC BASIN · ${clusters.length} 枢纽`),
-    createSVGEl("text", { x: vw - 16, y: 20, "text-anchor": "end", class: "a-dash-topo-micro", fill: "#52525b" }, buildMapHudLatencyLine(model, false)),
+    createSVGEl("text", { x: 16, y: 20, class: "a-dash-topo-map-coord" }, `158°E PACIFIC · ${clusters.length} 区域节点`),
+    createSVGEl("text", { x: vw - 16, y: 20, "text-anchor": "end", class: "a-dash-topo-micro", fill: SOFT_INK_COLOR }, buildMapHudLatencyLine(model, false)),
   );
-  if (unshownBadCount > 0 || hiddenClusterCount.length > 0) {
+  if (unshownAlertCount > 0 || hiddenClusterCount.length > 0) {
     const parts = [];
-    if (unshownBadCount > 0) parts.push(`另有 ${unshownBadCount} 条告警见下方台账/链路监控`);
-    if (hiddenClusterCount.length > 0) parts.push(`可放大查看 ${hiddenClusterCount.length} 处密集标签`);
+    if (unshownAlertCount > 0) parts.push(`另有 ${unshownAlertCount} 项告警见下方监测分组台账`);
+    if (hiddenClusterCount.length > 0) parts.push(`可放大查看 ${hiddenClusterCount.length} 处密集城市标签`);
     hudLayer.append(createSVGEl("text", {
       x: 16,
       y: mapHeight - 10,
       class: "a-dash-topo-micro",
-      fill: unshownBadCount > 0 ? BLOCKED_COLOR : "#52525b",
+      fill: unshownAlertCount > 0 ? BAD_COLOR : SOFT_INK_COLOR,
     }, parts.join(" · ")));
   }
 

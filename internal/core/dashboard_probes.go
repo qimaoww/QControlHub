@@ -90,7 +90,7 @@ type DashboardProbeAvailability struct {
 type DashboardProbePair struct {
 	ID                  string                     `json:"id"`
 	Name                string                     `json:"name"`
-	GroupName           string                     `json:"group_name,omitempty"`
+	GroupName           string                     `json:"group_name"`
 	TargetMode          string                     `json:"target_mode"`
 	Node1               DiagnosticEndpoint         `json:"node1"`
 	Node2               DiagnosticEndpoint         `json:"node2"`
@@ -125,7 +125,7 @@ type DashboardProbeListResponse struct {
 // update payloads using the same address and parameter constraints as network_diagnostics.
 type DashboardProbePairRequest struct {
 	Name                string               `json:"name"`
-	GroupName           string               `json:"group_name,omitempty"`
+	GroupName           string               `json:"group_name"`
 	TargetMode          string               `json:"target_mode"`
 	Node1               DiagnosticEndpoint   `json:"node1"`
 	Node2               DiagnosticEndpoint   `json:"node2"`
@@ -141,14 +141,22 @@ type DashboardProbePairRequest struct {
 // address, family, chain uniqueness, and target constraint cleanly.
 func (r *DashboardProbePairRequest) NormalizeAndValidate() error {
 	r.Name = strings.TrimSpace(r.Name)
+	if strings.ContainsAny(r.Name, "\n\r\x00") {
+		return errors.New("链路备注包含无效字符")
+	}
 	if utf8.RuneCountInString(r.Name) > 80 {
-		return errors.New("探测名称不能超过 80 个字符")
+		return errors.New("链路备注不能超过 80 个字符")
 	}
 	r.GroupName = strings.TrimSpace(r.GroupName)
+	if r.GroupName == "" {
+		return errors.New("请输入监测分组名称")
+	}
+	if strings.ContainsAny(r.GroupName, "\n\r\x00") {
+		return errors.New("监测分组名称包含无效字符")
+	}
 	if utf8.RuneCountInString(r.GroupName) > 40 {
 		return errors.New("监测分组名称不能超过 40 个字符")
 	}
-	r.TargetMode = strings.TrimSpace(r.TargetMode)
 	if r.TargetMode != "" && r.TargetMode != "ip" {
 		return errors.New("目标模式无效")
 	}

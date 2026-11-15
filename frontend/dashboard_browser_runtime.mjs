@@ -93,10 +93,19 @@ export async function testDashboardRuntime(mode, preview = false) {
     probes: [
       {
         id: "prb_1",
-        name: "东京 ↔ 香港专线",
+        name: "主用低延迟专线",
+        group_name: "东京香港专线",
         target_mode: "",
         node1: { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", address: "192.0.2.30" },
         node2: { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", address: "203.0.113.10" },
+        nodes: [
+          { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", address: "192.0.2.30" },
+          { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", address: "203.0.113.10" },
+        ],
+        chain: [
+          { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", region: "JP", address: "192.0.2.30", online: true, granted: true, ping: true },
+          { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", region: "HK", address: "203.0.113.10", online: true, granted: true, ping: true },
+        ],
         node1_name: "东京 · JP-03",
         node1_region: "JP",
         node2_name: "香港 · HK-01",
@@ -111,18 +120,35 @@ export async function testDashboardRuntime(mode, preview = false) {
           sampled_at: new Date(Date.now() - 5000).toISOString(),
           forward: { state: "succeeded", sent: 5, received: 5, loss_percent: 0, min_ms: 41.2, avg_ms: 43.8, max_ms: 46.1, stdev_ms: 1.8, reached: true },
           reverse: { state: "succeeded", sent: 5, received: 4, loss_percent: 20, min_ms: 42.0, avg_ms: 45.4, max_ms: 49.0, stdev_ms: 2.6, reached: true },
+          hops: [
+            {
+              hop_index: 0,
+              from: "tokyo",
+              to: "hongkong",
+              forward: { state: "succeeded", sent: 5, received: 5, loss_percent: 0, min_ms: 41.2, avg_ms: 43.8, max_ms: 46.1, stdev_ms: 1.8, reached: true },
+              reverse: { state: "succeeded", sent: 5, received: 4, loss_percent: 20, min_ms: 42.0, avg_ms: 45.4, max_ms: 49.0, stdev_ms: 2.6, reached: true },
+            },
+          ],
         },
         history: [
-          { sampled_at: new Date(Date.now() - 65000).toISOString(), forward: { avg_ms: 42.1, loss_percent: 0, reached: true }, reverse: { avg_ms: 44.0, loss_percent: 0, reached: true } },
-          { sampled_at: new Date(Date.now() - 5000).toISOString(), forward: { avg_ms: 43.8, loss_percent: 0, reached: true }, reverse: { avg_ms: 45.4, loss_percent: 20, reached: true } },
+          { id: "s1", sampled_at: new Date(Date.now() - 65000).toISOString(), state: "succeeded", forward: { avg_ms: 42.1, loss_percent: 0, reached: true }, reverse: { avg_ms: 44.0, loss_percent: 0, reached: true } },
+          { id: "s2", sampled_at: new Date(Date.now() - 5000).toISOString(), state: "succeeded", forward: { avg_ms: 43.8, loss_percent: 0, reached: true }, reverse: { avg_ms: 45.4, loss_percent: 20, reached: true } },
         ],
       },
       {
         id: "prb_2",
-        name: "新加坡 → Cloudflare",
+        name: "Cloudflare IP",
+        group_name: "新加坡外部测速",
         target_mode: "ip",
         node1: { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", address: "198.51.100.20" },
         node2: { name: "1.1.1.1", address: "1.1.1.1" },
+        nodes: [
+          { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", address: "198.51.100.20" },
+          { name: "1.1.1.1", address: "1.1.1.1" },
+        ],
+        chain: [
+          { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", region: "SG", address: "198.51.100.20", online: false, granted: true, ping: false },
+        ],
         node1_name: "新加坡 · SG-02",
         node1_region: "SG",
         bidirectional: false,
@@ -228,14 +254,28 @@ export async function testDashboardRuntime(mode, preview = false) {
       if (method === "POST") {
         assert(canSession("tasks.execute"), "unauthorized probe create");
         const body = JSON.parse(options.body || "{}");
+        const groupName = String(body.group_name || "").trim();
+        if (fixture.probes.some((p) => p.group_name === groupName)) {
+          return json({ error: `监测分组“${groupName}”已存在链路，每个分组仅允许配置一条链路` }, 409);
+        }
+        const rawNodes = Array.isArray(body.nodes) && body.nodes.length >= 2 ? body.nodes : [body.node1, body.node2].filter(Boolean);
         const created = {
           id: `prb_${fixture.probes.length + 1}`,
-          name: body.name || "新建探测对",
-          group_name: body.group_name || "",
+          name: body.name || "",
+          group_name: groupName,
           target_mode: body.target_mode || "",
           node1: body.node1,
           node2: body.node2,
-          nodes: Array.isArray(body.nodes) ? body.nodes : undefined,
+          nodes: rawNodes,
+          chain: rawNodes.filter((ep) => ep?.agent_id).map((ep) => ({
+            agent_id: ep.agent_id,
+            instance_id: ep.instance_id || "main",
+            name: ep.name,
+            address: ep.address,
+            online: true,
+            granted: true,
+            ping: true,
+          })),
           bidirectional: Boolean(body.bidirectional),
           parameters: body.parameters,
           auto_enabled: Boolean(body.auto_enabled),
@@ -268,6 +308,10 @@ export async function testDashboardRuntime(mode, preview = false) {
       }
       if (!action && method === "PUT") {
         const body = JSON.parse(options.body || "{}");
+        const groupName = String(body.group_name || "").trim();
+        if (fixture.probes.some((p) => p.id !== id && p.group_name === groupName)) {
+          return json({ error: `监测分组“${groupName}”已存在链路，每个分组仅允许配置一条链路` }, 409);
+        }
         Object.assign(target, { ...body, revision: (target.revision || 0) + 1 });
         return json(target);
       }
@@ -329,14 +373,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   const traffic = () => card("流量概况");
   const ranking = () => card("流量累计排行");
   const topology = () => card("网络延迟监测拓扑");
-  const probesDialog = () => [...document.querySelectorAll("dialog.a-dialog[open]")].find((d) => d.querySelector(".a-dialog-head h2")?.textContent === "节点链路监控");
-  const openProbesModal = async () => {
-    const btn = topology()?.querySelector(".a-dash-topo-probe-btn");
-    assert(btn, "topology probe modal trigger missing");
-    btn.click();
-    await waitFor(() => probesDialog()?.querySelector('[data-refresh-key]'), "probe modal did not open");
-    return probesDialog();
-  };
+  const activeDialog = () => [...document.querySelectorAll("dialog.a-dialog[open]")].at(-1);
   const nodes = () => card("节点运行状态");
   const activity = () => card("最近任务");
   const metric = (label) => panel()?.querySelector(`[data-refresh-key="${label}"] strong`);
@@ -365,11 +402,11 @@ export async function testDashboardRuntime(mode, preview = false) {
       await waitFor(() => document.querySelector(".a-main").textContent.includes("3/4") && document.querySelector(".a-main").textContent.includes("在线率 75%"), "overview-only user lost allowed summary");
     } else {
       assert(traffic() && ranking(), "readonly user lost own traffic");
-      await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector(".a-dash-topo-probe-btn"), "readonly user with agents.read+tasks.read should view topology and link monitor trigger");
-      const roDialog = await openProbesModal();
-      assert(roDialog.querySelector('[data-refresh-key="prb_1"]'), "readonly user lost probes inside topology modal");
-      assert(![...roDialog.querySelectorAll("button")].some((b) => ["添加链路", "立即探测", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
-      roDialog.close();
+      await waitFor(() => topology()?.querySelector(".a-topo-single-stage") && topology()?.querySelectorAll(".a-topo-group-pill").length === 2, "readonly user with agents.read+tasks.read should view single-group topology and switcher");
+      assert(topology().querySelectorAll(".a-topo-single-stage").length === 1, "homepage topology must render strictly one group link at a time");
+      assert(![...topology().querySelectorAll("button")].some((b) => ["+ 新建监测组", "立即探测", "暂停自动", "编辑", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
+      topology().querySelectorAll(".a-topo-group-pill")[1].click();
+      await waitFor(() => topology()?.querySelector('.a-topo-single-stage[data-group-name="新加坡外部测速"]'), "readonly user failed to switch monitoring group");
       assert(reads("/network-diagnostics/nodes") === 0, "readonly user fetched diagnostic node write metadata");
     }
     return;
@@ -416,45 +453,43 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(nodes().textContent.includes("时钟异常") && nodes().textContent.includes("IPv6"), "matrix omitted clock_sync or IPv6 capability badges");
   assert(!activity() && reads("/tasks") === 0, "retired recent-task area still renders or polls");
 
-  assert(!card("节点链路监控"), "probes card still renders directly on main dashboard instead of topology modal");
-  await waitFor(() => topology()?.querySelector("svg.a-dash-topo-svg") && topology()?.querySelector(".a-dash-topo-groups") && topology()?.querySelector('[data-topo-entity="node:tokyo"]') && (topology()?.textContent.includes("43.8ms") || topology()?.querySelector(".a-dash-topo-chip")?.textContent.includes("43.8ms")), "topology card did not render grouped nodes and live probe links");
-  assert(!/(B\/s|KB\/s|MB\/s|GB\/s|实时入站|实时出站|本月)/.test(topology().textContent), "topology still displays real-time traffic speed or monthly traffic");
-  topology().querySelector('[data-topo-entity="node:tokyo"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  await waitFor(() => topology()?.querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector(".a-dash-topo-inspect")?.textContent.includes("东京 · JP-03"), "topology node selection did not update inspect bar");
+  assert(!card("节点链路监控"), "probes card must not render alongside topology card");
+  await waitFor(() => topology()?.querySelectorAll(".a-topo-single-stage").length === 1 && topology()?.querySelectorAll(".a-topo-group-pill").length === 2, "dashboard topology did not render single selected group with switcher");
+  assert(topology().querySelector('.a-topo-single-stage')?.getAttribute("data-group-name") === "东京香港专线", "initial group should default to first group");
+  assert(topology().textContent.includes("43.8ms") && topology().textContent.includes("45.4ms"), "topology did not render forward/reverse hop metrics");
+  assert(!/(B\/s|KB\/s|MB\/s|GB\/s|实时入站|实时出站|本月)/.test(topology().textContent), "topology must not display traffic rates or monthly totals");
 
-  // Open link monitoring popup directly from the topology probe arc (or chip/header trigger) & verify stability across refreshes.
-  const probeArc = topology().querySelector('[data-topo-entity="probe:prb_1"]');
-  if (probeArc) {
-    probeArc.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  } else {
-    topology().querySelector('.a-dash-topo-probe-btn').click();
-  }
-  await waitFor(() => probesDialog()?.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("20%"), "link probes modal did not open from topology");
-  const modalBox = probesDialog();
-  assert(!panel().querySelector(".a-dash-chip-pill") && !/\d+\/\d+\s*样本|协程/.test(panel().textContent), "panel still renders removed sample/goroutine pills");
-  const stableAddProbeBtn = [...modalBox.querySelectorAll("button")].find((b) => b.textContent === "添加链路");
-  assert(stableAddProbeBtn, "add probe link button missing for authorized operator");
-  const stableProbesSVG = modalBox.querySelector("svg");
-  const stableProbeGrads = [...modalBox.querySelectorAll("linearGradient")].map((g) => g.id);
-  await refresh();
-  assert(probesDialog() === modalBox && modalBox.querySelector("svg") === stableProbesSVG, "unchanged refresh rebuilt probe modal SVG");
-  assert(JSON.stringify([...modalBox.querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stableProbeGrads), "probe gradient IDs churned across refresh");
-  assert([...modalBox.querySelectorAll("button")].find((b) => b.textContent === "添加链路") === stableAddProbeBtn, "refresh replaced add probe button inside modal");
+  // Focus single node and single hop in inspect strip
+  topology().querySelector('[data-topo-node="tokyo"]').click();
+  await waitFor(() => topology()?.querySelector('[data-topo-node="tokyo"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector(".a-topo-inspect")?.textContent.includes("东京 · JP-03"), "topology node selection did not update inspect bar");
+  topology().querySelector('.a-topo-hop-slot[data-hop-index="0"]').click();
+  await waitFor(() => topology()?.querySelector('.a-topo-hop-slot[data-hop-index="0"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector(".a-topo-inspect")?.textContent.includes("跳段 1/1"), "topology hop selection did not update inspect bar");
 
-  const runBtn = [...modalBox.querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "立即探测");
-  runBtn.click();
-  await waitFor(() => modalBox.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("停止"), "run action did not enter running/stop state");
-  const stopBtn = [...modalBox.querySelector('[data-refresh-key="prb_1"]').querySelectorAll("button")].find((b) => b.textContent === "停止");
-  stopBtn.click();
-  await waitFor(() => modalBox.querySelector('[data-refresh-key="prb_1"]')?.textContent.includes("立即探测"), "stop action did not settle");
+  // Verify run/stop and toggle actions directly from single-group header (single entry per action)
+  const runBtns = [...topology().querySelectorAll("button")].filter((b) => b.textContent === "立即探测");
+  assert(runBtns.length === 1, "expected strictly one run button in homepage single-group context");
+  runBtns[0].click();
+  await waitFor(() => [...topology().querySelectorAll("button")].some((b) => b.textContent === "停止"), "run action did not switch to stop");
+  [...topology().querySelectorAll("button")].find((b) => b.textContent === "停止").click();
+  await waitFor(() => [...topology().querySelectorAll("button")].some((b) => b.textContent === "立即探测"), "stop action did not settle");
 
-  // Add, extend to 3-hop chain (A-B-C), toggle, and delete a grouped probe chain through stacked UI form & confirmation dialog.
-  stableAddProbeBtn.click();
-  const addDialog = [...document.querySelectorAll("dialog[open]")].at(-1);
-  assert(addDialog?.matches(":modal") && addDialog !== modalBox, "add probe stacked dialog missing");
-  await waitFor(() => reads("/network-diagnostics/nodes") > 0 && addDialog.querySelector('select[name="hop_node_1"] option[value="singapore/main"]'), "diagnostic nodes not populated in chain builder");
-  addDialog.querySelector('input[name="name"]').value = "东京 → 新加坡测试";
-  addDialog.querySelector('input[name="group_name"]').value = "亚太核心组";
+  // Toggle dashboard history chart & verify preference persistence
+  [...topology().querySelectorAll("button")].find((b) => b.textContent === "历史趋势").click();
+  await waitFor(() => topology().querySelector("svg.a-topo-history-svg") && fixture.uiPrefs.values?.dashboard?.topo_show_history === true, "dashboard history chart toggle did not render or persist");
+
+  // Create a 3-hop chain group via unified dialog, verifying uniqueness check before save
+  [...topology().querySelectorAll("button")].find((b) => b.textContent === "+ 新建监测组").click();
+  await waitFor(() => activeDialog()?.querySelector('select[name="hop_node_1"] option[value="singapore/main"]'), "diagnostic nodes not populated in create group dialog");
+  const addDialog = activeDialog();
+  const groupInput = addDialog.querySelector('input[name="group_name"]');
+  groupInput.value = "东京香港专线";
+  groupInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitFor(() => groupInput.validationMessage.includes("已存在链路"), "duplicate group_name validation did not fire");
+  groupInput.value = "亚太核心组";
+  groupInput.dispatchEvent(new Event("input", { bubbles: true }));
+  addDialog.querySelector('input[name="name"]').value = "三跳测试链路";
+  addDialog.querySelector('select[name="hop_node_0"]').value = "tokyo/main";
+  addDialog.querySelector('select[name="hop_node_0"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('select[name="hop_node_1"]').value = "hongkong/main";
   addDialog.querySelector('select[name="hop_node_1"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('[data-refresh-key="add-hop"]').click();
@@ -462,17 +497,14 @@ export async function testDashboardRuntime(mode, preview = false) {
   addDialog.querySelector('select[name="hop_node_2"]').value = "singapore/main";
   addDialog.querySelector('select[name="hop_node_2"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('button[type="submit"]').click();
-  await waitFor(() => !addDialog.open && modalBox.textContent.includes("东京 → 新加坡测试") && modalBox.textContent.includes("亚太核心组") && modalBox.textContent.includes("全程 3 站"), "created multi-hop chain or group badge not rendered inside modal");
-  const createdCard = [...modalBox.querySelectorAll('[data-refresh-key]')].find((el) => el.textContent.includes("东京 → 新加坡测试"));
-  [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "暂停自动").click();
-  await waitFor(() => createdCard.textContent.includes("开启自动"), "toggling auto probe state failed");
-  [...createdCard.querySelectorAll("button")].find((b) => b.textContent === "删除").click();
-  const delConfirm = [...document.querySelectorAll("dialog[open]")].at(-1);
-  assert(delConfirm && delConfirm !== modalBox, "delete probe confirmation dialog missing");
-  [...delConfirm.querySelectorAll("button")].find((b) => b.textContent === "删除链路").click();
-  await waitFor(() => !modalBox.textContent.includes("东京 → 新加坡测试"), "deleted probe link stayed rendered");
-  modalBox.close();
-  await waitFor(() => !document.querySelector("dialog[open]"), "probe modal did not close cleanly");
+  await waitFor(() => !addDialog.open && topology()?.querySelector('.a-topo-single-stage[data-group-name="亚太核心组"]'), "newly created group link was not selected and rendered");
+  assert(topology().querySelectorAll(".a-topo-node-card").length === 3 && topology().querySelectorAll(".a-topo-hop-slot").length === 2, "3-hop chain did not render 3 nodes and 2 hops");
+
+  // Switch back to 东京香港专线 and re-focus node:tokyo for stability refresh assertions
+  topology().querySelector('.a-topo-group-pill[data-group-name="东京香港专线"]').click();
+  await waitFor(() => topology()?.querySelector('.a-topo-single-stage[data-group-name="东京香港专线"]'), "failed to switch back to 东京香港专线");
+  topology().querySelector('[data-topo-node="tokyo"]').click();
+  await waitFor(() => topology()?.querySelector('[data-topo-node="tokyo"]')?.getAttribute("aria-pressed") === "true", "failed to focus tokyo node");
 
   // Verify node telemetry matrix 24h dialog opens and renders metrics without interfering with polling.
   const trendBtn = [...nodes().querySelector(".a-dash-matrix-row").querySelectorAll("button")].find((b) => b.textContent === "24h 趋势");
@@ -512,7 +544,7 @@ export async function testDashboardRuntime(mode, preview = false) {
 
   const assertLayout = () => {
     assert(document.documentElement.scrollWidth <= innerWidth + 1, `viewport overflow ${innerWidth}`);
-    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-dash-topo-canvas,.a-dash-topo-inspect,.a-dash-matrix,.a-dash-matrix-row,.a-dash-probe-grid,.a-dash-probe-lane,.a-dash-flow-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-topo-body,.a-topo-switcher,.a-topo-single-stage,.a-topo-chain-stage,.a-topo-chain-step,.a-topo-node-card,.a-topo-hop-slot,.a-topo-inspect,.a-topo-controls-bar,.a-topo-domain-bar,.a-topo-overview-grid,.a-topo-overview-card,.a-topo-flow-list,.a-topo-flow-group-card,.a-topo-fleet-map-panel,.a-topo-map-wrap,.a-dash-topo-map-stage,.a-dash-matrix,.a-dash-matrix-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
       assert(element.scrollWidth <= element.clientWidth + 1, `content overflow ${element.className}`);
     }
     for (const element of document.querySelectorAll('[aria-label="节点运行状态"]')) {
@@ -540,12 +572,13 @@ export async function testDashboardRuntime(mode, preview = false) {
   const stablePanel = panel(), stableCPU = cpu(), stableNode = nodes().querySelector(".a-dash-matrix-row"), stableSVG = traffic().querySelector("svg.a-chart");
   const stableNodeAction = nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a");
   const stableRankRow = ranking().querySelector(".a-dash-rank-row");
-  const stableTopoSVG = topology().querySelector("svg.a-dash-topo-svg");
+  const stableTopoStage = topology().querySelector(".a-topo-single-stage");
+  const stableTopoSVG = topology().querySelector("svg.a-topo-conduit-svg");
   const stablePanelSVGs = [...panel().querySelectorAll("svg")];
   const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
   await refresh();
   assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
-  assert(topology().querySelector("svg.a-dash-topo-svg") === stableTopoSVG && topology().querySelector('[data-topo-entity="node:tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh rebuilt topology SVG or lost selected node");
+  assert(topology().querySelector(".a-topo-single-stage") === stableTopoStage && topology().querySelector("svg.a-topo-conduit-svg") === stableTopoSVG && topology().querySelector('[data-topo-node="tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh rebuilt topology stage or lost focused node");
   assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
   assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
   assert(ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");
@@ -642,38 +675,102 @@ export async function testDashboardRuntime(mode, preview = false) {
   assert(traffic().querySelector("svg.a-chart [d]") && traffic().querySelector("svg.a-chart").textContent.includes(`02-${days}`), "February axis lost final day");
   assertLayout();
 
+  if (mode === "dashboard-mobile") {
+    topology().querySelector('[data-topo-dash-view="map"]').click();
+    await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg.is-mobile"), "mobile dashboard topology failed to switch to pacific map");
+    assertLayout();
+    topology().querySelector('[data-topo-dash-view="flow"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-chain-stage") && !topology().querySelector("svg.a-dash-topo-map-svg"), "mobile dashboard topology failed to switch back to flow");
+    assertLayout();
+  }
+
   if (mode === "dashboard") {
-    assert(!topology().querySelector(".a-dash-topo-ledger"), "dashboard topology card should not render link matrix ledger");
+    assert(!topology().querySelector(".a-topo-overview-grid"), "dashboard topology card should not render standalone overview grid");
     assert(topology().querySelector('[data-refresh-key="open-topology-page"]')?.getAttribute("href") === "#topology", "dashboard topology detail link missing");
-    topology().querySelector('[data-topo-mode-btn="map"]').click();
-    await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg") && topology().querySelector('[data-topo-mode-btn="map"]')?.getAttribute("aria-pressed") === "true", "topology view mode did not switch to pacific map");
-    topology().querySelector('.a-dash-topo-probe-btn').click();
-    await waitFor(() => probesDialog()?.querySelector('[data-refresh-key="filter-abnormal"]'), "probes filter button missing");
-    probesDialog().querySelector('[data-refresh-key="filter-abnormal"]').click();
-    await waitFor(() => probesDialog().querySelector('[data-refresh-key="filter-abnormal"]')?.getAttribute("aria-pressed") === "true", "probe modal filter did not switch to abnormal");
-    probesDialog().close();
+
+    // Toggle homepage topology between flow and Pacific map, verify zoom & inspect sync + persistence
+    topology().querySelector('[data-topo-dash-view="map"]').click();
+    await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg") && fixture.uiPrefs.values?.dashboard?.topo_view_mode === "map", "homepage topology failed to switch to pacific map");
+    assertLayout();
+    topology().querySelector('[data-refresh-key="map-zoom-in"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "homepage map zoom in did not update scale");
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === "100%", "homepage map zoom reset failed");
+    topology().querySelector('[data-topo-dash-view="flow"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-chain-stage") && fixture.uiPrefs.values?.dashboard?.topo_view_mode === "flow", "homepage topology failed to restore flow mode");
 
     location.hash = "#topology";
-    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-dash-topo-ledger") && topology()?.querySelector("svg.a-dash-topo-map-svg"), "standalone topology page did not render ledger or restored map mode");
+    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-topo-overview-grid") && topology()?.querySelectorAll(".a-topo-overview-card").length === 3, "standalone topology page did not render overview cards");
     assert(!topology().querySelector('[data-refresh-key="open-topology-page"]'), "standalone topology page should not render duplicate detail link");
-    topology().querySelector('.a-dash-topo-filter-btn[data-filter="bad"]').click();
-    await waitFor(() => topology().querySelector('.a-dash-topo-filter-btn[data-filter="bad"]')?.getAttribute("aria-pressed") === "true", "topology ledger filter did not switch to bad");
-    await waitFor(() => fixture.uiPrefs.values?.dashboard?.topo_view_mode === "map" && fixture.uiPrefs.values?.dashboard?.topo_probe_filter === "bad" && fixture.uiPrefs.values?.dashboard?.probe_filter === "abnormal", "selectable dashboard options did not persist to /preferences/ui");
+    assert(topology().querySelector(".a-topo-domain-bar") && topology().querySelector('[data-topo-domain-btn="domain:multihop"]'), "standalone domain filter bar missing multi-hop domain");
+    assertLayout();
 
+    // Test standalone Flow comparison view + inline inspect strip
+    topology().querySelector('[data-topo-view-btn="flow"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-flow-list") && topology().querySelectorAll(".a-topo-flow-group-card").length === 3, "standalone topology did not render flow comparison list");
+    topology().querySelector('.a-topo-flow-group-card[data-group-name="东京香港专线"] [data-topo-node="tokyo"]').click();
+    await waitFor(() => topology().querySelector('.a-topo-flow-group-card[data-group-name="东京香港专线"] .a-topo-inspect')?.textContent.includes("东京 · JP-03"), "flow comparison inline inspect strip failed");
+    assertLayout();
+
+    // Test standalone Fleet Pacific Map view + entity inspection + domain filtering
+    topology().querySelector('[data-topo-view-btn="map"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-fleet-map-panel svg.a-dash-topo-map-svg"), "standalone topology did not render fleet pacific map");
+    topology().querySelector('.a-topo-fleet-map-panel [data-topo-entity^="probe:"]').click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="topo-map-inspect"] [data-refresh-key="map-focus-group"]'), "fleet map click did not update inspect action strip");
+    topology().querySelector('[data-topo-domain-btn="domain:multihop"]').click();
+    await waitFor(() => topology().querySelector('[data-topo-domain-btn="domain:multihop"]')?.getAttribute("aria-pressed") === "true" && fixture.uiPrefs.values?.topology?.domain_group === "domain:multihop", "domain filter did not persist");
+    topology().querySelector('[data-topo-domain-btn="all"]').click();
+    await waitFor(() => topology().querySelector('[data-topo-domain-btn="all"]')?.getAttribute("aria-pressed") === "true", "resetting domain filter to all failed");
+    assertLayout();
+
+    // Return to overview before filter/direction/sort/focus persistence checks
+    topology().querySelector('[data-topo-view-btn="overview"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-overview-grid"), "failed to return to overview");
+
+    // Filter, direction switch, sort, and focus view mode + preference persistence
+    topology().querySelector('.a-dash-topo-filter-btn[data-filter="abnormal"]').click();
+    await waitFor(() => topology().querySelectorAll(".a-topo-overview-card").length === 2 && topology().querySelector('.a-dash-topo-filter-btn[data-filter="abnormal"]')?.getAttribute("aria-pressed") === "true", "standalone filter abnormal did not filter groups");
+    topology().querySelector('[data-topo-dir-btn="reverse"]').click();
+    const sortSelect = topology().querySelector('select[name="topo_sort_by"]');
+    sortSelect.value = "name_asc";
+    sortSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    topology().querySelector('[data-topo-view-btn="focus"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-focus-details") && topology().querySelector(".a-topo-single-stage"), "standalone topology did not switch to focus mode");
+    topology().querySelector('.a-topo-group-pill[data-group-name="东京香港专线"]')?.click();
+    topology().querySelector('[data-topo-focus-viz="map"]')?.click();
+    await waitFor(() => topology().querySelector('.a-topo-single-stage svg.a-dash-topo-map-svg') && fixture.uiPrefs.values?.topology?.focus_viz === "map", "focus mode failed to switch to pacific map track");
+    await waitFor(() => fixture.uiPrefs.values?.topology?.view_mode === "focus" && fixture.uiPrefs.values?.topology?.status_filter === "abnormal" && fixture.uiPrefs.values?.topology?.metric_dir === "reverse" && fixture.uiPrefs.values?.topology?.sort_by === "name_asc" && fixture.uiPrefs.values?.topology?.selected_group === "东京香港专线", "standalone topology preferences did not persist");
+
+    // Navigate away and revisit #topology to confirm preference restore
     location.hash = "#tasks";
-    await waitFor(() => document.title.startsWith("任务"), "failed to leave topology before option restore check");
+    await waitFor(() => document.title.startsWith("任务"), "failed to leave topology before preference restore check");
     location.hash = "#topology";
-    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector("svg.a-dash-topo-map-svg") && topology()?.querySelector('.a-dash-topo-filter-btn[data-filter="bad"]')?.getAttribute("aria-pressed") === "true", "saved topology view mode or ledger filter did not restore on revisit");
-    topology().querySelector('[data-topo-mode-btn="flow"]').click();
+    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-topo-focus-details") && topology()?.querySelector('.a-topo-single-stage svg.a-dash-topo-map-svg') && topology()?.querySelector('.a-dash-topo-filter-btn[data-filter="abnormal"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector('[data-topo-dir-btn="reverse"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector('select[name="topo_sort_by"]')?.value === "name_asc", "saved standalone topology preferences did not restore on revisit");
+    topology().querySelector('[data-topo-focus-viz="flow"]')?.click();
+    await waitFor(() => topology().querySelector('.a-topo-chain-stage'), "failed to switch focus_viz back to flow");
+
+    // Reset filter to all, focus and delete created 亚太核心组, verify deterministic fallback
     topology().querySelector('.a-dash-topo-filter-btn[data-filter="all"]').click();
+    await waitFor(() => topology().querySelector('.a-topo-group-pill[data-group-name="亚太核心组"]'), "resetting filter did not reveal created group");
+    topology().querySelector('.a-topo-group-pill[data-group-name="亚太核心组"]').click();
+    await waitFor(() => topology()?.querySelector('.a-topo-single-stage[data-group-name="亚太核心组"]'), "failed to focus created group before delete");
+    [...topology().querySelector(".a-topo-single-head").querySelectorAll("button")].find((b) => b.textContent === "删除").click();
+    const delConfirm = activeDialog();
+    assert(delConfirm, "delete group confirmation dialog missing");
+    [...delConfirm.querySelectorAll("button")].find((b) => b.textContent === "删除监测分组").click();
+    await waitFor(() => !topology().querySelector('.a-topo-group-pill[data-group-name="亚太核心组"]') && topology().querySelector(".a-topo-single-stage"), "deleting active group failed or did not deterministically fall back");
+
+    // Reset standalone view back to overview/both/default and return to dashboard
+    topology().querySelector('[data-topo-dir-btn="both"]').click();
+    topology().querySelector('[data-topo-view-btn="overview"]').click();
+    const resetSort = topology().querySelector('select[name="topo_sort_by"]');
+    resetSort.value = "default";
+    resetSort.dispatchEvent(new Event("change", { bubbles: true }));
 
     location.hash = "#dashboard";
-    await waitFor(() => document.title.startsWith("仪表盘") && topology()?.querySelector("svg.a-dash-topo-svg") && !topology()?.querySelector("svg.a-dash-topo-map-svg") && !topology()?.querySelector(".a-dash-topo-ledger"), "saved dashboard view mode did not sync or ledger leaked on revisit");
-    topology().querySelector('.a-dash-topo-probe-btn').click();
-    await waitFor(() => probesDialog()?.querySelector('[data-refresh-key="filter-abnormal"]')?.getAttribute("aria-pressed") === "true", "saved probe modal filter did not restore on revisit");
-    probesDialog().querySelector('[data-refresh-key="filter-all"]').click();
-    probesDialog().close();
-    await waitFor(() => fixture.uiPrefs.values?.dashboard?.topo_view_mode === "flow" && fixture.uiPrefs.values?.dashboard?.topo_probe_filter === "all" && fixture.uiPrefs.values?.dashboard?.probe_filter === "all", "resetting selectable dashboard options did not persist");
+    await waitFor(() => document.title.startsWith("仪表盘") && topology()?.querySelector('.a-topo-single-stage[data-group-name="东京香港专线"]') && topology()?.querySelector("svg.a-topo-history-svg") && !topology()?.querySelector(".a-topo-overview-grid"), "dashboard topology group or history preference did not restore on revisit");
+    [...topology().querySelectorAll("button")].find((b) => b.textContent === "历史趋势").click();
+    await waitFor(() => fixture.uiPrefs.values?.dashboard?.topo_show_history === false, "resetting dashboard history toggle did not persist");
 
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
     document.dispatchEvent(new Event("visibilitychange"));

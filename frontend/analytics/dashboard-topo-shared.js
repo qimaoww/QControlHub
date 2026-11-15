@@ -1,14 +1,23 @@
 import { createSVGEl } from "./dashboard-panel.js";
+import { probeHistorySeries } from "../modules/dashboard-model.js";
 import { geoRegionDetails } from "../modules/region-model.js";
 import { PACIFIC_MAP_BOUNDS, projectPacificGeo } from "./pacific-map-data.js";
 
-export const INGRESS_COLOR = "#18181b";
-export const EGRESS_COLOR = "#71717a";
-export const BLOCKED_COLOR = "#a41a2b";
+export const INK_COLOR = "#18181b";
+export const SOFT_INK_COLOR = "#62626b";
+export const BORDER_COLOR = "#e4e4e7";
+export const BAD_COLOR = "#a41a2b";
 export const IDLE_FLOW_COLOR = "#a1a1aa";
 export const OK_COLOR = "#155731";
 export const WARN_COLOR = "#b45309";
 export const CO_LOCATED_RADIUS_PX = 5.5;
+
+export function tonePalette(tone) {
+  if (tone === "ok") return { stroke: "#155731", fill: "#eef9f0", border: "#c9e8d2", ink: "#155731" };
+  if (tone === "warn") return { stroke: "#b45309", fill: "#fff8e9", border: "#efddbb", ink: "#754511" };
+  if (tone === "bad") return { stroke: "#a41a2b", fill: "#fff2f3", border: "#f2cdd2", ink: "#a41a2b" };
+  return { stroke: "#71717a", fill: "#f4f4f5", border: "#e4e4e7", ink: "#52525b" };
+}
 
 export function visualUnits(text) {
   let units = 0;
@@ -31,64 +40,130 @@ export function clipLabel(text, maxUnits) {
   return out;
 }
 
-export function tonePalette(tone) {
-  if (tone === "ok") return { stroke: "#155731", fill: "#eef9f0", border: "#c9e8d2", ink: "#155731" };
-  if (tone === "warn") return { stroke: "#b45309", fill: "#fff8e9", border: "#efddbb", ink: "#754511" };
-  if (tone === "bad") return { stroke: "#a41a2b", fill: "#fff2f3", border: "#f2cdd2", ink: "#a41a2b" };
-  return { stroke: "#71717a", fill: "#f4f4f5", border: "#e4e4e7", ink: "#52525b" };
-}
-
-export function flowDur(weight) {
-  return `${Math.max(1.0, 2.55 - (Number(weight) || 0) * 1.45).toFixed(2)}s`;
-}
-
-/** Discrete CSS animation speed class to satisfy strict CSP without inline style attributes. */
-export function flowSpeedClass(weight) {
-  const w = Number(weight) || 0;
-  if (w >= 0.72) return "is-speed-fast";
-  if (w >= 0.42) return "is-speed-med";
+/** Discrete CSS animation speed class for live probe pulses (strict CSP, zero inline styles). */
+export function flowSpeedClass(latencyMS) {
+  const ms = Number(latencyMS);
+  if (!Number.isFinite(ms) || ms <= 0) return "is-speed-med";
+  if (ms <= 60) return "is-speed-fast";
+  if (ms <= 160) return "is-speed-med";
   return "is-speed-slow";
 }
 
-export function formatMs(ms) {
-  const num = Number(ms);
-  return `${num.toFixed(num >= 100 ? 0 : 1)}ms`;
+export function formatMs(ms, digits = null) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
+  const d = digits != null ? digits : (ms >= 100 ? 0 : 1);
+  return `${ms.toFixed(d)} ms`;
+}
+
+export function formatMsCompact(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
+  return `${ms.toFixed(ms >= 100 ? 0 : 1)}ms`;
+}
+
+export function formatLoss(loss) {
+  if (typeof loss !== "number" || !Number.isFinite(loss)) return "—";
+  return `${loss.toFixed(loss % 1 === 0 ? 0 : 1)}%`;
+}
+
+export function formatDirBadgeMetric(dir, { prefix = "", running = false, ready = true } = {}) {
+  if (running && (!dir || !dir.available)) return `${prefix}探测中`;
+  if (!ready && (!dir || !dir.available)) return `${prefix}暂不可用`;
+  if (!dir || !dir.available) return `${prefix}待采样`;
+  if (dir.state === "running" || dir.state === "preparing") return `${prefix}探测中`;
+  if (dir.state === "failed" || dir.error) return `${prefix}失败`;
+  if (!dir.reached || (dir.lossPercent ?? 0) >= 100) return `${prefix}不可达`;
+  const rtt = formatMsCompact(dir.avgMS);
+  const loss = dir.lossPercent > 0 ? ` · ${formatLoss(dir.lossPercent)}` : "";
+  return `${prefix}${rtt}${loss}`;
+}
+
+export function summarizeGroupMetricLine(group, metricDir = "both") {
+  if (!group) return "—";
+  const { overall, bidirectional, running, availability } = group;
+  if (running && !overall?.forward?.available) return "探测中…";
+  if (!availability?.ready && !overall?.forward?.available) return availability?.reason || "暂不可用";
+  if (metricDir === "reverse") {
+    if (!bidirectional) return "单向链路";
+    return formatDirBadgeMetric(overall.reverse, { prefix: "回 ", running, ready: availability?.ready });
+  }
+  if (metricDir === "forward" || !bidirectional) {
+    return formatDirBadgeMetric(overall.forward, { prefix: bidirectional ? "去 " : "", running, ready: availability?.ready });
+  }
+  const f = formatDirBadgeMetric(overall.forward, { prefix: "去 ", running, ready: availability?.ready });
+  const r = formatDirBadgeMetric(overall.reverse, { prefix: "回 ", running, ready: availability?.ready });
+  return `${f} / ${r}`;
 }
 
 export function isProbeUnreachable(probe) {
-  return probe.latencyMS == null || (probe.lossPercent != null && probe.lossPercent >= 100 && Number(probe.latencyMS) === 0);
+  if (!probe) return true;
+  if (probe.unavailableReverse) return false;
+  if (probe.tone === "bad" && probe.latencyMS == null && (!probe.bidirectional || probe.revLatencyMS == null)) return true;
+  if (probe.lossPercent != null && probe.lossPercent >= 100 && probe.latencyMS == null && probe.revLatencyMS == null) return true;
+  return false;
 }
 
-export function buildProbePillLabel(probe, compact = false, dense = false) {
-  if (probe.running) return "探测中…";
+const CIRCLED_HOP_NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
+
+export function buildProbePillLabel(probe, compact = false, dense = false, metricDir = null) {
+  if (!probe) return "—";
+  const dirMode = metricDir || probe.metricDir || "both";
+  const idx = Number(probe.hopIndex);
+  const prefix = probe.isMultiHop && Number.isFinite(idx) && idx >= 0
+    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
+    : "";
+  if (probe.running) return `${prefix}探测中…`;
+  if (probe.unavailableReverse || (dirMode === "reverse" && !probe.bidirectional)) return `${prefix}单向`;
   if (isProbeUnreachable(probe)) {
-    return probe.lossPercent != null && probe.lossPercent >= 100 ? "不可达 · 100%" : probe.metricLabel;
+    return probe.lossPercent != null && probe.lossPercent >= 100
+      ? `${prefix}不可达 · 100%`
+      : `${prefix}${probe.metricLabel || "不可达"}`;
   }
   const slash = dense ? "/" : " / ";
-  const rtt = !compact && probe.bidirectional && probe.revLatencyMS != null
-    ? `${formatMs(probe.latencyMS)}${slash}${formatMs(probe.revLatencyMS)}`
-    : formatMs(probe.latencyMS);
-  if (probe.lossPercent == null) return rtt;
+  const hasPrimary = probe.latencyMS != null && Number.isFinite(Number(probe.latencyMS));
+  const hasRev = dirMode === "both" && Boolean(probe.bidirectional) && probe.revLatencyMS != null && Number.isFinite(Number(probe.revLatencyMS));
+  let rtt = "";
+  if (dirMode === "reverse") {
+    if (!hasPrimary) return `${prefix}${probe.metricLabel || "待采样"}`;
+    rtt = compact ? formatMsCompact(probe.latencyMS) : `回 ${formatMsCompact(probe.latencyMS)}`;
+  } else if (dirMode === "forward") {
+    if (!hasPrimary) return `${prefix}${probe.metricLabel || "待采样"}`;
+    rtt = compact || !probe.bidirectional ? formatMsCompact(probe.latencyMS) : `去 ${formatMsCompact(probe.latencyMS)}`;
+  } else if (probe.bidirectional && (hasPrimary || hasRev)) {
+    const f = hasPrimary ? formatMsCompact(probe.latencyMS) : "×";
+    const r = hasRev ? formatMsCompact(probe.revLatencyMS) : "×";
+    rtt = compact ? f : `${f}${slash}${r}`;
+  } else if (hasPrimary) {
+    rtt = formatMsCompact(probe.latencyMS);
+  } else {
+    return `${prefix}${probe.metricLabel || "待采样"}`;
+  }
+  if (probe.lossPercent == null) return `${prefix}${rtt}`;
   const lossNum = probe.lossPercent.toFixed(probe.lossPercent % 1 ? 1 : 0);
-  if (compact) return probe.lossPercent > 0 ? `${rtt} · ${lossNum}%` : rtt;
-  return probe.lossPercent > 0 ? `${rtt} · 丢包${lossNum}%` : `${rtt} · 0%`;
+  if (compact) return probe.lossPercent > 0 ? `${prefix}${rtt} · ${lossNum}%` : `${prefix}${rtt}`;
+  return probe.lossPercent > 0 ? `${prefix}${rtt} · 丢包${lossNum}%` : `${prefix}${rtt} · 0%`;
 }
 
-/** Concise ambient alert text for severe faults surfaced on default overview canvases. */
 export function buildProbeShortAlertLabel(probe) {
-  if (probe.running) return "探测中…";
-  if (isProbeUnreachable(probe)) return "不可达";
+  if (!probe) return "异常";
+  const idx = Number(probe.hopIndex);
+  const prefix = probe.isMultiHop && Number.isFinite(idx) && idx >= 0
+    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
+    : "";
+  if (probe.running) return `${prefix}探测中…`;
+  if (isProbeUnreachable(probe)) return `${prefix}不可达`;
   if (probe.lossPercent != null && probe.lossPercent > 0) {
     const lossNum = probe.lossPercent.toFixed(probe.lossPercent % 1 ? 1 : 0);
-    return `丢包${lossNum}%`;
+    return `${prefix}丢包${lossNum}%`;
   }
-  return probe.metricLabel || "异常";
+  return `${prefix}${probe.metricLabel || "异常"}`;
 }
 
-/** Selects up to `maxCount` highest-severity `bad` probe IDs for ambient canvas callouts. */
-export function selectTopAmbientBadProbeIDs(probeLinks, { includeExternal = true, maxCount = 5 } = {}) {
-  const candidates = (probeLinks || []).filter((p) => p.tone === "bad" && (includeExternal || !p.isExternal));
+export function selectTopAmbientBadProbeIDs(probeLinks, { includeExternal = true, maxCount = 6 } = {}) {
+  const candidates = (probeLinks || []).filter((p) => (p.tone === "bad" || p.tone === "warn") && (includeExternal || !p.isExternal));
   candidates.sort((a, b) => {
+    const toneWeight = { bad: 2, warn: 1 };
+    const tDiff = (toneWeight[b.tone] || 0) - (toneWeight[a.tone] || 0);
+    if (tDiff !== 0) return tDiff;
     const aUnreach = isProbeUnreachable(a) ? 1 : 0;
     const bUnreach = isProbeUnreachable(b) ? 1 : 0;
     if (bUnreach !== aUnreach) return bUnreach - aUnreach;
@@ -101,33 +176,281 @@ export function selectTopAmbientBadProbeIDs(probeLinks, { includeExternal = true
   return new Set(candidates.slice(0, Math.max(0, maxCount)).map((p) => p.id));
 }
 
-export function cubicPath(x1, y1, x2, y2) {
-  const dx = Math.max(26, Math.abs(x2 - x1) * 0.48);
-  return `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${(x1 + dx).toFixed(1)} ${y1.toFixed(1)}, ${(x2 - dx).toFixed(1)} ${y2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
-}
+export function buildBidirectionalPillLines(hop, metricDir = "both") {
+  const idx = Number(hop?.hopIndex);
+  const prefix = hop?.isMultiHop && Number.isFinite(idx) && idx >= 0
+    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
+    : "";
+  const fmtPct = (v) => Number(v).toFixed(Number(v) % 1 ? 1 : 0);
 
-export function cubicPointAt(x1, y1, x2, y2, t = 0.5) {
-  const dx = Math.max(26, Math.abs(x2 - x1) * 0.48);
-  const cx1 = x1 + dx;
-  const cx2 = x2 - dx;
-  const mt = 1 - t;
-  const x = mt * mt * mt * x1 + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * x2;
-  const y = mt * mt * mt * y1 + 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t * y2;
-  return { x, y };
-}
-
-export function extendedCubicPath(x0, railX, y1, x2, y2) {
-  if (!(railX > x0 + 1)) {
-    return {
-      d: cubicPath(x0, y1, x2, y2),
-      pointAt: (t) => cubicPointAt(x0, y1, x2, y2, t),
-    };
+  if (hop?.running) {
+    const line1 = `${prefix}探测中…`;
+    const line2 = hop?.bidirectional && metricDir === "both" ? "去/回检测中" : "链路检测中";
+    return { line1, line2, fullLabel: `${line1} · ${line2}` };
   }
-  const dx = Math.max(26, Math.abs(x2 - railX) * 0.48);
-  const d = `M ${x0.toFixed(1)} ${y1.toFixed(1)} L ${railX.toFixed(1)} ${y1.toFixed(1)} C ${(railX + dx).toFixed(1)} ${y1.toFixed(1)}, ${(x2 - dx).toFixed(1)} ${y2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+
+  if (hop?.unavailableReverse || (metricDir === "reverse" && !hop?.bidirectional)) {
+    const line1 = `${prefix}单向链路`;
+    const line2 = "无回程测量";
+    return { line1, line2, fullLabel: `${line1} · ${line2}` };
+  }
+
+  const showFwd = metricDir !== "reverse";
+  const showRev = Boolean(hop?.bidirectional) && metricDir !== "forward";
+
+  const hasFwd = showFwd && hop?.latencyMS != null && Number.isFinite(Number(hop.latencyMS))
+    && !(hop?.fwdLossPercent != null && Number(hop.fwdLossPercent) >= 100 && Number(hop.latencyMS) === 0);
+  const hasRev = showRev && hop?.revLatencyMS != null && Number.isFinite(Number(hop.revLatencyMS))
+    && !(hop?.revLossPercent != null && Number(hop.revLossPercent) >= 100 && Number(hop.revLatencyMS) === 0);
+  const singleReverseVal = metricDir === "reverse" && hop?.latencyMS != null && Number.isFinite(Number(hop.latencyMS));
+
+  const lossVal = hop?.lossPercent != null
+    ? Number(hop.lossPercent)
+    : (hop?.fwdLossPercent != null ? Number(hop.fwdLossPercent) : (hop?.revLossPercent != null ? Number(hop.revLossPercent) : null));
+
+  if (!hasFwd && !hasRev && !singleReverseVal) {
+    const rawLabel = String(hop?.statusLabel || "");
+    if (rawLabel && rawLabel !== "不可达" && rawLabel !== "异常" && lossVal == null) {
+      const line1 = `${prefix}${rawLabel}`;
+      const line2 = hop?.unavailableReason || (showRev && showFwd ? "去/回待测" : "待采样");
+      return { line1, line2, fullLabel: `${line1} · ${line2}` };
+    }
+    const line1 = `${prefix}${showFwd && showRev ? "去/回 不可达" : "不可达"}`;
+    const line2 = lossVal != null ? `丢包 ${fmtPct(lossVal)}%` : (hop?.unavailableReason || "100% 丢包");
+    return { line1, line2, fullLabel: `${line1} · ${line2}` };
+  }
+
+  let line1 = "";
+  if (metricDir === "reverse") {
+    line1 = `${prefix}回 ${formatMsCompact(hop.latencyMS)}`;
+  } else if (showFwd && showRev) {
+    const fwdText = hasFwd ? `去 ${formatMsCompact(hop.latencyMS)}` : "去 ×";
+    const revText = hasRev ? `回 ${formatMsCompact(hop.revLatencyMS)}` : "回 ×";
+    line1 = `${prefix}${fwdText} · ${revText}`;
+  } else {
+    line1 = `${prefix}去 ${formatMsCompact(hop.latencyMS)}`;
+  }
+
+  let line2 = "";
+  if (
+    showFwd && showRev
+    && hop?.fwdLossPercent != null
+    && hop?.revLossPercent != null
+    && (Number(hop.fwdLossPercent) > 0 || Number(hop.revLossPercent) > 0)
+    && Math.round(Number(hop.fwdLossPercent) * 10) !== Math.round(Number(hop.revLossPercent) * 10)
+  ) {
+    line2 = `去${fmtPct(hop.fwdLossPercent)}%/回${fmtPct(hop.revLossPercent)}%`;
+  } else if (lossVal != null && lossVal > 0) {
+    line2 = `丢包 ${fmtPct(lossVal)}%`;
+  } else if (lossVal === 0) {
+    line2 = "0% 丢包";
+  } else {
+    line2 = hop?.isExternal ? "公网出口" : (hop?.bidirectional ? "双程探测" : "单向探测");
+  }
+
+  return { line1, line2, fullLabel: `${line1} · ${line2}` };
+}
+
+/**
+ * Renders an inline SVG conduit showing forward and (when enabled) reverse signal
+ * tracks between two adjacent hops in a single link. Pure CSS classes + SVG
+ * presentation attributes only (strict CSP, zero inline style attributes).
+ */
+export function renderHopConduitSVG({
+  forward = null,
+  reverse = null,
+  bidirectional = false,
+  running = false,
+  tone = "",
+  metricDir = "both",
+  vertical = false,
+} = {}) {
+  const showFwd = metricDir !== "reverse";
+  const showRev = bidirectional && metricDir !== "forward";
+  const fwdTone = forward?.status?.tone || tone || "";
+  const revTone = reverse?.status?.tone || tone || "";
+
+  const svg = createSVGEl("svg", {
+    class: `a-topo-conduit-svg${vertical ? " is-vertical" : ""}${running ? " is-running" : ""}`,
+    viewBox: vertical ? "0 0 40 36" : "0 0 112 34",
+    "aria-hidden": "true",
+  });
+
+  const drawLine = (x1, y1, x2, y2, dirTone, reverseDir = false) => {
+    const pal = tonePalette(dirTone);
+    const isBad = dirTone === "bad";
+    const dash = running ? "4 3" : isBad ? "3 3" : null;
+    svg.append(
+      createSVGEl("line", {
+        x1: x1.toFixed(1),
+        y1: y1.toFixed(1),
+        x2: x2.toFixed(1),
+        y2: y2.toFixed(1),
+        stroke: pal.stroke,
+        "stroke-width": isBad ? "1.9" : "1.65",
+        "stroke-linecap": "round",
+        ...(dash ? { "stroke-dasharray": dash } : {}),
+        class: running ? "a-topo-conduit-animated" : null,
+      }),
+    );
+    if (!vertical) {
+      const tipX = reverseDir ? x1 : x2;
+      const tailX = reverseDir ? x1 + 5 : x2 - 5;
+      svg.append(
+        createSVGEl("path", {
+          d: `M${tailX.toFixed(1)} ${(y1 - 3).toFixed(1)} L${tipX.toFixed(1)} ${y1.toFixed(1)} L${tailX.toFixed(1)} ${(y1 + 3).toFixed(1)}`,
+          fill: "none",
+          stroke: pal.stroke,
+          "stroke-width": "1.6",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+        }),
+      );
+    } else {
+      const tipY = reverseDir ? y1 : y2;
+      const tailY = reverseDir ? y1 + 4.5 : y2 - 4.5;
+      svg.append(
+        createSVGEl("path", {
+          d: `M${(x1 - 3).toFixed(1)} ${tailY.toFixed(1)} L${x1.toFixed(1)} ${tipY.toFixed(1)} L${(x1 + 3).toFixed(1)} ${tailY.toFixed(1)}`,
+          fill: "none",
+          stroke: pal.stroke,
+          "stroke-width": "1.6",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+        }),
+      );
+    }
+  };
+
+  if (vertical) {
+    if (showFwd && showRev) {
+      drawLine(14, 3, 14, 33, fwdTone, false);
+      drawLine(26, 3, 26, 33, revTone, true);
+    } else if (showFwd) {
+      drawLine(20, 3, 20, 33, fwdTone, false);
+    } else if (showRev) {
+      drawLine(20, 3, 20, 33, revTone, true);
+    }
+    return svg;
+  }
+
+  if (showFwd && showRev) {
+    drawLine(6, 11, 106, 11, fwdTone, false);
+    drawLine(6, 23, 106, 23, revTone, true);
+  } else if (showFwd) {
+    drawLine(6, 17, 106, 17, fwdTone, false);
+  } else if (showRev) {
+    drawLine(6, 17, 106, 17, revTone, true);
+  } else {
+    drawLine(6, 17, 106, 17, "", false);
+  }
+  return svg;
+}
+
+const sanitizeSVGKey = (val) => String(val || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+
+/**
+ * Renders latency & packet-loss history SVG sparkline for a monitoring group.
+ * Keeps linearGradient IDs deterministic via `gradKey` so keyed patch() updates
+ * never flicker or regenerate SVG gradients across background polls.
+ */
+export function renderProbeHistoryChart(
+  history = [],
+  {
+    bidirectional = false,
+    metricDir = "both",
+    width = 520,
+    height = 76,
+    gradKey = "default",
+  } = {},
+) {
+  const showFwd = metricDir !== "reverse";
+  const showRev = bidirectional && metricDir !== "forward";
+  const fwdSeries = showFwd ? probeHistorySeries(history, "forward") : [];
+  const revSeries = showRev ? probeHistorySeries(history, "reverse") : [];
+  if (fwdSeries.length < 2 && revSeries.length < 2) {
+    return null;
+  }
+
+  const w = Math.max(200, Math.round(width));
+  const h = Math.max(54, Math.round(height));
+  const padX = 6;
+  const padY = 8;
+  const usableW = Math.max(24, w - padX * 2);
+  const usableH = h - padY * 2;
+
+  const finite = [
+    ...fwdSeries.map((pt) => pt.avgMS),
+    ...revSeries.map((pt) => pt.avgMS),
+  ].filter((v) => typeof v === "number" && Number.isFinite(v) && v >= 0);
+
+  const rawPeak = finite.length ? Math.max(...finite) : 1;
+  const peak = rawPeak > 0 ? rawPeak * 1.2 : 1;
+  const count = Math.max(fwdSeries.length, revSeries.length, 2);
+  const xFor = (i) => (count <= 1 ? w - padX : padX + (i / (count - 1)) * usableW);
+  const yFor = (val) => padY + usableH - (Math.max(0, Math.min(peak, val)) / peak) * usableH;
+
+  const buildPath = (series) => {
+    const pts = [];
+    series.forEach((pt, idx) => {
+      if (pt?.avgMS == null || !Number.isFinite(pt.avgMS)) return;
+      pts.push([xFor(idx), yFor(pt.avgMS)]);
+    });
+    const d = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+    return { d, pts };
+  };
+
+  const fwd = buildPath(fwdSeries);
+  const rev = buildPath(revSeries);
+  const primary = fwd.pts.length ? fwd : rev;
+
+  const svg = createSVGEl("svg", {
+    class: "a-dash-spark is-probe a-topo-history-svg",
+    viewBox: `0 0 ${w} ${h}`,
+    "aria-hidden": "true",
+  });
+
+  svg.append(
+    createSVGEl("line", { x1: padX, y1: (padY + usableH * 0.5).toFixed(1), x2: w - padX, y2: (padY + usableH * 0.5).toFixed(1), class: "a-dash-spark-baseline" }),
+    createSVGEl("line", { x1: padX, y1: (padY + usableH).toFixed(1), x2: w - padX, y2: (padY + usableH).toFixed(1), class: "a-dash-osc-axis" }),
+  );
+
+  if (primary.pts.length >= 2) {
+    const gradID = `a-probe-grad-${sanitizeSVGKey(gradKey)}`;
+    const defs = createSVGEl("defs");
+    const grad = createSVGEl("linearGradient", { id: gradID, x1: "0", y1: "0", x2: "0", y2: "1" });
+    grad.append(
+      createSVGEl("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.14" }),
+      createSVGEl("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.01" }),
+    );
+    defs.append(grad);
+    svg.append(defs);
+    svg.append(createSVGEl("path", {
+      d: `${primary.d} L${primary.pts.at(-1)[0].toFixed(1)} ${(h - padY).toFixed(1)} L${primary.pts[0][0].toFixed(1)} ${(h - padY).toFixed(1)} Z`,
+      fill: `url(#${gradID})`,
+    }));
+  }
+  if (rev.d) svg.append(createSVGEl("path", { d: rev.d, class: "a-dash-spark-secondary" }));
+  if (fwd.d) svg.append(createSVGEl("path", { d: fwd.d, class: "a-dash-spark-line" }));
+  if (primary.pts.length) {
+    const [lx, ly] = primary.pts.at(-1);
+    svg.append(createSVGEl("circle", { cx: lx.toFixed(1), cy: ly.toFixed(1), r: "2.5", class: "a-dash-spark-dot" }));
+  }
+
+  const lossPoints = fwdSeries.length ? fwdSeries : revSeries;
+  lossPoints.forEach((pt, idx) => {
+    if (!pt) return;
+    if (!pt.reached || pt.lossPercent > 0) {
+      const x = xFor(idx).toFixed(1);
+      const y = pt.avgMS != null ? yFor(pt.avgMS).toFixed(1) : (padY + usableH - 2).toFixed(1);
+      svg.append(createSVGEl("circle", { cx: x, cy: y, r: "3.1", class: "a-dash-probe-loss-dot" }));
+    }
+  });
+
   return {
-    d,
-    pointAt: (t) => cubicPointAt(railX, y1, x2, y2, t),
+    svg,
+    sampleCount: Math.max(fwdSeries.length, revSeries.length),
+    peakMS: finite.length ? Math.max(...finite) : null,
   };
 }
 
@@ -177,37 +500,6 @@ export function quadPointAt(x1, y1, cx, cy, x2, y2, t) {
   };
 }
 
-export function assignProbeLanes(probes, rowByID) {
-  const internal = probes
-    .filter((p) => !p.isExternal && rowByID.has(p.from) && rowByID.has(p.to))
-    .map((p) => {
-      const rA = rowByID.get(p.from);
-      const rB = rowByID.get(p.to);
-      return {
-        probe: p,
-        min: Math.min(rA, rB),
-        max: Math.max(rA, rB),
-        span: Math.abs(rB - rA),
-      };
-    })
-    .sort((a, b) => a.span - b.span || a.min - b.min || a.max - b.max);
-
-  const lanes = [];
-  const laneOf = new Map();
-  for (const item of internal) {
-    let idx = lanes.findIndex((occupied) => occupied.every((o) => item.max <= o.min || item.min >= o.max));
-    if (idx < 0) {
-      idx = lanes.length;
-      lanes.push([]);
-    }
-    lanes[idx].push({ min: item.min, max: item.max });
-    laneOf.set(item.probe.id, { lane: idx, count: 0 });
-  }
-  const maxLanes = Math.max(1, lanes.length);
-  laneOf.forEach((v) => { v.count = maxLanes; });
-  return laneOf;
-}
-
 export function rectsOverlap(a, b, padX = 4, padY = padX) {
   return a.x - padX < b.x + b.w + padX
     && a.x + a.w + padX > b.x - padX
@@ -228,7 +520,6 @@ function onSegment2d(p, q, r) {
     && q.y <= Math.max(p.y, r.y) + 1e-6 && q.y >= Math.min(p.y, r.y) - 1e-6;
 }
 
-/** Tests whether two 2D line segments cross, ignoring shared endpoints. */
 export function segmentsIntersect(a1, a2, b1, b2) {
   if (!a1 || !a2 || !b1 || !b2) return false;
   if (pointsClose(a1, b1) || pointsClose(a1, b2) || pointsClose(a2, b1) || pointsClose(a2, b2)) {
@@ -312,7 +603,6 @@ export function placeCollisionFreePill(targetX, targetY, w, h, occupied, bounds,
     }
   }
 
-  // Stage 2: Expanding minimum-distance ring search around every anchor across the available corridor
   const spanY = Math.max(240, Math.round(maxCY - minCY));
   const stepY = Math.max(10, Math.round(reserveH * 0.55));
   const stepX = Math.max(14, Math.round(reserveW * 0.22));
@@ -341,7 +631,6 @@ export function placeCollisionFreePill(targetX, targetY, w, h, occupied, bounds,
     }
   }
 
-  // Stage 3: Full-canvas sweep safeguard to prevent pill collisions under extreme density
   if (!best) {
     for (let cy = minCY; cy <= maxCY + 0.5; cy += 10) {
       for (let cx = minCX; cx <= maxCX + 0.5; cx += 12) {
@@ -365,19 +654,6 @@ export function placeCollisionFreePill(targetX, targetY, w, h, occupied, bounds,
 
 export function createTopologyDefs(prefix = "a-topo") {
   const defs = createSVGEl("defs", { "data-refresh-key": `${prefix}-defs` });
-
-  const addGrad = (id, coords, stops) => {
-    const grad = createSVGEl("linearGradient", { id, "data-refresh-key": id, ...coords });
-    stops.forEach(([offset, color, opacity]) => {
-      grad.append(createSVGEl("stop", { offset, "stop-color": color, "stop-opacity": String(opacity) }));
-    });
-    defs.append(grad);
-  };
-
-  addGrad(`${prefix}-grad-rx`, { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#18181b", 0.90], ["100%", "#3f3f46", 0.72]]);
-  addGrad(`${prefix}-grad-tx`, { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#52525b", 0.82], ["100%", "#71717a", 0.65]]);
-  addGrad(`${prefix}-grad-bar`, { x1: "0%", y1: "0%", x2: "100%", y2: "0%" }, [["0%", "#18181b", 0.92], ["100%", "#52525b", 0.78]]);
-
   const addArrow = (id, color) => {
     const marker = createSVGEl("marker", {
       id,
@@ -393,17 +669,15 @@ export function createTopologyDefs(prefix = "a-topo") {
     defs.append(marker);
   };
 
-  addArrow(`${prefix}-arrow-rx`, INGRESS_COLOR);
-  addArrow(`${prefix}-arrow-tx`, EGRESS_COLOR);
   addArrow(`${prefix}-arrow-ok`, OK_COLOR);
   addArrow(`${prefix}-arrow-warn`, WARN_COLOR);
-  addArrow(`${prefix}-arrow-bad`, BLOCKED_COLOR);
+  addArrow(`${prefix}-arrow-bad`, BAD_COLOR);
   addArrow(`${prefix}-arrow-idle`, IDLE_FLOW_COLOR);
 
   return defs;
 }
 
-/** Canonical graph entity key constructors so all views share identical identifiers. */
+/** Pure network-monitoring entity key constructors. */
 export const entityKey = Object.freeze({
   node: (id) => `node:${String(id || "")}`,
   external: (id) => {
@@ -415,24 +689,8 @@ export const entityKey = Object.freeze({
     const uniqueSorted = [...new Set((memberIDs || []).map((id) => String(id || "")).filter(Boolean))].sort();
     return `cluster:${uniqueSorted.join(",")}`;
   },
-  hub: (kind) => `hub:${String(kind || "")}`,
 });
 
-export function parseEntityKey(key) {
-  const s = String(key || "");
-  if (!s) return { kind: "", id: "", memberIDs: [] };
-  if (s.startsWith("node:")) return { kind: "node", id: s.slice(5), memberIDs: [s.slice(5)] };
-  if (s.startsWith("ext:")) return { kind: "ext", id: s, memberIDs: [] };
-  if (s.startsWith("probe:")) return { kind: "probe", id: s.slice(6), memberIDs: [] };
-  if (s.startsWith("hub:")) return { kind: "hub", id: s.slice(4), memberIDs: [] };
-  if (s.startsWith("cluster:")) {
-    const memberIDs = s.slice(8).split(",").filter(Boolean);
-    return { kind: "cluster", id: s, memberIDs };
-  }
-  return { kind: "", id: s, memberIDs: [] };
-}
-
-/** Computes peer tag arrays for nodes and external targets (always prefixing internal nodes with `node:` and linking full multi-hop chains). */
 export function buildPeerProbeTags(model) {
   const map = new Map();
   for (const n of (model?.nodes || [])) map.set(n.id, new Set());
@@ -449,27 +707,11 @@ export function buildPeerProbeTags(model) {
     if (parentTag) map.get(p.to)?.add(parentTag);
     map.get(p.to)?.add(fromKey);
   }
-  for (const ch of (model?.probeChains || [])) {
-    const cTag = entityKey.probe(ch.id);
-    const segTags = (ch.hops || []).map((h) => entityKey.probe(h.id));
-    const epKeys = (ch.endpoints || []).map((ep) => (ep.kind === "ext" ? entityKey.external(ep.id) : entityKey.node(ep.id)));
-    for (const ep of (ch.endpoints || [])) {
-      const set = map.get(ep.id);
-      if (!set) continue;
-      set.add(cTag);
-      segTags.forEach((t) => set.add(t));
-      epKeys.forEach((k) => set.add(k));
-    }
-  }
   const out = new Map();
   map.forEach((set, k) => out.set(k, [...set]));
   return out;
 }
 
-/**
- * Single source of truth for entity identities, adjacency `peers` arrays, and valid active keys
- * shared across grouped flow boards, Pacific maps, probe pills, inspect bar, and ledger cards.
- */
 export function buildTopologySelectionIndex(model, clusters = []) {
   const peerTags = buildPeerProbeTags(model);
   const nodeMap = new Map();
@@ -477,39 +719,17 @@ export function buildTopologySelectionIndex(model, clusters = []) {
   const probeMap = new Map();
   const chainMap = new Map();
   const clusterMap = new Map();
-  const validKeys = new Set();
-
-  const ingressNodes = [];
-  const egressNodes = [];
-  for (const link of (model?.ingressLinks || [])) ingressNodes.push(entityKey.node(link.to));
-  for (const link of (model?.egressLinks || [])) egressNodes.push(entityKey.node(link.from));
-
-  const ingressSet = new Set(ingressNodes);
-  const egressSet = new Set(egressNodes);
-
-  if ((model?.nodes || []).length) {
-    validKeys.add("hub:ingress");
-    validKeys.add("hub:egress");
-  }
 
   for (const n of (model?.nodes || [])) {
     const nKey = entityKey.node(n.id);
-    validKeys.add(nKey);
-    const peers = new Set([nKey, ...(peerTags.get(n.id) || [])]);
-    if (ingressSet.has(nKey)) peers.add("hub:ingress");
-    if (egressSet.has(nKey)) peers.add("hub:egress");
-    nodeMap.set(n.id, [...peers]);
+    nodeMap.set(n.id, [nKey, ...(peerTags.get(n.id) || [])]);
   }
-
   for (const ext of (model?.externalTargets || [])) {
     const extKey = entityKey.external(ext.id);
-    validKeys.add(extKey);
     extMap.set(ext.id, [extKey, ...(peerTags.get(ext.id) || [])]);
   }
-
   for (const ch of (model?.probeChains || [])) {
     const cKey = entityKey.probe(ch.id);
-    validKeys.add(cKey);
     const set = new Set([cKey]);
     for (const h of (ch.hops || [])) set.add(entityKey.probe(h.id));
     for (const ep of (ch.endpoints || [])) {
@@ -517,23 +737,17 @@ export function buildTopologySelectionIndex(model, clusters = []) {
     }
     chainMap.set(ch.id, [...set]);
   }
-
   for (const p of (model?.probeLinks || [])) {
     const pKey = entityKey.probe(p.id);
+    const parentKey = p.probeID && p.probeID !== p.id ? entityKey.probe(p.probeID) : "";
     const fromKey = entityKey.node(p.from);
     const toKey = p.isExternal ? entityKey.external(p.to) : entityKey.node(p.to);
-    validKeys.add(pKey);
-    const set = new Set([pKey, fromKey, toKey]);
-    if (p.probeID && chainMap.has(p.probeID)) {
-      chainMap.get(p.probeID).forEach((k) => set.add(k));
-    }
+    const set = new Set([pKey, ...(parentKey ? [parentKey] : []), fromKey, toKey]);
     probeMap.set(p.id, [...set]);
   }
-
   for (const cl of (clusters || [])) {
     if (!cl || (cl.members || []).length <= 1) continue;
     const cKey = cl.key || entityKey.cluster(cl.members.map((m) => m.node.id));
-    validKeys.add(cKey);
     const cPeers = new Set([cKey]);
     for (const m of cl.members) {
       const nKey = entityKey.node(m.node.id);
@@ -544,11 +758,6 @@ export function buildTopologySelectionIndex(model, clusters = []) {
   }
 
   return {
-    validKeys,
-    hubPeers: {
-      ingress: ["hub:ingress", ...ingressNodes],
-      egress: ["hub:egress", ...egressNodes],
-    },
     nodePeers: (id) => nodeMap.get(id) || [entityKey.node(id)],
     extPeers: (id) => extMap.get(id) || [entityKey.external(id)],
     probePeers: (probe) => probeMap.get(probe.id) || chainMap.get(probe.id) || [
@@ -557,13 +766,10 @@ export function buildTopologySelectionIndex(model, clusters = []) {
       ...(probe.to ? [probe.isExternal ? entityKey.external(probe.to) : entityKey.node(probe.to)] : []),
     ],
     chainPeers: (chainID) => chainMap.get(chainID) || probeMap.get(chainID) || [entityKey.probe(chainID)],
-    ingressEdgePeers: (nodeID) => ["hub:ingress", entityKey.node(nodeID)],
-    egressEdgePeers: (nodeID) => ["hub:egress", entityKey.node(nodeID)],
     clusterPeers: (clusterKey) => clusterMap.get(clusterKey) || [clusterKey],
   };
 }
 
-/** Matches an element's peer tags against a single entity key or a `cluster:id1,id2,...` composite key. */
 export function matchesActiveSelection(peers, sel) {
   if (!sel) return null;
   if (peers.includes(sel)) return true;
@@ -574,16 +780,9 @@ export function matchesActiveSelection(peers, sel) {
   return false;
 }
 
-/**
- * Reconciles a `pinnedKey` or `hoveredKey` against the current `model` and view `clusters`,
- * clearing missing entities and smoothly remapping shifted cluster memberships so the UI
- * never freezes with dimmed nodes and a mismatched fallback header.
- */
 export function reconcileSelectionKey(key, model, { clusters = null, allowCluster = true } = {}) {
   const s = String(key || "");
   if (!s || !model || !Array.isArray(model.nodes) || !model.nodes.length) return "";
-  if (s === "hub:ingress" || s === "hub:egress") return s;
-
   const nodeSet = new Set(model.nodes.map((n) => n.id));
   const extSet = new Set((model.externalTargets || []).map((e) => e.id));
   const probeSet = new Set([
@@ -591,21 +790,13 @@ export function reconcileSelectionKey(key, model, { clusters = null, allowCluste
     ...(model.probeChains || []).map((c) => c.id),
   ]);
 
-  if (s.startsWith("node:")) {
-    return nodeSet.has(s.slice(5)) ? s : "";
-  }
-  if (s.startsWith("ext:")) {
-    return extSet.has(s) ? s : "";
-  }
-  if (s.startsWith("probe:")) {
-    return probeSet.has(s.slice(6)) ? s : "";
-  }
+  if (s.startsWith("node:")) return nodeSet.has(s.slice(5)) ? s : "";
+  if (s.startsWith("ext:")) return extSet.has(s) ? s : "";
+  if (s.startsWith("probe:")) return probeSet.has(s.slice(6)) ? s : "";
   if (s.startsWith("cluster:")) {
     const alive = s.slice(8).split(",").filter((id) => nodeSet.has(id));
     if (!alive.length) return "";
-    if (!allowCluster || alive.length === 1) {
-      return entityKey.node(alive[0]);
-    }
+    if (!allowCluster || alive.length === 1) return entityKey.node(alive[0]);
     const targetClusters = clusters || clusterTopologyNodes(model.nodes);
     const aliveSet = new Set(alive);
     const hitClusters = targetClusters.filter((cl) => cl.members.some((m) => aliveSet.has(m.node.id)));
@@ -613,16 +804,13 @@ export function reconcileSelectionKey(key, model, { clusters = null, allowCluste
       const target = hitClusters[0];
       return target.members.length > 1 ? target.key : entityKey.node(target.members[0].node.id);
     }
-    if (hitClusters.length > 1) {
-      return entityKey.node(alive[0]);
-    }
+    if (hitClusters.length > 1) return entityKey.node(alive[0]);
     return "";
   }
   return "";
 }
 
 const HUB_GEO_KEYWORDS = Object.freeze([
-  // China Mainland, HK, TW
   { countries: ["CN"], keys: ["上海", "shanghai", "sha", "pvg"], lat: 31.23, lon: 121.47 },
   { countries: ["CN"], keys: ["北京", "beijing", "pek", "bjs"], lat: 39.90, lon: 116.40 },
   { countries: ["CN"], keys: ["广州", "guangzhou", "can"], lat: 23.13, lon: 113.26 },
@@ -632,12 +820,10 @@ const HUB_GEO_KEYWORDS = Object.freeze([
   { countries: ["HK"], keys: ["香港", "hong kong", "hongkong", "hkg", "hk-"], lat: 22.32, lon: 114.17 },
   { countries: ["TW"], keys: ["台北", "臺北", "taipei", "tpe", "tw-"], lat: 25.03, lon: 121.57 },
   { countries: ["TW"], keys: ["高雄", "kaohsiung"], lat: 22.63, lon: 120.30 },
-  // East Asia
   { countries: ["JP"], keys: ["东京", "東京", "tokyo", "nrt", "hnd", "tyo", "jp-"], lat: 35.68, lon: 139.69 },
   { countries: ["JP"], keys: ["大阪", "osaka", "kix"], lat: 34.69, lon: 135.50 },
   { countries: ["KR"], keys: ["首尔", "seoul", "icn", "sel", "kr-"], lat: 37.57, lon: 126.98 },
   { countries: ["KR"], keys: ["釜山", "busan"], lat: 35.18, lon: 129.08 },
-  // SE & South Asia
   { countries: ["SG"], keys: ["新加坡", "singapore", "sin", "sg-"], lat: 1.35, lon: 103.82 },
   { countries: ["MY"], keys: ["吉隆坡", "kuala lumpur", "kul", "my-"], lat: 3.14, lon: 101.69 },
   { countries: ["TH"], keys: ["曼谷", "bangkok", "bkk"], lat: 13.76, lon: 100.50 },
@@ -648,16 +834,13 @@ const HUB_GEO_KEYWORDS = Object.freeze([
   { countries: ["IN"], keys: ["孟买", "mumbai", "bom", "in-"], lat: 19.08, lon: 72.88 },
   { countries: ["IN"], keys: ["新德里", "delhi", "del"], lat: 28.61, lon: 77.21 },
   { countries: ["IN"], keys: ["班加罗尔", "bangalore", "blr"], lat: 12.97, lon: 77.59 },
-  // Middle East
   { countries: ["AE"], keys: ["迪拜", "dubai", "dxb", "ae-"], lat: 25.20, lon: 55.27 },
   { countries: ["SA"], keys: ["利雅得", "riyadh"], lat: 24.71, lon: 46.68 },
   { countries: ["IL"], keys: ["特拉维夫", "tel aviv", "tlv"], lat: 32.09, lon: 34.78 },
   { countries: ["TR"], keys: ["伊斯坦布尔", "istanbul", "ist"], lat: 41.01, lon: 28.98 },
-  // Oceania
   { countries: ["AU"], keys: ["悉尼", "sydney", "syd", "au-"], lat: -33.87, lon: 151.21 },
   { countries: ["AU"], keys: ["墨尔本", "melbourne", "mel"], lat: -37.81, lon: 144.96 },
   { countries: ["NZ"], keys: ["奥克兰", "auckland", "akl"], lat: -36.85, lon: 174.76 },
-  // Europe
   { countries: ["DE"], keys: ["法兰克福", "frankfurt", "fra", "de-"], lat: 50.11, lon: 8.68 },
   { countries: ["DE"], keys: ["慕尼黑", "munich", "muc"], lat: 48.14, lon: 11.58 },
   { countries: ["DE"], keys: ["柏林", "berlin", "ber"], lat: 52.52, lon: 13.40 },
@@ -671,7 +854,6 @@ const HUB_GEO_KEYWORDS = Object.freeze([
   { countries: ["ES"], keys: ["马德里", "madrid", "mad"], lat: 40.42, lon: -3.70 },
   { countries: ["IT"], keys: ["米兰", "milan", "mxp"], lat: 45.46, lon: 9.19 },
   { countries: ["RU"], keys: ["莫斯科", "moscow", "mow"], lat: 55.76, lon: 37.62 },
-  // North America
   { countries: ["US"], keys: ["圣何塞", "san jose", "sjc", "硅谷", "us-10"], lat: 37.34, lon: -121.89 },
   { countries: ["US"], keys: ["旧金山", "san francisco", "sfo"], lat: 37.77, lon: -122.42 },
   { countries: ["US"], keys: ["洛杉矶", "los angeles", "lax", "us-04"], lat: 34.05, lon: -118.24 },
@@ -683,7 +865,6 @@ const HUB_GEO_KEYWORDS = Object.freeze([
   { countries: ["US"], keys: ["迈阿密", "miami", "mia"], lat: 25.76, lon: -80.19 },
   { countries: ["CA"], keys: ["多伦多", "toronto", "yyz", "ca-"], lat: 43.65, lon: -79.38 },
   { countries: ["CA"], keys: ["温哥华", "vancouver", "yvr"], lat: 49.28, lon: -123.12 },
-  // South America & Africa
   { countries: ["BR"], keys: ["圣保罗", "sao paulo", "gru", "br-"], lat: -23.55, lon: -46.63 },
   { countries: ["AR"], keys: ["布宜诺斯艾利斯", "buenos aires", "eze"], lat: -34.60, lon: -58.38 },
   { countries: ["ZA"], keys: ["约翰内斯堡", "johannesburg", "jnb", "za-"], lat: -26.20, lon: 28.05 },
@@ -691,48 +872,17 @@ const HUB_GEO_KEYWORDS = Object.freeze([
 ]);
 
 const REGION_CENTROIDS = Object.freeze({
-  CN: [31.23, 121.47],
-  HK: [22.32, 114.17],
-  MO: [22.20, 113.54],
-  TW: [25.03, 121.57],
-  JP: [35.68, 139.69],
-  KR: [37.57, 126.98],
-  SG: [1.35, 103.82],
-  MY: [3.14, 101.69],
-  TH: [13.76, 100.50],
-  VN: [10.82, 106.63],
-  ID: [-6.21, 106.85],
-  PH: [14.60, 120.98],
-  IN: [19.08, 72.88],
-  AE: [25.20, 55.27],
-  SA: [24.71, 46.68],
-  IL: [32.09, 34.78],
-  TR: [41.01, 28.98],
-  RU: [55.76, 37.62],
-  GB: [51.51, -0.13],
-  UK: [51.51, -0.13],
-  DE: [50.11, 8.68],
-  FR: [48.86, 2.35],
-  NL: [52.37, 4.90],
-  IE: [53.35, -6.26],
-  CH: [47.37, 8.54],
-  SE: [59.33, 18.07],
-  FI: [60.17, 24.94],
-  ES: [40.42, -3.70],
-  IT: [45.46, 9.19],
-  PL: [52.23, 21.01],
-  US: [37.34, -121.89],
-  CA: [43.65, -79.38],
-  MX: [19.43, -99.13],
-  BR: [-23.55, -46.63],
-  AR: [-34.60, -58.38],
-  CL: [-33.45, -70.67],
-  AU: [-33.87, 151.21],
-  NZ: [-36.85, 174.76],
-  ZA: [-26.20, 28.05],
-  EG: [30.04, 31.24],
-  NG: [6.52, 3.38],
-  KE: [-1.29, 36.82],
+  CN: [31.23, 121.47], HK: [22.32, 114.17], MO: [22.20, 113.54], TW: [25.03, 121.57],
+  JP: [35.68, 139.69], KR: [37.57, 126.98], SG: [1.35, 103.82], MY: [3.14, 101.69],
+  TH: [13.76, 100.50], VN: [10.82, 106.63], ID: [-6.21, 106.85], PH: [14.60, 120.98],
+  IN: [19.08, 72.88], AE: [25.20, 55.27], SA: [24.71, 46.68], IL: [32.09, 34.78],
+  TR: [41.01, 28.98], RU: [55.76, 37.62], GB: [51.51, -0.13], UK: [51.51, -0.13],
+  DE: [50.11, 8.68], FR: [48.86, 2.35], NL: [52.37, 4.90], IE: [53.35, -6.26],
+  CH: [47.37, 8.54], SE: [59.33, 18.07], FI: [60.17, 24.94], ES: [40.42, -3.70],
+  IT: [45.46, 9.19], PL: [52.23, 21.01], US: [37.34, -121.89], CA: [43.65, -79.38],
+  MX: [19.43, -99.13], BR: [-23.55, -46.63], AR: [-34.60, -58.38], CL: [-33.45, -70.67],
+  AU: [-33.87, 151.21], NZ: [-36.85, 174.76], ZA: [-26.20, 28.05], EG: [30.04, 31.24],
+  NG: [6.52, 3.38], KE: [-1.29, 36.82],
 });
 
 const GEO_REGEX_CACHE = new Map();
@@ -761,16 +911,9 @@ const normCountryCode = (code) => {
   return c === "UK" ? "GB" : c;
 };
 
-/**
- * Resolves a geographic point (projected onto the 1160x560 Pacific map) for an agent node.
- * Respects `regionCode` country boundaries when matching city/IATA keywords so short tokens
- * never misclassify nodes across countries, falling back to global keyword search only when
- * `regionCode` is absent or unmapped. Unmatched fallback coordinates spread cleanly across open
- * South Pacific ocean slots with generous separation so distinct unlocated nodes never merge.
- */
 export function resolveNodeGeoPoint(node, fallbackIndex = 0) {
   const haystack = `${node?.name || ""} ${node?.id || ""}`;
-  const rawRC = String(node?.regionCode || node?.region_code || "").trim().toUpperCase();
+  const rawRC = String(node?.regionCode || node?.region_code || node?.region || "").trim().toUpperCase();
   const normRC = normCountryCode(rawRC);
 
   if (normRC) {
@@ -816,10 +959,6 @@ export function resolveNodeGeoPoint(node, fallbackIndex = 0) {
   };
 }
 
-/**
- * Formats a concise geographic tag for space-constrained map beacons while preserving full hostnames
- * when no known city/country centroid exists (never rewriting host prefixes like `qch-tools-installed-`).
- */
 export function formatMapCityLabel(name, node = null) {
   const raw = String(name || "").trim();
   if (!raw && !node) return "-";
@@ -832,17 +971,13 @@ export function formatMapCityLabel(name, node = null) {
     if (geo.source === "city" && /[\u4e00-\u9fff]/.test(geo.label)) {
       return geo.label;
     }
-    const rc = String(node.regionCode || node.region_code || "").trim().toUpperCase();
+    const rc = String(node.regionCode || node.region_code || node.region || "").trim().toUpperCase();
     const region = rc ? geoRegionDetails(rc) : null;
-    if (region?.name) {
-      return region.name;
-    }
+    if (region?.name) return region.name;
   }
-
   return baseName;
 }
 
-/** Shared city/region label extractor used identically by map tags and the inspect bar. */
 export function extractCityClusterLabel(members) {
   if (!Array.isArray(members) || !members.length) return "同城节点";
   const primaryNode = members[0]?.node || members[0];
@@ -850,17 +985,12 @@ export function extractCityClusterLabel(members) {
   if (geo?.source === "city" && /[\u4e00-\u9fff]/.test(geo.label || "")) {
     return geo.label;
   }
-  const region = geoRegionDetails(primaryNode?.regionCode || primaryNode?.region_code);
+  const region = geoRegionDetails(primaryNode?.regionCode || primaryNode?.region_code || primaryNode?.region);
   const rawCity = formatMapCityLabel(primaryNode?.name, primaryNode);
   if (/[·|]/.test(String(primaryNode?.name || ""))) return rawCity;
   return region?.name || rawCity;
 }
 
-/**
- * Order-independent co-located clustering (Single-Linkage Connected Components over matched nodes).
- * Eliminates chain-order dependence and guarantees zero divergence between map beacons and
- * inspect-bar same-city member lists. Unmatched fallback nodes remain individual points.
- */
 export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, scaleX = 1, scaleY = 1, offsetX = 0, offsetY = 0 } = {}) {
   const items = [];
   let unmatchedIdx = 0;
@@ -872,13 +1002,7 @@ export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, s
     const cityKey = geo.matched
       ? (geo.source === "city" ? `city:${geo.label}` : `country:${geo.country}:${Math.round(geo.x)}:${Math.round(geo.y)}`)
       : `unmatched:${node.id}`;
-    items.push({
-      node,
-      geo,
-      geoX: sx,
-      geoY: sy,
-      cityKey,
-    });
+    items.push({ node, geo, geoX: sx, geoY: sy, cityKey });
   }
 
   const n = items.length;
@@ -908,7 +1032,6 @@ export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, s
     components.push(comp);
   }
 
-  // Keep member display order deterministic: online first, then id order; cluster key always sorted by IDs.
   return components.map((comp) => {
     const members = [...comp].sort((a, b) => {
       const aOn = a.node.isOnline ? 0 : 1;
@@ -936,7 +1059,6 @@ export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, s
   });
 }
 
-/** Single source of truth for finding same-city nodes matching an inspect-bar node ID. */
 export function findSameCityMembers(nodes, targetNodeID) {
   if (!targetNodeID || !Array.isArray(nodes) || !nodes.length) return [];
   const clusters = clusterTopologyNodes(nodes);
@@ -945,113 +1067,8 @@ export function findSameCityMembers(nodes, targetNodeID) {
 }
 
 /**
- * Returns a group-scoped slice of a dashboard topology model while keeping
- * `probeGroups` intact so Group Selector tabs stay navigable across modes.
- */
-export function filterTopologyModelByGroup(model, groupId = "") {
-  if (!model || !groupId || groupId === "all") return model;
-  const groups = model.probeGroups || [];
-  const group = groups.find((g) => g.id === groupId);
-  if (!group) return model;
-
-  const modelNodeMap = new Map((model.nodes || []).map((n) => [n.id, n]));
-  const nodes = (group.nodes || []).map((gn) => modelNodeMap.get(gn.id) || gn);
-  const externalTargets = group.externalTargets || [];
-  const probeChains = group.chains || [];
-  const allowedChainIDs = new Set(probeChains.map((c) => c.id));
-  const probeLinks = Array.isArray(group.links) && group.links.length
-    ? group.links
-    : (model.probeLinks || []).filter((p) => allowedChainIDs.has(p.probeID || p.id));
-  const abnormalLinks = probeChains.filter((c) => c.tone === "bad" || c.tone === "warn").length;
-
-  return {
-    ...model,
-    nodes,
-    onlineNodes: nodes.filter((n) => n.isOnline).length,
-    externalTargets,
-    probeLinks,
-    probeChains,
-    abnormalLinks,
-    totalProbeLinks: probeChains.length,
-    activeGroup: group,
-  };
-}
-
-const CIRCLED_HOP_NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
-
-/**
- * Formats bidirectional delay and packet-loss copy as a compact two-line SVG pill payload.
- */
-export function buildBidirectionalPillLines(hop) {
-  const idx = Number(hop?.hopIndex);
-  const prefix = hop?.isMultiHop && Number.isFinite(idx) && idx >= 0
-    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
-    : "";
-  const fmtPct = (v) => Number(v).toFixed(Number(v) % 1 ? 1 : 0);
-
-  if (hop?.running) {
-    const line1 = `${prefix}探测中…`;
-    const line2 = hop?.bidirectional ? "去/回检测中" : "单向检测中";
-    return { line1, line2, fullLabel: `${line1} · ${line2}` };
-  }
-
-  const hasFwd = hop?.latencyMS != null && Number.isFinite(Number(hop.latencyMS))
-    && !(hop?.fwdLossPercent != null && Number(hop.fwdLossPercent) >= 100 && Number(hop.latencyMS) === 0);
-  const hasRev = Boolean(hop?.bidirectional) && hop?.revLatencyMS != null && Number.isFinite(Number(hop.revLatencyMS))
-    && !(hop?.revLossPercent != null && Number(hop.revLossPercent) >= 100 && Number(hop.revLatencyMS) === 0);
-  const lossVal = hop?.lossPercent != null
-    ? Number(hop.lossPercent)
-    : (hop?.fwdLossPercent != null ? Number(hop.fwdLossPercent) : (hop?.revLossPercent != null ? Number(hop.revLossPercent) : null));
-
-  if (!hasFwd && !hasRev) {
-    const rawLabel = String(hop?.statusLabel || "");
-    if (rawLabel && rawLabel !== "不可达" && rawLabel !== "异常" && lossVal == null) {
-      const line1 = `${prefix}${rawLabel}`;
-      const line2 = hop?.bidirectional ? "去/回待测" : "单向待测";
-      return { line1, line2, fullLabel: `${line1} · ${line2}` };
-    }
-    const line1 = `${prefix}${hop?.bidirectional ? "去/回 不可达" : "不可达"}`;
-    const line2 = lossVal != null ? `丢包 ${fmtPct(lossVal)}%` : "100% 丢包";
-    return { line1, line2, fullLabel: `${line1} · ${line2}` };
-  }
-
-  let line1 = "";
-  if (hop?.bidirectional) {
-    const fwdText = hasFwd ? `去 ${formatMs(hop.latencyMS)}` : "去 ×";
-    const revText = hasRev ? `回 ${formatMs(hop.revLatencyMS)}` : "回 ×";
-    line1 = `${prefix}${fwdText} · ${revText}`;
-  } else {
-    line1 = `${prefix}去 ${formatMs(hop.latencyMS)}`;
-  }
-
-  let line2 = "";
-  if (
-    hop?.bidirectional
-    && hop?.fwdLossPercent != null
-    && hop?.revLossPercent != null
-    && (Number(hop.fwdLossPercent) > 0 || Number(hop.revLossPercent) > 0)
-    && Math.round(Number(hop.fwdLossPercent) * 10) !== Math.round(Number(hop.revLossPercent) * 10)
-  ) {
-    line2 = `去${fmtPct(hop.fwdLossPercent)}%/回${fmtPct(hop.revLossPercent)}%`;
-  } else if (lossVal != null && lossVal > 0) {
-    line2 = `丢包 ${fmtPct(lossVal)}%`;
-  } else if (lossVal === 0) {
-    line2 = "0% 丢包";
-  } else {
-    line2 = hop?.isExternal ? "公网出口" : (hop?.bidirectional ? "双程探测" : "单向探测");
-  }
-
-  return { line1, line2, fullLabel: `${line1} · ${line2}` };
-}
-
-/**
- * Computes deduplicated topological grid coordinates (`col`, `row`) for a single monitoring group:
- * - mobile `stacked`: 1-column vertical order with all links arching in a dedicated right rail;
- * - standalone nodes: compact multi-column grid;
- * - external / pure node->ext: 2-column bipartite layout;
- * - multi-hop chains: DAG column layout with boustrophedon snake wrap at `maxCols`;
- * - small mesh (`<= 5` vertices): balanced 2-column Max-Cut minimizing same-column chords;
- * - dense regional mesh (`>= 6` vertices): 3-column Hub-in-Center Max-Cut (hubs in center `col 1`).
+ * Computes deduplicated topological grid coordinates (`col`, `row`) for a monitoring
+ * domain group or single-group chain using pure network-monitoring graph structure.
  */
 export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } = {}) {
   const safeMaxCols = Math.max(2, Math.min(4, Number(maxCols) || 4));
@@ -1122,7 +1139,7 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
           id: ep.id,
           label: ep.name || ep.id,
           isOnline: Boolean(ep.online),
-          node: { id: ep.id, name: ep.name || ep.id, regionCode: ep.regionCode || "", isOnline: Boolean(ep.online), ip: ep.address || "" },
+          node: { id: ep.id, name: ep.name || ep.id, regionCode: ep.regionCode || "", isOnline: Boolean(ep.online), ip: ep.address || "", issue: ep.issue || "", shared: Boolean(ep.shared), role: ep.role || "" },
           ext: null,
         });
       }
@@ -1186,7 +1203,7 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
     layout = "stack";
     cols = 1;
     const ordered = [];
-    if (hasMultiHop) {
+    if (hasMultiHop || chains.length === 1) {
       const seen = new Set();
       for (const chain of chains) {
         for (const ep of chain.endpoints || []) {
@@ -1204,7 +1221,7 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
       ordered.push(...sortVertsDefault(nodeVerts), ...sortVertsDefault(extVerts));
     }
     ordered.forEach((v, idx) => placements.set(v.key, { col: 0, row: idx }));
-  } else if (edges.length === 0 || group?.kind === "nodes") {
+  } else if (edges.length === 0) {
     layout = "grid";
     cols = Math.min(safeMaxCols, Math.max(1, Math.ceil(Math.sqrt(allVerts.length))));
     sortVertsDefault(allVerts).forEach((v, i) => {
@@ -1219,9 +1236,8 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
     sortColByBarycenter(rightKeys, leftRows, (a, b) => (b.degreeInGroup - a.degreeInGroup) || a.label.localeCompare(b.label));
     left.forEach((v, r) => placements.set(v.key, { col: 0, row: r }));
     rightKeys.forEach((k, r) => placements.set(k, { col: 1, row: r }));
-  } else if (hasMultiHop) {
+  } else if (hasMultiHop || chains.length === 1) {
     layout = "chain";
-    // Compute topological rank along directed chain sequences (handles snake wrap for 5..10 hops).
     const rank = new Map();
     const visitOrder = [];
     const seen = new Set();
@@ -1253,7 +1269,6 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
       const r = rank.get(k) || 0;
       const band = Math.floor(r / cols);
       const stepInBand = r % cols;
-      // Boustrophedon snake wrap on odd bands so consecutive hops stay horizontally or vertically adjacent.
       const col = band % 2 === 1 ? (cols - 1 - stepInBand) : stepInBand;
       let row = band + (rankBucketCount.get(`${band}:${col}`) || 0);
       while (occupied.has(`${col}:${row}`)) row += 1;
@@ -1265,7 +1280,7 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
     layout = "maxcut-2col";
     cols = 2;
     const sorted = sortVertsDefault(allVerts);
-    const side = new Map(); // 0 = left, 1 = right
+    const side = new Map();
     let count0 = 0;
     let count1 = 0;
     for (const v of sorted) {
@@ -1282,7 +1297,6 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
       if (target === 0) count0 += 1;
       else count1 += 1;
     }
-    // Rebalance if heavily skewed.
     const limit = Math.ceil(sorted.length / 2);
     while (count0 > limit) {
       const move = sorted.find((v) => side.get(v.key) === 0);
@@ -1341,8 +1355,7 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
       }
     }
     while (leftKeys.length - rightKeys.length > 1) {
-      const k = leftKeys.pop();
-      rightKeys.push(k);
+      rightKeys.push(leftKeys.pop());
     }
     while (rightKeys.length - leftKeys.length > 1) {
       const idx = rightKeys.findIndex((k) => vertexMap.get(k)?.kind !== "ext");
@@ -1357,7 +1370,6 @@ export function planGroupTopologyGraph(group, { maxCols = 4, stacked = false } =
     sortColByBarycenter(leftKeys, centerMap, cmpFallback);
     sortColByBarycenter(rightKeys, centerMap, cmpFallback);
 
-    // Vertically center hub(s) alongside wing rows when symmetric.
     const maxWingRows = Math.max(leftKeys.length, rightKeys.length);
     const centerStart = maxWingRows > centerKeys.length ? Math.floor((maxWingRows - centerKeys.length) / 2) : 0;
     leftKeys.forEach((k, r) => placements.set(k, { col: 0, row: r }));

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -274,12 +275,21 @@ func (s *Store) CreateDashboardProbePair(ctx context.Context, req core.Dashboard
 		return core.DashboardProbePair{}, err
 	}
 	ownerID := scopeForConfig(ctx).OwnerID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 81083))`, ownerID); err != nil {
+		return core.DashboardProbePair{}, err
+	}
+	var conflictID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM dashboard_probe_pairs WHERE owner_id=$1 AND group_name=$2 LIMIT 1`, ownerID, req.GroupName).Scan(&conflictID); err == nil {
+		return core.DashboardProbePair{}, fmt.Errorf("%w: 监测分组“%s”已存在链路，每个分组仅允许配置一条链路", ErrConflict, req.GroupName)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return core.DashboardProbePair{}, err
+	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM dashboard_probe_pairs WHERE owner_id=$1`, ownerID).Scan(&count); err != nil {
 		return core.DashboardProbePair{}, err
 	}
 	if count >= core.DashboardProbeMaxPairsPerOwner {
-		return core.DashboardProbePair{}, fmt.Errorf("%w: 每个账号最多配置 %d 个监测链路", ErrConflict, core.DashboardProbeMaxPairsPerOwner)
+		return core.DashboardProbePair{}, fmt.Errorf("%w: 每个账号最多配置 %d 个监测分组", ErrConflict, core.DashboardProbeMaxPairsPerOwner)
 	}
 	for i, ep := range req.Nodes {
 		if req.TargetMode == "ip" && i == len(req.Nodes)-1 {
@@ -343,25 +353,36 @@ func (s *Store) UpdateDashboardProbePair(ctx context.Context, id string, req cor
 		return core.DashboardProbePair{}, err
 	}
 	ownerID := scopeForConfig(ctx).OwnerID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 81083))`, ownerID); err != nil {
+		return core.DashboardProbePair{}, err
+	}
 	var curRevision int64
-	var curTargetMode, curN1ID, curN1Inst, curN1Addr, curN2ID, curN2Inst, curN2Addr string
+	var curGroupName, curTargetMode, curN1ID, curN1Inst, curN1Addr, curN2ID, curN2Inst, curN2Addr, curLastSessionID string
 	var curNodesJSON []byte
-	var curAutoEnabled bool
+	var curBidirectional, curAutoEnabled bool
 	var curLastRunAt, curNextRunAt *time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT revision, target_mode, node1_agent_id, node1_instance_id, node1_address,
-		       node2_agent_id, node2_instance_id, node2_address, nodes, auto_enabled, last_run_at, next_run_at
+		SELECT revision, group_name, target_mode, node1_agent_id, node1_instance_id, node1_address,
+		       node2_agent_id, node2_instance_id, node2_address, nodes, bidirectional, auto_enabled, last_session_id, last_run_at, next_run_at
 		FROM dashboard_probe_pairs
 		WHERE id=$1 AND owner_id=$2
 		FOR UPDATE`, id, ownerID).Scan(
-		&curRevision, &curTargetMode, &curN1ID, &curN1Inst, &curN1Addr,
-		&curN2ID, &curN2Inst, &curN2Addr, &curNodesJSON, &curAutoEnabled, &curLastRunAt, &curNextRunAt,
+		&curRevision, &curGroupName, &curTargetMode, &curN1ID, &curN1Inst, &curN1Addr,
+		&curN2ID, &curN2Inst, &curN2Addr, &curNodesJSON, &curBidirectional, &curAutoEnabled, &curLastSessionID, &curLastRunAt, &curNextRunAt,
 	)
 	if err != nil {
 		return core.DashboardProbePair{}, mapError(err)
 	}
-	if req.Revision > 0 && req.Revision != curRevision {
+	if req.Revision <= 0 || req.Revision != curRevision {
 		return core.DashboardProbePair{}, fmt.Errorf("%w: 探测配置已更新，请刷新后重试", ErrConflict)
+	}
+	if req.GroupName != curGroupName {
+		var conflictID string
+		if err := tx.QueryRow(ctx, `SELECT id FROM dashboard_probe_pairs WHERE owner_id=$1 AND group_name=$2 AND id<>$3 LIMIT 1`, ownerID, req.GroupName, id).Scan(&conflictID); err == nil {
+			return core.DashboardProbePair{}, fmt.Errorf("%w: 监测分组“%s”已存在链路，每个分组仅允许配置一条链路", ErrConflict, req.GroupName)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return core.DashboardProbePair{}, err
+		}
 	}
 	var curNodes []core.DiagnosticEndpoint
 	if len(curNodesJSON) > 0 {
@@ -412,6 +433,32 @@ func (s *Store) UpdateDashboardProbePair(ctx context.Context, id string, req cor
 		next := now
 		nextRunAt = &next
 	}
+	topologyChanged := nodesChanged || req.Bidirectional != curBidirectional
+	nextLastSessionID := curLastSessionID
+	var stopOldReq *core.DiagnosticRequest
+	if topologyChanged && curLastSessionID != "" {
+		var oldDoc []byte
+		var oldState string
+		if err := tx.QueryRow(ctx, `SELECT document, state FROM network_diagnostic_sessions WHERE id=$1 AND owner_id=$2 FOR UPDATE`, curLastSessionID, ownerID).Scan(&oldDoc, &oldState); err == nil {
+			if oldState == "preparing" || oldState == "running" {
+				var oldSess core.DiagnosticSession
+				if json.Unmarshal(oldDoc, &oldSess) == nil {
+					stopOldReq = &oldSess.Request
+				}
+				if _, err := tx.Exec(ctx, `
+					UPDATE network_diagnostic_sessions
+					SET state='stopping', document=jsonb_set(document,'{state}','"stopping"')
+					WHERE id=$1 AND owner_id=$2 AND state IN ('preparing','running')`,
+					curLastSessionID, ownerID,
+				); err != nil {
+					return core.DashboardProbePair{}, err
+				}
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return core.DashboardProbePair{}, err
+		}
+		nextLastSessionID = ""
+	}
 	paramsRaw, _ := json.Marshal(req.Parameters)
 	nodesRaw, _ := json.Marshal(req.Nodes)
 	if _, err := tx.Exec(ctx, `
@@ -420,13 +467,13 @@ func (s *Store) UpdateDashboardProbePair(ctx context.Context, id string, req cor
 		    node1_agent_id=$6, node1_instance_id=$7, node1_address=$8,
 		    node2_agent_id=$9, node2_instance_id=$10, node2_address=$11,
 		    nodes=$12, bidirectional=$13, parameters=$14, auto_enabled=$15, auto_interval_seconds=$16,
-		    next_run_at=$17, revision=revision+1, updated_at=$18
+		    last_session_id=$17, next_run_at=$18, revision=revision+1, updated_at=$19
 		WHERE id=$1 AND owner_id=$2`,
 		id, ownerID, req.Name, req.GroupName, req.TargetMode,
 		req.Node1.AgentID, req.Node1.InstanceID, req.Node1.Address,
 		req.Node2.AgentID, req.Node2.InstanceID, req.Node2.Address,
 		nodesRaw, req.Bidirectional, paramsRaw, req.AutoEnabled, req.AutoIntervalSeconds,
-		nextRunAt, now,
+		nextLastSessionID, nextRunAt, now,
 	); err != nil {
 		return core.DashboardProbePair{}, mapError(err)
 	}
@@ -435,6 +482,9 @@ func (s *Store) UpdateDashboardProbePair(ctx context.Context, id string, req cor
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.DashboardProbePair{}, err
+	}
+	if stopOldReq != nil {
+		s.signalDiagnosticRequestParticipantsAfterCommit(ctx, *stopOldReq)
 	}
 	return s.GetDashboardProbePair(ctx, id)
 }
@@ -457,7 +507,20 @@ func (s *Store) DeleteDashboardProbePair(ctx context.Context, id string) error {
 	if err := tx.QueryRow(ctx, `SELECT last_session_id FROM dashboard_probe_pairs WHERE id=$1 AND owner_id=$2 FOR UPDATE`, id, ownerID).Scan(&lastSessionID); err != nil {
 		return mapError(err)
 	}
+	var stopOldReq *core.DiagnosticRequest
 	if lastSessionID != "" {
+		var oldDoc []byte
+		var oldState string
+		if err := tx.QueryRow(ctx, `SELECT document, state FROM network_diagnostic_sessions WHERE id=$1 AND owner_id=$2 FOR UPDATE`, lastSessionID, ownerID).Scan(&oldDoc, &oldState); err == nil {
+			if oldState == "preparing" || oldState == "running" {
+				var oldSess core.DiagnosticSession
+				if json.Unmarshal(oldDoc, &oldSess) == nil {
+					stopOldReq = &oldSess.Request
+				}
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE network_diagnostic_sessions
 			SET state='stopping', document=jsonb_set(document,'{state}','"stopping"')
@@ -473,7 +536,13 @@ func (s *Store) DeleteDashboardProbePair(ctx context.Context, id string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM dashboard_probe_pairs WHERE id=$1 AND owner_id=$2`, id, ownerID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	if stopOldReq != nil {
+		s.signalDiagnosticRequestParticipantsAfterCommit(ctx, *stopOldReq)
+	}
+	return nil
 }
 
 // RunDashboardProbePair starts one manual probe run for the configured A/B pair.
@@ -537,11 +606,15 @@ func (s *Store) RunDashboardProbePair(ctx context.Context, id string) (core.Dash
 	if err := tx.Commit(ctx); err != nil {
 		return core.DashboardProbePair{}, err
 	}
+	s.signalDiagnosticRequestParticipantsAfterCommit(ctx, session.Request)
 	return s.GetDashboardProbePair(ctx, id)
 }
 
 // StopDashboardProbePair cancels the in-flight probe session belonging to a pair.
 func (s *Store) StopDashboardProbePair(ctx context.Context, id string) (core.DashboardProbePair, error) {
+	if err := requireTaskPermission(ctx, s.pool, core.ActionStatus, false); err != nil {
+		return core.DashboardProbePair{}, err
+	}
 	ownerID := scopeForConfig(ctx).OwnerID
 	var lastSessionID string
 	if err := s.pool.QueryRow(ctx, `SELECT last_session_id FROM dashboard_probe_pairs WHERE id=$1 AND owner_id=$2`, id, ownerID).Scan(&lastSessionID); err != nil {
@@ -1239,5 +1312,115 @@ func (s *Store) runScheduledDashboardProbe(ctx context.Context, pairID, ownerID 
 		WHERE id=$1`, pair.ID, session.ID, now, next); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.signalDiagnosticRequestParticipantsAfterCommit(ctx, session.Request)
+	return nil
+}
+
+func truncateRunes(value string, maxRunes int) string {
+	if maxRunes <= 0 || utf8.RuneCountInString(value) <= maxRunes {
+		return value
+	}
+	var b strings.Builder
+	count := 0
+	for _, r := range value {
+		if count >= maxRunes {
+			break
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return b.String()
+}
+
+func cleanProbeGroupCandidate(raw string) string {
+	cleaned := strings.NewReplacer("\n", " ", "\r", " ", "\x00", "").Replace(strings.TrimSpace(raw))
+	return strings.TrimSpace(cleaned)
+}
+
+// migrateDashboardProbeGroupsTx assigns deterministic, non-empty, unique
+// group_name values per owner before schema v105 adds the unique constraint,
+// preserving all existing links and probe history samples without loss.
+func migrateDashboardProbeGroupsTx(ctx context.Context, tx pgx.Tx) error {
+	var tableExists bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('dashboard_probe_pairs') IS NOT NULL`).Scan(&tableExists); err != nil {
+		return err
+	}
+	if !tableExists {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id, owner_id, name, group_name, node1_address, node2_address
+		FROM dashboard_probe_pairs
+		ORDER BY owner_id ASC, created_at ASC, id ASC
+		FOR UPDATE`)
+	if err != nil {
+		return err
+	}
+	type probeGroupRow struct {
+		id        string
+		ownerID   string
+		name      string
+		groupName string
+		addr1     string
+		addr2     string
+	}
+	var allRows []probeGroupRow
+	for rows.Next() {
+		var r probeGroupRow
+		if err := rows.Scan(&r.id, &r.ownerID, &r.name, &r.groupName, &r.addr1, &r.addr2); err != nil {
+			rows.Close()
+			return err
+		}
+		allRows = append(allRows, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	usedByOwner := map[string]map[string]bool{}
+	for _, row := range allRows {
+		used := usedByOwner[row.ownerID]
+		if used == nil {
+			used = map[string]bool{}
+			usedByOwner[row.ownerID] = used
+		}
+		norm := cleanProbeGroupCandidate(row.groupName)
+		base := norm
+		if base == "" {
+			base = cleanProbeGroupCandidate(row.name)
+		}
+		if base == "" {
+			if row.addr1 != "" && row.addr2 != "" {
+				base = fmt.Sprintf("%s->%s", row.addr1, row.addr2)
+			} else {
+				base = "默认监测组"
+			}
+		}
+		base = truncateRunes(base, 40)
+		candidate := base
+		if used[candidate] {
+			for seq := 2; ; seq++ {
+				suffix := fmt.Sprintf(" (%d)", seq)
+				prefix := strings.TrimSpace(truncateRunes(base, 40-utf8.RuneCountInString(suffix)))
+				if prefix == "" {
+					prefix = "分组"
+				}
+				candidate = prefix + suffix
+				if !used[candidate] {
+					break
+				}
+			}
+		}
+		used[candidate] = true
+		if candidate != row.groupName {
+			if _, err := tx.Exec(ctx, `UPDATE dashboard_probe_pairs SET group_name=$2, updated_at=now() WHERE id=$1`, row.id, candidate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

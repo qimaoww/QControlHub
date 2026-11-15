@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 104
+const currentSchemaVersion = 105
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1308,6 +1308,9 @@ CREATE TABLE IF NOT EXISTS dashboard_probe_pairs (
 );
 ALTER TABLE dashboard_probe_pairs ADD COLUMN IF NOT EXISTS group_name varchar(40) NOT NULL DEFAULT '';
 ALTER TABLE dashboard_probe_pairs ADD COLUMN IF NOT EXISTS nodes jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE dashboard_probe_pairs DROP CONSTRAINT IF EXISTS dashboard_probe_pairs_group_nonempty_check;
+ALTER TABLE dashboard_probe_pairs ADD CONSTRAINT dashboard_probe_pairs_group_nonempty_check CHECK (btrim(group_name) <> '' AND group_name = btrim(group_name));
+CREATE UNIQUE INDEX IF NOT EXISTS dashboard_probe_pairs_owner_group_uidx ON dashboard_probe_pairs(owner_id, group_name);
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_owner_idx ON dashboard_probe_pairs(owner_id, created_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_due_idx ON dashboard_probe_pairs(next_run_at) WHERE auto_enabled;
 CREATE INDEX IF NOT EXISTS dashboard_probe_pairs_session_idx ON dashboard_probe_pairs(last_session_id) WHERE last_session_id <> '';

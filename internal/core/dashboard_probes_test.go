@@ -9,6 +9,7 @@ func TestDashboardProbePairRequestNormalizeAndValidate(t *testing.T) {
 	t.Parallel()
 	valid := DashboardProbePairRequest{
 		Name:          "  HK -> SG Latency  ",
+		GroupName:     "  默认分组  ",
 		Node1:         DiagnosticEndpoint{AgentID: "agt_0123456789abcdef", Address: "198.51.100.10"},
 		Node2:         DiagnosticEndpoint{AgentID: "agt_fedcba9876543210", Address: "203.0.113.20"},
 		Bidirectional: true,
@@ -22,6 +23,7 @@ func TestDashboardProbePairRequestNormalizeAndValidate(t *testing.T) {
 	}
 
 	custom := DashboardProbePairRequest{
+		GroupName:  "公网拨测",
 		TargetMode: "ip",
 		Node1:      DiagnosticEndpoint{AgentID: "agt_0123456789abcdef", Address: "198.51.100.10"},
 		Node2:      DiagnosticEndpoint{Address: "1.1.1.1"},
@@ -35,6 +37,10 @@ func TestDashboardProbePairRequestNormalizeAndValidate(t *testing.T) {
 		name   string
 		mutate func(*DashboardProbePairRequest)
 	}{
+		{"empty group", func(r *DashboardProbePairRequest) { r.GroupName = "" }},
+		{"blank group", func(r *DashboardProbePairRequest) { r.GroupName = "   " }},
+		{"control group", func(r *DashboardProbePairRequest) { r.GroupName = "a\nb" }},
+		{"long group", func(r *DashboardProbePairRequest) { r.GroupName = strings.Repeat("组", 41) }},
 		{"long name", func(r *DashboardProbePairRequest) { r.Name = strings.Repeat("a", 81) }},
 		{"mixed family", func(r *DashboardProbePairRequest) { r.Node2.Address = "2001:db8::2" }},
 		{"same agent", func(r *DashboardProbePairRequest) { r.Node2.AgentID = r.Node1.AgentID }},
@@ -113,6 +119,7 @@ func TestDashboardProbePairRequestNormalizeAndValidate(t *testing.T) {
 	}
 
 	customChain := DashboardProbePairRequest{
+		GroupName:  "多跳IP非法组",
 		TargetMode: "ip",
 		Nodes: []DiagnosticEndpoint{
 			{AgentID: "agt_a", Address: "198.51.100.1"},

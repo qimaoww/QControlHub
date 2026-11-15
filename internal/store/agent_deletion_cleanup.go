@@ -76,7 +76,7 @@ var agentCleanupSteps = []agentCleanupStep{
 	{"delete core log batches", `DELETE FROM core_log_batches WHERE ctid IN
         (SELECT ctid FROM core_log_batches WHERE agent_id=$1 LIMIT $2)`},
 	{"delete dashboard probe pairs", `DELETE FROM dashboard_probe_pairs WHERE ctid IN
-        (SELECT ctid FROM dashboard_probe_pairs WHERE node1_agent_id=$1 OR node2_agent_id=$1 LIMIT $2)`},
+        (SELECT ctid FROM dashboard_probe_pairs WHERE node1_agent_id=$1 OR node2_agent_id=$1 OR EXISTS (SELECT 1 FROM jsonb_array_elements(nodes) AS ep WHERE ep->>'agent_id'=$1) LIMIT $2)`},
 }
 
 func (s *Store) cleanupDeletedAgent(ctx context.Context, id string) error {

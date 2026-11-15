@@ -18612,7 +18612,7 @@
             "apiKey": []
           }
         ],
-        "summary": "查询仪表盘 A/B 探测对",
+        "summary": "查询监测分组链路",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "read",
@@ -18631,6 +18631,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "post": {
+        "description": "同一认证所有者下每个监测分组仅允许配置一条链路（支持 2 至 10 跳多跳链或自定义单跳 IP），同名分组返回 409 冲突；更新必须传入当前 revision，并发冲突返回 409。",
         "operationId": "createDashboardProbePair_api_v1_dashboard_probes",
         "requestBody": {
           "content": {
@@ -18720,6 +18721,9 @@
                     "type": "string"
                   }
                 },
+                "required": [
+                  "group_name"
+                ],
                 "type": "object"
               }
             }
@@ -18873,7 +18877,7 @@
             "apiKey": []
           }
         ],
-        "summary": "新增仪表盘 A/B 探测对",
+        "summary": "新增监测分组链路",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -18945,7 +18949,7 @@
             "apiKey": []
           }
         ],
-        "summary": "删除仪表盘 A/B 探测对",
+        "summary": "删除监测分组链路",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -18965,6 +18969,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "put": {
+        "description": "同一认证所有者下每个监测分组仅允许配置一条链路（支持 2 至 10 跳多跳链或自定义单跳 IP），同名分组返回 409 冲突；更新必须传入当前 revision，并发冲突返回 409。",
         "operationId": "updateDashboardProbePair_api_v1_dashboard_probes_{id}",
         "parameters": [
           {
@@ -19066,6 +19071,10 @@
                     "type": "string"
                   }
                 },
+                "required": [
+                  "group_name",
+                  "revision"
+                ],
                 "type": "object"
               }
             }
@@ -19219,7 +19228,7 @@
             "apiKey": []
           }
         ],
-        "summary": "更新仪表盘 A/B 探测对",
+        "summary": "更新监测分组链路",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -19401,7 +19410,7 @@
             "apiKey": []
           }
         ],
-        "summary": "触发仪表盘 A/B 探测",
+        "summary": "触发监测分组链路探测",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -19583,7 +19592,7 @@
             "apiKey": []
           }
         ],
-        "summary": "停止仪表盘 A/B 探测",
+        "summary": "停止监测分组链路探测",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -22385,9 +22394,8 @@
                     "time_mode": "today"
                   },
                   "dashboard": {
-                    "probe_filter": "all",
                     "topo_group": "example",
-                    "topo_probe_filter": "all",
+                    "topo_show_history": false,
                     "topo_view_mode": "flow",
                     "traffic_month": "example",
                     "traffic_rank_limit": "5",
@@ -22436,6 +22444,15 @@
                   "tcp": {
                     "agent": "example"
                   },
+                  "topology": {
+                    "domain_group": "",
+                    "focus_viz": "flow",
+                    "metric_dir": "both",
+                    "selected_group": "example",
+                    "sort_by": "default",
+                    "status_filter": "all",
+                    "view_mode": "flow"
+                  },
                   "traffic": {
                     "advanced": false,
                     "agent": "example",
@@ -22460,7 +22477,7 @@
                   },
                   "values": {
                     "additionalProperties": false,
-                    "maxProperties": 17,
+                    "maxProperties": 18,
                     "minProperties": 1,
                     "properties": {
                       "api": {
@@ -22591,29 +22608,15 @@
                       },
                       "dashboard": {
                         "additionalProperties": false,
-                        "maxProperties": 8,
+                        "maxProperties": 7,
                         "minProperties": 1,
                         "properties": {
-                          "probe_filter": {
-                            "enum": [
-                              "all",
-                              "abnormal"
-                            ],
-                            "type": "string"
-                          },
                           "topo_group": {
-                            "maxLength": 64,
+                            "maxLength": 40,
                             "type": "string"
                           },
-                          "topo_probe_filter": {
-                            "enum": [
-                              "all",
-                              "bad",
-                              "chain",
-                              "mesh",
-                              "ext"
-                            ],
-                            "type": "string"
+                          "topo_show_history": {
+                            "type": "boolean"
                           },
                           "topo_view_mode": {
                             "enum": [
@@ -22873,6 +22876,75 @@
                           "agent": {
                             "maxLength": 20,
                             "pattern": "^(?:agt_[0-9a-f]{16}|)$",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "topology": {
+                        "additionalProperties": false,
+                        "maxProperties": 7,
+                        "minProperties": 1,
+                        "properties": {
+                          "domain_group": {
+                            "enum": [
+                              "",
+                              "all",
+                              "domain:multihop",
+                              "domain:apac",
+                              "domain:emea",
+                              "domain:amer",
+                              "domain:cross",
+                              "domain:external"
+                            ],
+                            "type": "string"
+                          },
+                          "focus_viz": {
+                            "enum": [
+                              "flow",
+                              "map"
+                            ],
+                            "type": "string"
+                          },
+                          "metric_dir": {
+                            "enum": [
+                              "both",
+                              "forward",
+                              "reverse"
+                            ],
+                            "type": "string"
+                          },
+                          "selected_group": {
+                            "maxLength": 40,
+                            "type": "string"
+                          },
+                          "sort_by": {
+                            "enum": [
+                              "default",
+                              "abnormal",
+                              "latency_desc",
+                              "loss_desc",
+                              "name_asc"
+                            ],
+                            "type": "string"
+                          },
+                          "status_filter": {
+                            "enum": [
+                              "all",
+                              "abnormal",
+                              "running",
+                              "multihop",
+                              "paused"
+                            ],
+                            "type": "string"
+                          },
+                          "view_mode": {
+                            "enum": [
+                              "flow",
+                              "map",
+                              "focus",
+                              "overview"
+                            ],
                             "type": "string"
                           }
                         },

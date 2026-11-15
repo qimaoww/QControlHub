@@ -1,13 +1,31 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func probeCallRaw(client configScopeAPIClient, method, path string, body any) int {
+	encoded, _ := json.Marshal(body)
+	request := httptest.NewRequest(method, "/api/v1"+path, bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/json")
+	if client.token != "" {
+		request.Header.Set("Authorization", "Bearer "+client.token)
+	} else {
+		request.AddCookie(client.cookie)
+		request.Header.Set(csrfHeader, client.csrf)
+	}
+	response := httptest.NewRecorder()
+	client.handler.ServeHTTP(response, request)
+	return response.Code
+}
 
 func TestDashboardProbePairsCRUDPermissionsAndScheduling(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
@@ -45,8 +63,21 @@ func TestDashboardProbePairsCRUDPermissionsAndScheduling(t *testing.T) {
 	var initialList core.DashboardProbeListResponse
 	readonlyKey.call("GET", "/dashboard/probes", nil, 200, &initialList)
 
+	// Empty or whitespace-only group_name must be rejected with 400.
+	noGroupReq := core.DashboardProbePairRequest{
+		Name:                "No Group",
+		Node1:               endpoints[a.ID],
+		Node2:               endpoints[b.ID],
+		Bidirectional:       true,
+		AutoEnabled:         true,
+		AutoIntervalSeconds: 30,
+		Parameters:          core.DiagnosticParameters{Tool: "ping", Protocol: "icmp", Count: 3, IntervalMS: 200, TimeoutMS: 1000, Size: 56},
+	}
+	rwKey.call("POST", "/dashboard/probes", noGroupReq, 400, nil)
+
 	req := core.DashboardProbePairRequest{
 		Name:                "HK-SG Ping",
+		GroupName:           "核心互联",
 		Node1:               endpoints[a.ID],
 		Node2:               endpoints[b.ID],
 		Bidirectional:       true,
@@ -62,18 +93,126 @@ func TestDashboardProbePairsCRUDPermissionsAndScheduling(t *testing.T) {
 		t.Fatalf("created probe pair unexpected: %+v", pair)
 	}
 
-	// Bob cannot view, update, trigger, stop, or delete Alice's probe pair.
-	bob.call("PUT", "/dashboard/probes/"+pair.ID, req, 404, nil)
+	// Duplicate group_name for the same owner must fail with 409 Conflict.
+	dupReq := req
+	dupReq.Name = "Duplicate Attempt"
+	rwKey.call("POST", "/dashboard/probes", dupReq, 409, nil)
+
+	// Concurrent creation of the same group_name for one owner must yield exactly one success and one 409 Conflict.
+	c, _ := ownedConfigScopeAPIAgent(t, ctx, db, admin, "probe-c")
+	grantConfigScopeAPIAgent(t, ctx, db, c, alice, 5201)
+	if err := db.Heartbeat(ctx, c.ID, core.HeartbeatRequest{Features: append(c.Features, core.AgentFeatureNetworkDiagnostics)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateDiagnosticCapabilities(ctx, c.ID, &core.DiagnosticCapabilities{
+		Tools:     map[string]core.DiagnosticTool{"ping": {Version: "ICMP"}},
+		Addresses: []string{"192.0.2.30"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	access2 := acceptConfigScopeAPIInvitations(alice)
+	for _, sh := range access2.Shares {
+		if sh.AgentID == c.ID {
+			admin.call("PUT", "/agents/"+sh.AgentID+"/diagnostic-grants/"+sh.ID, map[string]bool{"enabled": true}, 204, nil)
+		}
+	}
+	alice.call("GET", "/network-diagnostics/nodes", nil, 200, &nodes)
+	for _, n := range nodes {
+		endpoints[n.AgentID] = core.DiagnosticEndpoint{AgentID: n.AgentID, InstanceID: n.InstanceID, Address: n.Capabilities.Addresses[0]}
+	}
+
+	startRace := make(chan struct{})
+	var raceWG sync.WaitGroup
+	raceStatuses := make(chan int, 2)
+	for _, target := range []core.DiagnosticEndpoint{endpoints[b.ID], endpoints[c.ID]} {
+		raceWG.Add(1)
+		go func(ep core.DiagnosticEndpoint) {
+			defer raceWG.Done()
+			<-startRace
+			raceReq := req
+			raceReq.GroupName = "并发互斥组"
+			raceReq.Node2 = ep
+			raceStatuses <- probeCallRaw(alice, "POST", "/dashboard/probes", raceReq)
+		}(target)
+	}
+	close(startRace)
+	raceWG.Wait()
+	close(raceStatuses)
+	createdRace, conflictRace := 0, 0
+	for code := range raceStatuses {
+		if code == 201 {
+			createdRace++
+		} else if code == 409 {
+			conflictRace++
+		} else {
+			t.Fatalf("unexpected concurrent group creation status: %d", code)
+		}
+	}
+	if createdRace != 1 || conflictRace != 1 {
+		t.Fatalf("expected 1 created and 1 conflict in concurrent group creation, got created=%d conflict=%d", createdRace, conflictRace)
+	}
+
+	// Cross-user isolation: bob and admin can create their own groups with the SAME group_name independently.
+	grantConfigScopeAPIAgent(t, ctx, db, a, bob, 5202)
+	grantConfigScopeAPIAgent(t, ctx, db, b, bob, 5202)
+	bobAccess := acceptConfigScopeAPIInvitations(bob)
+	for _, sh := range bobAccess.Shares {
+		admin.call("PUT", "/agents/"+sh.AgentID+"/diagnostic-grants/"+sh.ID, map[string]bool{"enabled": true}, 204, nil)
+	}
+	var bobNodes []core.DiagnosticNode
+	bob.call("GET", "/network-diagnostics/nodes", nil, 200, &bobNodes)
+	bobEp := map[string]core.DiagnosticEndpoint{}
+	for _, n := range bobNodes {
+		bobEp[n.AgentID] = core.DiagnosticEndpoint{AgentID: n.AgentID, InstanceID: n.InstanceID, Address: n.Capabilities.Addresses[0]}
+	}
+	bobReq := req
+	bobReq.Node1 = bobEp[a.ID]
+	bobReq.Node2 = bobEp[b.ID]
+	bobReq.AutoEnabled = false
+	var bobPair core.DashboardProbePair
+	bob.call("POST", "/dashboard/probes", bobReq, 201, &bobPair)
+	var adminPair core.DashboardProbePair
+	adminReq := req
+	adminReq.Node1 = core.DiagnosticEndpoint{AgentID: a.ID, Address: "192.0.2.10"}
+	adminReq.Node2 = core.DiagnosticEndpoint{AgentID: b.ID, Address: "192.0.2.20"}
+	adminReq.AutoEnabled = false
+	admin.call("POST", "/dashboard/probes", adminReq, 201, &adminPair)
+
+	// Bob and Admin cannot view, update, trigger, stop, or delete Alice's probe pair even with identical group names.
+	bob.call("PUT", "/dashboard/probes/"+pair.ID, bobReq, 404, nil)
 	bob.call("POST", "/dashboard/probes/"+pair.ID+"/run", nil, 404, nil)
 	bob.call("POST", "/dashboard/probes/"+pair.ID+"/stop", nil, 404, nil)
 	bob.call("DELETE", "/dashboard/probes/"+pair.ID, nil, 404, nil)
+	admin.call("PUT", "/dashboard/probes/"+pair.ID, adminReq, 404, nil)
+	admin.call("DELETE", "/dashboard/probes/"+pair.ID, nil, 404, nil)
 
-	// Stale revision check protects concurrent edits.
+	// Clean up extra race/isolation pairs so the remaining scheduling test observes Alice's single pair cleanly.
+	var aliceBeforeSched core.DashboardProbeListResponse
+	alice.call("GET", "/dashboard/probes", nil, 200, &aliceBeforeSched)
+	for _, p := range aliceBeforeSched.Pairs {
+		if p.GroupName == "并发互斥组" {
+			// Also verify renaming to an existing group returns 409 Conflict.
+			renameConflict := req
+			renameConflict.GroupName = "核心互联"
+			renameConflict.Node2 = p.Node2
+			renameConflict.Revision = p.Revision
+			alice.call("PUT", "/dashboard/probes/"+p.ID, renameConflict, 409, nil)
+			alice.call("DELETE", "/dashboard/probes/"+p.ID, nil, 204, nil)
+		}
+	}
+	bob.call("DELETE", "/dashboard/probes/"+bobPair.ID, nil, 204, nil)
+	admin.call("DELETE", "/dashboard/probes/"+adminPair.ID, nil, 204, nil)
+
+	// Stale revision or missing revision check protects concurrent edits.
 	badRev := req
 	badRev.Revision = 99
 	alice.call("PUT", "/dashboard/probes/"+pair.ID, badRev, 409, nil)
+	zeroRev := req
+	zeroRev.Revision = 0
+	alice.call("PUT", "/dashboard/probes/"+pair.ID, zeroRev, 409, nil)
 
-	// Trigger due auto-probe via scheduler.
+	// Refresh access list after second invitation acceptance so later grant-revocation subtest uses active share IDs.
+	access = access2
 	if err := db.RunDueDashboardProbes(ctx, time.Now().UTC().Add(time.Second)); err != nil {
 		t.Fatalf("run due probes: %v", err)
 	}
@@ -141,10 +280,93 @@ func TestDashboardProbePairsCRUDPermissionsAndScheduling(t *testing.T) {
 		t.Fatal("revoked API key scheduled probe remained auto_enabled")
 	}
 
+	// Explicit delete removes the probe pair cleanly.
 	alice.call("DELETE", "/dashboard/probes/"+pair.ID, nil, 204, nil)
 	alice.call("GET", "/dashboard/probes", nil, 200, &listAfter)
 	if len(listAfter.Pairs) != 0 {
 		t.Fatalf("deleted probe still present: %+v", listAfter.Pairs)
+	}
+
+	// Concurrent group rename into an occupied group or two concurrent renames to the same group must be serialized.
+	var p1, p2 core.DashboardProbePair
+	r1 := req
+	r1.GroupName = "分组一"
+	r2 := req
+	r2.GroupName = "分组二"
+	r2.Node2 = endpoints[c.ID]
+	r2.AutoEnabled = false
+	alice.call("POST", "/dashboard/probes", r1, 201, &p1)
+	alice.call("POST", "/dashboard/probes", r2, 201, &p2)
+	renameStart := make(chan struct{})
+	var renameWG sync.WaitGroup
+	renameCodes := make(chan int, 2)
+	for _, item := range []core.DashboardProbePair{p1, p2} {
+		renameWG.Add(1)
+		go func(target core.DashboardProbePair) {
+			defer renameWG.Done()
+			<-renameStart
+			up := req
+			up.GroupName = "目标合并组"
+			up.Nodes = target.Nodes
+			up.Node1 = target.Node1
+			up.Node2 = target.Node2
+			up.Revision = target.Revision
+			renameCodes <- probeCallRaw(alice, "PUT", "/dashboard/probes/"+target.ID, up)
+		}(item)
+	}
+	close(renameStart)
+	renameWG.Wait()
+	close(renameCodes)
+	rOK, rConf := 0, 0
+	for code := range renameCodes {
+		if code == 200 {
+			rOK++
+		} else if code == 409 {
+			rConf++
+		} else {
+			t.Fatalf("unexpected concurrent rename status: %d", code)
+		}
+	}
+	if rOK != 1 || rConf != 1 {
+		t.Fatalf("expected 1 success and 1 conflict on concurrent group rename, got ok=%d conflict=%d", rOK, rConf)
+	}
+
+	// Running probe stops cleanly when chain endpoints are edited, and deleting an intermediate hop agent cleans the multi-hop group.
+	alice.call("GET", "/dashboard/probes", nil, 200, &listAfter)
+	var targetPair core.DashboardProbePair
+	for _, p := range listAfter.Pairs {
+		if p.GroupName == "目标合并组" {
+			targetPair = p
+			break
+		}
+	}
+	var startedPair core.DashboardProbePair
+	alice.call("POST", "/dashboard/probes/"+targetPair.ID+"/run", nil, 201, &startedPair)
+	if !startedPair.Availability.Running {
+		t.Fatalf("expected running state after /run, got %+v", startedPair.Availability)
+	}
+	extendOnRun := req
+	extendOnRun.GroupName = targetPair.GroupName
+	extendOnRun.Nodes = []core.DiagnosticEndpoint{endpoints[a.ID], endpoints[c.ID], endpoints[b.ID]}
+	extendOnRun.Revision = startedPair.Revision
+	var updatedPair core.DashboardProbePair
+	alice.call("PUT", "/dashboard/probes/"+targetPair.ID, extendOnRun, 200, &updatedPair)
+	if updatedPair.LastSessionID != "" || updatedPair.ActiveState != "" || updatedPair.Availability.Running {
+		t.Fatalf("editing endpoints while running must stop/detach previous session, got %+v", updatedPair)
+	}
+
+	// Delete intermediate node c and run cleanup: multi-hop probe referencing c must be cleaned up.
+	admin.call("DELETE", "/agents/"+c.ID, nil, 204, nil)
+	if err := db.CleanupDeletedAgents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	alice.call("GET", "/dashboard/probes", nil, 200, &listAfter)
+	for _, p := range listAfter.Pairs {
+		for _, ep := range p.Nodes {
+			if ep.AgentID == c.ID {
+				t.Fatalf("expected multi-hop probe referencing deleted intermediate agent to be cleaned up, got %+v", p)
+			}
+		}
 	}
 }
 

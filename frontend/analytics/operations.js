@@ -7,7 +7,7 @@ import { formatDate } from "./appearance.js";
 import { bindSourceEditorTools } from "./source-editor.js";
 import { readableConfigSource } from '../modules/code-format.js';
 import { editAgentSharing } from "./sharing.js";
-import { aggregateDashboardTrafficDays, mergePanelMetricsHistory, niceTrafficScaleMax, summarizeDashboardNodes, summarizeDashboardTraffic, summarizeDashboardTrafficBreakdown, summarizeDashboardTrafficPeaks, utcMonth } from "../modules/dashboard-model.js";
+import { aggregateDashboardTrafficDays, isProbeRunning, mergePanelMetricsHistory, niceTrafficScaleMax, summarizeDashboardNodes, summarizeDashboardTraffic, summarizeDashboardTrafficBreakdown, summarizeDashboardTrafficPeaks, utcMonth } from "../modules/dashboard-model.js";
 import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
@@ -193,7 +193,7 @@ function chart(days, width, selectedDay, selectDay, onInspect) {
 
 import { createPanelHostController } from "./dashboard-panel.js";
 import { createTrafficRankingCard, trafficSplitBar } from "./dashboard-ranking.js";
-import { createDashboardProbesSection } from "./dashboard-probes.js";
+import { createDashboardProbeController } from "./dashboard-probes.js";
 import { createDashboardTopologySection } from "./dashboard-topology.js";
 import { createEdgeTelemetryController, paintNodeTelemetryMatrix } from "./dashboard-telemetry.js";
 
@@ -243,7 +243,7 @@ function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, 
 
   const probePollInterval = () => {
     const pairs = readings.get("probes")?.pairs;
-    return Array.isArray(pairs) && pairs.some(p => p.availability?.running || ["preparing", "running", "stopping"].includes(p.active_state)) ? 2000 : 5000;
+    return Array.isArray(pairs) && pairs.some((p) => isProbeRunning(p)) ? 2000 : 5000;
   };
 
   ctx.signal.addEventListener("abort", () => { requests.forEach(controller => controller.abort()); }, { once: true });
@@ -274,12 +274,11 @@ export async function dashboardPage(ctx) {
     },
     onSettled: async (key) => {
       if (key === "metrics") { paintMetrics(); }
-      else if (key === "traffic") { paintTraffic(); topologySection.schedulePaint(); }
-      else if (key === "trafficPolicies") { rankingCard?.paint(); topologySection.schedulePaint(); }
-      else if (key === "probes") { probesSection.paint(); topologySection.schedulePaint(); }
+      else if (key === "traffic") { paintTraffic(); }
+      else if (key === "trafficPolicies") { rankingCard?.paint(); }
+      else if (key === "probes") { topologySection.schedulePaint(); }
       else if (key === "connections" || key === "certificates" || key === "ipQuality") {
         edgeTelemetry.paint();
-        if (key === "connections") topologySection.schedulePaint();
       } else {
         await queueBusiness();
       }
@@ -447,28 +446,22 @@ export async function dashboardPage(ctx) {
   ), trafficState);
   trafficCard?.classList?.add("a-dash-traffic-card");
 
-  const probesSection = createDashboardProbesSection(ctx, {
-    date,
+  let topologySection;
+  const probeController = createDashboardProbeController(ctx, {
     getOrderIDs: () => readings.get("order")?.ids || [],
     getProbes: () => readings.get("probes"),
-    getProbesState: () => states.get("probes"),
     reloadProbes: () => read("probes", "/dashboard/probes", true),
+    onSaved: (saved, meta) => topologySection?.onProbeSaved?.(saved, meta),
+    onDeleted: (pair) => topologySection?.onProbeDeleted?.(pair),
   });
 
-  const topologySection = createDashboardTopologySection(ctx, {
-    bytes,
+  topologySection = createDashboardTopologySection(ctx, {
+    date,
     getAgents: () => list(readings.get("agents")),
     getOrderIDs: () => readings.get("order")?.ids || [],
-    getUsage: () => readings.get("traffic"),
-    getPolicies: () => readings.get("trafficPolicies"),
     getProbes: () => readings.get("probes"),
-    getMetrics: () => readings.get("metrics"),
-    getConnections: () => readings.get("connections"),
     getStates: () => states,
-    getMonth: () => month,
-    canOpenProbes: probesSection.canView,
-    onOpenProbes: (probeID, options) => probesSection.open(probeID, options),
-    showLedger: false,
+    probeController,
     isStandalonePage: false,
   });
 
@@ -488,7 +481,6 @@ export async function dashboardPage(ctx) {
           paintBusiness();
           rankingCard?.paint();
           topologySection.schedulePaint();
-          probesSection.paint();
           edgeTelemetry.paint();
         }
       } finally { finishBusiness(); }
@@ -666,7 +658,7 @@ export async function dashboardPage(ctx) {
   ctx.onRefresh(() => refresh(true));
   ctx.signal.addEventListener("abort", () => { trafficDialog?.close(); }, { once: true });
   paintMetrics(); paintTraffic(); paintBusiness();
-  topologySection.paint(); probesSection.paint(); edgeTelemetry.paint();
+  topologySection.paint(); edgeTelemetry.paint();
   void refresh(true);
   poll(ctx, () => refresh(false), probePollInterval);
   const bentoRow = (className, ...items) => {
@@ -687,65 +679,46 @@ export async function dashboardPage(ctx) {
 }
 
 export async function topologyPage(ctx) {
-  const month = ctx.state.data.dashboardMonth || utcMonth();
-  const can = permission => ctx.can(permission);
-  let probesSection;
+  const can = (permission) => ctx.can(permission);
   let topologySection;
 
   const store = createTelemetryStore(ctx, {
-    getMonth: () => month,
     onSettled: (key) => {
-      if (key === "probes" || key === "agents" || key === "order") probesSection?.paint();
-      topologySection?.schedulePaint();
+      if (key === "probes" || key === "agents" || key === "order") {
+        topologySection?.schedulePaint();
+      }
     },
   });
   const { readings, states, read, shouldPoll, probePollInterval } = store;
 
-  probesSection = createDashboardProbesSection(ctx, {
-    date,
+  const probeController = createDashboardProbeController(ctx, {
     getOrderIDs: () => readings.get("order")?.ids || [],
     getProbes: () => readings.get("probes"),
-    getProbesState: () => states.get("probes"),
     reloadProbes: () => read("probes", "/dashboard/probes", true),
+    onSaved: (saved, meta) => topologySection?.onProbeSaved?.(saved, meta),
+    onDeleted: (pair) => topologySection?.onProbeDeleted?.(pair),
   });
 
   topologySection = createDashboardTopologySection(ctx, {
-    bytes,
+    date,
     getAgents: () => list(readings.get("agents")),
     getOrderIDs: () => readings.get("order")?.ids || [],
-    getUsage: () => readings.get("traffic"),
-    getPolicies: () => readings.get("trafficPolicies"),
     getProbes: () => readings.get("probes"),
-    getMetrics: () => readings.get("metrics"),
-    getConnections: () => readings.get("connections"),
     getStates: () => states,
-    getMonth: () => month,
-    canOpenProbes: probesSection.canView,
-    onOpenProbes: (probeID, options) => probesSection.open(probeID, options),
-    showLedger: true,
+    probeController,
     isStandalonePage: true,
   });
 
-  let connectionsLastFetch = 0;
   function refresh(manual = false) {
     const sources = [
       ...(can("agents.read") ? [["agents", "/agents"], ["order", "/preferences/node-order"]] : []),
-      ...(can("panel-metrics.read") && shouldPoll("metrics", manual) ? [["metrics", "/panel-metrics"]] : []),
-      ...(can("traffic.read") && shouldPoll("traffic", manual) ? [["traffic", query("/traffic-usage", { month })]] : []),
-      ...(can("traffic.read") && shouldPoll("trafficPolicies", manual) ? [["trafficPolicies", "/traffic-policies?view=page"]] : []),
       ...(can("agents.read") && can("tasks.read") && shouldPoll("probes", manual) ? [["probes", "/dashboard/probes"]] : []),
     ];
-    const now = Date.now();
-    if (manual || !connectionsLastFetch || now - connectionsLastFetch >= 15000) {
-      connectionsLastFetch = now;
-      if (can("core-logs.read") && shouldPoll("connections", manual)) sources.push(["connections", "/client-connections?limit=1&timeline=true"]);
-    }
     return Promise.all(sources.map(([key, path]) => read(key, path)));
   }
 
   ctx.onRefresh(() => refresh(true));
   topologySection.paint();
-  probesSection.paint();
   void refresh(true);
   poll(ctx, () => refresh(false), probePollInterval);
 

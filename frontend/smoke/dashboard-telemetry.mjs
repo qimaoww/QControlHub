@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
 import {
-  buildTopologySelectionIndex,
-  clusterTopologyNodes,
-  findSameCityMembers,
-  matchesActiveSelection,
-  reconcileSelectionKey,
-  resolveNodeGeoPoint,
-} from "../analytics/dashboard-topo-shared.js";
-import { projectPacificGeo } from "../analytics/pacific-map-data.js";
-
-import {
   aggregateDashboardTrafficDays,
+  buildProbeGroupModels,
+  buildProbeTopologyModel,
+  filterAndSortProbeGroups,
+  groupMetricForDirection,
   isClockSyncAbnormal,
+  isProbeRunning,
   isValidProbeIPAddress,
   mergePanelMetricsHistory,
   niceTrafficScaleMax,
@@ -19,7 +14,7 @@ import {
   probeDirectionStatus,
   probeHistorySeries,
   rankDashboardTrafficView,
-  buildDashboardTopology,
+  resolveSelectedProbeGroup,
   sanitizePanelSample,
   selectMostActiveNodes,
   summarizeClientConnectionsPulse,
@@ -28,7 +23,9 @@ import {
   summarizeDashboardTrafficPeaks,
   summarizeExpiringCertificates,
   summarizeIPQualityFleet,
+  summarizeProbeGroups,
 } from "../modules/dashboard-model.js";
+import { buildProbePillLabel } from "../analytics/dashboard-topo-shared.js";
 
 export async function run() {
   const days = aggregateDashboardTrafficDays([
@@ -271,172 +268,191 @@ export async function run() {
     elapsedDays: 3,
   });
 
-  const topo = buildDashboardTopology({
-    now: Date.parse("2026-08-03T12:00:00Z"),
-    month: "2026-08",
-    today: "2026-08-03",
-    orderIDs: ["de", "tokyo", "hk", "sg", "us", "uk", "nl"],
+  // One-Group-One-Link model & multi-hop/status/filter/sort/fallback assertions
+  assert.equal(isProbeRunning({ active_state: "cleanup_pending" }), true);
+  assert.equal(isProbeRunning({ availability: { running: true } }), true);
+  assert.equal(isProbeRunning({ active_state: "succeeded", availability: { running: false } }), false);
+
+  const tenNodes = Array.from({ length: 10 }, (_, idx) => ({
+    agent_id: `hop-${idx + 1}`,
+    instance_id: "main",
+    name: `节点 ${idx + 1}`,
+    address: `10.10.0.${idx + 1}`,
+  }));
+  const tenChainMeta = tenNodes.map((ep, idx) => ({
+    agent_id: ep.agent_id,
+    instance_id: ep.instance_id,
+    name: ep.name,
+    region: idx % 2 === 0 ? "JP" : "HK",
+    address: ep.address,
+    online: true,
+    granted: true,
+    ping: true,
+  }));
+  const nineHops = Array.from({ length: 9 }, (_, idx) => ({
+    hop_index: idx,
+    from: tenNodes[idx].agent_id,
+    to: tenNodes[idx + 1].agent_id,
+    forward: {
+      state: "succeeded",
+      avg_ms: idx === 4 ? 190 : 20 + idx * 3,
+      loss_percent: idx === 4 ? 25 : 0,
+      reached: true,
+    },
+    reverse: {
+      state: "succeeded",
+      avg_ms: 22 + idx * 3,
+      loss_percent: 0,
+      reached: true,
+    },
+  }));
+
+  const groupModels = buildProbeGroupModels({
     agents: [
-      { id: "de", name: "德国", region_code: "DE", status: "offline", runtime: { "sing-box": { installed: true, service_status: "inactive" } } },
-      { id: "tokyo", name: "东京", region_code: "JP", status: "online", runtime: { xray: { installed: true, service_status: "active" } }, metrics: { network_available: true, network_rx_bps: 4000, network_tx_bps: 2000, collected_at: "2026-08-03T11:59:55Z" } },
-      { id: "hk", name: "香港", region_code: "HK", status: "online", runtime: { mihomo: { installed: true, service_status: "active" } }, metrics: { network_available: true, network_rx_bps: 2000, network_tx_bps: 1000, collected_at: "2026-08-03T11:59:56Z" } },
-      { id: "sg", name: "新加坡", region_code: "SG", status: "online", runtime: {} },
-      { id: "us", name: "美国", region_code: "US", status: "online", runtime: { xray: { installed: true, service_status: "active" } } },
-      { id: "uk", name: "英国", region_code: "GB", status: "online", runtime: { xray: { installed: true, service_status: "active" } } },
-      { id: "nl", name: "荷兰", region_code: "NL", status: "online", runtime: { xray: { installed: true, service_status: "active" } } },
+      { id: "tokyo", name: "东京 · A", region_code: "JP", status: "online" },
+      { id: "hk", name: "香港 · B", region_code: "HK", status: "online" },
+      { id: "sg", name: "新加坡 · C", region_code: "SG", status: "offline" },
     ],
-    usageRows: [
-      { agent_id: "tokyo", day: "2026-08-01", received_bytes: 500, sent_bytes: 200 },
-      { agent_id: "hk", day: "2026-08-02", received_bytes: 300, sent_bytes: 100 },
-    ],
-    policies: [
-      { agent_id: "sg", blocked: true, receive_bps: 0, send_bps: 0, port: 443 },
-    ],
-    probes: [
+    orderIDs: ["tokyo", "hk", "sg"],
+    pairs: [
       {
-        id: "p1",
-        name: "东京 ↔ 香港",
+        id: "g_pair",
+        group_name: "核心双节点",
+        name: "稳定专线",
         target_mode: "",
-        node1: { agent_id: "tokyo", address: "1.1.1.1" },
-        node2: { agent_id: "hk", address: "2.2.2.2" },
+        node1: { agent_id: "tokyo", instance_id: "main", name: "东京 · A", address: "10.0.0.1" },
+        node2: { agent_id: "hk", instance_id: "shared-1", name: "香港 · B", address: "10.0.0.2" },
         bidirectional: true,
+        auto_enabled: true,
+        auto_interval_seconds: 60,
         availability: { ready: true, running: false },
         latest: {
-          forward: { state: "succeeded", avg_ms: 42.5, loss_percent: 0, reached: true },
-          reverse: { state: "succeeded", avg_ms: 44.1, loss_percent: 20, reached: true },
+          sampled_at: "2026-08-03T12:00:00Z",
+          forward: { state: "succeeded", avg_ms: 31.2, loss_percent: 0, reached: true },
+          reverse: { state: "succeeded", avg_ms: 32.8, loss_percent: 0, reached: true },
         },
       },
       {
-        id: "p2",
-        name: "新加坡 → Cloudflare",
-        target_mode: "ip",
-        node1: { agent_id: "sg", address: "3.3.3.3" },
-        node2: { name: "1.1.1.1", address: "1.1.1.1" },
-        bidirectional: false,
-        availability: { ready: true, running: false },
-        latest: { forward: { state: "succeeded", avg_ms: 2.3, loss_percent: 0, reached: true } },
-      },
-    ],
-    metrics: { network_available: true, network_rate_available: true, network_rx_bps: 8000, network_tx_bps: 6000 },
-    connections: { ips: 12, flows: 88, sources: [{ agent_id: "tokyo", status: "ok" }] },
-    maxNodes: 6,
-  });
-  assert.equal(topo.nodes.length, 6);
-  assert.equal(topo.hiddenNodeCount, 1);
-  assert.equal(topo.hiddenNodeCount === 1 && topo.nodes.some((n) => n.id === "de"), false, "offline node should yield to online active nodes");
-  assert.equal(topo.externalTargets.length, 1);
-  assert.equal(topo.probeLinks.length, 2);
-  assert.equal(topo.probeLinks[0].tone, "bad");
-  assert.equal(topo.probeLinks[0].metricLabel, "42.5ms · 丢包20%");
-  assert.equal(topo.probeLinks[1].isExternal, true);
-  assert.equal(topo.ingress.rateBPS, 6000);
-  assert.equal(topo.egress.rateBPS, 3000);
-  assert.equal(topo.ingress.clientIPs, 12);
-  assert.equal(topo.egress.panelRxBPS, 8000);
-
-  const berlin = resolveNodeGeoPoint({ id: "berlin-01", name: "berlin-01", regionCode: "DE" }, 0);
-  const berlinExpected = projectPacificGeo(52.52, 13.405);
-  assert.equal(berlin.matched, true);
-  assert.equal(berlin.country, "DE");
-  assert.ok(Math.hypot(berlin.x - berlinExpected.x, berlin.y - berlinExpected.y) < 12, "berlin-01 should resolve to Berlin");
-
-  const canada = resolveNodeGeoPoint({ id: "canada-01", name: "canada-01", regionCode: "CA" }, 1);
-  assert.equal(canada.matched, true);
-  assert.equal(canada.country, "CA");
-
-  const helsinki = resolveNodeGeoPoint({ id: "helsinki-01", name: "helsinki-01", regionCode: "FI" }, 2);
-  assert.equal(helsinki.matched, true);
-  assert.equal(helsinki.country, "FI");
-
-  const mainNode = resolveNodeGeoPoint({ id: "main-01", name: "main-01", regionCode: "" }, 3);
-  assert.notEqual(mainNode.country, "IN");
-
-  assert.equal(matchesActiveSelection(["probe:p1", "node:b"], "cluster:a,b,c"), true);
-  assert.equal(matchesActiveSelection(["probe:p1", "node:z"], "cluster:a,b,c"), false);
-
-  const selIdx = buildTopologySelectionIndex(topo);
-  assert.ok(selIdx.probePeers(topo.probeLinks[0]).includes("node:hk"), "internal probe.to peers must carry node: prefix");
-  assert.equal(matchesActiveSelection(selIdx.probePeers(topo.probeLinks[0]), "node:hk"), true);
-
-  const uncapped = buildDashboardTopology({
-    now: Date.parse("2026-08-03T12:00:00Z"),
-    month: "2026-08",
-    today: "2026-08-03",
-    agents: Array.from({ length: 30 }, (_, i) => ({ id: `n-${i}`, name: `n-${i}`, status: "online" })),
-    maxNodes: null,
-  });
-  assert.equal(uncapped.nodes.length, 30);
-  assert.equal(uncapped.hiddenNodeCount, 0);
-
-  const unordered = [
-    { id: "hk-b", name: "香港节点-B", regionCode: "HK", isOnline: true, rxBPS: 10 },
-    { id: "unk-2", name: "custom-2", regionCode: "", isOnline: true, rxBPS: 10 },
-    { id: "hk-a", name: "香港节点-A", regionCode: "HK", isOnline: true, rxBPS: 20 },
-    { id: "unk-1", name: "custom-1", regionCode: "", isOnline: true, rxBPS: 10 },
-  ];
-  const clustersA = clusterTopologyNodes(unordered);
-  const clustersB = clusterTopologyNodes([...unordered].reverse());
-  assert.deepEqual(
-    clustersA.map((c) => c.key).sort(),
-    clustersB.map((c) => c.key).sort(),
-    "clustering must be order-independent",
-  );
-  assert.deepEqual(
-    findSameCityMembers(unordered, "hk-a").map((m) => m.id).sort(),
-    ["hk-a", "hk-b"],
-  );
-  assert.equal(findSameCityMembers(unordered, "unk-2").length, 0, "unmatched geo nodes should not merge into one city cluster");
-
-  // Multi-hop A-B-C-D bidirectional full-chain monitoring & grouped display assertions
-  const chainTopo = buildDashboardTopology({
-    now: Date.parse("2026-08-03T12:00:00Z"),
-    month: "2026-08",
-    today: "2026-08-03",
-    agents: [
-      { id: "a", name: "东京 · A", region_code: "JP", ip: "10.0.0.1", status: "online" },
-      { id: "b", name: "香港 · B", region_code: "HK", ip: "10.0.0.2", status: "online" },
-      { id: "c", name: "新加坡 · C", region_code: "SG", ip: "10.0.0.3", status: "online" },
-      { id: "d", name: "悉尼 · D", region_code: "AU", ip: "10.0.0.4", status: "online" },
-      { id: "idle-e", name: "备用 · E", region_code: "DE", ip: "10.0.0.5", status: "online" },
-    ],
-    probes: [
-      {
-        id: "chain_abcd",
-        name: "亚太全链路 A-B-C-D",
-        group_name: "核心专线",
+        id: "g_ten",
+        group_name: "跨洲十跳链",
+        name: "Partial Hop Failure",
         target_mode: "",
-        nodes: [
-          { agent_id: "a", name: "东京 · A", address: "10.0.0.1" },
-          { agent_id: "b", name: "香港 · B", address: "10.0.0.2" },
-          { agent_id: "c", name: "新加坡 · C", address: "10.0.0.3" },
-          { agent_id: "d", name: "悉尼 · D", address: "10.0.0.4" },
+        nodes: tenNodes,
+        chain: tenChainMeta,
+        bidirectional: true,
+        auto_enabled: true,
+        auto_interval_seconds: 60,
+        availability: { ready: true, running: false },
+        latest: {
+          sampled_at: "2026-08-03T12:01:00Z",
+          forward: { state: "succeeded", avg_ms: 360, loss_percent: 25, reached: true },
+          reverse: { state: "succeeded", avg_ms: 310, loss_percent: 0, reached: true },
+          hops: nineHops,
+        },
+      },
+      {
+        id: "g_ip_unreach",
+        group_name: "外部黑洞检测",
+        name: "",
+        target_mode: "ip",
+        node1: { agent_id: "tokyo", instance_id: "main", name: "东京 · A", address: "10.0.0.1" },
+        node2: { name: "203.0.113.99", address: "203.0.113.99" },
+        bidirectional: false,
+        auto_enabled: false,
+        auto_interval_seconds: 120,
+        availability: { ready: true, running: false },
+        latest: {
+          sampled_at: "2026-08-03T11:58:00Z",
+          forward: { state: "succeeded", loss_percent: 100, reached: false },
+        },
+      },
+      {
+        id: "g_unavail",
+        group_name: "离线节点组",
+        name: "",
+        target_mode: "",
+        node1: { agent_id: "sg", instance_id: "main", name: "新加坡 · C", address: "10.0.0.3" },
+        node2: { agent_id: "hk", instance_id: "shared-1", name: "香港 · B", address: "10.0.0.2" },
+        chain: [
+          { agent_id: "sg", instance_id: "main", name: "新加坡 · C", region: "SG", address: "10.0.0.3", online: false, granted: true, ping: true },
+          { agent_id: "hk", instance_id: "shared-1", name: "香港 · B", region: "HK", address: "10.0.0.2", online: true, granted: false, ping: true },
         ],
         bidirectional: true,
-        availability: { ready: true, running: false },
-        latest: {
-          forward: { state: "succeeded", avg_ms: 120.5, loss_percent: 10, reached: true },
-          reverse: { state: "succeeded", avg_ms: 125.0, loss_percent: 5, reached: true },
-          hops: [
-            { hop_index: 0, from: "a", to: "b", forward: { state: "succeeded", avg_ms: 40.0, loss_percent: 0, reached: true }, reverse: { state: "succeeded", avg_ms: 41.0, loss_percent: 0, reached: true } },
-            { hop_index: 1, from: "b", to: "c", forward: { state: "succeeded", avg_ms: 30.5, loss_percent: 10, reached: true }, reverse: { state: "succeeded", avg_ms: 32.0, loss_percent: 5, reached: true } },
-            { hop_index: 2, from: "c", to: "d", forward: { state: "succeeded", avg_ms: 50.0, loss_percent: 0, reached: true }, reverse: { state: "succeeded", avg_ms: 52.0, loss_percent: 0, reached: true } },
-          ],
-        },
+        auto_enabled: true,
+        active_state: "running",
+        availability: { ready: false, reason: "新加坡 · C 离线", running: true },
       },
     ],
-    maxNodes: null,
   });
-  assert.equal(chainTopo.probeChains.length, 1);
-  assert.equal(chainTopo.probeChains[0].isMultiHop, true);
-  assert.equal(chainTopo.probeChains[0].hops.length, 3);
-  assert.equal(chainTopo.probeLinks.length, 3);
-  assert.equal(chainTopo.probeGroups[0].kind, "named");
-  assert.equal(chainTopo.probeGroups[0].title, "核心专线");
-  assert.equal(chainTopo.probeGroups[1].kind, "nodes");
-  assert.equal(chainTopo.probeGroups[1].nodes.length, 1);
-  const chainIdx = buildTopologySelectionIndex(chainTopo);
-  assert.ok(chainIdx.chainPeers("chain_abcd").includes("node:c"), "intermediate hop node must belong to chain peers");
-  assert.equal(reconcileSelectionKey("probe:chain_abcd", chainTopo, { allowCluster: false }), "probe:chain_abcd");
+
+  assert.equal(groupModels.length, 4);
+  assert.equal(groupModels[0].nodes[1].shared, true, "non-main instance must be tagged shared");
+  assert.equal(groupModels[0].overall.statusBadge.tone, "ok");
+  assert.equal(groupModels[1].nodes.length, 10, "10-hop chain preserves all 10 nodes");
+  assert.equal(groupModels[1].hops.length, 9, "10-node chain has 9 hops");
+  assert.equal(groupModels[1].isMultiHop, true);
+  assert.equal(groupModels[1].hops[4].tone, "bad", "partial hop 25% loss marked bad");
+  assert.equal(groupModels[1].overall.statusBadge.tone, "bad", "partial hop failure surfaces on overall group status");
+  assert.equal(groupModels[2].isExternal, true);
+  assert.equal(groupModels[2].overall.statusBadge.label, "不可达");
+  assert.equal(groupModels[3].running, true);
+  assert.equal(groupModels[3].nodes[0].issue, "节点离线");
+  assert.equal(groupModels[3].nodes[1].issue, "共享未授权");
+
+  assert.deepEqual(summarizeProbeGroups(groupModels), {
+    total: 4,
+    healthy: 1,
+    warn: 1,
+    bad: 2,
+    idle: 0,
+    running: 1,
+    autoEnabled: 3,
+    multiHop: 1,
+    unavailable: 1,
+  });
+
+  assert.equal(groupMetricForDirection(groupModels[2], "reverse").unavailableReverse, true);
+  assert.equal(groupMetricForDirection(groupModels[1], "forward").latencyMS, 360);
+  assert.equal(groupMetricForDirection(groupModels[1], "both").lossPercent, 25);
+
+  assert.deepEqual(
+    filterAndSortProbeGroups(groupModels, { statusFilter: "multihop" }).map((g) => g.groupName),
+    ["跨洲十跳链"],
+  );
+  assert.deepEqual(
+    filterAndSortProbeGroups(groupModels, { statusFilter: "paused" }).map((g) => g.groupName),
+    ["外部黑洞检测"],
+  );
+  assert.deepEqual(
+    filterAndSortProbeGroups(groupModels, { statusFilter: "all", sortBy: "latency_desc", metricDir: "forward" }).map((g) => g.groupName),
+    ["跨洲十跳链", "核心双节点", "外部黑洞检测", "离线节点组"],
+  );
+  assert.deepEqual(
+    filterAndSortProbeGroups(groupModels, { statusFilter: "all", sortBy: "loss_desc", metricDir: "both" }).map((g) => g.groupName),
+    ["外部黑洞检测", "跨洲十跳链", "核心双节点", "离线节点组"],
+  );
+
+  assert.deepEqual(
+    resolveSelectedProbeGroup(groupModels, "跨洲十跳链").group.groupName,
+    "跨洲十跳链",
+  );
+  const fallback = resolveSelectedProbeGroup(groupModels, "已被删除的组");
+  assert.equal(fallback.group.groupName, "核心双节点");
+  assert.equal(fallback.fellBack, true);
+  assert.deepEqual(resolveSelectedProbeGroup([], "不存在"), { group: null, fellBack: true });
+
+  const topoBoth = buildProbeTopologyModel({ groups: groupModels, metricDir: "both" });
+  const topoFwd = buildProbeTopologyModel({ groups: groupModels, metricDir: "forward" });
+  const topoRev = buildProbeTopologyModel({ groups: groupModels, metricDir: "reverse" });
+  assert.ok(topoBoth.domainGroups.length >= 3, "expected multiple domain groups for mixed probe fleet");
+  const pairLinkBoth = topoBoth.probeLinks.find((l) => l.probeID === "g_pair");
+  const pairLinkFwd = topoFwd.probeLinks.find((l) => l.probeID === "g_pair");
+  const pairLinkRev = topoRev.probeLinks.find((l) => l.probeID === "g_pair");
+  assert.equal(buildProbePillLabel(pairLinkBoth), "31.2ms / 32.8ms · 0%");
+  assert.equal(buildProbePillLabel(pairLinkFwd), "去 31.2ms · 0%");
+  assert.equal(buildProbePillLabel(pairLinkRev), "回 32.8ms · 0%");
+  const extLinkRev = topoRev.probeLinks.find((l) => l.probeID === "g_ip_unreach");
+  assert.equal(buildProbePillLabel(extLinkRev), "单向");
 
   console.log("Dashboard telemetry model smoke passed");
 }

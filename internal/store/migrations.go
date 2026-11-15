@@ -176,6 +176,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("refresh core log covering indexes: %w", err)
 		}
 	}
+	if appliedVersion < 105 {
+		if err := migrateDashboardProbeGroupsTx(ctx, tx); err != nil {
+			return fmt.Errorf("migrate dashboard probe groups: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema v%d -> v%d after %s: %w", appliedVersion, currentSchemaVersion, time.Since(started).Round(time.Millisecond), err)
 	}
