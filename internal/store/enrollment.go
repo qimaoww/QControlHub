@@ -144,6 +144,7 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	if err := tx.Commit(ctx); err != nil {
 		return core.Agent{}, err
 	}
+	s.invalidateAgentPublicKeyAfterCommit(ctx, id)
 	return core.Agent{
 		SupportedCapabilities: supported,
 		AdminHidden:           adminHidden,

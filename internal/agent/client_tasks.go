@@ -243,6 +243,13 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			}
 		}
 	}
+	if c.executor != nil && task.Action != core.ActionStatus &&
+		task.Action != core.ActionReadConfig &&
+		task.Action != core.ActionReadManagedConfig &&
+		task.Action != core.ActionIPQuality &&
+		task.Action != core.ActionNetworkDiagnostic {
+		c.executor.InvalidateRuntimeCaches()
+	}
 	if len(sideEffects) > 0 {
 		output += "\n附属步骤失败（主操作结果见任务状态）：\n" + strings.Join(sideEffects, "\n")
 	}

@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -186,39 +185,28 @@ func (body *blockedWebSocketBody) response(request *http.Request) *http.Response
 	}
 }
 
-func waitForBlockedWireProducer(t *testing.T, producer string, finished <-chan error) {
+func waitForBlockedWebSocketWrite(t *testing.T, body *blockedWebSocketBody, finished <-chan error) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
-	for {
-		// Wait for the actual blocked enqueue rather than guessing when the
-		// scheduler and /proc collection have produced 16 messages.
-		stack := make([]byte, 1<<20)
-		stack = stack[:runtime.Stack(stack, true)]
-		for _, goroutine := range strings.Split(string(stack), "\n\n") {
-			if strings.Contains(goroutine, "[select]") && strings.Contains(goroutine, "(*Client)."+producer) && strings.Contains(goroutine, "(*Client).runWebSocket") {
-				return
-			}
-		}
-		select {
-		case err := <-finished:
-			t.Fatalf("session returned before queue saturation: %v", err)
-		case <-deadline.C:
-			t.Fatalf("did not observe %s blocked on the full outgoing queue", producer)
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-body.writeStarted:
+		// Allow periodic ticks to enqueue and coalesce behind the stalled write.
+		time.Sleep(25 * time.Millisecond)
+	case err := <-finished:
+		t.Fatalf("session returned before stalled write: %v", err)
+	case <-deadline.C:
+		t.Fatal("did not observe stalled websocket write")
 	}
 }
 
 func TestRunWebSocketReleasesSaturatedQueue(t *testing.T) {
-	for _, producer := range []string{"queueHeartbeat", "queueMetrics"} {
+	for _, producer := range []string{"heartbeat", "metrics"} {
 		for _, failure := range []string{"read", "write", "cancel"} {
 			t.Run(producer+"/"+failure, func(t *testing.T) {
 				client := reconnectTestClient(t)
-				if producer == "queueMetrics" {
+				if producer == "metrics" {
 					client.config.HeartbeatEvery, client.config.MetricsEvery = time.Hour, time.Millisecond
-					// Prime the shared collector through its public API. The
-					// producer starts enqueueing once a stable CPU window exists.
 					_, _ = client.metrics.Collect(context.Background())
 				}
 				body := newBlockedWebSocketBody(t)
@@ -229,7 +217,7 @@ func TestRunWebSocketReleasesSaturatedQueue(t *testing.T) {
 				defer cancel()
 				finished := make(chan error, 1)
 				go func() { finished <- client.runWebSocket(ctx) }()
-				waitForBlockedWireProducer(t, producer, finished)
+				waitForBlockedWebSocketWrite(t, body, finished)
 				switch failure {
 				case "read":
 					close(body.readFailure)
@@ -271,7 +259,7 @@ func TestRunReconnectsAfterSaturatedSession(t *testing.T) {
 	defer cancel()
 	finished := make(chan error, 1)
 	go func() { finished <- client.Run(ctx) }()
-	waitForBlockedWireProducer(t, "queueHeartbeat", finished)
+	waitForBlockedWebSocketWrite(t, first, finished)
 	close(first.writeFailure)
 	select {
 	case <-second.writeStarted:

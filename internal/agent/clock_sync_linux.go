@@ -15,6 +15,8 @@ import (
 
 var chronyOffsetPattern = regexp.MustCompile(`(?m)^Last offset\s*:\s*([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))\s+seconds\b`)
 
+var clockSyncCollector = collectClockSync
+
 func collectClockSync(ctx context.Context) *core.ClockSyncStatus {
 	checkedAt := time.Now().UTC()
 	if path, err := exec.LookPath("chronyc"); err == nil {
@@ -40,24 +42,61 @@ func collectClockSync(ctx context.Context) *core.ClockSyncStatus {
 	return &core.ClockSyncStatus{Status: "unavailable", CheckedAt: checkedAt}
 }
 
+func cloneClockSync(src *core.ClockSyncStatus) *core.ClockSyncStatus {
+	if src == nil {
+		return nil
+	}
+	copyStatus := *src
+	if src.OffsetMilliseconds != nil {
+		offset := *src.OffsetMilliseconds
+		copyStatus.OffsetMilliseconds = &offset
+	}
+	return &copyStatus
+}
+
 func (c *Client) cachedClockSync(ctx context.Context) *core.ClockSyncStatus {
 	c.clockSyncMu.Lock()
-	defer c.clockSyncMu.Unlock()
 	if c.clockSync != nil && time.Since(c.clockSync.CheckedAt) < 30*time.Second {
-		copy := *c.clockSync
-		if c.clockSync.OffsetMilliseconds != nil {
-			offset := *c.clockSync.OffsetMilliseconds
-			copy.OffsetMilliseconds = &offset
-		}
-		return &copy
+		snap := cloneClockSync(c.clockSync)
+		c.clockSyncMu.Unlock()
+		return snap
 	}
-	c.clockSync = collectClockSync(ctx)
-	copy := *c.clockSync
-	if c.clockSync.OffsetMilliseconds != nil {
-		offset := *c.clockSync.OffsetMilliseconds
-		copy.OffsetMilliseconds = &offset
+	c.clockSyncMu.Unlock()
+
+	fresh := collectClockSync(ctx)
+	c.clockSyncMu.Lock()
+	if c.clockSync == nil || !fresh.CheckedAt.Before(c.clockSync.CheckedAt) {
+		c.clockSync = fresh
 	}
-	return &copy
+	snap := cloneClockSync(c.clockSync)
+	c.clockSyncMu.Unlock()
+	return snap
+}
+
+// cachedClockSyncSnapshot returns the latest known clock sync snapshot without
+// blocking high-frequency telemetry ticks, kicking off a bounded async refresh
+// when stale.
+func (c *Client) cachedClockSyncSnapshot(ctx context.Context) *core.ClockSyncStatus {
+	c.clockSyncMu.Lock()
+	snap := cloneClockSync(c.clockSync)
+	needsRefresh := c.clockSync == nil || time.Since(c.clockSync.CheckedAt) >= 30*time.Second
+	if needsRefresh && !c.clockSyncRefreshing && ctx.Err() == nil {
+		c.clockSyncRefreshing = true
+		go func() {
+			refreshCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			fresh := clockSyncCollector(refreshCtx)
+			timedOutOrCanceled := refreshCtx.Err() != nil
+			c.clockSyncMu.Lock()
+			if !timedOutOrCanceled && fresh != nil && (c.clockSync == nil || !fresh.CheckedAt.Before(c.clockSync.CheckedAt)) {
+				c.clockSync = fresh
+			}
+			c.clockSyncRefreshing = false
+			c.clockSyncMu.Unlock()
+		}()
+	}
+	c.clockSyncMu.Unlock()
+	return snap
 }
 
 func parseChronyTracking(output string, checkedAt time.Time) *core.ClockSyncStatus {

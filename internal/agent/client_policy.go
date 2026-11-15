@@ -25,7 +25,7 @@ func (c *Client) applyAgentPolicy(ctx context.Context, policy core.AgentPolicy) 
 	return nil
 }
 
-func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMessage) error {
+func (c *Client) buildHeartbeatMessage(ctx context.Context) core.WireMessage {
 	runtimeContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	runtimeState := c.executor.Runtime(runtimeContext)
 	cancel()
@@ -76,7 +76,11 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	if metricsHaveData(metrics) || metrics.BBR != nil {
 		heartbeat.Metrics = &metrics
 	}
-	message := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: heartbeat}
+	return core.WireMessage{Type: core.WireHeartbeat, Heartbeat: heartbeat}
+}
+
+func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMessage) error {
+	message := c.buildHeartbeatMessage(ctx)
 	select {
 	case outgoing <- message:
 		return nil
@@ -85,23 +89,38 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	}
 }
 
+func (c *Client) buildMetricsMessage(ctx context.Context, nonBlockingClockSync bool, compact *compactTelemetryState) (core.WireMessage, bool) {
+	metrics, metricsErr := c.metrics.Collect(ctx)
+	if metricsErr != nil {
+		slog.Debug("host metrics collection was partial", "error", metricsErr)
+	}
+	if nonBlockingClockSync {
+		metrics.ClockSync = c.cachedClockSyncSnapshot(ctx)
+	} else {
+		metrics.ClockSync = c.cachedClockSync(ctx)
+	}
+	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
+		return core.WireMessage{}, false
+	}
+	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
+	metrics.BBR = c.bbr.Cached()
+	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
+	if compact != nil {
+		message = compact.CompactMetrics(message)
+	}
+	return message, true
+}
+
 // queueMetrics sends a lightweight metrics-only push between full heartbeats
 // so the panel's live resource values refresh at the configured cadence
 // instead of waiting for the heartbeat cycle. Samples without a CPU reading
 // are skipped so one partial collection never overwrites the last complete
 // snapshot stored on the control plane.
 func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMessage) error {
-	metrics, metricsErr := c.metrics.Collect(ctx)
-	if metricsErr != nil {
-		slog.Debug("host metrics collection was partial", "error", metricsErr)
-	}
-	metrics.ClockSync = c.cachedClockSync(ctx)
-	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
+	message, ok := c.buildMetricsMessage(ctx, false, nil)
+	if !ok {
 		return nil
 	}
-	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
-	metrics.BBR = c.bbr.Cached()
-	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
 	select {
 	case outgoing <- message:
 		return nil
@@ -152,6 +171,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSystemBBR,
 		core.AgentFeatureIPQuality,
 		core.AgentFeatureInstanceStatus,
+		core.AgentFeatureCompactTelemetry,
 	}
 	if hostPortObservationSupported() {
 		features = append(features, core.AgentFeatureHostPorts)

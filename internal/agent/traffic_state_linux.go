@@ -13,13 +13,25 @@ import (
 )
 
 func (manager *TrafficManager) saveLocked() error {
+	return manager.saveWithForceLocked(false)
+}
+
+func (manager *TrafficManager) saveWithForceLocked(force bool) error {
 	if !manager.dirty {
 		return nil
 	}
+	now := manager.now().UTC()
+	if !force && !manager.urgentDirty && manager.checkpointEvery > 0 && !manager.lastPersistedAt.IsZero() &&
+		!now.Before(manager.lastPersistedAt) && now.Sub(manager.lastPersistedAt) < manager.checkpointEvery {
+		return nil
+	}
 	if err := saveTrafficState(manager.statePath, trafficState{Records: manager.records, BootID: manager.bootID}); err != nil {
+		manager.urgentDirty = true
 		return err
 	}
 	manager.dirty = false
+	manager.urgentDirty = false
+	manager.lastPersistedAt = now
 	return nil
 }
 

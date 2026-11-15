@@ -283,3 +283,43 @@ func assertFillfactor(t *testing.T, s *Store, table string, want int) {
 	}
 	t.Fatalf("%s reloptions = %v, want %s", table, options, wantOption)
 }
+
+func TestCompactMetricsPushPreservesSlowChangingSnapshots(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx := context.Background()
+	agentID := seedLiveStateAgent(t, s, "compact snapshot fixture")
+	offset := 1.25
+	checkedAt := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	if err := s.UpdateAgentMetrics(ctx, agentID, core.HostMetrics{
+		CPUAvailable:      true,
+		CPUPercent:        10,
+		NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"203.0.113.10"}}},
+		BBR:               &core.SystemBBRStatus{CongestionControl: "bbr", DefaultQdisc: "fq", Available: true, CollectedAt: checkedAt},
+		ClockSync:         &core.ClockSyncStatus{Status: "synchronized", OffsetMilliseconds: &offset, CheckedAt: checkedAt},
+	}); err != nil {
+		t.Fatalf("seed full metrics: %v", err)
+	}
+	// Compact 1s metrics push omits unchanged NetworkInterfaces, BBR, ClockSync.
+	if err := s.UpdateAgentMetrics(ctx, agentID, core.HostMetrics{
+		CPUAvailable: true,
+		CPUPercent:   25,
+	}); err != nil {
+		t.Fatalf("compact metrics push: %v", err)
+	}
+	agent, err := s.GetAgent(ctx, agentID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.Metrics.CPUPercent != 25 {
+		t.Fatalf("CPUPercent = %v, want 25", agent.Metrics.CPUPercent)
+	}
+	if len(agent.Metrics.NetworkInterfaces) != 1 || agent.Metrics.NetworkInterfaces[0].Name != "eth0" {
+		t.Fatalf("NetworkInterfaces lost after compact push: %+v", agent.Metrics.NetworkInterfaces)
+	}
+	if agent.Metrics.BBR == nil || agent.Metrics.BBR.CongestionControl != "bbr" {
+		t.Fatalf("BBR lost after compact push: %+v", agent.Metrics.BBR)
+	}
+	if agent.Metrics.ClockSync == nil || agent.Metrics.ClockSync.Status != "synchronized" || agent.Metrics.ClockSync.OffsetMilliseconds == nil || *agent.Metrics.ClockSync.OffsetMilliseconds != offset {
+		t.Fatalf("ClockSync lost after compact push: %+v", agent.Metrics.ClockSync)
+	}
+}

@@ -50,6 +50,7 @@ const (
 	WireAgentTimeZoneResult       = "agent_time_zone_result"
 	WireHeartbeat                 = "heartbeat"
 	WireMetrics                   = "metrics"
+	WireTelemetryResync           = "telemetry_resync"
 	WireTask                      = "task"
 	WireResult                    = "result"
 	WireResultAck                 = "result_ack"
@@ -78,14 +79,19 @@ type WireMessage struct {
 	CoreLogs                  *CoreLogBatch              `json:"core_logs,omitempty"`
 	TrafficPolicies           []PortTrafficPolicy        `json:"traffic_policies,omitempty"`
 	// Preserve verified local enforcement until the initial heartbeat arrives.
-	TrafficPoliciesPending bool                  `json:"traffic_policies_pending,omitempty"`
-	PublicIPProbe          *PublicIPProbeConfig  `json:"public_ip_probe,omitempty"`
-	AgentPolicy            *AgentPolicy          `json:"agent_policy,omitempty"`
-	AgentTimeZone          *AgentTimeZoneCommand `json:"agent_time_zone,omitempty"`
-	AgentTimeZoneResult    *AgentTimeZoneResult  `json:"agent_time_zone_result,omitempty"`
-	TaskID                 string                `json:"task_id,omitempty"`
-	BatchID                string                `json:"batch_id,omitempty"`
-	Error                  string                `json:"error,omitempty"`
+	TrafficPoliciesPending bool `json:"traffic_policies_pending,omitempty"`
+	// CompactTelemetry lets the control plane advertise on WireHello that it
+	// preserves omitted static host snapshots (network_interfaces, bbr,
+	// clock_sync) across incremental WireMetrics frames.
+	CompactTelemetry    bool                  `json:"compact_telemetry,omitempty"`
+	TelemetryFullSync   bool                  `json:"telemetry_full_sync,omitempty"`
+	PublicIPProbe       *PublicIPProbeConfig  `json:"public_ip_probe,omitempty"`
+	AgentPolicy         *AgentPolicy          `json:"agent_policy,omitempty"`
+	AgentTimeZone       *AgentTimeZoneCommand `json:"agent_time_zone,omitempty"`
+	AgentTimeZoneResult *AgentTimeZoneResult  `json:"agent_time_zone_result,omitempty"`
+	TaskID              string                `json:"task_id,omitempty"`
+	BatchID             string                `json:"batch_id,omitempty"`
+	Error               string                `json:"error,omitempty"`
 }
 
 type AgentTimeZoneCommand struct {

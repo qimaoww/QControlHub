@@ -28,18 +28,40 @@ import (
 
 // upsertAgentLiveStateSQL replaces the stored snapshot for one Agent.
 //
-// An Agent that reports no network interfaces keeps the previously stored list,
-// so a partial report cannot erase a usable address snapshot. This preserves
-// the merge the single-table layout performed.
+// An Agent that omits slow-changing snapshot sections (network_interfaces, bbr,
+// clock_sync) keeps the previously stored values, so a compact metrics push or
+// partial probe cannot erase a usable host snapshot. This preserves the merge
+// semantics of the single-table layout while cutting high-frequency wire size.
+const upsertAgentLiveStateConflictBodySQL = `
+		metrics = $2::jsonb
+			|| CASE
+				WHEN $2::jsonb ? 'network_interfaces' OR NOT (agent_live_state.metrics ? 'network_interfaces') THEN '{}'::jsonb
+				ELSE jsonb_build_object('network_interfaces', agent_live_state.metrics->'network_interfaces')
+			END
+			|| CASE
+				WHEN $2::jsonb ? 'bbr' OR NOT (agent_live_state.metrics ? 'bbr') THEN '{}'::jsonb
+				ELSE jsonb_build_object('bbr', agent_live_state.metrics->'bbr')
+			END
+			|| CASE
+				WHEN $2::jsonb ? 'clock_sync' OR NOT (agent_live_state.metrics ? 'clock_sync') THEN '{}'::jsonb
+				ELSE jsonb_build_object('clock_sync', agent_live_state.metrics->'clock_sync')
+			END,
+		updated_at=now()`
+
 const upsertAgentLiveStateSQL = `
 	INSERT INTO agent_live_state (agent_id,metrics,updated_at)
 	VALUES ($1,$2::jsonb,now())
-	ON CONFLICT (agent_id) DO UPDATE SET
-		metrics=CASE
-			WHEN $2::jsonb ? 'network_interfaces' OR NOT (agent_live_state.metrics ? 'network_interfaces') THEN $2::jsonb
-			ELSE $2::jsonb || jsonb_build_object('network_interfaces', agent_live_state.metrics->'network_interfaces')
-		END,
-		updated_at=now()`
+	ON CONFLICT (agent_id) DO UPDATE SET` + upsertAgentLiveStateConflictBodySQL
+
+const updateAgentMetricsAndLiveStateSQL = `
+	WITH updated AS (
+		UPDATE agents SET last_seen=now()
+		WHERE id=$1 AND revoked_at IS NULL
+		RETURNING id
+	)
+	INSERT INTO agent_live_state (agent_id,metrics,updated_at)
+	SELECT updated.id,$2::jsonb,now() FROM updated
+	ON CONFLICT (agent_id) DO UPDATE SET` + upsertAgentLiveStateConflictBodySQL
 
 // recordAgentLiveState stores the latest metrics snapshot for one Agent. The
 // caller has already established that the Agent exists and is not revoked.

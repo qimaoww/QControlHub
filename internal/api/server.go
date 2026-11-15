@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
@@ -23,6 +24,8 @@ type tokenPrincipal struct {
 type liveConnection struct {
 	trafficRefresh  chan struct{}
 	timeZoneRefresh chan struct{}
+	policyRefresh   chan struct{}
+	managedPolicy   *atomic.Bool
 	id              string
 	cancel          context.CancelFunc
 }

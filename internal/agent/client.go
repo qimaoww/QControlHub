@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -85,6 +86,10 @@ type Client struct {
 	timeZone                 string
 	clockSyncMu              sync.Mutex
 	clockSync                *core.ClockSyncStatus
+	clockSyncRefreshing      bool
+	authKeyMu                sync.Mutex
+	authKeyRaw               string
+	authKeyCached            ed25519.PrivateKey
 	trafficPolicyMu          sync.Mutex
 	pendingTrafficPolicies   []core.PortTrafficPolicy
 	trafficPoliciesPending   bool
@@ -196,7 +201,13 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	}
 	config.ServerURL = httpScheme + "://" + parsed.Host
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	transport.MaxIdleConns = 32
+	transport.MaxIdleConnsPerHost = 8
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		ClientSessionCache: tls.NewLRUClientSessionCache(32),
+	}
 	if config.TLSCAFile != "" {
 		rootCAs, err := loadTrustedCA(config.TLSCAFile)
 		if err != nil {

@@ -194,6 +194,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	var partial []byte
 	bytesSinceValidation := int64(0)
 	nextValidation := time.Now().Add(coreLogRevalidateEvery)
+	idleEOFs := 0
 	for ctx.Err() == nil {
 		// A fast restart can refill a copytruncated file to its previous size
 		// before the next stat. Track our rotations explicitly so the new prefix
@@ -207,6 +208,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 		read, readErr := file.Read(buffer)
 		if read > 0 {
+			idleEOFs = 0
 			if err := collector.publishFileBlock(ctx, file, source, run, trusted,
 				buffer[:read], &partial, &offset); err != nil {
 				return err
@@ -295,13 +297,20 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			continue
 		}
 		if !atEOF {
+			idleEOFs = 0
 			continue
 		}
+		idleEOFs++
 		rotateBytes, _ := collector.rotationPolicy()
 		if info.Size() >= rotateBytes {
+			idleEOFs = 0
 			collector.rotateFile(source)
 		}
-		timer := time.NewTimer(time.Second)
+		waitFor := time.Second
+		if idleEOFs >= 5 {
+			waitFor = 2 * time.Second
+		}
+		timer := time.NewTimer(waitFor)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

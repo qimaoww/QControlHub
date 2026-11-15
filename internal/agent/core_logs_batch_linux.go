@@ -77,6 +77,26 @@ func (collector *CoreLogCollector) appendLocked(entry core.CoreLogEntry) {
 		return
 	}
 	collector.queued = append(collector.queued, entry)
+	collector.signalReady()
+}
+
+// Ready returns a signal channel notified whenever new log entries arrive or
+// an acknowledged batch frees subsequent queued entries for immediate upload.
+func (collector *CoreLogCollector) Ready() <-chan struct{} {
+	if collector == nil {
+		return nil
+	}
+	return collector.ready
+}
+
+func (collector *CoreLogCollector) signalReady() {
+	if collector.ready == nil {
+		return
+	}
+	select {
+	case collector.ready <- struct{}{}:
+	default:
+	}
 }
 
 func (collector *CoreLogCollector) NextBatch() *core.CoreLogBatch {
@@ -110,6 +130,9 @@ func (collector *CoreLogCollector) Acknowledge(batchID string) bool {
 		return false
 	}
 	collector.pending = nil
+	if len(collector.queued) > 0 {
+		collector.signalReady()
+	}
 	return true
 }
 

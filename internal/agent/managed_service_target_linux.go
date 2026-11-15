@@ -6,11 +6,74 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/qimaoww/qcontrolhub/internal/core"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func serviceUnitFingerprint(kind, unitRoot, validator, service string) string {
+	var b strings.Builder
+	b.Grow(128)
+	b.WriteString(kind)
+	b.WriteByte('|')
+	b.WriteString(validator)
+	b.WriteByte('|')
+	b.WriteString(unitRoot)
+	b.WriteByte('|')
+	b.WriteString(service)
+	unitPath := filepath.Join(unitRoot, service)
+	appendLstatFingerprint(&b, unitPath)
+	if kind != ServiceManagerOpenRC {
+		dropInDir := unitPath + ".d"
+		info, err := os.Lstat(dropInDir)
+		if err != nil {
+			b.WriteString("|d:")
+			b.WriteString(err.Error())
+			return b.String()
+		}
+		b.WriteString("|d:")
+		b.WriteString(strconv.FormatInt(info.ModTime().UnixNano(), 10))
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatUint(uint64(info.Mode()), 8))
+		if entries, readErr := os.ReadDir(dropInDir); readErr == nil {
+			for _, entry := range entries {
+				b.WriteByte('|')
+				b.WriteString(entry.Name())
+				appendLstatFingerprint(&b, filepath.Join(dropInDir, entry.Name()))
+			}
+		}
+	}
+	return b.String()
+}
+
+func appendLstatFingerprint(b *strings.Builder, path string) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		b.WriteString("|missing:")
+		if errors.Is(err, os.ErrNotExist) {
+			b.WriteString("enoent")
+		} else {
+			b.WriteString(err.Error())
+		}
+		return
+	}
+	b.WriteString("|stat:")
+	b.WriteString(strconv.FormatInt(info.Size(), 10))
+	b.WriteByte(':')
+	b.WriteString(strconv.FormatInt(info.ModTime().UnixNano(), 10))
+	b.WriteByte(':')
+	b.WriteString(strconv.FormatUint(uint64(info.Mode()), 8))
+}
+
+func managedServiceTargetFingerprint(managed EngineSpec, manager *ServiceManager) string {
+	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
+		return serviceUnitFingerprint(ServiceManagerOpenRC, openRCInitRoot, rcServicePath, managed.Service)
+	}
+	return serviceUnitFingerprint(ServiceManagerSystemd, existingDiscoveryManagedUnitRoot, systemctlPath, managed.Service)
+}
 
 func validateManagedServiceTarget(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) (string, error) {
 	manager := selectedServiceManager(managers...)

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -105,6 +106,49 @@ func validateConfigurationPath(ctx context.Context, engine core.Engine, binary, 
 	return runInDirectory(ctx, filepath.Dir(configPath), binary, args...)
 }
 
+const (
+	managedTargetValidCacheTTL = 60 * time.Second
+	managedTargetErrorCacheTTL = 5 * time.Second
+)
+
+func (e *Executor) runtimeManagedTargetBlockedReason(ctx context.Context, engine core.Engine, spec EngineSpec) string {
+	manager := e.serviceManager()
+	fp := managedServiceTargetFingerprint(spec, manager)
+	e.runtimeCacheMu.Lock()
+	if cached, ok := e.runtimeTargets[engine]; ok && cached.fingerprint == fp {
+		ttl := managedTargetValidCacheTTL
+		if cached.hasErr {
+			ttl = managedTargetErrorCacheTTL
+		}
+		if time.Since(cached.checkedAt) < ttl {
+			e.runtimeCacheMu.Unlock()
+			return cached.blockedReason
+		}
+	}
+	e.runtimeCacheMu.Unlock()
+
+	_, err := validateManagedServiceTarget(ctx, engine, spec, manager)
+	blocked := ""
+	hasErr := err != nil
+	if err != nil {
+		blocked = fmt.Sprintf("verify managed %s service target: %v", engine, err)
+	}
+	if ctx.Err() == nil {
+		e.runtimeCacheMu.Lock()
+		if e.runtimeTargets == nil {
+			e.runtimeTargets = make(map[core.Engine]cachedRuntimeTarget, 4)
+		}
+		e.runtimeTargets[engine] = cachedRuntimeTarget{
+			blockedReason: blocked,
+			fingerprint:   fp,
+			checkedAt:     time.Now(),
+			hasErr:        hasErr,
+		}
+		e.runtimeCacheMu.Unlock()
+	}
+	return blocked
+}
+
 func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeState {
 	e.specsMu.RLock()
 	specs := make(map[core.Engine]EngineSpec, len(e.Specs))
@@ -128,40 +172,78 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 		discoveryIssues[engine] = issue
 	}
 	e.specsMu.RUnlock()
-	result := make(map[core.Engine]core.RuntimeState, len(specs))
+
+	type runtimeProbeInput struct {
+		engine          core.Engine
+		spec            EngineSpec
+		existingSources []EngineSpec
+	}
+	type runtimeProbeOutput struct {
+		engine core.Engine
+		state  core.RuntimeState
+	}
+	probes := make([]runtimeProbeInput, 0, len(specs))
 	for engine, spec := range specs {
-		state := core.RuntimeState{ManagedOperationBlockedReason: managedIssues[engine], ImportedResourceUpdateError: resourceIssues[engine]}
-		if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
-			if _, err := validateManagedServiceTarget(ctx, engine, spec, e.serviceManager()); err != nil {
-				state.ManagedHostBlockedReason = fmt.Sprintf("verify managed %s service target: %v", engine, err)
+		probes = append(probes, runtimeProbeInput{
+			engine:          engine,
+			spec:            spec,
+			existingSources: e.existingSources(engine),
+		})
+	}
+	outputs := make([]runtimeProbeOutput, len(probes))
+	manager := e.serviceManager()
+	defaultSpecs := DefaultSpecsForServiceManager(manager.Kind())
+	var wg sync.WaitGroup
+	wg.Add(len(probes))
+	for idx, probe := range probes {
+		go func(i int, p runtimeProbeInput) {
+			defer wg.Done()
+			engine, spec := p.engine, p.spec
+			state := core.RuntimeState{
+				ManagedOperationBlockedReason: managedIssues[engine],
+				ImportedResourceUpdateError:   resourceIssues[engine],
 			}
-		}
-		for _, source := range e.existingSources(engine) {
-			status, err := serviceStatusWithManager(ctx, e.serviceManager(), source.Service)
-			if err != nil {
-				status = "unknown"
+			if spec == defaultSpecs[engine] {
+				state.ManagedHostBlockedReason = e.runtimeManagedTargetBlockedReason(ctx, engine, spec)
 			}
-			state.ExistingSources = append(state.ExistingSources, core.ExistingCoreSource{ID: existingSourceID(source), Service: source.Service, ConfigPath: source.ConfigPath, ConfigDirectory: source.ConfigDirectory, Status: status})
-		}
-		if len(state.ExistingSources) > 0 && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
-			state.ExistingConfigAvailable = true
-		}
-		if issue := discoveryIssues[engine]; issue != "" {
-			state.ExistingConfigUnsupportedReason = issue
-		}
-		if existing, ok := existingSpecs[engine]; ok && !isManagedCoreSource(existing) && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
-			state.ExistingConfigAvailable = true
-		}
-		if path, err := exec.LookPath(spec.Binary); err == nil {
-			state.Installed = true
-			state.Version = binaryVersion(ctx, engine, path)
-		}
-		if status, err := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service); err == nil {
-			state.ServiceStatus = strings.TrimSpace(status)
-		} else {
-			state.ServiceStatus = "unknown"
-		}
-		result[engine] = state
+			for _, source := range p.existingSources {
+				status, err := serviceStatusWithManager(ctx, manager, source.Service)
+				if err != nil {
+					status = "unknown"
+				}
+				state.ExistingSources = append(state.ExistingSources, core.ExistingCoreSource{
+					ID:              existingSourceID(source),
+					Service:         source.Service,
+					ConfigPath:      source.ConfigPath,
+					ConfigDirectory: source.ConfigDirectory,
+					Status:          status,
+				})
+			}
+			if len(state.ExistingSources) > 0 && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
+				state.ExistingConfigAvailable = true
+			}
+			if issue := discoveryIssues[engine]; issue != "" {
+				state.ExistingConfigUnsupportedReason = issue
+			}
+			if existing, ok := existingSpecs[engine]; ok && !isManagedCoreSource(existing) && state.ManagedOperationBlockedReason == "" && state.ManagedHostBlockedReason == "" {
+				state.ExistingConfigAvailable = true
+			}
+			if path, err := exec.LookPath(spec.Binary); err == nil {
+				state.Installed = true
+				state.Version = e.runtimeBinaryVersion(ctx, engine, path)
+			}
+			if status, err := serviceStatusWithManager(ctx, manager, spec.Service); err == nil {
+				state.ServiceStatus = strings.TrimSpace(status)
+			} else {
+				state.ServiceStatus = "unknown"
+			}
+			outputs[i] = runtimeProbeOutput{engine: engine, state: state}
+		}(idx, probe)
+	}
+	wg.Wait()
+	result := make(map[core.Engine]core.RuntimeState, len(outputs))
+	for _, out := range outputs {
+		result[out.engine] = out.state
 	}
 	return result
 }
