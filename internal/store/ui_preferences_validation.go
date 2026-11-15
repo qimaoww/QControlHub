@@ -106,9 +106,10 @@ var uiPreferenceRules = map[string]map[string]preferenceRule{
 		"traffic_rank_period": preferenceEnum("month", "cycle"),
 		"traffic_rank_limit":  preferenceEnum("5", "10", "all"),
 		"traffic_rank_scope":  preferenceEnum("all", "current"),
-		"topo_group":          preferenceText(40),
-		"topo_view_mode":      preferenceEnum("flow", "map"),
-		"topo_show_history":   preferenceBool,
+		"topo_group":            preferenceText(40),
+		"topo_view_mode":        preferenceEnum("flow", "map"),
+		"topo_show_history":     preferenceBool,
+		"topo_groups_collapsed": preferenceBool,
 	},
 	"topology": {
 		"view_mode":      preferenceEnum("flow", "map", "focus", "overview"),

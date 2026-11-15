@@ -7,7 +7,14 @@ import {
   resolveSelectedProbeGroup,
   summarizeProbeGroups,
 } from "../modules/dashboard-model.js";
-import { renderPacificMapSVG } from "./dashboard-map.js";
+import {
+  MAX_MAP_SCALE,
+  clampMapZoomTransform,
+  computeMapFocusZoom,
+  getMapViewportDimensions,
+  getMapWrapSpan,
+  renderPacificMapSVG,
+} from "./dashboard-map.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import {
   clusterTopologyNodes,
@@ -23,7 +30,7 @@ import {
   renderProbeHistoryChart,
   summarizeGroupMetricLine,
 } from "./dashboard-topo-shared.js";
-import { PACIFIC_MAP_BOUNDS } from "./pacific-map-data.js";
+
 import { listen, patch } from "./live-dom.js";
 import { nodeRegionFlag } from "./node-region.js";
 import { badge, button, empty, muted, node, notice, section, table } from "./ui.js";
@@ -80,19 +87,7 @@ function groupKindBadgeText(group) {
   return "双节点";
 }
 
-function clampZoomTransform(z) {
-  const scale = Math.max(1, Math.min(3.2, Number(z?.scale) || 1));
-  if (scale <= 1.001) return { scale: 1, tx: 0, ty: 0 };
-  const vw = PACIFIC_MAP_BOUNDS.width;
-  const vh = PACIFIC_MAP_BOUNDS.height;
-  const minTx = vw * (1 - scale);
-  const minTy = vh * (1 - scale);
-  return {
-    scale,
-    tx: Math.max(minTx, Math.min(0, Number(z?.tx) || 0)),
-    ty: Math.max(minTy, Math.min(0, Number(z?.ty) || 0)),
-  };
-}
+
 
 export function createDashboardTopologySection(ctx, {
   date,
@@ -122,9 +117,11 @@ export function createDashboardTopologySection(ctx, {
   let dashGroupName = "";
   let dashViewMode = "flow";
   let dashShowHistory = false;
+  let dashGroupsCollapsed = null;
   let dashGroupTouched = false;
   let dashViewTouched = false;
   let dashHistoryTouched = false;
+  let dashGroupsCollapsedTouched = false;
 
   // Standalone #topology workspace preferences (page = "topology")
   let topoViewMode = "overview";
@@ -145,10 +142,26 @@ export function createDashboardTopologySection(ctx, {
   // Ephemeral inspection & map viewport state (never persisted)
   let focusedItemKey = "";
   let flowInspectKey = ""; // `${group.id}::node:${idx}` or `${group.id}::hop:${idx}` in standalone flow list
+  let topoMapShowAll = false;
   let mapPinnedKey = "";
   let mapHoveredKey = "";
   let mapZoom = { scale: 1, tx: 0, ty: 0 };
+  let mapDefaultZoom = { scale: 1, tx: 0, ty: 0 };
+  let mapZoomScopeSig = "";
+  let mapZoomCustom = false;
+  let isMapDragging = false;
   let suppressNextMapClick = false;
+  let activeDrag = {
+    active: false,
+    dragging: false,
+    movedDist: 0,
+    pointerId: null,
+    startClient: { x: 0, y: 0 },
+    lastClient: { x: 0, y: 0 },
+    renderedZoom: { scale: 1, tx: 0, ty: 0 },
+    dims: { width: 1160, mapHeight: 560 },
+    svgEl: null,
+  };
   let lastActiveGroup = null;
   let lastGroups = [];
   let lastFleetModel = null;
@@ -179,6 +192,10 @@ export function createDashboardTopologySection(ctx, {
       }
       if (!dashHistoryTouched && typeof saved.topo_show_history === "boolean" && saved.topo_show_history !== dashShowHistory) {
         dashShowHistory = saved.topo_show_history;
+        changed = true;
+      }
+      if (!dashGroupsCollapsedTouched && typeof saved.topo_groups_collapsed === "boolean" && saved.topo_groups_collapsed !== dashGroupsCollapsed) {
+        dashGroupsCollapsed = saved.topo_groups_collapsed;
         changed = true;
       }
     } else {
@@ -237,6 +254,20 @@ export function createDashboardTopologySection(ctx, {
     void ctx.preferences.ready?.().then(() => syncSavedPreferences({ repaint: true }));
   }
 
+  const isDashGroupsCollapsed = (groups) => {
+    if (!groups || groups.length <= 1) return false;
+    if (typeof dashGroupsCollapsed === "boolean") return dashGroupsCollapsed;
+    return groups.length > 6;
+  };
+
+  const toggleDashGroupsCollapsed = (groups) => {
+    const next = !isDashGroupsCollapsed(groups);
+    dashGroupsCollapsedTouched = true;
+    dashGroupsCollapsed = next;
+    ctx.preferences?.patch?.("dashboard", { topo_groups_collapsed: next });
+    paint(true);
+  };
+
   const selectDashboardGroup = (groupName, { persist = true } = {}) => {
     const next = String(groupName || "").trim().slice(0, 40);
     dashGroupTouched = true;
@@ -247,7 +278,8 @@ export function createDashboardTopologySection(ctx, {
     dashGroupName = next;
     focusedItemKey = "";
     mapHoveredKey = "";
-    mapZoom = { scale: 1, tx: 0, ty: 0 };
+    mapZoomCustom = false;
+    mapZoomScopeSig = "";
     if (changed) paint(true);
   };
 
@@ -290,7 +322,8 @@ export function createDashboardTopologySection(ctx, {
     flowInspectKey = "";
     mapPinnedKey = "";
     mapHoveredKey = "";
-    mapZoom = { scale: 1, tx: 0, ty: 0 };
+    mapZoomCustom = false;
+    mapZoomScopeSig = "";
     if (Object.keys(patchFields).length) {
       ctx.preferences?.patch?.("topology", patchFields);
     }
@@ -307,6 +340,8 @@ export function createDashboardTopologySection(ctx, {
       mapHoveredKey = "";
       focusedItemKey = "";
       flowInspectKey = "";
+      mapZoomCustom = false;
+      mapZoomScopeSig = "";
       ctx.preferences?.patch?.("topology", { domain_group: normalized });
       paint(true);
     }
@@ -322,7 +357,8 @@ export function createDashboardTopologySection(ctx, {
     topoSelectedGroup = next;
     focusedItemKey = "";
     mapHoveredKey = "";
-    mapZoom = { scale: 1, tx: 0, ty: 0 };
+    mapZoomCustom = false;
+    mapZoomScopeSig = "";
     if (changed) paint(true);
   };
 
@@ -379,18 +415,98 @@ export function createDashboardTopologySection(ctx, {
   const headerBadges = node("div", { className: "a-topo-head-badges" });
   const headerActions = node("div", { className: "a-actions a-topo-head-actions" });
   const bodyHost = node("div", { className: "a-card-body a-topo-body" });
+  let cardEl = null;
+
+  const handleGlobalMapMove = (e) => {
+    if (!activeDrag.active) return;
+    if (activeDrag.pointerId != null && e.pointerId !== activeDrag.pointerId) return;
+    const liveSvg = activeDrag.svgEl?.isConnected ? activeDrag.svgEl : bodyHost.querySelector("svg.a-dash-topo-map-svg");
+    if (!liveSvg) return;
+    const totalDxPx = e.clientX - activeDrag.startClient.x;
+    const totalDyPx = e.clientY - activeDrag.startClient.y;
+    const stepDxPx = e.clientX - activeDrag.lastClient.x;
+    const stepDyPx = e.clientY - activeDrag.lastClient.y;
+    activeDrag.lastClient = { x: e.clientX, y: e.clientY };
+    activeDrag.movedDist = Math.max(activeDrag.movedDist, Math.hypot(totalDxPx, totalDyPx));
+    if (!activeDrag.dragging) {
+      if (activeDrag.movedDist < 4) return;
+      activeDrag.dragging = true;
+      isMapDragging = true;
+      liveSvg.classList.add("is-dragging");
+      try { liveSvg.setPointerCapture?.(e.pointerId); } catch {}
+    }
+    const rect = liveSvg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const d = activeDrag.dims;
+    const vb = liveSvg.viewBox?.baseVal;
+    const vbW = vb?.width || d.width;
+    const vbH = vb?.height || d.mapHeight;
+    const stepDxSvg = (stepDxPx / rect.width) * vbW;
+    const stepDySvg = (stepDyPx / rect.height) * vbH;
+    const clamped = clampMapZoomTransform({
+      scale: mapZoom.scale,
+      tx: mapZoom.tx + stepDxSvg,
+      ty: mapZoom.ty + stepDySvg,
+    }, d.width, d.mapHeight, MAX_MAP_SCALE);
+    mapZoom = clamped;
+    mapZoomCustom = true;
+
+    const wrapSpan = getMapWrapSpan(d.width, mapZoom.scale);
+    const rz = activeDrag.renderedZoom;
+    const shiftX = wrapSpan > 0
+      ? ((((clamped.tx - rz.tx) % wrapSpan) + wrapSpan * 1.5) % wrapSpan) - wrapSpan * 0.5
+      : (clamped.tx - rz.tx);
+    const shiftY = clamped.ty - rz.ty;
+    if (wrapSpan > 0 && Math.abs(shiftX) > wrapSpan * 0.42) {
+      paint(true);
+      return;
+    }
+    const vp = liveSvg.querySelector(".a-dash-topo-map-viewport");
+    if (vp) {
+      vp.setAttribute("transform", `translate(${shiftX.toFixed(1)} ${shiftY.toFixed(1)})`);
+    }
+  };
+
+  const handleGlobalMapEnd = (e) => {
+    if (!activeDrag.active && !activeDrag.dragging) return;
+    if (activeDrag.pointerId != null && e?.pointerId != null && e.pointerId !== activeDrag.pointerId) return;
+    const liveSvg = activeDrag.svgEl?.isConnected ? activeDrag.svgEl : bodyHost.querySelector("svg.a-dash-topo-map-svg");
+    const wasDragged = activeDrag.dragging && activeDrag.movedDist > 4;
+    const pointerId = activeDrag.pointerId;
+    activeDrag.active = false;
+    activeDrag.dragging = false;
+    activeDrag.pointerId = null;
+    activeDrag.svgEl = null;
+    isMapDragging = false;
+    liveSvg?.classList?.remove("is-dragging");
+    if (liveSvg && pointerId != null) {
+      try { liveSvg.releasePointerCapture?.(pointerId); } catch {}
+    }
+    if (wasDragged) {
+      suppressNextMapClick = true;
+      setTimeout(() => { suppressNextMapClick = false; }, 60);
+      paint(true);
+    }
+  };
+
+  window.addEventListener("pointermove", handleGlobalMapMove, { signal: ctx.signal });
+  window.addEventListener("pointerup", handleGlobalMapEnd, { signal: ctx.signal });
+  window.addEventListener("pointercancel", handleGlobalMapEnd, { signal: ctx.signal });
 
   listen(document, "keydown", (event) => {
     if (event.key !== "Escape") return;
     if (document.querySelector("dialog[open], .a-tooltip")) return;
+    const scopeEl = cardEl || bodyHost;
+    if (!scopeEl.contains(event.target) && !scopeEl.contains(document.activeElement)) return;
     if (focusedItemKey || flowInspectKey || mapPinnedKey || mapHoveredKey) {
       focusedItemKey = "";
       flowInspectKey = "";
       mapPinnedKey = "";
       mapHoveredKey = "";
       paint(true);
-    } else if (mapZoom.scale > 1.001) {
-      mapZoom = { scale: 1, tx: 0, ty: 0 };
+    } else if (mapZoomCustom) {
+      mapZoom = { ...mapDefaultZoom };
+      mapZoomCustom = false;
       paint(true);
     }
   });
@@ -439,11 +555,13 @@ export function createDashboardTopologySection(ctx, {
     const isFocused = activeItemKey === itemKey;
     const isOfflineOrErr = Boolean(ep.issue);
     const dotTone = ep.kind === "ext" ? "ok" : isOfflineOrErr ? "bad" : ep.online ? "ok" : "bad";
+    const isLiveOnline = ep.kind !== "ext" && !isOfflineOrErr && ep.online;
     const flag = ep.kind === "ext" ? null : nodeRegionFlag(ctx, { id: ep.agentID, region_code: ep.region });
 
     return node("button", {
       type: "button",
       className: `a-topo-node-card${ep.kind === "ext" ? " is-ext" : ""}${isOfflineOrErr ? " is-issue" : ""}${isFocused ? " is-active" : ""}`,
+      "data-tone": dotTone,
       "data-refresh-key": `${keyScope}-node-${group.id}-${ep.index}`,
       "data-topo-node": ep.agentID || ep.address || String(ep.index),
       "aria-pressed": isFocused ? "true" : "false",
@@ -451,7 +569,7 @@ export function createDashboardTopologySection(ctx, {
       onclick: () => (onSelect ? onSelect(itemKey) : toggleFocus(itemKey)),
     },
       node("div", { className: "a-topo-node-top" },
-        node("span", { className: `a-topo-dot is-${dotTone}`, "aria-hidden": "true" }),
+        node("span", { className: `a-topo-dot is-${dotTone}${isLiveOnline && allowMotion() ? " is-live" : ""}`, "aria-hidden": "true" }),
         flag,
         !flag && ep.region ? node("span", { className: "a-topo-region-tag" }, ep.region) : null,
         node("span", { className: "a-topo-role-tag" }, ep.role),
@@ -490,6 +608,7 @@ export function createDashboardTopologySection(ctx, {
         ? (hop.worstLossPercent > 0 ? `丢包 ${formatLoss(hop.worstLossPercent)}` : "0% 丢包")
         : (hop.unavailableReason || hop.statusLabel);
 
+    const motion = allowMotion();
     const conduit = renderHopConduitSVG({
       forward: hop.forward,
       reverse: hop.reverse,
@@ -498,6 +617,7 @@ export function createDashboardTopologySection(ctx, {
       tone: hop.tone,
       metricDir,
       vertical: false,
+      allowMotion: motion,
     });
     const conduitVert = renderHopConduitSVG({
       forward: hop.forward,
@@ -507,6 +627,7 @@ export function createDashboardTopologySection(ctx, {
       tone: hop.tone,
       metricDir,
       vertical: true,
+      allowMotion: motion,
     });
 
     return node("button", {
@@ -795,7 +916,7 @@ export function createDashboardTopologySection(ctx, {
       const peers = (el.getAttribute("data-topo-peers") || "").split(" ").filter(Boolean);
       const match = matchesActiveSelection(peers, activeSel);
       const base = el.getAttribute("data-base-opacity") || "1";
-      const dim = el.getAttribute("data-dim-opacity") ?? "0.14";
+      const dim = el.getAttribute("data-dim-opacity") ?? "0.30";
       const next = match === true ? "1" : match === false ? dim : base;
       if (el.getAttribute("opacity") !== next) el.setAttribute("opacity", next);
       el.classList.toggle("is-highlighted", match === true);
@@ -847,6 +968,7 @@ export function createDashboardTopologySection(ctx, {
         }
       });
       const activate = (event) => {
+        if (event.type === "click" && suppressNextMapClick) return;
         if (event.type === "keydown" && event.key !== "Enter" && event.key !== " ") return;
         if (event.type === "keydown") event.preventDefault();
         event.stopPropagation();
@@ -902,7 +1024,7 @@ export function createDashboardTopologySection(ctx, {
       const hl = isHighlightedEdge(peers);
       const selected = pinnedOnlyKey() === eKey;
       const baseStr = focusOnly ? "0" : "1";
-      const dimStr = focusOnly ? "0" : "0.22";
+      const dimStr = focusOnly ? "0" : "0.32";
       const op = focusOnly ? (hl === true ? "1" : "0") : (hl === false ? dimStr : "1");
       const g = createSVGEl("g", {
         class: `a-dash-topo-probe-item ${focusOnly ? "a-dash-topo-focus-only" : ""} ${selected ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
@@ -928,14 +1050,15 @@ export function createDashboardTopologySection(ctx, {
         "stroke-width": selected || hl === true ? "1.8" : "1.1",
         class: "a-dash-topo-probe-pill",
       }));
-      const dotX = cx - pillW / 2 + (compact ? 8 : 10);
+      const dotX = cx - pillW / 2 + (compact ? 6.5 : 8.5);
       if (isProbeUnreachable(probe) && probe.tone === "bad") {
+        const s = compact ? 1.8 : 2.1;
         g.append(createSVGEl("path", {
           class: "a-dash-topo-pill-dot",
-          d: `M ${(dotX - 2.3).toFixed(1)} ${(cy - 2.3).toFixed(1)} L ${(dotX + 2.3).toFixed(1)} ${(cy + 2.3).toFixed(1)} M ${(dotX + 2.3).toFixed(1)} ${(cy - 2.3).toFixed(1)} L ${(dotX - 2.3).toFixed(1)} ${(cy + 2.3).toFixed(1)}`,
+          d: `M ${(dotX - s).toFixed(1)} ${(cy - s).toFixed(1)} L ${(dotX + s).toFixed(1)} ${(cy + s).toFixed(1)} M ${(dotX + s).toFixed(1)} ${(cy - s).toFixed(1)} L ${(dotX - s).toFixed(1)} ${(cy + s).toFixed(1)}`,
           fill: "none",
           stroke: pal.stroke,
-          "stroke-width": "1.5",
+          "stroke-width": "1.35",
           "stroke-linecap": "round",
         }));
       } else {
@@ -943,12 +1066,12 @@ export function createDashboardTopologySection(ctx, {
           class: "a-dash-topo-pill-dot",
           cx: dotX.toFixed(1),
           cy: cy.toFixed(1),
-          r: compact ? 2.5 : 3,
+          r: compact ? 2.1 : 2.5,
           fill: pal.stroke,
         }));
       }
       g.append(createSVGEl("text", {
-        x: (dotX + (compact ? 6.5 : 7.5)).toFixed(1),
+        x: (dotX + (compact ? 5.2 : 6.5)).toFixed(1),
         y: (cy + (compact ? 3.2 : 3.6)).toFixed(1),
         class: "a-dash-topo-pill-text",
         fill: pal.ink,
@@ -969,17 +1092,45 @@ export function createDashboardTopologySection(ctx, {
     };
   };
 
-  const buildMapStageElement = ({ model, singleGroup = null, scopeKey = "map", isMobile = false, width = 880 } = {}) => {
+  const ensureMapZoomForScope = ({ model, singleGroup = null, scopeKey = "map", scopeExtra = "", isMobile = false, width = 880 } = {}) => {
+    const dims = getMapViewportDimensions({ width, isMobile });
+    const nextDefault = model
+      ? computeMapFocusZoom(model, { width: dims.width, height: dims.mapHeight, isMobile })
+      : { scale: 1, tx: 0, ty: 0 };
+    const nextSig = `${scopeKey}:${singleGroup ? singleGroup.id : `fleet:${scopeExtra}`}:${isMobile ? `${dims.width}x${dims.mapHeight}` : "desk"}`;
+    mapDefaultZoom = nextDefault;
+    if (mapZoomScopeSig !== nextSig) {
+      mapZoomScopeSig = nextSig;
+      mapZoom = { ...nextDefault };
+      mapZoomCustom = false;
+    } else if (!mapZoomCustom) {
+      mapZoom = { ...nextDefault };
+    } else {
+      mapZoom = clampMapZoomTransform(mapZoom, dims.width, dims.mapHeight, MAX_MAP_SCALE);
+    }
+    return dims;
+  };
+
+  const buildMapStageElement = ({ model, singleGroup = null, scopeKey = "map", scopeExtra = "", isMobile = false, width = 880 } = {}) => {
+    const dims = ensureMapZoomForScope({ model, singleGroup, scopeKey, scopeExtra, isMobile, width });
+    const renderedZoom = { ...mapZoom };
+    if (activeDrag.active || activeDrag.dragging) {
+      activeDrag.renderedZoom = { ...renderedZoom };
+      activeDrag.dims = { ...dims };
+    }
     const clipId = `a-topo-clip-${scopeKey}`;
     const defsPrefix = `a-topo-${scopeKey}`;
     const svg = renderPacificMapSVG({
       width,
       isMobile,
       model,
-      zoomTransform: isMobile ? null : mapZoom,
+      zoomTransform: renderedZoom,
       helpers: createMapHelpers({ singleGroup, model, clipId, defsPrefix }),
     });
     svg.setAttribute("data-refresh-key", `map-svg-${scopeKey}`);
+    svg.classList.add("is-pannable");
+    svg.classList.toggle("is-zoomed", renderedZoom.scale > 1.01);
+    svg.classList.toggle("is-dragging", activeDrag.dragging);
 
     const stage = node("div", {
       className: "a-dash-topo-map-stage",
@@ -988,7 +1139,7 @@ export function createDashboardTopologySection(ctx, {
     }, svg);
 
     listen(svg, "pointerleave", () => {
-      if (mapHoveredKey) {
+      if (mapHoveredKey && !isMapDragging) {
         mapHoveredKey = "";
         syncLiveMapSelection();
       }
@@ -1011,119 +1162,119 @@ export function createDashboardTopologySection(ctx, {
       }
     });
 
-    if (!isMobile) {
-      const zoomBy = (factor, anchorX = PACIFIC_MAP_BOUNDS.width / 2, anchorY = PACIFIC_MAP_BOUNDS.height / 2) => {
-        const nextScale = Math.max(1, Math.min(3.2, mapZoom.scale * factor));
-        if (Math.abs(nextScale - mapZoom.scale) < 0.01) return;
-        const ratio = nextScale / mapZoom.scale;
-        mapZoom = clampZoomTransform({
-          scale: nextScale,
-          tx: anchorX - (anchorX - mapZoom.tx) * ratio,
-          ty: anchorY - (anchorY - mapZoom.ty) * ratio,
-        });
+    const zoomBy = (factor, anchorX = dims.width / 2, anchorY = dims.mapHeight / 2) => {
+      const nextScale = Math.max(1, Math.min(MAX_MAP_SCALE, mapZoom.scale * factor));
+      if (Math.abs(nextScale - mapZoom.scale) < 0.01) return;
+      const ratio = nextScale / mapZoom.scale;
+      mapZoom = clampMapZoomTransform({
+        scale: nextScale,
+        tx: anchorX - (anchorX - mapZoom.tx) * ratio,
+        ty: anchorY - (anchorY - mapZoom.ty) * ratio,
+      }, dims.width, dims.mapHeight, MAX_MAP_SCALE);
+      mapZoomCustom = true;
+      paint(true);
+    };
+
+    const hasSelection = Boolean(singleGroup ? focusedItemKey : mapPinnedKey);
+    const wrapSpanNow = getMapWrapSpan(dims.width, mapZoom.scale);
+    const txDelta = wrapSpanNow > 0
+      ? Math.abs(((((mapZoom.tx - mapDefaultZoom.tx) % wrapSpanNow) + wrapSpanNow * 1.5) % wrapSpanNow) - wrapSpanNow * 0.5)
+      : Math.abs(mapZoom.tx - mapDefaultZoom.tx);
+    const isZoomModified = mapZoomCustom && (
+      Math.abs(mapZoom.scale - mapDefaultZoom.scale) > 0.02 ||
+      txDelta > 1.5 ||
+      Math.abs(mapZoom.ty - mapDefaultZoom.ty) > 1.5
+    );
+    const pctLabel = `${Math.round(mapZoom.scale * 100)}%`;
+    const toolsBar = node("div", {
+      className: `a-dash-topo-map-tools${isMobile ? " is-mobile" : ""}`,
+      role: "group",
+      "aria-label": "地图缩放控制",
+      "data-refresh-key": `map-tools-${scopeKey}`,
+    },
+      button("−", () => zoomBy(1 / 1.35), {
+        className: "a-button",
+        title: "缩小地图",
+        disabled: mapZoom.scale <= 1.01,
+        "data-refresh-key": "map-zoom-out",
+      }),
+      button(isZoomModified || hasSelection ? `重置 (${pctLabel})` : pctLabel, () => {
+        mapHoveredKey = "";
+        mapZoom = { ...mapDefaultZoom };
+        mapZoomCustom = false;
+        if (singleGroup) focusedItemKey = "";
+        else mapPinnedKey = "";
         paint(true);
+      }, {
+        className: "a-button",
+        title: singleGroup ? "恢复默认居中对焦视角" : "重置地图视角",
+        disabled: !isZoomModified && !hasSelection,
+        "data-refresh-key": "map-zoom-reset",
+      }),
+      button("+", () => zoomBy(1.35), {
+        className: "a-button",
+        title: "放大地图",
+        disabled: mapZoom.scale >= MAX_MAP_SCALE - 0.05,
+        "data-refresh-key": "map-zoom-in",
+      }),
+    );
+    stage.append(toolsBar);
+
+    const clientToSvgPoint = (targetSvg, clientX, clientY) => {
+      const rect = targetSvg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return { x: dims.width / 2, y: dims.mapHeight / 2 };
+      const vb = targetSvg.viewBox?.baseVal;
+      const vbW = vb?.width || dims.width;
+      const vbH = vb?.height || dims.mapHeight;
+      return {
+        x: ((clientX - rect.left) / rect.width) * vbW,
+        y: ((clientY - rect.top) / rect.height) * vbH,
       };
+    };
 
-      const hasSelection = Boolean(singleGroup ? focusedItemKey : mapPinnedKey);
-      const pctLabel = `${Math.round(mapZoom.scale * 100)}%`;
-      const toolsBar = node("div", {
-        className: "a-dash-topo-map-tools",
-        role: "group",
-        "aria-label": "地图缩放控制",
-        "data-refresh-key": `map-tools-${scopeKey}`,
-      },
-        button("−", () => zoomBy(1 / 1.35), {
-          className: "a-button",
-          title: "缩小地图",
-          disabled: mapZoom.scale <= 1.01,
-          "data-refresh-key": "map-zoom-out",
-        }),
-        button(mapZoom.scale > 1.01 ? `重置 (${pctLabel})` : "100%", () => {
-          mapHoveredKey = "";
-          mapZoom = { scale: 1, tx: 0, ty: 0 };
-          if (singleGroup) focusedItemKey = "";
-          else mapPinnedKey = "";
-          paint(true);
-        }, {
-          className: "a-button",
-          title: "重置地图视角",
-          disabled: mapZoom.scale <= 1.01 && !hasSelection,
-          "data-refresh-key": "map-zoom-reset",
-        }),
-        button("+", () => zoomBy(1.35), {
-          className: "a-button",
-          title: "放大地图",
-          disabled: mapZoom.scale >= 3.18,
-          "data-refresh-key": "map-zoom-in",
-        }),
-      );
-      stage.append(toolsBar);
+    listen(svg, "dblclick", (e) => {
+      if (e.target.closest?.("[data-topo-entity]")) return;
+      const liveSvg = e.currentTarget || svg;
+      const pt = clientToSvgPoint(liveSvg, e.clientX, e.clientY);
+      if (pt.y > dims.mapHeight) return;
+      if (mapZoom.scale >= 4.5) {
+        mapZoom = { ...mapDefaultZoom };
+        mapZoomCustom = false;
+        paint(true);
+      } else {
+        zoomBy(1.6, pt.x, pt.y);
+      }
+    });
 
-      const clientToSvgPoint = (clientX, clientY) => {
-        const rect = svg.getBoundingClientRect();
-        if (!rect.width || !rect.height) return { x: PACIFIC_MAP_BOUNDS.width / 2, y: PACIFIC_MAP_BOUNDS.height / 2 };
-        return {
-          x: ((clientX - rect.left) / rect.width) * PACIFIC_MAP_BOUNDS.width,
-          y: ((clientY - rect.top) / rect.height) * PACIFIC_MAP_BOUNDS.height,
-        };
+    listen(svg, "pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (e.target.closest?.(".a-dash-topo-map-tools")) return;
+      const liveSvg = e.currentTarget || svg;
+      const rect = liveSvg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const vb = liveSvg.viewBox?.baseVal;
+      const vbH = vb?.height || dims.mapHeight;
+      const clickSvgY = ((e.clientY - rect.top) / rect.height) * vbH;
+      if (clickSvgY > dims.mapHeight) return;
+      activeDrag = {
+        active: true,
+        dragging: false,
+        movedDist: 0,
+        pointerId: e.pointerId,
+        startClient: { x: e.clientX, y: e.clientY },
+        lastClient: { x: e.clientX, y: e.clientY },
+        renderedZoom: { ...renderedZoom },
+        dims: { ...dims },
+        svgEl: liveSvg,
       };
+    });
 
-      let dragging = false;
-      let movedDist = 0;
-      let startClient = { x: 0, y: 0 };
-      let startTrans = { tx: 0, ty: 0 };
-
-      listen(svg, "pointerdown", (e) => {
-        if (e.button !== 0 || mapZoom.scale <= 1.01) return;
-        if (e.target.closest?.("[data-topo-entity]")) return;
-        dragging = true;
-        movedDist = 0;
-        startClient = { x: e.clientX, y: e.clientY };
-        startTrans = { tx: mapZoom.tx, ty: mapZoom.ty };
-        svg.setPointerCapture?.(e.pointerId);
-      });
-      listen(svg, "pointermove", (e) => {
-        if (!dragging) return;
-        const dxPx = e.clientX - startClient.x;
-        const dyPx = e.clientY - startClient.y;
-        movedDist = Math.max(movedDist, Math.hypot(dxPx, dyPx));
-        const rect = svg.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        const dxSvg = (dxPx / rect.width) * PACIFIC_MAP_BOUNDS.width;
-        const dySvg = (dyPx / rect.height) * PACIFIC_MAP_BOUNDS.height;
-        mapZoom = clampZoomTransform({
-          scale: mapZoom.scale,
-          tx: startTrans.tx + dxSvg,
-          ty: startTrans.ty + dySvg,
-        });
-        const vp = svg.querySelector(".a-dash-topo-map-viewport");
-        if (vp) {
-          vp.setAttribute("transform", `translate(${mapZoom.tx.toFixed(1)} ${mapZoom.ty.toFixed(1)}) scale(${mapZoom.scale.toFixed(3)})`);
-        }
-      });
-      listen(svg, "pointerup", (e) => {
-        if (!dragging) return;
-        dragging = false;
-        svg.releasePointerCapture?.(e.pointerId);
-        if (movedDist > 5) {
-          suppressNextMapClick = true;
-          paint(true);
-        }
-      });
-      listen(svg, "dblclick", (e) => {
-        if (e.target.closest?.("[data-topo-entity]")) return;
-        const pt = clientToSvgPoint(e.clientX, e.clientY);
-        if (mapZoom.scale >= 2.5) {
-          mapZoom = { scale: 1, tx: 0, ty: 0 };
-          paint(true);
-        } else {
-          zoomBy(1.6, pt.x, pt.y);
-        }
-      });
+    if (!isMobile) {
       listen(svg, "wheel", (e) => {
-        if (!e.ctrlKey && !e.metaKey) return;
+        if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return;
         e.preventDefault();
-        const pt = clientToSvgPoint(e.clientX, e.clientY);
+        const liveSvg = e.currentTarget || svg;
+        const pt = clientToSvgPoint(liveSvg, e.clientX, e.clientY);
         zoomBy(e.deltaY < 0 ? 1.18 : 1 / 1.18, pt.x, pt.y);
       }, { passive: false });
     }
@@ -1240,6 +1391,48 @@ export function createDashboardTopologySection(ctx, {
     );
   };
 
+  const renderDashboardGroupSwitcher = (groups, activeGroup) => {
+    if (!groups || groups.length <= 1) return null;
+    const collapsed = isDashGroupsCollapsed(groups);
+    const toggleBtn = button(
+      collapsed ? `切换分组 (${groups.length})` : "收起",
+      () => toggleDashGroupsCollapsed(groups),
+      {
+        className: "a-button a-topo-mini-btn a-topo-switcher-toggle",
+        "aria-expanded": collapsed ? "false" : "true",
+        "data-refresh-key": "dash-groups-toggle",
+      },
+    );
+    if (collapsed && activeGroup) {
+      return node("div", {
+        className: "a-topo-switcher-box is-collapsed",
+        "data-refresh-key": "dash-switcher-box",
+      },
+        node("div", { className: "a-topo-switcher-collapsed" },
+          node("div", {
+            className: "a-topo-switcher-summary",
+            "data-group-name": activeGroup.groupName,
+            "data-refresh-key": `dash-summary-${activeGroup.id}`,
+          },
+            node("span", { className: `a-topo-dot is-${activeGroup.overall.statusBadge.tone || "idle"}`, "aria-hidden": "true" }),
+            node("span", { className: "a-topo-switcher-summary-name" }, activeGroup.groupName),
+            node("span", { className: "a-topo-pill-metric" }, summarizeGroupMetricLine(activeGroup, "both")),
+          ),
+          toggleBtn,
+        ),
+      );
+    }
+    return node("div", {
+      className: "a-topo-switcher-box",
+      "data-refresh-key": "dash-switcher-box",
+    },
+      node("div", { className: "a-topo-switcher-row" },
+        renderGroupSwitcher(groups, activeGroup, (name) => selectDashboardGroup(name), "dash"),
+        toggleBtn,
+      ),
+    );
+  };
+
   const renderVizModeSwitch = (currentViz, onChange, { attrName, keyPrefix, labels = ["链路图", "地理图"] } = {}) => node("div", {
     className: "a-dash-topo-mode-switch",
     role: "group",
@@ -1296,6 +1489,7 @@ export function createDashboardTopologySection(ctx, {
     gradPrefix = "dash",
     renderWidth = 880,
     isMobile = false,
+    precomputedMapModel = null,
   } = {}) => {
     const availNotice = !group.availability.ready && group.availability.reason
       ? node("p", { className: "a-notice warn", role: "status", "data-refresh-key": `avail-notice-${group.id}` }, group.availability.reason)
@@ -1303,7 +1497,7 @@ export function createDashboardTopologySection(ctx, {
 
     let stageBody;
     if (vizMode === "map") {
-      const singleModel = buildSingleGroupTopologyModel(group, { metricDir });
+      const singleModel = precomputedMapModel || buildSingleGroupTopologyModel(group, { metricDir });
       lastSingleMapModel = singleModel;
       stageBody = buildMapStageElement({
         model: singleModel,
@@ -1346,13 +1540,37 @@ export function createDashboardTopologySection(ctx, {
       ));
       if (idx < group.hops.length) {
         const hop = group.hops[idx];
-        const hopMetric = topoMetricDir === "reverse"
-          ? (hop.bidirectional ? formatDirBadgeMetric(hop.reverse, { running: group.running, ready: hop.ready }) : "单向")
-          : topoMetricDir === "forward" || !hop.bidirectional
-            ? formatDirBadgeMetric(hop.forward, { running: group.running, ready: hop.ready })
-            : `${formatMsCompact(hop.forward.avgMS)}${hop.reverse?.avgMS != null ? `/${formatMsCompact(hop.reverse.avgMS)}` : ""}${hop.worstLossPercent > 0 ? ` · ${formatLoss(hop.worstLossPercent)}` : ""}`;
+        const dirPrefix = topoMetricDir === "reverse"
+          ? "← "
+          : (topoMetricDir === "forward" || !hop.bidirectional)
+            ? "→ "
+            : "⇄ ";
+        let hopMetric = "";
+        if (topoMetricDir === "reverse") {
+          hopMetric = hop.bidirectional
+            ? formatDirBadgeMetric(hop.reverse, { running: group.running, ready: hop.ready })
+            : "单向";
+        } else if (topoMetricDir === "forward" || !hop.bidirectional) {
+          hopMetric = formatDirBadgeMetric(hop.forward, { running: group.running, ready: hop.ready });
+        } else if (group.running && !hop.forward?.available && !hop.reverse?.available) {
+          hopMetric = "探测中";
+        } else if (!hop.ready && !hop.forward?.available && !hop.reverse?.available) {
+          hopMetric = "暂不可用";
+        } else if (!hop.forward?.available && !hop.reverse?.available) {
+          hopMetric = "待采样";
+        } else if (hop.forward?.avgMS == null && hop.reverse?.avgMS == null) {
+          hopMetric = hop.statusLabel || "不可达";
+        } else {
+          const fwdStr = hop.forward?.avgMS != null
+            ? formatMsCompact(hop.forward.avgMS)
+            : (hop.forward?.available ? "×" : "—");
+          const revStr = hop.reverse?.avgMS != null
+            ? formatMsCompact(hop.reverse.avgMS)
+            : (hop.reverse?.available ? "×" : "—");
+          hopMetric = `${fwdStr}/${revStr}${hop.worstLossPercent > 0 ? ` · ${formatLoss(hop.worstLossPercent)}` : ""}`;
+        }
         miniChainItems.push(button(
-          hopMetric || hop.statusLabel,
+          `${dirPrefix}${hopMetric || hop.statusLabel}`,
           () => setTopoViewMode("focus", { focusGroupName: group.groupName, focusItem: `hop:${hop.hopIndex}` }),
           {
             className: "a-topo-mini-hop",
@@ -1377,13 +1595,13 @@ export function createDashboardTopologySection(ctx, {
             badge(group.overall.statusBadge.label, group.overall.statusBadge.tone),
             badge(groupKindBadgeText(group), ""),
           ),
-          group.remark ? node("p", { className: "a-muted a-topo-remark" }, group.remark) : null,
         ),
         node("div", { className: "a-topo-overview-kpi" },
           node("strong", { className: `a-topo-overview-metric is-${tone}` }, metricLine),
           muted(`${group.autoEnabled ? `自动 ${group.autoIntervalSeconds}s` : "已暂停"} · ${sampledText}`),
         ),
       ),
+      group.remark ? node("p", { className: "a-muted a-topo-remark" }, group.remark) : null,
       node("div", { className: "a-topo-mini-chain" }, ...miniChainItems),
       (!group.availability.ready && group.availability.reason) || group.overall.error
         ? node("p", { className: "a-topo-overview-alert" }, group.availability.reason || group.overall.error)
@@ -1633,6 +1851,7 @@ export function createDashboardTopologySection(ctx, {
           "aria-label": "按网络域筛选",
           "data-refresh-key": "topo-domain-bar",
         },
+          node("span", { className: "a-topo-bar-label" }, "分域"),
           button(`全部分域 (${groups.length})`, () => setTopoDomainGroup("all"), {
             className: "a-topo-domain-pill",
             "aria-pressed": effectiveDomain === "all" ? "true" : "false",
@@ -1675,6 +1894,7 @@ export function createDashboardTopologySection(ctx, {
     paintScheduled = false;
     paintForced = false;
     if (!canViewSurface() || disposed) return;
+    if (!force && isMapDragging) return;
 
     const states = getStates();
     const probesState = states.get("probes") || "";
@@ -1734,10 +1954,25 @@ export function createDashboardTopologySection(ctx, {
       focusedItemKey = "";
     }
 
-    const fleetMapModel = (isStandalonePage && topoViewMode === "map")
+    const fleetCompareActive = isStandalonePage && topoViewMode === "map" && topoMapShowAll && filteredGroups.length > 1;
+    const fleetMapModel = fleetCompareActive
       ? buildProbeTopologyModel({ groups: filteredGroups, metricDir: topoMetricDir })
       : null;
     lastFleetModel = fleetMapModel;
+    const precomputedSingleMapModel = (showMapCurrently && !fleetMapModel && activeGroup)
+      ? buildSingleGroupTopologyModel(activeGroup, { metricDir: isStandalonePage ? topoMetricDir : "both" })
+      : null;
+    const mapScopeExtra = `${effectiveDomain}:${topoStatusFilter}:${filteredGroups.length}`;
+    if (showMapCurrently) {
+      ensureMapZoomForScope({
+        model: fleetMapModel || precomputedSingleMapModel,
+        singleGroup: fleetMapModel ? null : activeGroup,
+        scopeKey: fleetMapModel ? "fleet" : `${isStandalonePage ? topoViewMode : "dash"}-single`,
+        scopeExtra: mapScopeExtra,
+        isMobile,
+        width: renderWidth,
+      });
+    }
     if (fleetMapModel) {
       const fleetClusters = clusterTopologyNodes(fleetMapModel.nodes);
       mapPinnedKey = reconcileSelectionKey(mapPinnedKey, fleetMapModel, { clusters: fleetClusters, allowCluster: true });
@@ -1766,7 +2001,9 @@ export function createDashboardTopologySection(ctx, {
       dashGroupName,
       dashViewMode,
       dashShowHistory,
+      isDashGroupsCollapsed(groups),
       topoViewMode,
+      topoMapShowAll,
       effectiveDomain,
       topoSelectedGroup,
       topoFocusViz,
@@ -1858,8 +2095,8 @@ export function createDashboardTopologySection(ctx, {
     }
 
     if (!isStandalonePage) {
-      // Homepage: strictly ONE selected group + ONE link at a time
-      bodyChildren.push(renderGroupSwitcher(groups, activeGroup, (name) => selectDashboardGroup(name), "dash"));
+      // Homepage: strictly ONE selected group + ONE link at a time, with collapsible switcher
+      bodyChildren.push(renderDashboardGroupSwitcher(groups, activeGroup));
       if (activeGroup) {
         bodyChildren.push(renderSingleGroupWorkspace(activeGroup, {
           metricDir: "both",
@@ -1869,6 +2106,7 @@ export function createDashboardTopologySection(ctx, {
           gradPrefix: "dash",
           renderWidth,
           isMobile,
+          precomputedMapModel: precomputedSingleMapModel,
         }));
       }
       patchChildren(bodyHost, bodyChildren);
@@ -1918,20 +2156,91 @@ export function createDashboardTopologySection(ctx, {
           gradPrefix: "focus",
           renderWidth,
           isMobile,
+          precomputedMapModel: precomputedSingleMapModel,
         }));
         bodyChildren.push(renderFocusDetails(activeGroup));
       }
     } else if (topoViewMode === "map") {
+      const mapControls = filteredGroups.length > 1
+        ? node("div", {
+            className: "a-topo-switcher a-topo-fleet-map-bar",
+            role: "tablist",
+            "aria-label": "地图单链分组与同图对比切换",
+            "data-refresh-key": "fleet-map-bar",
+          },
+            button(`同图对比 (${filteredGroups.length})`, () => {
+              topoMapShowAll = true;
+              mapPinnedKey = "";
+              mapHoveredKey = "";
+              focusedItemKey = "";
+              mapZoomCustom = false;
+              mapZoomScopeSig = "";
+              paint(true);
+            }, {
+              className: `a-topo-group-pill${fleetCompareActive ? " is-active" : ""}`,
+              role: "tab",
+              "aria-selected": fleetCompareActive ? "true" : "false",
+              "data-refresh-key": "fleet-map-compare",
+            }),
+            ...filteredGroups.map((g) => {
+              const isActiveGroup = !fleetCompareActive && Boolean(activeGroup && g.id === activeGroup.id);
+              const metricText = topoMetricDir === "reverse"
+                ? (g.bidirectional ? formatDirBadgeMetric(g.overall.reverse, { running: g.running, ready: g.availability.ready }) : "单向")
+                : formatDirBadgeMetric(g.overall.forward, { running: g.running, ready: g.availability.ready });
+              return button(
+                [
+                  node("span", { className: `a-topo-dot is-${g.overall.statusBadge.tone || "idle"}`, "aria-hidden": "true" }),
+                  node("span", { className: "a-topo-pill-name" }, g.groupName),
+                  node("span", { className: "a-topo-pill-metric" }, metricText),
+                ],
+                () => {
+                  topoMapShowAll = false;
+                  setTopoSelectedGroup(g.groupName);
+                  paint(true);
+                },
+                {
+                  className: `a-topo-group-pill${isActiveGroup ? " is-active" : ""}`,
+                  role: "tab",
+                  "aria-selected": isActiveGroup ? "true" : "false",
+                  "data-group-name": g.groupName,
+                  "data-refresh-key": `map-pill-${g.id}`,
+                },
+              );
+            }),
+          )
+        : null;
+
+      const mapInspect = fleetCompareActive
+        ? renderFleetMapInspect(fleetMapModel)
+        : (activeGroup
+            ? renderInspectStrip(activeGroup, topoMetricDir, {
+                extraActions: [
+                  button("聚焦分析", () => setTopoViewMode("focus", { focusGroupName: activeGroup.groupName }), {
+                    className: "a-button a-topo-mini-btn",
+                    "data-refresh-key": "map-focus-group",
+                  }),
+                  ...(canExecuteProbes()
+                    ? [button("编辑", () => probeController.openEdit(activeGroup.raw), {
+                        className: "a-button a-topo-mini-btn",
+                        "data-refresh-key": "map-edit-group",
+                      })]
+                    : []),
+                ],
+              })
+            : null);
+
       bodyChildren.push(
         node("div", { className: "a-topo-fleet-map-panel", "data-refresh-key": "fleet-map-panel" },
+          mapControls,
           buildMapStageElement({
-            model: fleetMapModel,
-            singleGroup: null,
-            scopeKey: "fleet",
+            model: fleetMapModel || precomputedSingleMapModel,
+            singleGroup: fleetCompareActive ? null : activeGroup,
+            scopeKey: fleetCompareActive ? "fleet" : "map-single",
+            scopeExtra: mapScopeExtra,
             isMobile,
             width: renderWidth,
           }),
-          renderFleetMapInspect(fleetMapModel),
+          mapInspect,
         ),
       );
     } else if (topoViewMode === "flow") {
@@ -2017,6 +2326,7 @@ export function createDashboardTopologySection(ctx, {
     bodyHost,
     node("div", { className: "a-actions a-dash-topo-tools" }, headerBadges, headerActions),
   );
+  cardEl = card || null;
   card?.classList?.add("a-dash-topo-card");
   if (isStandalonePage && card) card.classList.add("is-standalone");
 

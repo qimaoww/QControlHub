@@ -544,7 +544,8 @@ export async function testDashboardRuntime(mode, preview = false) {
 
   const assertLayout = () => {
     assert(document.documentElement.scrollWidth <= innerWidth + 1, `viewport overflow ${innerWidth}`);
-    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-topo-body,.a-topo-switcher,.a-topo-single-stage,.a-topo-chain-stage,.a-topo-chain-step,.a-topo-node-card,.a-topo-hop-slot,.a-topo-inspect,.a-topo-controls-bar,.a-topo-domain-bar,.a-topo-overview-grid,.a-topo-overview-card,.a-topo-flow-list,.a-topo-flow-group-card,.a-topo-fleet-map-panel,.a-topo-map-wrap,.a-dash-topo-map-stage,.a-dash-matrix,.a-dash-matrix-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-topo-body,.a-topo-switcher-box,.a-topo-switcher-row,.a-topo-switcher-collapsed,.a-topo-switcher,.a-topo-single-stage,.a-topo-chain-stage,.a-topo-chain-step,.a-topo-node-card,.a-topo-hop-slot,.a-topo-inspect,.a-topo-controls-bar,.a-topo-domain-bar,.a-topo-overview-grid,.a-topo-overview-card,.a-topo-flow-list,.a-topo-flow-group-card,.a-topo-fleet-map-panel,.a-topo-map-wrap,.a-dash-topo-map-stage,.a-dash-matrix,.a-dash-matrix-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+      if (element.classList.contains("a-topo-switcher") && getComputedStyle(element).overflowX === "auto") continue;
       assert(element.scrollWidth <= element.clientWidth + 1, `content overflow ${element.className}`);
     }
     for (const element of document.querySelectorAll('[aria-label="节点运行状态"]')) {
@@ -553,10 +554,12 @@ export async function testDashboardRuntime(mode, preview = false) {
     if (panel()) {
       assert(panel().querySelectorAll(".a-dash-dial-svg").length === 3, "panel dial gauges missing");
     }
-    const statSummary = traffic().querySelector('[data-refresh-key="月累计流量"]');
-    assert(Math.abs(statSummary.querySelector(".a-dash-ledger-head").getBoundingClientRect().left - statSummary.querySelector(".a-dash-ledger-duplex").getBoundingClientRect().left) < 1, "monthly traffic and direction counters are not aligned");
-    assert(Math.abs(statSummary.querySelector(".a-dash-ledger-head").getBoundingClientRect().left - traffic().querySelector("h2").getBoundingClientRect().left) < 1, "traffic summary ignores the card content edge");
-    assert(Math.abs(traffic().querySelector("[name=traffic_month]").getBoundingClientRect().bottom - [...traffic().querySelectorAll("button")].find((b) => b.textContent === "流量明细").getBoundingClientRect().bottom) < 1, "month and detail controls are not aligned");
+    if (traffic()) {
+      const statSummary = traffic().querySelector('[data-refresh-key="月累计流量"]');
+      assert(Math.abs(statSummary.querySelector(".a-dash-ledger-head").getBoundingClientRect().left - statSummary.querySelector(".a-dash-ledger-duplex").getBoundingClientRect().left) < 1, "monthly traffic and direction counters are not aligned");
+      assert(Math.abs(statSummary.querySelector(".a-dash-ledger-head").getBoundingClientRect().left - traffic().querySelector("h2").getBoundingClientRect().left) < 1, "traffic summary ignores the card content edge");
+      assert(Math.abs(traffic().querySelector("[name=traffic_month]").getBoundingClientRect().bottom - [...traffic().querySelectorAll("button")].find((b) => b.textContent === "流量明细").getBoundingClientRect().bottom) < 1, "month and detail controls are not aligned");
+    }
   };
   for (const scale of [90, 100, 110, 135]) {
     document.documentElement.style.fontSize = `${scale}%`;
@@ -578,7 +581,9 @@ export async function testDashboardRuntime(mode, preview = false) {
   const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
   await refresh();
   assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
-  assert(topology().querySelector(".a-topo-single-stage") === stableTopoStage && topology().querySelector("svg.a-topo-conduit-svg") === stableTopoSVG && topology().querySelector('[data-topo-node="tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh rebuilt topology stage or lost focused node");
+  assert(topology().querySelector(".a-topo-single-stage") === stableTopoStage, "unchanged refresh rebuilt topology stage");
+  assert(topology().querySelector("svg.a-topo-conduit-svg") === stableTopoSVG, "unchanged refresh rebuilt topology conduit SVG");
+  assert(topology().querySelector('[data-topo-node="tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh lost focused node (after refresh)");
   assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
   assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
   assert(ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");
@@ -676,8 +681,21 @@ export async function testDashboardRuntime(mode, preview = false) {
   assertLayout();
 
   if (mode === "dashboard-mobile") {
+    const mobSwitcher = topology().querySelector(".a-topo-switcher");
+    assert(mobSwitcher && getComputedStyle(mobSwitcher).overflowX === "auto", "mobile topology switcher must enable horizontal scrolling");
+    assert(mobSwitcher.getBoundingClientRect().height < 80, "mobile topology switcher should remain a single horizontal row");
     topology().querySelector('[data-topo-dash-view="map"]').click();
     await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg.is-mobile"), "mobile dashboard topology failed to switch to pacific map");
+    const mobHudText = topology().querySelector(".a-dash-topo-map-hud")?.textContent || "";
+    assert(mobHudText.includes("去43.8ms/回45.4ms") && mobHudText.includes("丢包20%") && !mobHudText.includes("均 "), `unexpected mobile single-group HUD: ${mobHudText}`);
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => /^\d+%$/.test(topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || ""), "mobile map reset did not clear selection");
+    const mobDefaultPct = topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || "";
+    assert(Number.parseInt(mobDefaultPct, 10) > 100, `expected mobile single-group map auto-focus >100%, got ${mobDefaultPct}`);
+    topology().querySelector('[data-refresh-key="map-zoom-in"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "mobile map zoom in did not update scale");
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === mobDefaultPct, "mobile map zoom reset did not restore auto-focus");
     assertLayout();
     topology().querySelector('[data-topo-dash-view="flow"]').click();
     await waitFor(() => topology().querySelector(".a-topo-chain-stage") && !topology().querySelector("svg.a-dash-topo-map-svg"), "mobile dashboard topology failed to switch back to flow");
@@ -688,14 +706,38 @@ export async function testDashboardRuntime(mode, preview = false) {
     assert(!topology().querySelector(".a-topo-overview-grid"), "dashboard topology card should not render standalone overview grid");
     assert(topology().querySelector('[data-refresh-key="open-topology-page"]')?.getAttribute("href") === "#topology", "dashboard topology detail link missing");
 
-    // Toggle homepage topology between flow and Pacific map, verify zoom & inspect sync + persistence
+    // Verify homepage group switcher collapse/expand & persistence
+    topology().querySelector('[data-refresh-key="dash-groups-toggle"]')?.click();
+    await waitFor(() => topology().querySelector(".a-topo-switcher-collapsed") && fixture.uiPrefs.values?.dashboard?.topo_groups_collapsed === true, "homepage group switcher failed to collapse");
+    assertLayout();
+    topology().querySelector('[data-refresh-key="dash-groups-toggle"]')?.click();
+    await waitFor(() => topology().querySelector(".a-topo-switcher") && fixture.uiPrefs.values?.dashboard?.topo_groups_collapsed === false, "homepage group switcher failed to expand");
+    assertLayout();
+
+    // Toggle homepage topology between flow and Pacific map, verify auto-focus, zoom & inspect sync + persistence
     topology().querySelector('[data-topo-dash-view="map"]').click();
     await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg") && fixture.uiPrefs.values?.dashboard?.topo_view_mode === "map", "homepage topology failed to switch to pacific map");
+    const deskHudText = topology().querySelector(".a-dash-topo-map-hud")?.textContent || "";
+    assert(deskHudText.includes("去 43.8ms / 回 45.4ms") && deskHudText.includes("丢包 20%") && !deskHudText.includes("均 "), `unexpected desktop single-group HUD: ${deskHudText}`);
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => /^\d+%$/.test(topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || ""), "homepage map reset did not clear selection");
+    const defaultPct = topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || "";
+    assert(Number.parseInt(defaultPct, 10) > 100, `expected desktop single-group auto-focus >100%, got ${defaultPct}`);
     assertLayout();
     topology().querySelector('[data-refresh-key="map-zoom-in"]')?.click();
     await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "homepage map zoom in did not update scale");
     topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
-    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === "100%", "homepage map zoom reset failed");
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === defaultPct, "homepage map zoom reset did not restore auto-focus");
+    const dragSvg = topology().querySelector("svg.a-dash-topo-map-svg");
+    const dragRect = dragSvg.getBoundingClientRect();
+    const sx = dragRect.left + dragRect.width * 0.5;
+    const sy = dragRect.top + dragRect.height * 0.5;
+    dragSvg.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: sx, clientY: sy }));
+    dragSvg.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, pointerType: "mouse", clientX: sx + 48, clientY: sy + 24 }));
+    dragSvg.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: sx + 48, clientY: sy + 24 }));
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "dragging zoomed map did not pan viewport");
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === defaultPct, "map reset after drag did not restore auto-focus");
     topology().querySelector('[data-topo-dash-view="flow"]').click();
     await waitFor(() => topology().querySelector(".a-topo-chain-stage") && fixture.uiPrefs.values?.dashboard?.topo_view_mode === "flow", "homepage topology failed to restore flow mode");
 
@@ -703,6 +745,11 @@ export async function testDashboardRuntime(mode, preview = false) {
     await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-topo-overview-grid") && topology()?.querySelectorAll(".a-topo-overview-card").length === 3, "standalone topology page did not render overview cards");
     assert(!topology().querySelector('[data-refresh-key="open-topology-page"]'), "standalone topology page should not render duplicate detail link");
     assert(topology().querySelector(".a-topo-domain-bar") && topology().querySelector('[data-topo-domain-btn="domain:multihop"]'), "standalone domain filter bar missing multi-hop domain");
+    const tokyoCard = topology().querySelector('.a-topo-overview-card[data-group-name="东京香港专线"]');
+    assert(tokyoCard?.querySelector(":scope > .a-topo-remark")?.textContent === "主用低延迟专线", "overview remark must render directly under overview card head");
+    assert(tokyoCard?.querySelector(".a-topo-mini-hop")?.textContent.startsWith("⇄ "), "bidirectional mini-hop button missing ⇄ prefix");
+    const extCard = topology().querySelector('.a-topo-overview-card[data-group-name="新加坡外部测速"]');
+    assert(extCard?.querySelector(".a-topo-mini-hop")?.textContent.startsWith("→ "), "unidirectional mini-hop button missing → prefix");
     assertLayout();
 
     // Test standalone Flow comparison view + inline inspect strip
@@ -712,10 +759,12 @@ export async function testDashboardRuntime(mode, preview = false) {
     await waitFor(() => topology().querySelector('.a-topo-flow-group-card[data-group-name="东京香港专线"] .a-topo-inspect')?.textContent.includes("东京 · JP-03"), "flow comparison inline inspect strip failed");
     assertLayout();
 
-    // Test standalone Fleet Pacific Map view + entity inspection + domain filtering
+    // Test standalone Pacific Map view (defaults to single-link centered focus + optional multi-group compare) + entity inspection + domain filtering
     topology().querySelector('[data-topo-view-btn="map"]').click();
-    await waitFor(() => topology().querySelector(".a-topo-fleet-map-panel svg.a-dash-topo-map-svg"), "standalone topology did not render fleet pacific map");
-    topology().querySelector('.a-topo-fleet-map-panel [data-topo-entity^="probe:"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-fleet-map-panel svg.a-dash-topo-map-svg"), "standalone topology did not render map panel");
+    topology().querySelector('[data-refresh-key="fleet-map-compare"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="fleet-map-compare"]')?.getAttribute("aria-selected") === "true", "failed to toggle multi-group map compare");
+    topology().querySelector('.a-topo-fleet-map-panel [data-topo-entity^="probe:"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await waitFor(() => topology().querySelector('[data-refresh-key="topo-map-inspect"] [data-refresh-key="map-focus-group"]'), "fleet map click did not update inspect action strip");
     topology().querySelector('[data-topo-domain-btn="domain:multihop"]').click();
     await waitFor(() => topology().querySelector('[data-topo-domain-btn="domain:multihop"]')?.getAttribute("aria-pressed") === "true" && fixture.uiPrefs.values?.topology?.domain_group === "domain:multihop", "domain filter did not persist");

@@ -22395,6 +22395,7 @@
                   },
                   "dashboard": {
                     "topo_group": "example",
+                    "topo_groups_collapsed": false,
                     "topo_show_history": false,
                     "topo_view_mode": "flow",
                     "traffic_month": "example",
@@ -22608,12 +22609,15 @@
                       },
                       "dashboard": {
                         "additionalProperties": false,
-                        "maxProperties": 7,
+                        "maxProperties": 8,
                         "minProperties": 1,
                         "properties": {
                           "topo_group": {
                             "maxLength": 40,
                             "type": "string"
+                          },
+                          "topo_groups_collapsed": {
+                            "type": "boolean"
                           },
                           "topo_show_history": {
                             "type": "boolean"

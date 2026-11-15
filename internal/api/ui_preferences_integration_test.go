@@ -118,10 +118,10 @@ func TestAccountUIPreferences(t *testing.T) {
 	}
 	// Verify all dashboard and topology selectable options persist, isolate per account, restore across sessions, and reject invalid values.
 	dashPref := patch(alice, map[string]any{
-		"dashboard": map[string]any{"topo_group": "亚太核心", "topo_view_mode": "map", "topo_show_history": true},
+		"dashboard": map[string]any{"topo_group": "亚太核心", "topo_view_mode": "map", "topo_show_history": true, "topo_groups_collapsed": true},
 		"topology":  map[string]any{"view_mode": "focus", "domain_group": "domain:apac", "selected_group": "核心互联", "focus_viz": "map", "status_filter": "abnormal", "sort_by": "latency_desc", "metric_dir": "forward"},
 	}, 4, 200)
-	if gotDash := dashPref.Values["dashboard"]; string(gotDash["topo_group"]) != `"亚太核心"` || string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_show_history"]) != "true" {
+	if gotDash := dashPref.Values["dashboard"]; string(gotDash["topo_group"]) != `"亚太核心"` || string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_show_history"]) != "true" || string(gotDash["topo_groups_collapsed"]) != "true" {
 		t.Fatalf("dashboard topology selectable options did not save: %+v", dashPref)
 	}
 	if gotTopo := dashPref.Values["topology"]; string(gotTopo["view_mode"]) != `"focus"` || string(gotTopo["domain_group"]) != `"domain:apac"` || string(gotTopo["selected_group"]) != `"核心互联"` || string(gotTopo["focus_viz"]) != `"map"` || string(gotTopo["status_filter"]) != `"abnormal"` || string(gotTopo["sort_by"]) != `"latency_desc"` || string(gotTopo["metric_dir"]) != `"forward"` {
@@ -131,7 +131,7 @@ func TestAccountUIPreferences(t *testing.T) {
 		t.Fatal("dashboard/topology options leaked across accounts")
 	}
 	gotDevice := read(device)
-	if gotDash := gotDevice.Values["dashboard"]; string(gotDash["topo_group"]) != `"亚太核心"` || string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_show_history"]) != "true" {
+	if gotDash := gotDevice.Values["dashboard"]; string(gotDash["topo_group"]) != `"亚太核心"` || string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_show_history"]) != "true" || string(gotDash["topo_groups_collapsed"]) != "true" {
 		t.Fatalf("dashboard selectable options did not restore across client session: %+v", gotDash)
 	}
 	if gotTopo := gotDevice.Values["topology"]; string(gotTopo["view_mode"]) != `"focus"` || string(gotTopo["domain_group"]) != `"domain:apac"` || string(gotTopo["selected_group"]) != `"核心互联"` || string(gotTopo["focus_viz"]) != `"map"` || string(gotTopo["status_filter"]) != `"abnormal"` || string(gotTopo["sort_by"]) != `"latency_desc"` || string(gotTopo["metric_dir"]) != `"forward"` {

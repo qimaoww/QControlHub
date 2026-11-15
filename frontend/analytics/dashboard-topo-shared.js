@@ -102,36 +102,34 @@ export function isProbeUnreachable(probe) {
   return false;
 }
 
-const CIRCLED_HOP_NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
-
 export function buildProbePillLabel(probe, compact = false, dense = false, metricDir = null) {
   if (!probe) return "—";
   const dirMode = metricDir || probe.metricDir || "both";
-  const idx = Number(probe.hopIndex);
-  const prefix = probe.isMultiHop && Number.isFinite(idx) && idx >= 0
-    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
-    : "";
+  const prefix = "";
   if (probe.running) return `${prefix}探测中…`;
   if (probe.unavailableReverse || (dirMode === "reverse" && !probe.bidirectional)) return `${prefix}单向`;
   if (isProbeUnreachable(probe)) {
+    if (compact) return `${prefix}不可达`;
     return probe.lossPercent != null && probe.lossPercent >= 100
       ? `${prefix}不可达 · 100%`
       : `${prefix}${probe.metricLabel || "不可达"}`;
   }
-  const slash = dense ? "/" : " / ";
+  const slash = compact || dense ? "/" : " / ";
   const hasPrimary = probe.latencyMS != null && Number.isFinite(Number(probe.latencyMS));
   const hasRev = dirMode === "both" && Boolean(probe.bidirectional) && probe.revLatencyMS != null && Number.isFinite(Number(probe.revLatencyMS));
   let rtt = "";
   if (dirMode === "reverse") {
     if (!hasPrimary) return `${prefix}${probe.metricLabel || "待采样"}`;
-    rtt = compact ? formatMsCompact(probe.latencyMS) : `回 ${formatMsCompact(probe.latencyMS)}`;
+    rtt = compact ? `回${formatMsCompact(probe.latencyMS)}` : `回 ${formatMsCompact(probe.latencyMS)}`;
   } else if (dirMode === "forward") {
     if (!hasPrimary) return `${prefix}${probe.metricLabel || "待采样"}`;
-    rtt = compact || !probe.bidirectional ? formatMsCompact(probe.latencyMS) : `去 ${formatMsCompact(probe.latencyMS)}`;
+    rtt = compact ? (probe.bidirectional ? `去${formatMsCompact(probe.latencyMS)}` : formatMsCompact(probe.latencyMS)) : (!probe.bidirectional ? formatMsCompact(probe.latencyMS) : `去 ${formatMsCompact(probe.latencyMS)}`);
   } else if (probe.bidirectional && (hasPrimary || hasRev)) {
-    const f = hasPrimary ? formatMsCompact(probe.latencyMS) : "×";
-    const r = hasRev ? formatMsCompact(probe.revLatencyMS) : "×";
-    rtt = compact ? f : `${f}${slash}${r}`;
+    const fKnown = hasPrimary || probe.fwdLossPercent != null;
+    const rKnown = hasRev || probe.revLossPercent != null;
+    const f = hasPrimary ? formatMsCompact(probe.latencyMS) : (fKnown ? "×" : "—");
+    const r = hasRev ? formatMsCompact(probe.revLatencyMS) : (rKnown ? "×" : "");
+    rtt = dense || !r ? f : `${f}${slash}${r}`;
   } else if (hasPrimary) {
     rtt = formatMsCompact(probe.latencyMS);
   } else {
@@ -145,10 +143,7 @@ export function buildProbePillLabel(probe, compact = false, dense = false, metri
 
 export function buildProbeShortAlertLabel(probe) {
   if (!probe) return "异常";
-  const idx = Number(probe.hopIndex);
-  const prefix = probe.isMultiHop && Number.isFinite(idx) && idx >= 0
-    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
-    : "";
+  const prefix = "";
   if (probe.running) return `${prefix}探测中…`;
   if (isProbeUnreachable(probe)) return `${prefix}不可达`;
   if (probe.lossPercent != null && probe.lossPercent > 0) {
@@ -177,10 +172,7 @@ export function selectTopAmbientBadProbeIDs(probeLinks, { includeExternal = true
 }
 
 export function buildBidirectionalPillLines(hop, metricDir = "both") {
-  const idx = Number(hop?.hopIndex);
-  const prefix = hop?.isMultiHop && Number.isFinite(idx) && idx >= 0
-    ? `${CIRCLED_HOP_NUMS[idx] || `${idx + 1}.`} `
-    : "";
+  const prefix = "";
   const fmtPct = (v) => Number(v).toFixed(Number(v) % 1 ? 1 : 0);
 
   if (hop?.running) {
@@ -264,6 +256,7 @@ export function renderHopConduitSVG({
   tone = "",
   metricDir = "both",
   vertical = false,
+  allowMotion = true,
 } = {}) {
   const showFwd = metricDir !== "reverse";
   const showRev = bidirectional && metricDir !== "forward";
@@ -276,45 +269,115 @@ export function renderHopConduitSVG({
     "aria-hidden": "true",
   });
 
-  const drawLine = (x1, y1, x2, y2, dirTone, reverseDir = false) => {
+  const drawLine = (x1, y1, x2, y2, dir, dirTone, reverseDir = false) => {
     const pal = tonePalette(dirTone);
-    const isBad = dirTone === "bad";
-    const dash = running ? "4 3" : isBad ? "3 3" : null;
+    const isUnreach = Boolean(dir?.available && (!dir.reached || (dir.lossPercent ?? 0) >= 100));
+    const isBad = dirTone === "bad" || isUnreach;
+    const isWarn = dirTone === "warn" || (dir?.lossPercent != null && dir.lossPercent > 0);
+    const hasLiveFlow = !running && !isUnreach && Boolean(dir?.reached) && dir?.avgMS != null;
+
+    const sx = reverseDir ? x2 : x1;
+    const sy = reverseDir ? y2 : y1;
+    const ex = reverseDir ? x1 : x2;
+    const ey = reverseDir ? y1 : y2;
+
+    // Subtle precision conduit rail
     svg.append(
       createSVGEl("line", {
-        x1: x1.toFixed(1),
-        y1: y1.toFixed(1),
-        x2: x2.toFixed(1),
-        y2: y2.toFixed(1),
-        stroke: pal.stroke,
-        "stroke-width": isBad ? "1.9" : "1.65",
+        x1: sx.toFixed(1),
+        y1: sy.toFixed(1),
+        x2: ex.toFixed(1),
+        y2: ey.toFixed(1),
+        stroke: pal.border,
+        "stroke-width": "2.4",
         "stroke-linecap": "round",
+        opacity: "0.45",
+      }),
+    );
+
+    const dash = running ? "5 5" : isBad ? "3 3" : null;
+    svg.append(
+      createSVGEl("line", {
+        x1: sx.toFixed(1),
+        y1: sy.toFixed(1),
+        x2: ex.toFixed(1),
+        y2: ey.toFixed(1),
+        stroke: pal.stroke,
+        "stroke-width": isBad ? "1.6" : "1.35",
+        "stroke-linecap": "round",
+        opacity: hasLiveFlow ? "0.42" : "0.92",
         ...(dash ? { "stroke-dasharray": dash } : {}),
         class: running ? "a-topo-conduit-animated" : null,
       }),
     );
-    if (!vertical) {
-      const tipX = reverseDir ? x1 : x2;
-      const tailX = reverseDir ? x1 + 5 : x2 - 5;
+
+    if (allowMotion && hasLiveFlow) {
+      const spd = flowSpeedClass(dir.avgMS);
       svg.append(
+        createSVGEl("line", {
+          x1: sx.toFixed(1),
+          y1: sy.toFixed(1),
+          x2: ex.toFixed(1),
+          y2: ey.toFixed(1),
+          stroke: pal.stroke,
+          "stroke-width": "1.9",
+          "stroke-linecap": "round",
+          "stroke-dasharray": isWarn ? "4 16" : "6 14",
+          class: `a-topo-conduit-pulse ${spd}`,
+        }),
+      );
+    }
+
+    // Source terminal port ring
+    svg.append(
+      createSVGEl("circle", {
+        cx: sx.toFixed(1),
+        cy: sy.toFixed(1),
+        r: "2.1",
+        fill: "#ffffff",
+        stroke: pal.stroke,
+        "stroke-width": "1.35",
+      }),
+    );
+
+    // Midpoint break cross when segment is unreachable
+    if (isUnreach && !running) {
+      const mx = (sx + ex) / 2;
+      const my = (sy + ey) / 2;
+      svg.append(
+        createSVGEl("circle", { cx: mx.toFixed(1), cy: my.toFixed(1), r: "4.6", fill: "#ffffff", stroke: pal.border, "stroke-width": "1" }),
         createSVGEl("path", {
-          d: `M${tailX.toFixed(1)} ${(y1 - 3).toFixed(1)} L${tipX.toFixed(1)} ${y1.toFixed(1)} L${tailX.toFixed(1)} ${(y1 + 3).toFixed(1)}`,
+          d: `M${(mx - 2.1).toFixed(1)} ${(my - 2.1).toFixed(1)} L${(mx + 2.1).toFixed(1)} ${(my + 2.1).toFixed(1)} M${(mx + 2.1).toFixed(1)} ${(my - 2.1).toFixed(1)} L${(mx - 2.1).toFixed(1)} ${(my + 2.1).toFixed(1)}`,
           fill: "none",
           stroke: pal.stroke,
-          "stroke-width": "1.6",
+          "stroke-width": "1.35",
+          "stroke-linecap": "round",
+        }),
+      );
+    }
+
+    if (!vertical) {
+      const tipX = ex;
+      const tailX = reverseDir ? ex + 4.8 : ex - 4.8;
+      svg.append(
+        createSVGEl("path", {
+          d: `M${tailX.toFixed(1)} ${(ey - 2.9).toFixed(1)} L${tipX.toFixed(1)} ${ey.toFixed(1)} L${tailX.toFixed(1)} ${(ey + 2.9).toFixed(1)}`,
+          fill: "none",
+          stroke: pal.stroke,
+          "stroke-width": "1.55",
           "stroke-linecap": "round",
           "stroke-linejoin": "round",
         }),
       );
     } else {
-      const tipY = reverseDir ? y1 : y2;
-      const tailY = reverseDir ? y1 + 4.5 : y2 - 4.5;
+      const tipY = ey;
+      const tailY = reverseDir ? ey + 4.5 : ey - 4.5;
       svg.append(
         createSVGEl("path", {
-          d: `M${(x1 - 3).toFixed(1)} ${tailY.toFixed(1)} L${x1.toFixed(1)} ${tipY.toFixed(1)} L${(x1 + 3).toFixed(1)} ${tailY.toFixed(1)}`,
+          d: `M${(ex - 2.9).toFixed(1)} ${tailY.toFixed(1)} L${ex.toFixed(1)} ${tipY.toFixed(1)} L${(ex + 2.9).toFixed(1)} ${tailY.toFixed(1)}`,
           fill: "none",
           stroke: pal.stroke,
-          "stroke-width": "1.6",
+          "stroke-width": "1.55",
           "stroke-linecap": "round",
           "stroke-linejoin": "round",
         }),
@@ -324,25 +387,25 @@ export function renderHopConduitSVG({
 
   if (vertical) {
     if (showFwd && showRev) {
-      drawLine(14, 3, 14, 33, fwdTone, false);
-      drawLine(26, 3, 26, 33, revTone, true);
+      drawLine(14, 4, 14, 32, forward, fwdTone, false);
+      drawLine(26, 4, 26, 32, reverse, revTone, true);
     } else if (showFwd) {
-      drawLine(20, 3, 20, 33, fwdTone, false);
+      drawLine(20, 4, 20, 32, forward, fwdTone, false);
     } else if (showRev) {
-      drawLine(20, 3, 20, 33, revTone, true);
+      drawLine(20, 4, 20, 32, reverse, revTone, true);
     }
     return svg;
   }
 
   if (showFwd && showRev) {
-    drawLine(6, 11, 106, 11, fwdTone, false);
-    drawLine(6, 23, 106, 23, revTone, true);
+    drawLine(7, 11, 105, 11, forward, fwdTone, false);
+    drawLine(7, 23, 105, 23, reverse, revTone, true);
   } else if (showFwd) {
-    drawLine(6, 17, 106, 17, fwdTone, false);
+    drawLine(7, 17, 105, 17, forward, fwdTone, false);
   } else if (showRev) {
-    drawLine(6, 17, 106, 17, revTone, true);
+    drawLine(7, 17, 105, 17, reverse, revTone, true);
   } else {
-    drawLine(6, 17, 106, 17, "", false);
+    drawLine(7, 17, 105, 17, null, "", false);
   }
   return svg;
 }
@@ -991,18 +1054,21 @@ export function extractCityClusterLabel(members) {
   return region?.name || rawCity;
 }
 
-export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, scaleX = 1, scaleY = 1, offsetX = 0, offsetY = 0 } = {}) {
+export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, scaleX = 1, scaleY = 1, offsetX = 0, offsetY = 0, worldWrapSpan = 0, viewportWidth = PACIFIC_MAP_BOUNDS.width } = {}) {
+  const wrapSpan = worldWrapSpan > 0 ? Number(worldWrapSpan) : 0;
+  const wrapMod = (v) => (wrapSpan > 0 ? ((v % wrapSpan) + wrapSpan) % wrapSpan : v);
   const items = [];
   let unmatchedIdx = 0;
   for (const node of (nodes || [])) {
     const precheck = resolveNodeGeoPoint(node, 0);
     const geo = precheck.matched ? precheck : resolveNodeGeoPoint(node, unmatchedIdx++);
-    const sx = offsetX + geo.x * scaleX;
-    const sy = offsetY + geo.y * scaleY;
+    const rawWx = geo.x * scaleX;
+    const wx = wrapMod(rawWx);
+    const wy = geo.y * scaleY;
     const cityKey = geo.matched
       ? (geo.source === "city" ? `city:${geo.label}` : `country:${geo.country}:${Math.round(geo.x)}:${Math.round(geo.y)}`)
       : `unmatched:${node.id}`;
-    items.push({ node, geo, geoX: sx, geoY: sy, cityKey });
+    items.push({ node, geo, worldX: wx, worldY: wy, cityKey });
   }
 
   const n = items.length;
@@ -1011,7 +1077,9 @@ export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, s
   const sameCityEdge = (a, b) => {
     if (!a.geo.matched || !b.geo.matched) return false;
     if (a.cityKey === b.cityKey) return true;
-    return Math.hypot(a.geoX - b.geoX, a.geoY - b.geoY) < radiusPx;
+    const rawDx = Math.abs(a.worldX - b.worldX);
+    const dx = wrapSpan > 0 ? Math.min(rawDx, Math.abs(wrapSpan - rawDx)) : rawDx;
+    return Math.hypot(dx, a.worldY - b.worldY) < radiusPx;
   };
 
   for (let i = 0; i < n; i++) {
@@ -1039,8 +1107,20 @@ export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, s
       if (aOn !== bOn) return aOn - bOn;
       return String(a.node.id).localeCompare(String(b.node.id));
     });
-    const avgX = members.reduce((s, m) => s + m.geoX, 0) / members.length;
-    const avgY = members.reduce((s, m) => s + m.geoY, 0) / members.length;
+    const refWx = members[0].worldX;
+    const unwrappedSumX = members.reduce((s, m) => {
+      if (wrapSpan <= 0) return s + m.worldX;
+      const d = ((((m.worldX - refWx) % wrapSpan) + wrapSpan * 1.5) % wrapSpan) - wrapSpan * 0.5;
+      return s + refWx + d;
+    }, 0);
+    const avgWorldX = wrapMod(unwrappedSumX / members.length);
+    const avgWorldY = members.reduce((s, m) => s + m.worldY, 0) / members.length;
+    let sx = offsetX + avgWorldX;
+    if (wrapSpan > 0) {
+      const k = Math.round((viewportWidth * 0.5 - sx) / wrapSpan);
+      sx += k * wrapSpan;
+    }
+    const sy = offsetY + avgWorldY;
     const key = members.length > 1
       ? entityKey.cluster(members.map((m) => m.node.id))
       : entityKey.node(members[0].node.id);
@@ -1051,10 +1131,12 @@ export function clusterTopologyNodes(nodes, { radiusPx = CO_LOCATED_RADIUS_PX, s
       primary: members[0],
       members,
       label,
-      geoX: avgX,
-      geoY: avgY,
-      x: avgX,
-      y: avgY,
+      worldX: avgWorldX,
+      worldY: avgWorldY,
+      geoX: sx,
+      geoY: sy,
+      x: sx,
+      y: sy,
     };
   });
 }
