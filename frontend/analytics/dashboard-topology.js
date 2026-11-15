@@ -23,21 +23,17 @@ import {
   formatLoss,
   formatMs,
   formatMsCompact,
-  isProbeRunning as isTopoProbeRunning,
   matchesActiveSelection,
   reconcileSelectionKey,
-  renderHopConduitSVG,
   renderProbeHistoryChart,
   summarizeGroupMetricLine,
   tonePalette,
 } from "./dashboard-topo-shared.js";
 
 import { listen, patch } from "./live-dom.js";
-import { nodeRegionFlag } from "./node-region.js";
 import { badge, button, empty, muted, node, notice, section, table } from "./ui.js";
 
-const VALID_DASH_VIEW_MODES = new Set(["flow", "map"]);
-const VALID_TOPO_VIEW_MODES = new Set(["overview", "flow", "map", "focus"]);
+const VALID_TOPO_VIEW_MODES = new Set(["map", "focus"]);
 const VALID_TOPO_DOMAINS = new Set([
   "all",
   "domain:multihop",
@@ -47,7 +43,6 @@ const VALID_TOPO_DOMAINS = new Set([
   "domain:cross",
   "domain:external",
 ]);
-const VALID_TOPO_FOCUS_VIZ = new Set(["flow", "map"]);
 const VALID_TOPO_FILTERS = new Set(["all", "abnormal", "running", "multihop", "paused"]);
 const VALID_TOPO_SORTS = new Set(["default", "abnormal", "latency_desc", "loss_desc", "name_asc"]);
 const VALID_TOPO_DIRS = new Set(["both", "forward", "reverse"]);
@@ -116,34 +111,29 @@ export function createDashboardTopologySection(ctx, {
 
   // Dashboard single-group preferences (page = "dashboard")
   let dashGroupName = "";
-  let dashViewMode = "flow";
   let dashShowHistory = false;
   let dashGroupsCollapsed = null;
   let dashGroupTouched = false;
-  let dashViewTouched = false;
   let dashHistoryTouched = false;
   let dashGroupsCollapsedTouched = false;
 
   // Standalone #topology workspace preferences (page = "topology")
-  let topoViewMode = "overview";
+  let topoViewMode = "map";
   let topoDomainGroup = "all";
   let topoSelectedGroup = "";
-  let topoFocusViz = "flow";
   let topoStatusFilter = "all";
   let topoSortBy = "default";
   let topoMetricDir = "both";
   let topoViewTouched = false;
   let topoDomainTouched = false;
   let topoGroupTouched = false;
-  let topoFocusVizTouched = false;
   let topoFilterTouched = false;
   let topoSortTouched = false;
   let topoDirTouched = false;
 
   // Ephemeral inspection & map viewport state (never persisted)
   let focusedItemKey = "";
-  let flowInspectKey = ""; // `${group.id}::node:${idx}` or `${group.id}::hop:${idx}` in standalone flow list
-  let topoMapShowAll = false;
+  let topoMapShowAll = true;
   let mapPinnedKey = "";
   let mapHoveredKey = "";
   let mapFocusedTagKey = "";
@@ -199,10 +189,6 @@ export function createDashboardTopologySection(ctx, {
         focusedItemKey = "";
         changed = true;
       }
-      if (!dashViewTouched && VALID_DASH_VIEW_MODES.has(saved.topo_view_mode) && saved.topo_view_mode !== dashViewMode) {
-        dashViewMode = saved.topo_view_mode;
-        changed = true;
-      }
       if (!dashHistoryTouched && typeof saved.topo_show_history === "boolean" && saved.topo_show_history !== dashShowHistory) {
         dashShowHistory = saved.topo_show_history;
         changed = true;
@@ -213,15 +199,17 @@ export function createDashboardTopologySection(ctx, {
       }
     } else {
       const saved = ctx.preferences.get("topology") || {};
-      if (!topoViewTouched && VALID_TOPO_VIEW_MODES.has(saved.view_mode) && saved.view_mode !== topoViewMode) {
-        topoViewMode = saved.view_mode;
-        focusedItemKey = "";
-        flowInspectKey = "";
-        mapPinnedKey = "";
-        mapHoveredKey = "";
-        mapFocusedTagKey = "";
-        clearPendingZoomCommit();
-        changed = true;
+      if (!topoViewTouched && saved.view_mode !== undefined) {
+        const nextView = VALID_TOPO_VIEW_MODES.has(saved.view_mode) ? saved.view_mode : "map";
+        if (nextView !== topoViewMode) {
+          topoViewMode = nextView;
+          focusedItemKey = "";
+          mapPinnedKey = "";
+          mapHoveredKey = "";
+          mapFocusedTagKey = "";
+          clearPendingZoomCommit();
+          changed = true;
+        }
       }
       if (!topoDomainTouched && saved.domain_group !== undefined) {
         const nextDomain = normalizeDomainPref(saved.domain_group);
@@ -237,10 +225,6 @@ export function createDashboardTopologySection(ctx, {
       if (!topoGroupTouched && typeof saved.selected_group === "string" && saved.selected_group.length <= 40 && saved.selected_group !== topoSelectedGroup) {
         topoSelectedGroup = saved.selected_group;
         focusedItemKey = "";
-        changed = true;
-      }
-      if (!topoFocusVizTouched && VALID_TOPO_FOCUS_VIZ.has(saved.focus_viz) && saved.focus_viz !== topoFocusViz) {
-        topoFocusViz = saved.focus_viz;
         changed = true;
       }
       if (!topoFilterTouched && VALID_TOPO_FILTERS.has(saved.status_filter) && saved.status_filter !== topoStatusFilter) {
@@ -302,20 +286,6 @@ export function createDashboardTopologySection(ctx, {
     if (changed) paint(true);
   };
 
-  const setDashboardViewMode = (mode) => {
-    const normalized = mode === "map" ? "map" : "flow";
-    dashViewTouched = true;
-    const changed = dashViewMode !== normalized;
-    dashViewMode = normalized;
-    mapHoveredKey = "";
-    mapFocusedTagKey = "";
-    if (changed) {
-      clearPendingZoomCommit();
-      ctx.preferences?.patch?.("dashboard", { topo_view_mode: normalized });
-      paint(true);
-    }
-  };
-
   const toggleDashboardHistory = () => {
     dashHistoryTouched = true;
     dashShowHistory = !dashShowHistory;
@@ -324,7 +294,7 @@ export function createDashboardTopologySection(ctx, {
   };
 
   const setTopoViewMode = (mode, { focusGroupName = null, focusItem = "" } = {}) => {
-    const normalized = VALID_TOPO_VIEW_MODES.has(mode) ? mode : "overview";
+    const normalized = mode === "focus" ? "focus" : "map";
     const patchFields = {};
     topoViewTouched = true;
     if (topoViewMode !== normalized) {
@@ -340,7 +310,6 @@ export function createDashboardTopologySection(ctx, {
       }
     }
     focusedItemKey = focusItem || "";
-    flowInspectKey = "";
     mapPinnedKey = "";
     mapHoveredKey = "";
     mapFocusedTagKey = "";
@@ -363,7 +332,6 @@ export function createDashboardTopologySection(ctx, {
       mapHoveredKey = "";
       mapFocusedTagKey = "";
       focusedItemKey = "";
-      flowInspectKey = "";
       mapZoomCustom = false;
       mapZoomScopeSig = "";
       clearPendingZoomCommit();
@@ -389,20 +357,6 @@ export function createDashboardTopologySection(ctx, {
     if (changed) paint(true);
   };
 
-  const setTopoFocusViz = (viz) => {
-    const normalized = viz === "map" ? "map" : "flow";
-    topoFocusVizTouched = true;
-    const changed = topoFocusViz !== normalized;
-    topoFocusViz = normalized;
-    mapHoveredKey = "";
-    mapFocusedTagKey = "";
-    if (changed) {
-      clearPendingZoomCommit();
-      ctx.preferences?.patch?.("topology", { focus_viz: normalized });
-      paint(true);
-    }
-  };
-
   const setTopoFilter = (filter) => {
     if (!VALID_TOPO_FILTERS.has(filter)) return;
     topoFilterTouched = true;
@@ -412,7 +366,6 @@ export function createDashboardTopologySection(ctx, {
       mapPinnedKey = "";
       mapHoveredKey = "";
       mapFocusedTagKey = "";
-      flowInspectKey = "";
       clearPendingZoomCommit();
       ctx.preferences?.patch?.("topology", { status_filter: filter });
       paint(true);
@@ -529,9 +482,8 @@ export function createDashboardTopologySection(ctx, {
     if (document.querySelector("dialog[open], .a-tooltip")) return;
     const scopeEl = cardEl || bodyHost;
     if (!scopeEl.contains(event.target) && !scopeEl.contains(document.activeElement)) return;
-    if (focusedItemKey || flowInspectKey || mapPinnedKey || mapHoveredKey || mapFocusedTagKey) {
+    if (focusedItemKey || mapPinnedKey || mapHoveredKey || mapFocusedTagKey) {
       focusedItemKey = "";
-      flowInspectKey = "";
       mapPinnedKey = "";
       mapHoveredKey = "";
       mapFocusedTagKey = "";
@@ -581,124 +533,6 @@ export function createDashboardTopologySection(ctx, {
     if (dir.stdevMS != null) parts.push(`抖动 ${dir.stdevMS.toFixed(1)} ms`);
     parts.push(`丢包 ${formatLoss(dir.lossPercent)}`);
     return parts.join(" · ");
-  };
-
-  const renderNodeCard = (group, ep, { activeItemKey = focusedItemKey, onSelect = null, keyScope = "chain" } = {}) => {
-    const itemKey = `node:${ep.index}`;
-    const isFocused = activeItemKey === itemKey;
-    const isOfflineOrErr = Boolean(ep.issue);
-    const dotTone = ep.kind === "ext" ? "ok" : isOfflineOrErr ? "bad" : ep.online ? "ok" : "bad";
-    const isLiveOnline = ep.kind !== "ext" && !isOfflineOrErr && ep.online;
-    const flag = ep.kind === "ext" ? null : nodeRegionFlag(ctx, { id: ep.agentID, region_code: ep.region });
-
-    return node("button", {
-      type: "button",
-      className: `a-topo-node-card${ep.kind === "ext" ? " is-ext" : ""}${isOfflineOrErr ? " is-issue" : ""}${isFocused ? " is-active" : ""}`,
-      "data-tone": dotTone,
-      "data-refresh-key": `${keyScope}-node-${group.id}-${ep.index}`,
-      "data-topo-node": ep.agentID || ep.address || String(ep.index),
-      "aria-pressed": isFocused ? "true" : "false",
-      title: `${ep.name}${ep.address ? ` (${ep.address})` : ""}${ep.issue ? ` · ${ep.issue}` : ""}`,
-      onclick: () => (onSelect ? onSelect(itemKey) : toggleFocus(itemKey)),
-    },
-      node("div", { className: "a-topo-node-top" },
-        node("span", { className: `a-topo-dot is-${dotTone}${isLiveOnline && allowMotion() ? " is-live" : ""}`, "aria-hidden": "true" }),
-        flag,
-        !flag && ep.region ? node("span", { className: "a-topo-region-tag" }, ep.region) : null,
-        node("span", { className: "a-topo-role-tag" }, ep.role),
-        ep.shared ? badge("共享", "") : null,
-      ),
-      node("strong", { className: "a-topo-node-name" }, ep.name),
-      node("div", { className: "a-topo-node-sub" },
-        ep.address ? node("span", { className: "a-topo-node-addr" }, ep.address) : null,
-        ep.issue ? node("span", { className: "a-topo-node-issue" }, ep.issue) : null,
-      ),
-    );
-  };
-
-  const renderHopConnector = (group, hop, metricDir, { activeItemKey = focusedItemKey, onSelect = null, keyScope = "chain" } = {}) => {
-    const itemKey = `hop:${hop.hopIndex}`;
-    const isFocused = activeItemKey === itemKey;
-    const showFwd = metricDir !== "reverse";
-    const showRev = hop.bidirectional && metricDir !== "forward";
-
-    const fwdLabel = formatDirBadgeMetric(hop.forward, {
-      prefix: hop.bidirectional ? "去 " : "",
-      running: group.running,
-      ready: hop.ready,
-    });
-    const revLabel = hop.bidirectional
-      ? formatDirBadgeMetric(hop.reverse, {
-          prefix: "回 ",
-          running: group.running,
-          ready: hop.ready,
-        })
-      : (metricDir === "reverse" ? "单向（无回程）" : "");
-
-    const lossText = group.running
-      ? "测量中"
-      : hop.worstLossPercent != null
-        ? (hop.worstLossPercent > 0 ? `丢包 ${formatLoss(hop.worstLossPercent)}` : "0% 丢包")
-        : (hop.unavailableReason || hop.statusLabel);
-
-    const motion = allowMotion();
-    const conduit = renderHopConduitSVG({
-      forward: hop.forward,
-      reverse: hop.reverse,
-      bidirectional: hop.bidirectional,
-      running: group.running,
-      tone: hop.tone,
-      metricDir,
-      vertical: false,
-      allowMotion: motion,
-    });
-    const conduitVert = renderHopConduitSVG({
-      forward: hop.forward,
-      reverse: hop.reverse,
-      bidirectional: hop.bidirectional,
-      running: group.running,
-      tone: hop.tone,
-      metricDir,
-      vertical: true,
-      allowMotion: motion,
-    });
-
-    return node("button", {
-      type: "button",
-      className: `a-topo-hop-slot${isFocused ? " is-active" : ""}`,
-      "data-refresh-key": `${keyScope}-hop-${hop.id}`,
-      "data-tone": hop.tone || "idle",
-      "data-hop-index": String(hop.hopIndex),
-      "aria-pressed": isFocused ? "true" : "false",
-      title: `${hop.from.name} ${hop.bidirectional ? "⇄" : "→"} ${hop.to.name} · ${lossText}`,
-      onclick: () => (onSelect ? onSelect(itemKey) : toggleFocus(itemKey)),
-    },
-      node("div", { className: "a-topo-hop-rail" }, conduit, conduitVert),
-      node("div", { className: "a-topo-hop-pill", "data-tone": hop.tone || "idle" },
-        showFwd ? node("span", { className: "a-topo-hop-rtt" }, fwdLabel) : null,
-        (showRev || metricDir === "reverse") ? node("span", { className: "a-topo-hop-rtt is-rev" }, revLabel) : null,
-        node("span", { className: "a-topo-hop-loss" }, lossText),
-      ),
-    );
-  };
-
-  const renderSingleChainVisual = (group, metricDir, opts = {}) => {
-    const scope = opts.keyScope || "chain";
-    const steps = group.nodes.map((ep, idx) => {
-      const hop = idx < group.hops.length ? group.hops[idx] : null;
-      return node("div", {
-        className: `a-topo-chain-step${hop ? "" : " is-terminal"}`,
-        "data-refresh-key": `${scope}-step-${group.id}-${ep.index}`,
-      },
-        keyed(`slot-node-${ep.index}`, renderNodeCard(group, ep, opts)),
-        hop ? keyed(`slot-hop-${hop.hopIndex}`, renderHopConnector(group, hop, metricDir, opts)) : null,
-      );
-    });
-    return node("div", {
-      className: `a-topo-chain-stage${group.isMultiHop ? " is-multihop" : ""}`,
-      "data-refresh-key": `${scope}-stage-${group.id}`,
-      "data-node-count": String(group.nodes.length),
-    }, ...steps);
   };
 
   const renderInspectStrip = (group, metricDir, { activeItemKey = focusedItemKey, onClear = null, extraActions = [] } = {}) => {
@@ -1569,30 +1403,9 @@ export function createDashboardTopologySection(ctx, {
     );
   };
 
-  const renderVizModeSwitch = (currentViz, onChange, { attrName, keyPrefix, labels = ["链路图", "地理图"] } = {}) => node("div", {
-    className: "a-dash-topo-mode-switch",
-    role: "group",
-    "aria-label": "可视化呈现方式",
-    "data-refresh-key": `${keyPrefix}-viz-switch`,
-  },
-    button(labels[0], () => onChange("flow"), {
-      className: `a-dash-topo-mode-btn${currentViz === "flow" ? " is-active" : ""}`,
-      "aria-pressed": currentViz === "flow" ? "true" : "false",
-      [attrName]: "flow",
-      "data-refresh-key": `${keyPrefix}-viz-flow`,
-    }),
-    button(labels[1], () => onChange("map"), {
-      className: `a-dash-topo-mode-btn${currentViz === "map" ? " is-active" : ""}`,
-      "aria-pressed": currentViz === "map" ? "true" : "false",
-      [attrName]: "map",
-      "data-refresh-key": `${keyPrefix}-viz-map`,
-    }),
-  );
-
   const renderGroupHeaderBar = (group, {
     includeFocusBtn = false,
     includeDelete = false,
-    vizSwitchEl = null,
   } = {}) => {
     const scheduleLabel = group.autoEnabled ? `自动 ${group.autoIntervalSeconds}s` : "已暂停";
     const metaTags = [
@@ -1610,7 +1423,6 @@ export function createDashboardTopologySection(ctx, {
         group.remark ? node("p", { className: "a-muted a-topo-remark" }, group.remark) : null,
       ),
       node("div", { className: "a-actions a-topo-single-ops" },
-        vizSwitchEl,
         ...renderGroupActionButtons(group, { includeFocusBtn, includeDelete }),
       ),
     );
@@ -1618,8 +1430,6 @@ export function createDashboardTopologySection(ctx, {
 
   const renderSingleGroupWorkspace = (group, {
     metricDir = "both",
-    vizMode = "flow",
-    vizSwitchEl = null,
     showHistory = false,
     includeDelete = false,
     gradPrefix = "dash",
@@ -1631,164 +1441,26 @@ export function createDashboardTopologySection(ctx, {
       ? node("p", { className: "a-notice warn", role: "status", "data-refresh-key": `avail-notice-${group.id}` }, group.availability.reason)
       : null;
 
-    let stageBody;
-    if (vizMode === "map") {
-      const singleModel = precomputedMapModel || buildSingleGroupTopologyModel(group, { metricDir });
-      lastSingleMapModel = singleModel;
-      stageBody = buildMapStageElement({
-        model: singleModel,
-        singleGroup: group,
-        scopeKey: `${gradPrefix}-single`,
-        isMobile,
-        width: renderWidth,
-      });
-    } else {
-      lastSingleMapModel = null;
-      stageBody = renderSingleChainVisual(group, metricDir);
-    }
+    const singleModel = precomputedMapModel || buildSingleGroupTopologyModel(group, { metricDir });
+    lastSingleMapModel = singleModel;
+    const stageBody = buildMapStageElement({
+      model: singleModel,
+      singleGroup: group,
+      scopeKey: `${gradPrefix}-single`,
+      isMobile,
+      width: renderWidth,
+    });
 
     return node("div", {
       className: `a-topo-single-stage is-tone-${group.overall.statusBadge.tone || "idle"}`,
       "data-refresh-key": `single-stage-${group.id}`,
       "data-group-name": group.groupName,
     },
-      renderGroupHeaderBar(group, { includeFocusBtn: false, includeDelete, vizSwitchEl }),
+      renderGroupHeaderBar(group, { includeFocusBtn: false, includeDelete }),
       availNotice,
       stageBody,
       renderInspectStrip(group, metricDir),
       showHistory ? renderHistorySection(group, metricDir, gradPrefix) : null,
-    );
-  };
-
-  const renderOverviewCard = (group) => {
-    const tone = group.overall.statusBadge.tone || "idle";
-    const metricLine = summarizeGroupMetricLine(group, topoMetricDir);
-    const sampledText = group.overall.sampledAt ? date(group.overall.sampledAt) : "待采样";
-
-    const miniChainItems = [];
-    group.nodes.forEach((ep, idx) => {
-      miniChainItems.push(node("span", {
-        className: `a-topo-mini-node${ep.issue ? " is-issue" : ""}`,
-        title: `${ep.name}${ep.address ? ` (${ep.address})` : ""}${ep.issue ? ` · ${ep.issue}` : ""}`,
-      },
-        node("span", { className: `a-topo-dot is-${ep.issue ? "bad" : ep.online ? "ok" : "bad"}`, "aria-hidden": "true" }),
-        ep.name,
-      ));
-      if (idx < group.hops.length) {
-        const hop = group.hops[idx];
-        const dirPrefix = topoMetricDir === "reverse"
-          ? "← "
-          : (topoMetricDir === "forward" || !hop.bidirectional)
-            ? "→ "
-            : "⇄ ";
-        let hopMetric = "";
-        if (topoMetricDir === "reverse") {
-          hopMetric = hop.bidirectional
-            ? formatDirBadgeMetric(hop.reverse, { running: group.running, ready: hop.ready })
-            : "单向";
-        } else if (topoMetricDir === "forward" || !hop.bidirectional) {
-          hopMetric = formatDirBadgeMetric(hop.forward, { running: group.running, ready: hop.ready });
-        } else if (group.running && !hop.forward?.available && !hop.reverse?.available) {
-          hopMetric = "探测中";
-        } else if (!hop.ready && !hop.forward?.available && !hop.reverse?.available) {
-          hopMetric = "暂不可用";
-        } else if (!hop.forward?.available && !hop.reverse?.available) {
-          hopMetric = "待采样";
-        } else if (hop.forward?.avgMS == null && hop.reverse?.avgMS == null) {
-          hopMetric = hop.statusLabel || "不可达";
-        } else {
-          const fwdStr = hop.forward?.avgMS != null
-            ? formatMsCompact(hop.forward.avgMS)
-            : (hop.forward?.available ? "×" : "—");
-          const revStr = hop.reverse?.avgMS != null
-            ? formatMsCompact(hop.reverse.avgMS)
-            : (hop.reverse?.available ? "×" : "—");
-          hopMetric = `${fwdStr}/${revStr}${hop.worstLossPercent > 0 ? ` · ${formatLoss(hop.worstLossPercent)}` : ""}`;
-        }
-        miniChainItems.push(button(
-          `${dirPrefix}${hopMetric || hop.statusLabel}`,
-          () => setTopoViewMode("focus", { focusGroupName: group.groupName, focusItem: `hop:${hop.hopIndex}` }),
-          {
-            className: "a-topo-mini-hop",
-            "data-tone": hop.tone || "idle",
-            "data-refresh-key": `mini-hop-${hop.id}`,
-            title: `${hop.from.name} ${hop.bidirectional ? "⇄" : "→"} ${hop.to.name} · 点击聚焦分析`,
-          },
-        ));
-      }
-    });
-
-    return node("article", {
-      className: "a-card a-topo-overview-card",
-      "data-refresh-key": `overview-card-${group.id}`,
-      "data-group-name": group.groupName,
-      "data-tone": tone,
-    },
-      node("div", { className: "a-topo-overview-head" },
-        node("div", { className: "a-topo-overview-title" },
-          node("div", { className: "a-topo-single-name-row" },
-            node("h3", {}, group.groupName),
-            badge(group.overall.statusBadge.label, group.overall.statusBadge.tone),
-            badge(groupKindBadgeText(group), ""),
-          ),
-        ),
-        node("div", { className: "a-topo-overview-kpi" },
-          node("strong", { className: `a-topo-overview-metric is-${tone}` }, metricLine),
-          muted(`${group.autoEnabled ? `自动 ${group.autoIntervalSeconds}s` : "已暂停"} · ${sampledText}`),
-        ),
-      ),
-      group.remark ? node("p", { className: "a-muted a-topo-remark" }, group.remark) : null,
-      node("div", { className: "a-topo-mini-chain" }, ...miniChainItems),
-      (!group.availability.ready && group.availability.reason) || group.overall.error
-        ? node("p", { className: "a-topo-overview-alert" }, group.availability.reason || group.overall.error)
-        : null,
-      node("div", { className: "a-topo-overview-foot a-actions" },
-        ...renderGroupActionButtons(group, { includeFocusBtn: true, includeDelete: true }),
-      ),
-    );
-  };
-
-  const renderFlowComparisonCard = (group) => {
-    const tone = group.overall.statusBadge.tone || "idle";
-    const prefix = `${group.id}::`;
-    const activeItemKey = flowInspectKey.startsWith(prefix) ? flowInspectKey.slice(prefix.length) : "";
-    const selectItem = (itemKey) => {
-      const fullKey = `${prefix}${itemKey}`;
-      flowInspectKey = flowInspectKey === fullKey ? "" : fullKey;
-      paint(true);
-    };
-    const clearItem = () => {
-      flowInspectKey = "";
-      paint(true);
-    };
-
-    return node("article", {
-      className: "a-card a-topo-flow-group-card",
-      "data-refresh-key": `flow-group-card-${group.id}`,
-      "data-group-name": group.groupName,
-      "data-tone": tone,
-    },
-      renderGroupHeaderBar(group, { includeFocusBtn: true, includeDelete: true }),
-      (!group.availability.ready && group.availability.reason) || group.overall.error
-        ? node("p", { className: "a-topo-overview-alert" }, group.availability.reason || group.overall.error)
-        : null,
-      renderSingleChainVisual(group, topoMetricDir, {
-        activeItemKey,
-        onSelect: selectItem,
-        keyScope: "flowlist",
-      }),
-      activeItemKey
-        ? renderInspectStrip(group, topoMetricDir, {
-            activeItemKey,
-            onClear: clearItem,
-            extraActions: [
-              button("进入聚焦分析", () => setTopoViewMode("focus", { focusGroupName: group.groupName, focusItem: activeItemKey }), {
-                className: "a-button a-topo-mini-btn",
-                "data-refresh-key": `flow-deep-${group.id}`,
-              }),
-            ],
-          })
-        : null,
     );
   };
 
@@ -1908,18 +1580,6 @@ export function createDashboardTopologySection(ctx, {
       "aria-label": "拓扑视图模式",
       "data-refresh-key": "topo-view-switch",
     },
-      button("总览", () => setTopoViewMode("overview"), {
-        className: `a-dash-topo-mode-btn${topoViewMode === "overview" ? " is-active" : ""}`,
-        "aria-pressed": topoViewMode === "overview" ? "true" : "false",
-        "data-topo-view-btn": "overview",
-        "data-refresh-key": "view-overview",
-      }),
-      button("链图", () => setTopoViewMode("flow"), {
-        className: `a-dash-topo-mode-btn${topoViewMode === "flow" ? " is-active" : ""}`,
-        "aria-pressed": topoViewMode === "flow" ? "true" : "false",
-        "data-topo-view-btn": "flow",
-        "data-refresh-key": "view-flow",
-      }),
       button("地图", () => setTopoViewMode("map"), {
         className: `a-dash-topo-mode-btn${topoViewMode === "map" ? " is-active" : ""}`,
         "aria-pressed": topoViewMode === "map" ? "true" : "false",
@@ -2075,10 +1735,6 @@ export function createDashboardTopologySection(ctx, {
     const activeGroup = activeResolution.group;
     lastActiveGroup = activeGroup;
 
-    const showMapCurrently = isStandalonePage
-      ? (topoViewMode === "map" || (topoViewMode === "focus" && topoFocusViz === "map"))
-      : dashViewMode === "map";
-
     // Reconcile local ephemeral focus key if active group changed or element disappeared
     if (activeGroup && focusedItemKey.startsWith("node:")) {
       const idx = Number(focusedItemKey.slice(5));
@@ -2095,11 +1751,11 @@ export function createDashboardTopologySection(ctx, {
       ? buildProbeTopologyModel({ groups: filteredGroups, metricDir: topoMetricDir })
       : null;
     lastFleetModel = fleetMapModel;
-    const precomputedSingleMapModel = (showMapCurrently && !fleetMapModel && activeGroup)
+    const precomputedSingleMapModel = (!fleetMapModel && activeGroup)
       ? buildSingleGroupTopologyModel(activeGroup, { metricDir: isStandalonePage ? topoMetricDir : "both" })
       : null;
     const mapScopeExtra = `${effectiveDomain}:${topoStatusFilter}:${filteredGroups.length}`;
-    if (showMapCurrently) {
+    if (fleetMapModel || precomputedSingleMapModel) {
       ensureMapZoomForScope({
         model: fleetMapModel || precomputedSingleMapModel,
         singleGroup: fleetMapModel ? null : activeGroup,
@@ -2131,25 +1787,22 @@ export function createDashboardTopologySection(ctx, {
     const sig = JSON.stringify([
       isStandalonePage,
       chartWidth,
-      showMapCurrently ? (isMobile ? renderWidth : "desk") : "nomap",
+      isMobile ? renderWidth : "desk",
       isMobile,
-      showMapCurrently ? mapZoom : null,
+      mapZoom,
       nextStatus,
       probesState,
       dashGroupName,
-      dashViewMode,
       dashShowHistory,
       isDashGroupsCollapsed(groups),
       topoViewMode,
       topoMapShowAll,
       effectiveDomain,
       topoSelectedGroup,
-      topoFocusViz,
       topoStatusFilter,
       topoSortBy,
       topoMetricDir,
       focusedItemKey,
-      flowInspectKey,
       mapPinnedKey,
       canExecuteProbes(),
       groups.map((g) => ({
@@ -2183,11 +1836,6 @@ export function createDashboardTopologySection(ctx, {
 
     const topActionNodes = [];
     if (!isStandalonePage && activeGroup) {
-      topActionNodes.push(renderVizModeSwitch(dashViewMode, setDashboardViewMode, {
-        attrName: "data-topo-dash-view",
-        keyPrefix: "dash",
-        labels: ["链路图", "地理图"],
-      }));
       topActionNodes.push(button("历史趋势", toggleDashboardHistory, {
         className: "a-button a-topo-mini-btn",
         "aria-pressed": dashShowHistory ? "true" : "false",
@@ -2233,12 +1881,11 @@ export function createDashboardTopologySection(ctx, {
     }
 
     if (!isStandalonePage) {
-      // Homepage: strictly ONE selected group + ONE link at a time, with collapsible switcher
+      // Homepage: strictly ONE selected group on Pacific map at a time, with collapsible switcher
       bodyChildren.push(renderDashboardGroupSwitcher(groups, activeGroup));
       if (activeGroup) {
         bodyChildren.push(renderSingleGroupWorkspace(activeGroup, {
           metricDir: "both",
-          vizMode: dashViewMode,
           showHistory: dashShowHistory,
           includeDelete: false,
           gradPrefix: "dash",
@@ -2248,9 +1895,7 @@ export function createDashboardTopologySection(ctx, {
         }));
       }
       patchChildren(bodyHost, bodyChildren);
-      if (dashViewMode === "map") {
-        syncLiveMapSelection();
-      }
+      syncLiveMapSelection();
       return;
     }
 
@@ -2282,15 +1927,8 @@ export function createDashboardTopologySection(ctx, {
     if (topoViewMode === "focus") {
       bodyChildren.push(renderGroupSwitcher(filteredGroups, activeGroup, (name) => setTopoSelectedGroup(name), "focus", topoMetricDir));
       if (activeGroup) {
-        const vizSwitchEl = renderVizModeSwitch(topoFocusViz, setTopoFocusViz, {
-          attrName: "data-topo-focus-viz",
-          keyPrefix: "focus",
-          labels: ["链路流图", "地理轨迹"],
-        });
         bodyChildren.push(renderSingleGroupWorkspace(activeGroup, {
           metricDir: topoMetricDir,
-          vizMode: topoFocusViz,
-          vizSwitchEl,
           showHistory: false,
           includeDelete: true,
           gradPrefix: "focus",
@@ -2300,7 +1938,7 @@ export function createDashboardTopologySection(ctx, {
         }));
         bodyChildren.push(renderFocusDetails(activeGroup));
       }
-    } else if (topoViewMode === "map") {
+    } else {
       const mapControls = filteredGroups.length > 1
         ? node("div", {
             className: "a-topo-switcher a-topo-fleet-map-bar",
@@ -2385,22 +2023,10 @@ export function createDashboardTopologySection(ctx, {
           mapInspect,
         ),
       );
-    } else if (topoViewMode === "flow") {
-      bodyChildren.push(node("div", {
-        className: "a-topo-flow-list",
-        "data-refresh-key": "flow-group-list",
-      }, ...filteredGroups.map((g) => renderFlowComparisonCard(g))));
-    } else {
-      bodyChildren.push(node("div", {
-        className: "a-topo-overview-grid",
-        "data-refresh-key": "overview-grid",
-      }, ...filteredGroups.map((g) => renderOverviewCard(g))));
     }
 
     patchChildren(bodyHost, bodyChildren);
-    if (showMapCurrently) {
-      syncLiveMapSelection();
-    }
+    syncLiveMapSelection();
     const sortEl = bodyHost.querySelector('select[name="topo_sort_by"]');
     if (sortEl && document.activeElement !== sortEl && sortEl.value !== topoSortBy) {
       sortEl.value = topoSortBy;
@@ -2435,6 +2061,7 @@ export function createDashboardTopologySection(ctx, {
         topoGroupTouched = true;
         topoSelectedGroup = nextName;
         patchFields.selected_group = nextName;
+        if (!isEdit) topoMapShowAll = false;
       }
       if (!isEdit && topoStatusFilter !== "all") {
         topoFilterTouched = true;
