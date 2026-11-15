@@ -1401,7 +1401,7 @@ strong, b { font-weight: 600; }
 .a-dash-topo-probe-item,
 .a-dash-topo-node,
 .a-dash-topo-dock-chip { cursor: pointer; outline: none; }
-.a-dash-topo-probe-item:focus-visible > .a-dash-topo-probe-pill,
+.a-dash-topo-probe-item:focus-visible .a-dash-topo-probe-pill,
 .a-dash-topo-map-tag:focus-visible > rect.a-dash-topo-card,
 .a-dash-topo-map-tag:focus-visible > circle.a-dash-topo-card,
 .a-dash-topo-dock-chip:focus-visible > rect.a-dash-topo-card {
@@ -1464,68 +1464,154 @@ strong, b { font-weight: 600; }
 .a-dash-topo-chain-total-value { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; font-family: var(--font-ui); pointer-events: none; }
 .a-dash-topo-chain-total-value.is-mobile { font-size: 9.5px; font-weight: 600; }
 .a-dash-topo-ext-sub { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; pointer-events: none; }
+.a-dash-topo-arc-rail,
+.a-dash-topo-arc-wave,
+.a-dash-topo-arc-tip,
 .a-dash-topo-flow-pulse { pointer-events: none; }
+.a-dash-topo-arc-wave,
+.a-dash-topo-arc-tip { display: none; }
 .a-dash-topo-beacon-pulse {
   transform-box: fill-box;
   transform-origin: center;
   pointer-events: none;
 }
-@keyframes a-topo-map-flow {
-  from { stroke-dashoffset: 40; }
-  to { stroke-dashoffset: 0; }
+@keyframes a-topo-arc-draw {
+  0% { stroke-dashoffset: 105; }
+  8% { stroke-dashoffset: 102; }
+  100% { stroke-dashoffset: 0; }
 }
-@keyframes a-topo-map-flow-rev {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: 40; }
+@keyframes a-topo-arc-wave {
+  0% { stroke-dashoffset: 104; stroke-opacity: 0; }
+  5% { stroke-dashoffset: 99; stroke-opacity: 0.96; }
+  44% { stroke-dashoffset: 0; stroke-opacity: 0.98; }
+  62% { stroke-dashoffset: 0; stroke-opacity: 0.92; }
+  91% { stroke-dashoffset: -104; stroke-opacity: 0.28; }
+  100% { stroke-dashoffset: -104; stroke-opacity: 0; }
 }
-@keyframes a-topo-map-warn-breathe {
-  0%, 100% { stroke-opacity: 0.55; }
+@keyframes a-topo-arc-tip {
+  0% { stroke-dashoffset: 6; stroke-opacity: 0; }
+  5% { stroke-dashoffset: 1; stroke-opacity: 0.98; }
+  44% { stroke-dashoffset: -94; stroke-opacity: 0.98; }
+  54% { stroke-dashoffset: -106; stroke-opacity: 0; }
+  100% { stroke-dashoffset: -106; stroke-opacity: 0; }
+}
+@keyframes a-topo-arc-warn-breathe {
+  0%, 100% { stroke-opacity: 0.68; }
   50% { stroke-opacity: 1; }
+}
+@keyframes a-topo-pill-reveal {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
 }
 @keyframes a-dash-topo-radar {
   0% { transform: scale(1); opacity: 0.55; }
   100% { transform: scale(2.15); opacity: 0; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .a-dash-topo-flow-pulse {
-    animation-name: a-topo-map-flow;
-    animation-duration: 1.8s;
-    animation-timing-function: linear;
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-draw-track {
+    stroke-dasharray: 104;
+    animation-name: a-topo-arc-draw;
+    animation-duration: 1.24s;
+    animation-timing-function: cubic-bezier(0.25, 0.72, 0.35, 1);
+    animation-fill-mode: both;
+    animation-iteration-count: 1;
+  }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-draw {
+    stroke-dasharray: 104;
+    animation-name: a-topo-arc-draw;
+    animation-duration: 1.24s;
+    animation-timing-function: cubic-bezier(0.25, 0.72, 0.35, 1);
+    animation-fill-mode: both;
+    animation-iteration-count: 1;
+  }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-draw-track.is-speed-fast,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-draw.is-speed-fast { animation-duration: 1.12s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-draw-track.is-speed-med,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-draw.is-speed-med { animation-duration: 1.40s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-draw-track.is-speed-slow,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-draw.is-speed-slow { animation-duration: 1.72s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-draw-track.is-ambient-track,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-draw.is-ambient-track { animation-duration: 1.54s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-draw-track.is-running,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-draw.is-running { animation-duration: 1.06s; }
+
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-flow-active {
+    stroke-opacity: 0.28;
+    transition: stroke-opacity .24s var(--a-ease-state);
+  }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-rail.is-flow-active.is-ambient-track {
+    stroke-opacity: 0.38;
+  }
+
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave {
+    display: inline;
+    animation-name: a-topo-arc-wave;
+    animation-duration: 2.9s;
+    animation-timing-function: cubic-bezier(0.28, 0.68, 0.34, 1);
+    animation-fill-mode: both;
     animation-iteration-count: infinite;
+    transition: stroke-width .15s var(--a-ease-state), opacity .16s var(--a-ease-state);
   }
-  .a-dash-topo-flow-pulse.is-reverse {
-    animation-name: a-topo-map-flow-rev;
-  }
-  .a-dash-topo-flow-pulse.is-warn {
-    animation-name: a-topo-map-flow, a-topo-map-warn-breathe;
-    animation-duration: 1.75s, 1.6s;
-    animation-timing-function: linear, ease-in-out;
-    animation-iteration-count: infinite, infinite;
-  }
-  .a-dash-topo-flow-pulse.is-warn.is-reverse {
-    animation-name: a-topo-map-flow-rev, a-topo-map-warn-breathe;
-  }
-  .a-dash-topo-flow-pulse.is-speed-fast { animation-duration: 1.15s; }
-  .a-dash-topo-flow-pulse.is-speed-med { animation-duration: 1.75s; }
-  .a-dash-topo-flow-pulse.is-speed-slow { animation-duration: 2.45s; }
-  .a-dash-topo-flow-pulse.is-warn.is-speed-fast { animation-duration: 1.15s, 1.6s; }
-  .a-dash-topo-flow-pulse.is-warn.is-speed-med { animation-duration: 1.75s, 1.6s; }
-  .a-dash-topo-flow-pulse.is-warn.is-speed-slow { animation-duration: 2.45s, 1.6s; }
-  .a-dash-topo-flow-pulse.is-running { animation-duration: 0.9s; }
-  .a-dash-topo-flow-pulse.is-warn.is-running { animation-duration: 0.9s, 1.6s; }
-  .a-dash-topo-probe-running {
-    animation-name: a-topo-map-flow;
-    animation-duration: 1.05s;
-    animation-timing-function: linear;
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip {
+    display: inline;
+    animation-name: a-topo-arc-tip;
+    animation-duration: 2.9s;
+    animation-timing-function: cubic-bezier(0.28, 0.68, 0.34, 1);
+    animation-fill-mode: both;
     animation-iteration-count: infinite;
+    transition: stroke-width .15s var(--a-ease-state), opacity .16s var(--a-ease-state);
   }
-  .a-dash-topo-probe-running.is-reverse {
-    animation-name: a-topo-map-flow-rev;
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave.is-speed-fast,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip.is-speed-fast { animation-duration: 2.3s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave.is-speed-med,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip.is-speed-med { animation-duration: 2.9s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave.is-speed-slow,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip.is-speed-slow { animation-duration: 3.6s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave.is-ambient-wave,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip.is-ambient-wave { animation-duration: 3.25s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave.is-running,
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip.is-running { animation-duration: 2.0s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-wave.is-highlighted { stroke-width: 2.8px; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-arc-tip.is-highlighted { stroke-width: 3.35px; }
+
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal {
+    animation-name: a-topo-pill-reveal;
+    animation-duration: 0.42s;
+    animation-timing-function: var(--a-ease-arrive);
+    animation-fill-mode: both;
+    animation-iteration-count: 1;
   }
-  .a-dash-topo-beacon-pulse {
+
+  :root:not([data-theme-motion="off"]) .is-draw-step-0 { animation-delay: 0s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-1 { animation-delay: 0.18s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-2 { animation-delay: 0.36s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-3 { animation-delay: 0.54s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-4 { animation-delay: 0.72s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-5 { animation-delay: 0.90s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-6 { animation-delay: 1.08s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-7 { animation-delay: 1.26s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-8 { animation-delay: 1.44s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-9 { animation-delay: 1.62s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-10 { animation-delay: 1.80s; }
+  :root:not([data-theme-motion="off"]) .is-draw-step-11 { animation-delay: 1.98s; }
+
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-0 { animation-delay: 0.24s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-1 { animation-delay: 0.42s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-2 { animation-delay: 0.60s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-3 { animation-delay: 0.78s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-4 { animation-delay: 0.96s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-5 { animation-delay: 1.14s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-6 { animation-delay: 1.32s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-7 { animation-delay: 1.50s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-8 { animation-delay: 1.68s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-9 { animation-delay: 1.86s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-10 { animation-delay: 2.04s; }
+  :root:not([data-theme-motion="off"]) .a-dash-topo-pill-reveal.is-draw-step-11 { animation-delay: 2.22s; }
+
+  :root:not([data-theme-motion="off"]) .a-dash-topo-beacon-pulse {
     animation: a-dash-topo-radar 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
-  .a-dash-topo-beacon-pulse.is-running {
+  :root:not([data-theme-motion="off"]) .a-dash-topo-beacon-pulse.is-running {
     animation-duration: 1.4s;
   }
 }

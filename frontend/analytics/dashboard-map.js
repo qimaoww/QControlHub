@@ -825,6 +825,7 @@ function buildStaticOceanLayer(defs, { width, mapHeight, clipId }) {
   const patID = `${clipId}-grid`;
   const gridPat = createSVGEl("pattern", {
     id: patID,
+    "data-refresh-key": "pacific-grid",
     width: "24",
     height: "24",
     patternUnits: "userSpaceOnUse",
@@ -859,7 +860,7 @@ function buildPacificBackdropGroup(defs, { width, mapHeight, clipId, bgTransform
 
   const comp = Math.max(0.3, strokeComp);
   const worldID = `${clipId}-world`;
-  const worldG = createSVGEl("g", { id: worldID });
+  const worldG = createSVGEl("g", { id: worldID, "data-refresh-key": "pacific-world" });
   const graticuleG = createSVGEl("g", {
     fill: "none",
     stroke: BORDER_COLOR,
@@ -1182,55 +1183,64 @@ const clusterHealthTone = (cluster) => {
   return anyIssue ? BAD_COLOR : anyOnline ? OK_COLOR : IDLE_FLOW_COLOR;
 };
 
-function appendPulsePair(pulseLayer, segD, {
+function appendProgressiveWavePair(pulseLayer, segD, {
   pal,
   spd,
+  drawStep = 0,
+  isAmbient = false,
   isWarn = false,
   isRunning = false,
-  isReverse = false,
   peers,
   hl,
   isExternal = false,
   compact = false,
   refreshKey,
 }) {
-  const dirCls = isReverse ? " is-reverse" : "";
+  const stepCls = `is-draw-step-${Math.max(0, Math.min(11, Number(drawStep) || 0))}`;
+  const ambCls = isAmbient ? " is-ambient-wave" : "";
   const warnCls = isWarn ? " is-warn" : "";
   const runCls = isRunning ? " is-running" : "";
-  const pulseW = compact ? 1.85 : 2.2;
-  const coreW = compact ? 0.92 : 1.05;
-  const mainDash = isWarn ? "6 34" : "8 32";
+  const hlCls = hl === true ? " is-highlighted" : "";
+
+  const waveW = compact ? 2.05 : 2.35;
+  const tipW = compact ? 2.55 : 2.9;
+  const baseWaveOp = isAmbient ? "0.78" : (isWarn ? "0.94" : "0.96");
+  const baseTipOp = isAmbient ? "0.86" : "0.98";
 
   pulseLayer.append(
     createSVGEl("path", {
       d: segD,
+      pathLength: "100",
       fill: "none",
-      stroke: pal.pulse,
-      "stroke-width": pulseW.toFixed(2),
-      "stroke-dasharray": mainDash,
+      stroke: pal.stroke,
+      "stroke-width": waveW.toFixed(2),
+      "stroke-dasharray": "104 114",
+      "stroke-dashoffset": "0",
       "stroke-linecap": "round",
       "data-topo-peers": peers.join(" "),
-      "data-base-opacity": isWarn ? "0.90" : "0.92",
-      "data-dim-opacity": "0.18",
-      opacity: hl === false ? "0.18" : (isWarn ? "0.90" : "0.92"),
+      "data-base-opacity": baseWaveOp,
+      "data-dim-opacity": "0.14",
+      opacity: hl === true ? "1" : (hl === false ? "0.14" : baseWaveOp),
       ...(isExternal ? { "data-ext-probe": "1" } : {}),
-      class: `a-dash-topo-flow-pulse ${spd}${dirCls}${warnCls}${runCls}`,
-      "data-refresh-key": `${refreshKey}-main`,
+      class: `a-dash-topo-arc-wave ${spd} ${stepCls}${ambCls}${warnCls}${runCls}${hlCls}`,
+      "data-refresh-key": `${refreshKey}-wave`,
     }),
     createSVGEl("path", {
       d: segD,
+      pathLength: "100",
       fill: "none",
-      stroke: pal.pulseCore || "#ffffff",
-      "stroke-width": coreW.toFixed(2),
-      "stroke-dasharray": "4 36",
+      stroke: pal.pulse,
+      "stroke-width": tipW.toFixed(2),
+      "stroke-dasharray": "6 116",
+      "stroke-dashoffset": "-106",
       "stroke-linecap": "round",
       "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "0.95",
-      "data-dim-opacity": "0.22",
-      opacity: hl === false ? "0.22" : "0.95",
+      "data-base-opacity": baseTipOp,
+      "data-dim-opacity": "0.16",
+      opacity: hl === true ? "1" : (hl === false ? "0.16" : baseTipOp),
       ...(isExternal ? { "data-ext-probe": "1" } : {}),
-      class: `a-dash-topo-flow-pulse is-core ${spd}${dirCls}${warnCls}${runCls}`,
-      "data-refresh-key": `${refreshKey}-core`,
+      class: `a-dash-topo-arc-tip ${spd} ${stepCls}${ambCls}${warnCls}${runCls}${hlCls}`,
+      "data-refresh-key": `${refreshKey}-tip`,
     }),
   );
 }
@@ -1324,6 +1334,7 @@ function renderClusterBeaconElement({
   peers,
   singleMode,
   compact,
+  runningNodeIDs = null,
   pulseLayer,
   beaconLayer,
   helpers,
@@ -1332,6 +1343,7 @@ function renderClusterBeaconElement({
   const cx = cluster.x;
   const cy = cluster.y;
   const anyOnline = cluster.members.some((m) => m.node.isOnline);
+  const anyRunning = Boolean(runningNodeIDs && cluster.members.some((m) => runningNodeIDs.has(m.node.id)));
   const toneColor = clusterHealthTone(cluster);
 
   if (anyOnline && helpers.allowMotion()) {
@@ -1340,13 +1352,14 @@ function renderClusterBeaconElement({
       cy: cy.toFixed(1),
       r: (r + (compact ? 5.5 : 6.8)).toFixed(1),
       fill: "none",
-      stroke: toneColor,
+      stroke: anyRunning ? RUNNING_COLOR : toneColor,
       "stroke-width": compact ? "1" : "1.1",
-      class: "a-dash-topo-beacon-pulse",
+      class: `a-dash-topo-beacon-pulse${anyRunning ? " is-running" : ""}`,
+      "data-refresh-key": `${compact ? "m-" : "map-"}beacon-pulse-${key}`,
       "data-topo-peers": peers.join(" "),
-      "data-base-opacity": "0.42",
+      "data-base-opacity": anyRunning ? "0.62" : "0.42",
       "data-dim-opacity": "0.14",
-      opacity: hl === false ? "0.14" : "0.42",
+      opacity: hl === false ? "0.14" : (anyRunning ? "0.62" : "0.42"),
     }));
   }
 
@@ -1419,6 +1432,7 @@ function renderLinksAndPills({
   pillBoundsBase,
   pillLimitX,
   compact,
+  defs,
   helpers,
   probeLayer,
   pulseLayer,
@@ -1426,6 +1440,25 @@ function renderLinksAndPills({
   pillLayer,
 }) {
   const leaderSegments = [];
+  const chainIdxByProbeID = new Map();
+  (model.probeChains || []).forEach((ch, cIdx) => {
+    (ch.hops || []).forEach((h) => chainIdxByProbeID.set(h.id, cIdx));
+  });
+
+  // In single multi-hop view, keep a shared cycle speed across hops of the same chain
+  // so sequential relay phases stay locked across infinite repetitions.
+  let sharedChainSpeed = "";
+  if (singleMode && model.singleGroup?.isMultiHop) {
+    const lats = model.probeLinks
+      .map((p) => (dirMode === "reverse" && p.bidirectional ? (p.revLatencyMS ?? p.latencyMS) : p.latencyMS))
+      .filter((v) => typeof v === "number" && Number.isFinite(v) && v > 0);
+    const avgHopLat = lats.length ? (lats.reduce((s, v) => s + v, 0) / lats.length) : null;
+    sharedChainSpeed = model.singleGroup.running ? "is-speed-fast" : flowSpeedClass(avgHopLat);
+  }
+
+  const motionOn = helpers.allowMotion();
+  const defsPrefix = helpers.defsPrefix || "a-topo";
+
   const renderOrder = [...model.probeLinks].sort((a, b) => {
     const score = { ok: 1, "": 1, idle: 1, running: 2, warn: 2, bad: 3 };
     return (score[a.tone] || 0) - (score[b.tone] || 0);
@@ -1445,14 +1478,31 @@ function renderLinksAndPills({
     const isBad = effectiveTone === "bad";
     const isWarn = effectiveTone === "warn";
 
-    const baseOpacity = singleMode ? 0.72 : (isBad ? 0.84 : isWarn ? 0.76 : probe.isExternal ? 0.50 : 0.50);
-    const opacity = hl === true ? 1 : hl === false ? 0.28 : baseOpacity;
+    const reverseOnly = dirMode === "reverse" && probe.bidirectional && !probe.unavailableReverse;
+    const hopCount = Math.max(1, Number(probe.hopCount || 1));
+    const hopIndex = Number(probe.hopIndex || 0);
+    const hopSeq = reverseOnly ? Math.max(0, hopCount - 1 - hopIndex) : hopIndex;
+    const chainIdx = chainIdxByProbeID.get(probe.id) ?? 0;
+    const drawStep = singleMode
+      ? Math.min(11, hopCount > 6 ? hopSeq : hopSeq * 2)
+      : Math.min(11, (chainIdx % 5) + hopSeq);
+
+    const activeLat = reverseOnly ? (probe.revLatencyMS ?? probe.latencyMS) : probe.latencyMS;
+    const spd = probeRunning
+      ? "is-speed-fast"
+      : (sharedChainSpeed || flowSpeedClass(activeLat));
+
+    const canWave = motionOn && !fullUnreachable && !isBad && !probe.unavailableReverse;
+    const isAmbientWave = canWave && !singleMode && hl !== true && !probeRunning && !isWarn;
+
+    const baseOpacity = singleMode ? 0.78 : (isBad ? 0.84 : isWarn ? 0.78 : probe.isExternal ? 0.54 : 0.56);
+    const opacity = hl === true ? 1 : hl === false ? 0.26 : baseOpacity;
 
     const g = createSVGEl("g", {
       "data-refresh-key": `${compact ? "m-" : ""}map-arc-${probe.id}`,
       "data-topo-peers": peers.join(" "),
       "data-base-opacity": String(baseOpacity),
-      "data-dim-opacity": "0.28",
+      "data-dim-opacity": "0.26",
       ...(probe.isExternal ? { "data-ext-probe": "1" } : {}),
       opacity: opacity.toFixed(2),
     });
@@ -1461,45 +1511,89 @@ function renderLinksAndPills({
       hl === true
         ? (compact ? 2.4 : 2.6)
         : singleMode
-          ? (compact ? 1.9 : 2.05)
+          ? (compact ? 1.85 : 2.0)
           : isBad
             ? (compact ? 1.9 : 2.0)
-            : (compact ? 1.4 : 1.5)
+            : (compact ? 1.4 : 1.55)
     ).toFixed(2);
-    const allowAnim = helpers.allowMotion() && (singleMode || hl === true || probeRunning || isWarn || isBad);
 
-    const reverseOnly = dirMode === "reverse" && probe.bidirectional && !probe.unavailableReverse;
+    const orderedSegments = reverseOnly ? [...geom.segments].reverse() : geom.segments;
     const basePathD = reverseOnly
-      ? geom.segments.map((s) => `M ${s.x2.toFixed(1)} ${s.y2.toFixed(1)} Q ${s.cx.toFixed(1)} ${s.cy.toFixed(1)}, ${s.x1.toFixed(1)} ${s.y1.toFixed(1)}`).join(" ")
+      ? orderedSegments.map((s) => `M ${s.x2.toFixed(1)} ${s.y2.toFixed(1)} Q ${s.cx.toFixed(1)} ${s.cy.toFixed(1)}, ${s.x1.toFixed(1)} ${s.y1.toFixed(1)}`).join(" ")
       : geom.d;
-    const dash = probeRunning ? "6 4" : isBad ? (compact ? "4 3" : "5 3") : probe.isExternal ? "2 3" : null;
+    const dash = probeRunning ? "2.5 3.5" : isBad ? (compact ? "4 3" : "5 3") : probe.isExternal ? "2 3" : null;
+    const dirSuffix = reverseOnly ? "rev" : "fwd";
+    const runSuffix = probeRunning ? "run" : "idle";
+    const drawKeySuffix = `${probe.id}-${dirSuffix}-${runSuffix}`;
+
+    let maskAttr = null;
+    if (dash && motionOn && defs) {
+      const maskID = `${defsPrefix}-${compact ? "m-" : ""}arc-mask-${probe.id}`;
+      const maskEl = createSVGEl("mask", {
+        id: maskID,
+        "data-refresh-key": `${compact ? "m-" : ""}map-arc-mask-${drawKeySuffix}`,
+        maskUnits: "userSpaceOnUse",
+        maskContentUnits: "userSpaceOnUse",
+        x: "-3200",
+        y: "-400",
+        width: "8400",
+        height: "2200",
+      });
+      maskEl.append(createSVGEl("path", {
+        d: basePathD,
+        pathLength: "100",
+        fill: "none",
+        stroke: "#ffffff",
+        "stroke-width": (Number(strokeW) + 6).toFixed(2),
+        "stroke-linecap": "round",
+        "stroke-dashoffset": "0",
+        class: `a-dash-topo-arc-draw ${spd} is-draw-step-${drawStep}${probeRunning ? " is-running" : ""}`,
+        "data-refresh-key": `${compact ? "m-" : ""}map-arc-mask-path-${drawKeySuffix}`,
+      }));
+      defs.append(maskEl);
+      maskAttr = `url(#${maskID})`;
+    }
+
+    const railClasses = ["a-dash-topo-arc-rail"];
+    if (motionOn) {
+      if (!dash) {
+        railClasses.push("is-draw-track", spd, `is-draw-step-${drawStep}`);
+      }
+      if (canWave) railClasses.push("is-flow-active");
+      if (isAmbientWave) railClasses.push("is-ambient-track");
+      if (probeRunning) railClasses.push("is-running");
+    }
 
     g.append(createSVGEl("path", {
       d: basePathD,
+      ...(!dash ? { pathLength: "100", "stroke-dashoffset": "0" } : {}),
       fill: "none",
       stroke: pal.stroke,
       "stroke-width": strokeW,
       "stroke-dasharray": dash,
       "stroke-linecap": "round",
-      class: probeRunning ? `a-dash-topo-probe-running${reverseOnly ? " is-reverse" : ""}` : null,
+      ...(maskAttr ? { mask: maskAttr } : {}),
+      class: railClasses.join(" "),
+      "data-refresh-key": `${compact ? "m-" : ""}map-arc-rail-${drawKeySuffix}`,
     }));
 
-    if (allowAnim && !fullUnreachable && !isBad && !probe.unavailableReverse) {
-      const activeLat = reverseOnly ? (probe.revLatencyMS ?? probe.latencyMS) : probe.latencyMS;
-      const spd = probeRunning ? "is-speed-fast" : flowSpeedClass(activeLat);
-      geom.segments.forEach((seg, segIdx) => {
-        const segD = `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
-        appendPulsePair(pulseLayer, segD, {
+    if (canWave) {
+      orderedSegments.forEach((seg, segIdx) => {
+        const segD = reverseOnly
+          ? `M ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)}`
+          : `M ${seg.x1.toFixed(1)} ${seg.y1.toFixed(1)} Q ${seg.cx.toFixed(1)} ${seg.cy.toFixed(1)}, ${seg.x2.toFixed(1)} ${seg.y2.toFixed(1)}`;
+        appendProgressiveWavePair(pulseLayer, segD, {
           pal,
           spd,
+          drawStep,
+          isAmbient: isAmbientWave,
           isWarn,
           isRunning: probeRunning,
-          isReverse: reverseOnly,
           peers,
           hl,
           isExternal: probe.isExternal,
           compact,
-          refreshKey: `${compact ? "m-" : ""}map-pulse-${probe.id}-${segIdx}`,
+          refreshKey: `${compact ? "m-" : ""}map-wave-${drawKeySuffix}-${segIdx}`,
         });
       });
     }
@@ -1510,6 +1604,7 @@ function renderLinksAndPills({
       stroke: "transparent",
       "stroke-width": compact ? "14" : "12",
       class: "a-dash-topo-probe-item",
+      "data-refresh-key": `${compact ? "m-" : ""}map-arc-hit-${probe.id}`,
     });
     helpers.bindInteractive(hit, eKey);
     g.append(hit);
@@ -1549,6 +1644,8 @@ function renderLinksAndPills({
       { isAmbient, leaderSegments },
     );
 
+    const pillDrawStep = isAmbient && motionOn ? drawStep : null;
+
     if (placed && (placed.shifted || Math.hypot(placed.cx - geom.mid.x, placed.cy - geom.mid.y) > 15)) {
       helpers.appendProbeLeader(
         leaderLayer,
@@ -1559,6 +1656,7 @@ function renderLinksAndPills({
         compact,
         !isAmbient,
         probe.id,
+        pillDrawStep,
       );
     }
 
@@ -1574,6 +1672,7 @@ function renderLinksAndPills({
       compact,
       peers,
       focusOnly: !isAmbient,
+      drawStep: pillDrawStep,
     });
     if (probe.isExternal) pillEl.setAttribute("data-ext-probe", "1");
     pillLayer.append(pillEl);
@@ -1823,6 +1922,7 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
 
     if (chosen.leader) {
       leaderLayer.append(createSVGEl("line", {
+        "data-refresh-key": `m-tag-leader-${key}`,
         x1: cluster.x.toFixed(1),
         y1: cluster.y.toFixed(1),
         x2: chosen.edgeX.toFixed(1),
@@ -1886,6 +1986,14 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
     }));
   });
 
+  const runningNodeIDs = new Set();
+  for (const p of (model.probeLinks || [])) {
+    if (isProbeRunning(p)) {
+      if (p.from) runningNodeIDs.add(p.from);
+      if (p.to && !p.isExternal) runningNodeIDs.add(p.to);
+    }
+  }
+
   renderLinksAndPills({
     model,
     arcGeom,
@@ -1900,6 +2008,7 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
     pillBoundsBase: { minY: 28, maxY: mapHeight - 8 },
     pillLimitX: { min: 8, max: w - 8 },
     compact: true,
+    defs,
     helpers,
     probeLayer: linkLayer,
     pulseLayer,
@@ -1922,6 +2031,7 @@ function renderMobilePacificMap({ width, model, zoomTransform = null, helpers })
       peers,
       singleMode,
       compact: true,
+      runningNodeIDs,
       pulseLayer,
       beaconLayer,
       helpers,
@@ -2200,6 +2310,7 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
 
     if (chosen.leader) {
       leaderLayer.append(createSVGEl("line", {
+        "data-refresh-key": `map-tag-leader-${key}`,
         x1: cluster.x.toFixed(1),
         y1: cluster.y.toFixed(1),
         x2: chosen.edgeX.toFixed(1),
@@ -2263,6 +2374,14 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
     }));
   });
 
+  const runningNodeIDs = new Set();
+  for (const p of (model.probeLinks || [])) {
+    if (isProbeRunning(p)) {
+      if (p.from) runningNodeIDs.add(p.from);
+      if (p.to && !p.isExternal) runningNodeIDs.add(p.to);
+    }
+  }
+
   renderLinksAndPills({
     model,
     arcGeom,
@@ -2277,6 +2396,7 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
     pillBoundsBase: { minY: 34, maxY: mapHeight - 14 },
     pillLimitX: { min: 18, max: vw - 18 },
     compact: false,
+    defs,
     helpers,
     probeLayer,
     pulseLayer,
@@ -2299,6 +2419,7 @@ export function renderPacificMapSVG({ width, isMobile, model, zoomTransform = nu
       peers,
       singleMode,
       compact: false,
+      runningNodeIDs,
       pulseLayer,
       beaconLayer,
       helpers,

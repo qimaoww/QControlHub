@@ -873,22 +873,29 @@ export function createDashboardTopologySection(ctx, {
       listen(el, "keydown", activate);
     };
 
-    const appendProbeLeader = (leaderLayer, placed, pal, peers, hl, compact = false, focusOnly = false, probeID = "") => {
+    const appendProbeLeader = (leaderLayer, placed, pal, peers, hl, compact = false, focusOnly = false, probeID = "", drawStep = null) => {
       if (!leaderLayer || !placed?.shifted) return;
       const baseStr = focusOnly ? "0" : "0.86";
       const dimStr = focusOnly ? "0" : "0.18";
       const op = focusOnly ? (hl === true ? "1" : "0") : (hl === false ? "0.18" : "0.86");
       const leaderClass = focusOnly ? "a-dash-topo-probe-leader a-dash-topo-focus-only" : "a-dash-topo-probe-leader";
-      const attrs = {
+      const outer = createSVGEl("g", {
+        ...(probeID ? { "data-refresh-key": `${compact ? "m-" : ""}probe-leader-${probeID}` } : {}),
         class: leaderClass,
         "data-topo-peers": peers.join(" "),
         "data-base-opacity": baseStr,
         "data-dim-opacity": dimStr,
         opacity: op,
-      };
-      leaderLayer.append(
+      });
+      const revealCls = (!focusOnly && drawStep != null && allowMotion())
+        ? `a-dash-topo-pill-reveal is-draw-step-${drawStep}`
+        : null;
+      const body = createSVGEl("g", {
+        ...(probeID ? { "data-refresh-key": `${compact ? "m-" : ""}probe-leader-body-${probeID}` } : {}),
+        class: revealCls,
+      });
+      body.append(
         createSVGEl("line", {
-          ...(probeID ? { "data-refresh-key": `probe-leader-line-${probeID}` } : {}),
           x1: placed.anchorX.toFixed(1),
           y1: placed.anchorY.toFixed(1),
           x2: placed.cx.toFixed(1),
@@ -897,19 +904,18 @@ export function createDashboardTopologySection(ctx, {
           "stroke-opacity": compact ? "0.58" : "0.66",
           "stroke-width": compact ? "0.95" : "1.1",
           "stroke-dasharray": "2 2",
-          ...attrs,
         }),
         createSVGEl("circle", {
-          ...(probeID ? { "data-refresh-key": `probe-leader-dot-${probeID}` } : {}),
           cx: placed.anchorX.toFixed(1),
           cy: placed.anchorY.toFixed(1),
           r: compact ? 2.1 : 2.5,
           fill: pal.stroke,
           stroke: "#ffffff",
           "stroke-width": "1.2",
-          ...attrs,
         }),
       );
+      outer.append(body);
+      leaderLayer.append(outer);
     };
 
     const createProbePillGroup = ({
@@ -923,6 +929,7 @@ export function createDashboardTopologySection(ctx, {
       compact = false,
       peers,
       focusOnly = false,
+      drawStep = null,
     }) => {
       const eKey = topoEntityKey.probe(probe.id);
       const hl = isHighlightedEdge(peers);
@@ -932,7 +939,7 @@ export function createDashboardTopologySection(ctx, {
       const op = focusOnly ? (hl === true ? "1" : "0") : (hl === false ? dimStr : "1");
       const g = createSVGEl("g", {
         class: `a-dash-topo-probe-item ${focusOnly ? "a-dash-topo-focus-only" : ""} ${selected ? "is-active" : ""} ${hl === true ? "is-highlighted" : ""}`,
-        "data-refresh-key": `probe-pill-${probe.id}`,
+        "data-refresh-key": `${compact ? "m-" : ""}probe-pill-${probe.id}`,
         "data-probe-id": probe.id,
         "data-topo-peers": peers.join(" "),
         "data-base-opacity": baseStr,
@@ -943,7 +950,16 @@ export function createDashboardTopologySection(ctx, {
         ? `${probe.groupName} · ${probe.fromName} ${probe.bidirectional ? "⇄" : "→"} ${probe.toName}: ${probe.metricLabel}`
         : `${probe.name}: ${probe.metricLabel}`;
       g.append(createSVGEl("title", {}, tipText));
-      g.append(createSVGEl("rect", {
+
+      const revealCls = (!focusOnly && drawStep != null && allowMotion())
+        ? `a-dash-topo-pill-reveal is-draw-step-${drawStep}`
+        : null;
+      const inner = createSVGEl("g", {
+        "data-refresh-key": `${compact ? "m-" : ""}probe-pill-body-${probe.id}`,
+        class: revealCls,
+      });
+
+      inner.append(createSVGEl("rect", {
         x: (cx - pillW / 2).toFixed(1),
         y: (cy - pillH / 2).toFixed(1),
         width: pillW.toFixed(1),
@@ -956,7 +972,7 @@ export function createDashboardTopologySection(ctx, {
       }));
 
       const dotX = cx - pillW / 2 + (compact ? 6.5 : 8.5);
-      g.append(createSVGEl("circle", {
+      inner.append(createSVGEl("circle", {
         cx: dotX.toFixed(1),
         cy: cy.toFixed(1),
         r: compact ? 2.1 : 2.5,
@@ -964,13 +980,14 @@ export function createDashboardTopologySection(ctx, {
       }));
       const textX = dotX + (compact ? 5.2 : 6.5);
 
-      g.append(createSVGEl("text", {
+      inner.append(createSVGEl("text", {
         x: textX.toFixed(1),
         y: (cy + (compact ? 3.2 : 3.6)).toFixed(1),
         class: "a-dash-topo-pill-text",
         fill: pal.ink,
       }, label));
 
+      g.append(inner);
       bindInteractive(g, eKey);
       return g;
     };
