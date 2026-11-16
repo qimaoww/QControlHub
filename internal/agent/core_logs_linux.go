@@ -56,6 +56,7 @@ type CoreLogCollector struct {
 	mu                   sync.Mutex
 	filePublishMu        sync.Mutex
 	queued               []core.CoreLogEntry
+	queueStorage         []core.CoreLogEntry
 	pending              *core.CoreLogBatch
 	dropped              uint64
 	sources              []coreLogJournalSource

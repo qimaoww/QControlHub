@@ -189,3 +189,27 @@ func TestCoreLogProcessMeasurements(t *testing.T) {
 	cpu := time.Duration(endCPU.Utime.Nano() + endCPU.Stime.Nano() - startCPU.Utime.Nano() - startCPU.Stime.Nano())
 	t.Logf("mode=%s records=%d seconds=%.3f process_cpu_ms=%.3f process_cpu_percent=%.3f allocated_bytes=%d allocs=%d gc=%d heap_after_gc=%d rss_kib=%d->%d goroutines=%d->%d fds=%d->%d queue_max=%d queue_end=%d json_bytes=%d", mode, sent, elapsed.Seconds(), float64(cpu)/float64(time.Millisecond), 100*cpu.Seconds()/elapsed.Seconds(), after.TotalAlloc-before.TotalAlloc, after.Mallocs-before.Mallocs, after.NumGC-before.NumGC, recovered.HeapAlloc, rss, endRSS, goroutines, endGoroutines, descriptors, endDescriptors, maxQueue, len(collector.queued), wireBytes)
 }
+
+func BenchmarkCoreLogBatchCycle(b *testing.B) {
+	for _, count := range []int{1, 32, 2048} {
+		b.Run(fmt.Sprintf("entries%d", count), func(b *testing.B) {
+			collector := NewCoreLogCollector(map[core.Engine]EngineSpec{})
+			entries := make([]core.CoreLogEntry, count)
+			for i := range entries {
+				entries[i] = core.CoreLogEntry{Engine: core.EngineXray, InstanceID: fmt.Sprintf("shr_%016x", i%32), Message: fmt.Sprint(i) + strings.Repeat("ordinary diagnostic line ", 160)}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				for _, entry := range entries {
+					collector.append(entry)
+				}
+				for batch := collector.NextBatch(); batch != nil; batch = collector.NextBatch() {
+					if !collector.Acknowledge(batch.ID) {
+						b.Fatal("ACK rejected")
+					}
+				}
+			}
+		})
+	}
+}

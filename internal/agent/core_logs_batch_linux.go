@@ -32,6 +32,7 @@ func (collector *CoreLogCollector) appendJournal(entry core.CoreLogEntry, cursor
 		collector.cursorOrder = append(collector.cursorOrder, cursor)
 		if len(collector.cursorOrder) > coreLogQueueLimit*2 {
 			oldest := collector.cursorOrder[0]
+			collector.cursorOrder[0] = ""
 			collector.cursorOrder = collector.cursorOrder[1:]
 			delete(collector.seenCursors, oldest)
 		}
@@ -69,6 +70,7 @@ func (collector *CoreLogCollector) appendLocked(entry core.CoreLogEntry) {
 	}
 
 	for len(collector.queued)+pendingCoreLogCount(collector.pending) >= coreLogQueueLimit && len(collector.queued) > 0 {
+		collector.queued[0] = core.CoreLogEntry{}
 		collector.queued = collector.queued[1:]
 		collector.dropped++
 	}
@@ -76,7 +78,11 @@ func (collector *CoreLogCollector) appendLocked(entry core.CoreLogEntry) {
 		collector.dropped++
 		return
 	}
+	previousCapacity := cap(collector.queued)
 	collector.queued = append(collector.queued, entry)
+	if cap(collector.queued) != previousCapacity {
+		collector.queueStorage = collector.queued[:0]
+	}
 	collector.signalReady()
 }
 
@@ -117,7 +123,10 @@ func (collector *CoreLogCollector) NextBatch() *core.CoreLogBatch {
 		return nil
 	}
 	count := min(len(collector.queued), core.MaxCoreLogBatchEntries)
-	entries := append([]core.CoreLogEntry(nil), collector.queued[:count]...)
+	// Transfer ownership of the prefix to the pending batch. NextBatch still
+	// returns an independent copy, and queued appends cannot overwrite this
+	// prefix. ACK releases its references even while the suffix stays queued.
+	entries := collector.queued[:count:count]
 	collector.queued = collector.queued[count:]
 	collector.pending = &core.CoreLogBatch{ID: batchID, Entries: entries}
 	return cloneCoreLogBatch(collector.pending)
@@ -129,7 +138,13 @@ func (collector *CoreLogCollector) Acknowledge(batchID string) bool {
 	if collector.pending == nil || collector.pending.ID != batchID {
 		return false
 	}
+	clear(collector.pending.Entries)
 	collector.pending = nil
+	if len(collector.queued) == 0 {
+		// Reuse only after ACK: a producer may append while the batch is in
+		// flight, and must never overwrite the prefix awaiting confirmation.
+		collector.queued = collector.queueStorage
+	}
 	if len(collector.queued) > 0 {
 		collector.signalReady()
 	}
