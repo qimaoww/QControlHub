@@ -499,7 +499,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   addDialog.querySelector('select[name="hop_node_2"]').dispatchEvent(new Event("change", { bubbles: true }));
   addDialog.querySelector('button[type="submit"]').click();
   await waitFor(() => !addDialog.open && topology()?.querySelector('.a-topo-single-stage[data-group-name="亚太核心组"]'), "newly created group link was not selected and rendered");
-  assert(topology().querySelectorAll('.a-topo-single-stage svg.a-dash-topo-map-svg .a-dash-topo-map-probes [data-topo-entity^="probe:"]').length === 2 || topology().querySelectorAll('.a-topo-single-stage svg.a-dash-topo-map-svg [data-refresh-key^="map-arc-"]').length === 2, "3-hop chain did not render 2 hop arcs on map");
+  assert(topology().querySelectorAll('.a-topo-single-stage svg.a-dash-topo-map-svg [data-refresh-key^="map-arc-"], .a-topo-single-stage svg.a-dash-topo-map-svg [data-refresh-key^="m-map-arc-"]').length === 2, "3-hop chain did not render 2 hop arcs on map");
 
   // Switch back to 东京香港专线 and re-focus node:tokyo for stability refresh assertions
   topology().querySelector('.a-topo-group-pill[data-group-name="东京香港专线"]').click();
@@ -577,14 +577,14 @@ export async function testDashboardRuntime(mode, preview = false) {
   const stableNodeAction = nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a");
   const stableRankRow = ranking().querySelector(".a-dash-rank-row");
   const stableTopoStage = topology().querySelector(".a-topo-single-stage");
-  const stableTopoSVG = topology().querySelector("svg.a-topo-conduit-svg");
+  const stableTopoSVG = topology().querySelector("svg.a-dash-topo-map-svg");
   const stablePanelSVGs = [...panel().querySelectorAll("svg")];
   const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
   await refresh();
   assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
   assert(topology().querySelector(".a-topo-single-stage") === stableTopoStage, "unchanged refresh rebuilt topology stage");
-  assert(topology().querySelector("svg.a-topo-conduit-svg") === stableTopoSVG, "unchanged refresh rebuilt topology conduit SVG");
-  assert(topology().querySelector('[data-topo-node="tokyo"]')?.getAttribute("aria-pressed") === "true", "unchanged refresh lost focused node (after refresh)");
+  assert(stableTopoSVG && topology().querySelector("svg.a-dash-topo-map-svg") === stableTopoSVG, "unchanged refresh rebuilt topology map SVG");
+  assert(topology().querySelector('[data-topo-entity="node:tokyo"]')?.classList.contains("is-active"), "unchanged refresh lost focused node (after refresh)");
   assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
   assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
   assert(ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");

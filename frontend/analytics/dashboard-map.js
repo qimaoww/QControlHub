@@ -1531,7 +1531,7 @@ function renderLinksAndPills({
       const maskID = `${defsPrefix}-${compact ? "m-" : ""}arc-mask-${probe.id}`;
       const maskEl = createSVGEl("mask", {
         id: maskID,
-        "data-refresh-key": `${compact ? "m-" : ""}map-arc-mask-${drawKeySuffix}`,
+        "data-refresh-key": `${compact ? "m-" : ""}map-mask-${drawKeySuffix}`,
         maskUnits: "userSpaceOnUse",
         maskContentUnits: "userSpaceOnUse",
         x: "-3200",
@@ -1548,7 +1548,7 @@ function renderLinksAndPills({
         "stroke-linecap": "round",
         "stroke-dashoffset": "0",
         class: `a-dash-topo-arc-draw ${spd} is-draw-step-${drawStep}${probeRunning ? " is-running" : ""}`,
-        "data-refresh-key": `${compact ? "m-" : ""}map-arc-mask-path-${drawKeySuffix}`,
+        "data-refresh-key": `${compact ? "m-" : ""}map-mask-path-${drawKeySuffix}`,
       }));
       defs.append(maskEl);
       maskAttr = `url(#${maskID})`;
@@ -1574,7 +1574,7 @@ function renderLinksAndPills({
       "stroke-linecap": "round",
       ...(maskAttr ? { mask: maskAttr } : {}),
       class: railClasses.join(" "),
-      "data-refresh-key": `${compact ? "m-" : ""}map-arc-rail-${drawKeySuffix}`,
+      "data-refresh-key": `${compact ? "m-" : ""}map-rail-${drawKeySuffix}`,
     }));
 
     if (canWave) {
@@ -1604,7 +1604,7 @@ function renderLinksAndPills({
       stroke: "transparent",
       "stroke-width": compact ? "14" : "12",
       class: "a-dash-topo-probe-item",
-      "data-refresh-key": `${compact ? "m-" : ""}map-arc-hit-${probe.id}`,
+      "data-refresh-key": `${compact ? "m-" : ""}map-hit-${probe.id}`,
     });
     helpers.bindInteractive(hit, eKey);
     g.append(hit);
