@@ -213,3 +213,36 @@ func BenchmarkCoreLogBatchCycle(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkCoreLogBatchPipeline(b *testing.B) {
+	for _, count := range []int{1, core.MaxCoreLogBatchEntries} {
+		b.Run(fmt.Sprintf("entries%d", count), func(b *testing.B) {
+			collector := NewCoreLogCollector(map[core.Engine]EngineSpec{})
+			collector.executor = &Executor{}
+			entries := make([]core.CoreLogEntry, count)
+			for i := range entries {
+				entries[i] = core.CoreLogEntry{Engine: core.EngineXray, InstanceID: fmt.Sprintf("shr_%016x", i), Message: "ordinary diagnostic line"}
+				collector.append(entries[i])
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				batch := collector.NextBatch()
+				if batch == nil || len(batch.Entries) != count {
+					b.Fatal("batch lost entries")
+				}
+				// Producers keep running while the previous batch awaits ACK.
+				for _, entry := range entries {
+					collector.append(entry)
+				}
+				if !collector.Acknowledge(batch.ID) {
+					b.Fatal("ACK rejected")
+				}
+			}
+			b.StopTimer()
+			if batch := collector.NextBatch(); batch == nil || len(batch.Entries) != count || !collector.Acknowledge(batch.ID) || collector.NextBatch() != nil {
+				b.Fatal("pipeline did not drain")
+			}
+		})
+	}
+}
