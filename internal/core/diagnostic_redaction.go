@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -48,8 +49,24 @@ func redactDiagnosticContainers(value string) string {
 // RedactDiagnosticValue preserves resource IDs, versions, structure and error
 // context. Serialized configuration/fragment/file strings are parsed as JSON
 // or YAML before fallback text redaction, including arrays of credentials.
-func RedactDiagnosticValue(value any) any { return redactDiagnosticValue(value, 0) }
-func redactDiagnosticValue(value any, depth int) any {
+func RedactDiagnosticValue(value any) any {
+	return redactDiagnosticValue(context.Background(), value, 0)
+}
+
+// RedactDiagnosticValueContext stops walking a response when its read expires.
+// Never return a partially redacted value to a caller.
+func RedactDiagnosticValueContext(ctx context.Context, value any) (any, error) {
+	safe := redactDiagnosticValue(ctx, value, 0)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return safe, nil
+}
+
+func redactDiagnosticValue(ctx context.Context, value any, depth int) any {
+	if ctx.Err() != nil {
+		return nil
+	}
 	if depth > 64 {
 		return "[redacted: nesting limit]"
 	}
@@ -57,13 +74,16 @@ func redactDiagnosticValue(value any, depth int) any {
 	case map[string]any:
 		result := make(map[string]any, len(v))
 		for key, item := range v {
+			if ctx.Err() != nil {
+				return nil
+			}
 			users, userMap := item.(map[string]any)
 			if diagnosticCredentialKey.MatchString(key) || (key == "key" && v["type"] == "sudoku") {
 				result[key] = redactCredentialShape(item, depth+1)
 			} else if key == "users" && userMap {
 				result[key] = redactDiagnosticUserMap(users, depth+1)
 			} else {
-				result[key] = redactDiagnosticValue(item, depth+1)
+				result[key] = redactDiagnosticValue(ctx, item, depth+1)
 				if key == "clients" || key == "users" {
 					redactDiagnosticClientIDs(result[key])
 				}
@@ -79,7 +99,10 @@ func redactDiagnosticValue(value any, depth int) any {
 	case []any:
 		result := make([]any, len(v))
 		for i, item := range v {
-			result[i] = redactDiagnosticValue(item, depth+1)
+			if ctx.Err() != nil {
+				return nil
+			}
+			result[i] = redactDiagnosticValue(ctx, item, depth+1)
 		}
 		return result
 	case string:
@@ -89,7 +112,7 @@ func redactDiagnosticValue(value any, depth int) any {
 			d := json.NewDecoder(strings.NewReader(v))
 			d.UseNumber()
 			if d.Decode(&structured) == nil {
-				b, err := json.Marshal(redactDiagnosticValue(structured, depth+1))
+				b, err := json.Marshal(redactDiagnosticValue(ctx, structured, depth+1))
 				if err == nil {
 					return string(b)
 				}

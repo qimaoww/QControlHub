@@ -45,7 +45,7 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			// The Key receives a redacted representation without those validators.
 			request = request.Clone(request.Context())
 			request.Header.Del("If-None-Match")
-			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request), revealSecrets: s.sessionAllows(request, core.PermissionSecretsRead) || request.Pattern == "GET /api/v1/openapi.json"}
+			response := &apiKeyResponseWriter{ResponseWriter: w, request: request, secret: bearerToken(request), revealSecrets: s.sessionAllows(request, core.PermissionSecretsRead) || request.Pattern == "GET /api/v1/openapi.json"}
 			// Retain a failure only after the rejected business transaction has
 			// rolled back, so its returned diagnostic ID remains queryable.
 			response.failure = func(status int, value any) any {

@@ -1,8 +1,11 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDiagnosticRedactionMasksKeyAssignmentsPEMAndHistoricalPaths(t *testing.T) {
@@ -44,6 +47,12 @@ func FuzzDiagnosticRedactionEquivalent(f *testing.F) {
 		"a1234567-1234-1234-1234-123456789abc",
 		"read certificate/key /var/lib/qcontrolhub-mihomo/" + strings.Repeat("A", 43),
 		"PRIVATE_KEY=secret\nmldſa65_ſeed: secret",
+		"AUTHORIZATION: hidden\nCoOkIe: hidden\npre-ſhared-Key=hidden",
+		"paſſword=hidden\nBearer ſecret\nhttps://user:pass@host.test/",
+		"a1234567-1234-1234-1234-123456789abc safe-------diagnostic",
+		`{"short_ids":["abcd"],"authentication":{"password":"secret"}}`,
+		"[TCP] 192.0.2.1:443 --> probe.invalid:8443 using DIRECT",
+		"webhook_url=https://hooks.example.test/opaque-endpoint",
 	} {
 		f.Add(seed)
 	}
@@ -62,6 +71,42 @@ func FuzzDiagnosticRedactionEquivalent(f *testing.F) {
 			t.Fatalf("redaction differs for %q: got %q, want %q", raw, got, want)
 		}
 	})
+}
+
+func TestDiagnosticRedactionContextDiscardsCanceledResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	value, err := RedactDiagnosticValueContext(ctx, map[string]any{"message": "password=secret"})
+	if value != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled redaction returned %v, %v", value, err)
+	}
+}
+
+func TestDiagnosticRedactionContextStopsTraversal(t *testing.T) {
+	entries := make([]any, 8000)
+	for i := range entries {
+		entries[i] = map[string]any{"message": strings.Repeat("password=fixture-secret diagnostic ", 100)}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	value, err := RedactDiagnosticValueContext(ctx, entries)
+	if value != nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+		t.Fatalf("traversal did not discard expired data: err=%v elapsed=%s", err, time.Since(started))
+	}
+	if safe, err := RedactDiagnosticValueContext(context.Background(), "password=fixture-secret"); err != nil || strings.Contains(safe.(string), "fixture-secret") {
+		t.Fatal("fresh read did not recover safely")
+	}
+}
+
+func BenchmarkDiagnosticPlainLogRedaction(b *testing.B) {
+	message := strings.Repeat("[TCP] 192.0.2.1:443 --> probe.invalid:8443 using DIRECT ", 75)
+	b.SetBytes(int64(len(message)))
+	for b.Loop() {
+		if got := RedactDiagnostic(message); got != message {
+			b.Fatal("plain log changed")
+		}
+	}
 }
 
 func TestDiagnosticRedactionIsIdempotentAndMasksWholeCredentials(t *testing.T) {
