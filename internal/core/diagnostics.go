@@ -29,6 +29,9 @@ var diagnosticLegacyRealityPath = regexp.MustCompile(`(read certificate/key /var
 // RedactDiagnostic handles labelled keys and inline private PEM even when the
 // configuration is unavailable (journal output or diagnostics from old Agents).
 func RedactDiagnostic(value string) string {
+	if !mayContainDiagnosticCredential(value) {
+		return value
+	}
 	value = redactDiagnosticContainers(value)
 	value = replaceDiagnostic(value, diagnosticPrivatePEM, "[redacted private PEM]")
 	value = replaceDiagnostic(value, diagnosticBearer, "Bearer [redacted]")
@@ -42,9 +45,38 @@ func RedactDiagnostic(value string) string {
 	return replaceDiagnostic(value, diagnosticLegacyRealityPath, "${1}[redacted]${2}")
 }
 
+// Every credential expression contains one of these ASCII markers, apart
+// from bare UUIDs and URL userinfo. Fold the two additional Unicode equivalents
+// of ASCII letters as well, so the shortcut cannot bypass (?i) redaction.
+func mayContainDiagnosticCredential(value string) bool {
+	folded := strings.ToLower(value)
+	folded = strings.ReplaceAll(folded, "ſ", "s")
+	for _, marker := range []string{"pass", "key", "psk", "secret", "token", "credential", "authorization", "cookie", "uuid", "decryption", "mldsa65", "short", "bearer", "webhook"} {
+		if strings.Contains(folded, marker) {
+			return true
+		}
+	}
+	if strings.Contains(value, "://") && strings.Contains(value, "@") {
+		return true
+	}
+	hexRun := 0
+	for i := 0; i < len(folded); i++ {
+		c := folded[i]
+		if c == '-' && hexRun >= 8 {
+			return true // A possible UUID prefix; the full expression decides.
+		}
+		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' {
+			hexRun++
+		} else {
+			hexRun = 0
+		}
+	}
+	return false
+}
+
 // ReplaceAllString allocates two message-sized buffers even without a match.
-// Most log lines contain no credentials. Still run every original expression,
-// including its Unicode case folding, and allocate only for actual redaction.
+// Candidate lines still run every original expression, including Unicode case
+// folding, and allocate replacement buffers only for actual redaction.
 func replaceDiagnostic(value string, pattern *regexp.Regexp, replacement string) string {
 	if !pattern.MatchString(value) {
 		return value
