@@ -78,10 +78,12 @@ func (collector *CoreLogCollector) appendLocked(entry core.CoreLogEntry) {
 		collector.dropped++
 		return
 	}
-	previousCapacity := cap(collector.queued)
-	collector.queued = append(collector.queued, entry)
-	if cap(collector.queued) != previousCapacity {
+	if len(collector.queued) == cap(collector.queued) {
+		collector.queued = append(collector.queued, entry)
 		collector.queueStorage = collector.queued[:0]
+	} else {
+		collector.queued = collector.queued[:len(collector.queued)+1]
+		collector.queued[len(collector.queued)-1] = entry
 	}
 	collector.signalReady()
 }
@@ -123,11 +125,16 @@ func (collector *CoreLogCollector) NextBatch() *core.CoreLogBatch {
 		return nil
 	}
 	count := min(len(collector.queued), core.MaxCoreLogBatchEntries)
-	// Transfer ownership of the prefix to the pending batch. NextBatch still
-	// returns an independent copy, and queued appends cannot overwrite this
-	// prefix. ACK releases its references even while the suffix stays queued.
-	entries := collector.queued[:count:count]
-	collector.queued = collector.queued[count:]
+	// Keep the pending batch independent from producers, then release consumed
+	// references before retaining or slicing the queue buffer. An empty queue
+	// can reuse its current buffer even while the copied batch awaits ACK.
+	entries := append([]core.CoreLogEntry(nil), collector.queued[:count]...)
+	clear(collector.queued[:count])
+	if count == len(collector.queued) {
+		collector.queued = collector.queueStorage
+	} else {
+		collector.queued = collector.queued[count:]
+	}
 	collector.pending = &core.CoreLogBatch{ID: batchID, Entries: entries}
 	return cloneCoreLogBatch(collector.pending)
 }
@@ -138,13 +145,7 @@ func (collector *CoreLogCollector) Acknowledge(batchID string) bool {
 	if collector.pending == nil || collector.pending.ID != batchID {
 		return false
 	}
-	clear(collector.pending.Entries)
 	collector.pending = nil
-	if len(collector.queued) == 0 {
-		// Reuse only after ACK: a producer may append while the batch is in
-		// flight, and must never overwrite the prefix awaiting confirmation.
-		collector.queued = collector.queueStorage
-	}
 	if len(collector.queued) > 0 {
 		collector.signalReady()
 	}

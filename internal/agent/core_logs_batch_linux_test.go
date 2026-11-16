@@ -40,7 +40,13 @@ func TestCoreLogBatchOwnershipAcrossAppendRetryAndACK(t *testing.T) {
 			for i := range count {
 				collector.append(core.CoreLogEntry{Engine: core.EngineXray, Message: fmt.Sprint(i)})
 			}
+			storage := collector.queued
 			first := collector.NextBatch()
+			for _, entry := range storage[:min(count, core.MaxCoreLogBatchEntries)] {
+				if entry != (core.CoreLogEntry{}) {
+					t.Fatal("consumed queue prefix retained an entry")
+				}
+			}
 			first.Entries[0].Message = "caller changed its copy"
 			collector.append(core.CoreLogEntry{Engine: core.EngineMihomo, InstanceID: "shr_0123456789abcdef", Message: "arrived while pending"})
 			retry := collector.NextBatch()
