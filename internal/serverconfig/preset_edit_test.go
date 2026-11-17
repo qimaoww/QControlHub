@@ -2,11 +2,57 @@ package serverconfig
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestPresetEditPreservesAbsentSnellOptions(t *testing.T) {
+	const source = `listeners: [{name: first, type: snell, listen: 127.0.0.1, port: 24001, version: 6, psk: abcdefghijkl}, {name: second, type: snell, port: 24002, version: 6, psk: abcdefghijkm, udp: false}]`
+	input, ok := Parse(core.EngineMihomo, source)
+	if !ok || input.SourceOnly {
+		t.Fatal("handwritten Snell listener not editable")
+	}
+	input.Port = 24003
+	generated, err := Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := MutateGenerated(core.EngineMihomo, source, generated, "first", "modify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := managedDocument(core.EngineMihomo, strings.Replace(source, "24001", "24003", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := managedDocument(core.EngineMihomo, result)
+	if err != nil || !reflect.DeepEqual(got["listeners"], want["listeners"]) {
+		t.Fatalf("edited listeners = %v; want %v (%v)", got["listeners"], want["listeners"], err)
+	}
+}
+
+func TestNativeOutboundPatchDoesNotMaterializeFormDefaults(t *testing.T) {
+	const source = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"extension":9007199254740993,"username":null}`
+	const baseline = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"version":"5","username":""}`
+	updated := strings.Replace(baseline, `"old.example"`, `"new.example","explicit":null`, 1)
+	result, err := PatchNativePreset(core.EngineSingBox, source, baseline, updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result), &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(strings.Replace(source, `"old.example"`, `"new.example","explicit":null`, 1)), &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("patched fragment = %s", result)
+	}
+}
 
 func TestSpecialPresetEditsRetainNativeContent(t *testing.T) {
 	for _, pair := range []struct {
