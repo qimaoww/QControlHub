@@ -8,7 +8,7 @@ const unexpected = () => assert.fail("native route import performed browser work
 try {
   for (const key of descriptors.keys()) Object.defineProperty(globalThis, key, { configurable: true, value: key === "fetch" ? unexpected : new Proxy({}, { get: unexpected }) });
   for (const [path, exports] of [
-    ["operations", ["dashboardPage", "tasksPage", "quotaPage"]], ["settings", ["settingsPage"]],
+    ["operations", ["dashboardPage", "topologyPage", "tasksPage", "quotaPage"]], ["settings", ["settingsPage"]],
     ["client-access", ["clientAccessPage"]], ["substore", ["substorePage"]],
     ["traffic", ["trafficPage"]], ["users", ["usersPage"]],
     ["nodes", ["nodesPage"]], ["live-config", ["liveConfigPage"]],

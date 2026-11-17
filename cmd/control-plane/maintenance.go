@@ -11,6 +11,7 @@ import (
 )
 
 func janitor(ctx context.Context, dataStore *store.Store) {
+	go runDashboardProbes(ctx, dataStore)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	pruneCounter := 0
@@ -60,6 +61,23 @@ func cleanDeletedAgents(ctx context.Context, dataStore *store.Store) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+func runDashboardProbes(ctx context.Context, dataStore *store.Store) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			if err := dataStore.RunDueDashboardProbes(probeCtx, time.Now().UTC()); err != nil && ctx.Err() == nil {
+				slog.Error("run due dashboard probes", "error", err)
+			}
+			cancel()
 		}
 	}
 }

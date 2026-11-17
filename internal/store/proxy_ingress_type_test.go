@@ -243,7 +243,7 @@ func TestProxyIngressTypeMigrationAndMixedAgents(t *testing.T) {
 	if _, err := db.pool.Exec(ctx, `UPDATE agent_shares SET proxy_ingresses='[{"mode":"unknown","port":443,"generation":2}]'::jsonb WHERE id=$1`, share.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations WHERE version=102`); err != nil {
+	if _, err := db.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations WHERE version>=102`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.migrate(ctx); err == nil {

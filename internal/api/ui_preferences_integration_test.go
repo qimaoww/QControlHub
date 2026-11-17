@@ -116,6 +116,44 @@ func TestAccountUIPreferences(t *testing.T) {
 			t.Fatalf("anonymous: %d", res.Code)
 		}
 	}
+	// Verify all dashboard and topology selectable options persist, isolate per account, restore across sessions, and reject invalid values.
+	dashPref := patch(alice, map[string]any{
+		"dashboard": map[string]any{"topo_group": "亚太核心", "topo_view_mode": "map", "topo_show_history": true, "topo_groups_collapsed": true},
+		"topology":  map[string]any{"view_mode": "focus", "domain_group": "domain:apac", "selected_group": "核心互联", "focus_viz": "map", "status_filter": "abnormal", "sort_by": "latency_desc", "metric_dir": "forward"},
+	}, 4, 200)
+	if gotDash := dashPref.Values["dashboard"]; string(gotDash["topo_group"]) != `"亚太核心"` || string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_show_history"]) != "true" || string(gotDash["topo_groups_collapsed"]) != "true" {
+		t.Fatalf("dashboard topology selectable options did not save: %+v", dashPref)
+	}
+	if gotTopo := dashPref.Values["topology"]; string(gotTopo["view_mode"]) != `"focus"` || string(gotTopo["domain_group"]) != `"domain:apac"` || string(gotTopo["selected_group"]) != `"核心互联"` || string(gotTopo["focus_viz"]) != `"map"` || string(gotTopo["status_filter"]) != `"abnormal"` || string(gotTopo["sort_by"]) != `"latency_desc"` || string(gotTopo["metric_dir"]) != `"forward"` {
+		t.Fatalf("topology selectable options did not save: %+v", dashPref)
+	}
+	if len(read(bob).Values["dashboard"]) != 0 || len(read(bob).Values["topology"]) != 0 {
+		t.Fatal("dashboard/topology options leaked across accounts")
+	}
+	gotDevice := read(device)
+	if gotDash := gotDevice.Values["dashboard"]; string(gotDash["topo_group"]) != `"亚太核心"` || string(gotDash["topo_view_mode"]) != `"map"` || string(gotDash["topo_show_history"]) != "true" || string(gotDash["topo_groups_collapsed"]) != "true" {
+		t.Fatalf("dashboard selectable options did not restore across client session: %+v", gotDash)
+	}
+	if gotTopo := gotDevice.Values["topology"]; string(gotTopo["view_mode"]) != `"focus"` || string(gotTopo["domain_group"]) != `"domain:apac"` || string(gotTopo["selected_group"]) != `"核心互联"` || string(gotTopo["focus_viz"]) != `"map"` || string(gotTopo["status_filter"]) != `"abnormal"` || string(gotTopo["sort_by"]) != `"latency_desc"` || string(gotTopo["metric_dir"]) != `"forward"` {
+		t.Fatalf("topology selectable options did not restore across client session: %+v", gotTopo)
+	}
+	for _, validMode := range []string{"flow", "map", "overview"} {
+		dashPref = patch(alice, map[string]any{"topology": map[string]any{"view_mode": validMode}}, dashPref.Revision, 200)
+	}
+	for _, badDash := range []any{
+		map[string]any{"dashboard": map[string]any{"topo_group": strings.Repeat("组", 41)}},
+		map[string]any{"dashboard": map[string]any{"topo_view_mode": "matrix"}},
+		map[string]any{"dashboard": map[string]any{"topo_show_history": "yes"}},
+		map[string]any{"topology": map[string]any{"view_mode": "matrix"}},
+		map[string]any{"topology": map[string]any{"domain_group": "domain:invalid"}},
+		map[string]any{"topology": map[string]any{"selected_group": strings.Repeat("a", 41)}},
+		map[string]any{"topology": map[string]any{"focus_viz": "graph"}},
+		map[string]any{"topology": map[string]any{"status_filter": "invalid"}},
+		map[string]any{"topology": map[string]any{"sort_by": "random"}},
+		map[string]any{"topology": map[string]any{"metric_dir": "all"}},
+	} {
+		patch(alice, badDash, dashPref.Revision, 400)
+	}
 }
 
 func TestAccountUIPreferencesConcurrentFields(t *testing.T) {

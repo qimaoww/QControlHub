@@ -95,20 +95,34 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			}
 			request = request.WithContext(store.WithAPIKeyAuth(request.Context(), k.ID, required, effective))
 		}
+		hasBearer := bearerToken(request) != ""
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
-		if !s.adminLimiter.Allow(key, now) {
+		if hasBearer && !s.adminLimiter.Allow(key, now) {
 			writeError(w, http.StatusTooManyRequests, "too many authentication failures")
 			return
 		}
 		role, ok := s.sessionRole(request)
 		if !ok {
-			s.adminLimiter.Failure(key, now)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="QControlHub admin API"`)
-			writeError(w, http.StatusUnauthorized, "invalid admin token")
+			if hasBearer {
+				s.adminLimiter.Failure(key, now)
+				writeError(w, http.StatusUnauthorized, "invalid admin token")
+				return
+			}
+			// Stale browser tabs (after server restarts or 12h expiry) fire
+			// concurrent dashboard reads before the first 401 aborts siblings.
+			// Cookie misses must not exhaust the credential brute-force budget.
+			message := "authentication required"
+			if cookie, err := request.Cookie(s.cookieName()); err == nil && cookie.Value != "" {
+				message = "session expired"
+			}
+			writeError(w, http.StatusUnauthorized, message)
 			return
 		}
-		s.adminLimiter.Success(key)
+		if hasBearer {
+			s.adminLimiter.Success(key)
+		}
 		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
 		value, _ := s.sessionForRequest(request)
 		request = request.WithContext(store.WithPrincipalAuth(request.Context(), value.UserID, value.AuthRevision))

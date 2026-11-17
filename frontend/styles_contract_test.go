@@ -63,12 +63,13 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// and responsive notification records with wrapped dates and reachable actions,
 	// and source indentation, line numbers and JSON syntax highlighting, and
 	// the approved open tools layout, metric strips and readable route columns,
-	// plus wrapped record endpoints with independently centered direction markers.
-	const expected = "27ec7b89e24196b95d789fb66838dd15c479075d83f516e52c29054b551e92c4"
+	// plus wrapped record endpoints with independently centered direction markers,
+	// and light-paper dashboard telemetry grids, sparklines, ranking, topology and link probes.
+	const expected = "23fd72a5d1ea8061817469fa9fa99afdd4547d3bc443a55db45826fc11c15b2e"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}
-	for _, required := range []string{".a-dialog", ".a-dialog::backdrop", ".a-code", ".a-button", ".a-form-grid", "min-height: 44px", "overflow-wrap: anywhere"} {
+	for _, required := range []string{".a-dialog", ".a-dialog::backdrop", ".a-code", ".a-button", ".a-form-grid", ".a-topo-single-stage", ".a-topo-domain-bar", ".a-topo-fleet-map-panel", ".a-dash-topo-map-stage", "min-height: 44px", "overflow-wrap: anywhere"} {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("native console styles missing %q", required)
 		}

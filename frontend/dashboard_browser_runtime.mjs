@@ -19,200 +19,804 @@ export async function testDashboardRuntime(mode, preview = false) {
   const limited = mode === "dashboard-limited";
   const readonly = mode === "dashboard-readonly";
   const hasPanel = !limited && !readonly;
-  const session = { role: limited || readonly ? "user" : "admin", user_id: limited || readonly ? "dashboard-user" : undefined, csrf_token: "browser-test-csrf",
-    permissions: limited ? ["overview.read"] : ["overview.read", "agents.read", "tasks.read", "traffic.read", "metrics.read", "settings.read", "agent-config.read"] };
+  const session = {
+    role: limited || readonly ? "user" : "admin",
+    user_id: limited || readonly ? "dashboard-user" : undefined,
+    csrf_token: "browser-test-csrf",
+    permissions: limited
+      ? ["overview.read"]
+      : readonly
+        ? ["overview.read", "agents.read", "tasks.read", "traffic.read", "metrics.read", "settings.read", "agent-config.read"]
+        : ["overview.read", "agents.read", "tasks.read", "tasks.execute", "traffic.read", "metrics.read", "panel-metrics.read", "core-logs.read", "certificates.read", "settings.read", "agent-config.read"],
+  };
   setStorageAccount(session);
   accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["tokyo", "hongkong", "singapore", "frankfurt"]));
+
+  const nowISO = new Date().toISOString();
   const agents = [
-    { id: "hongkong", name: "香港 · HK-01", os: "Debian", arch: "amd64", status: "online", capabilities: ["xray", "sing-box"] },
-    { id: "singapore", name: "新加坡 · SG-02", os: "Ubuntu", arch: "arm64", status: "online", capabilities: ["mihomo", "ss-rust"] },
-    { id: "tokyo", name: "东京 · JP-03", os: "Debian", arch: "amd64", status: "online", capabilities: ["sing-box", "xray", "mihomo", "ss-rust"] },
-    { id: "frankfurt", name: "法兰克福 · DE-04", os: "Alpine", arch: "amd64", status: "offline", capabilities: ["sing-box"] },
-  ].map((agent) => ({ ...agent, last_seen: new Date(Date.now() - (agent.status === "offline" ? 12 * 60000 : 1000)).toISOString(),
-    runtime: Object.fromEntries(agent.capabilities.map((engine, index) => [engine, { installed: true, service_status: index ? 'inactive' : 'active' }])),
-    metrics: { network_available: true, network_rx_bps: 2048, network_tx_bps: 1024, collected_at: new Date().toISOString() }, features: [], labels: {} }));
+    { id: "hongkong", name: "香港 · HK-01", region_code: "HK", os: "Debian", arch: "amd64", status: "online", capabilities: ["xray", "sing-box"], public_ipv4: "203.0.113.10" },
+    { id: "singapore", name: "新加坡 · SG-02", region_code: "SG", os: "Ubuntu", arch: "arm64", status: "online", capabilities: ["mihomo", "ss-rust"], public_ipv4: "198.51.100.20", public_ipv6: "2001:db8::20" },
+    { id: "tokyo", name: "东京 · JP-03", region_code: "JP", os: "Debian", arch: "amd64", status: "online", capabilities: ["sing-box", "xray", "mihomo", "ss-rust"], public_ipv4: "192.0.2.30", clock_skew: true },
+    { id: "frankfurt", name: "法兰克福 · DE-04", region_code: "DE", os: "Alpine", arch: "amd64", status: "offline", capabilities: ["sing-box"] },
+  ].map((agent) => ({
+    ...agent,
+    last_seen: new Date(Date.now() - (agent.status === "offline" ? 12 * 60000 : 1000)).toISOString(),
+    runtime: Object.fromEntries(agent.capabilities.map((engine, index) => [engine, { installed: true, service_status: index ? "inactive" : "active" }])),
+    metrics: {
+      cpu_available: agent.status === "online",
+      cpu_percent: agent.status === "online" ? 18.4 : 0,
+      memory_available: agent.status === "online",
+      memory_used_bytes: 2.1 * GiB,
+      memory_total_bytes: 4 * GiB,
+      network_available: true,
+      network_rx_bps: 2048,
+      network_tx_bps: 1024,
+      collected_at: nowISO,
+      public_ipv4: agent.public_ipv4 || "",
+      public_ipv6: agent.public_ipv6 || "",
+      clock_sync: agent.clock_skew ? { status: "skewed", offset_ms: 4800 } : { status: "ok", offset_ms: 4 },
+    },
+    features: [],
+    labels: {},
+  }));
+
   const tasks = [
     { id: "task-1", agent_id: "hongkong", action: "deploy", engine: "xray", status: "succeeded" },
     { id: "task-2", agent_id: "singapore", action: "upgrade-agent", engine: "", status: "running" },
     { id: "task-3", agent_id: "tokyo", action: "restart", engine: "sing-box", status: "pending" },
     { id: "task-4", agent_id: "frankfurt", action: "install", engine: "sing-box", status: "failed" },
   ].map((task, index) => ({ ...task, created_at: new Date(Date.now() - (index + 1) * 60000).toISOString() }));
+
+  const diagNodes = [
+    { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", region_code: "JP", online: true, capabilities: { ping: true, addresses: ["192.0.2.30"] } },
+    { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", region_code: "HK", online: true, capabilities: { ping: true, addresses: ["203.0.113.10"] } },
+    { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", region_code: "SG", online: true, capabilities: { ping: true, addresses: ["198.51.100.20", "2001:db8::20"] } },
+  ];
+
   const fixture = {
     calls: [],
     failed: mode === "dashboard-unavailable",
     gate: null,
+    uiPrefs: { values: {}, revision: 1 },
     metrics: {
       cpu_available: true, cpu_percent: 23.6,
       memory_available: true, memory_used_bytes: 3.48 * GiB, memory_total_bytes: 8 * GiB,
       disk_available: true, disk_used_bytes: 26.4 * GiB, disk_total_bytes: 80 * GiB,
-      network_available: true, network_rx_bps: 1.6 * 1024 ** 2, network_tx_bps: 864 * 1024,
+      network_available: true, network_rate_available: true, network_rx_bps: 1.6 * 1024 ** 2, network_tx_bps: 864 * 1024,
       network_rx_bytes: 68 * GiB, network_tx_bytes: 42 * GiB,
+      panel_runtime: { sample_interval_seconds: 2, sample_window_count: 12, sample_window_capacity: 60 },
+      history: [
+        { collected_at: new Date(Date.now() - 4000).toISOString(), cpu_available: true, cpu_percent: 19.2, memory_available: true, memory_used_bytes: 3.3 * GiB, memory_total_bytes: 8 * GiB, network_available: true, network_rate_available: true, network_rx_bps: 1.1 * 1024 ** 2, network_tx_bps: 620 * 1024 },
+        { collected_at: new Date(Date.now() - 2000).toISOString(), cpu_available: true, cpu_percent: 21.8, memory_available: true, memory_used_bytes: 3.4 * GiB, memory_total_bytes: 8 * GiB, network_available: true, network_rate_available: true, network_rx_bps: 1.4 * 1024 ** 2, network_tx_bps: 740 * 1024 },
+      ],
     },
+    probes: [
+      {
+        id: "prb_1",
+        name: "主用低延迟专线",
+        group_name: "东京香港专线",
+        target_mode: "",
+        node1: { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", address: "192.0.2.30" },
+        node2: { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", address: "203.0.113.10" },
+        nodes: [
+          { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", address: "192.0.2.30" },
+          { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", address: "203.0.113.10" },
+        ],
+        chain: [
+          { agent_id: "tokyo", instance_id: "main", name: "东京 · JP-03", region: "JP", address: "192.0.2.30", online: true, granted: true, ping: true },
+          { agent_id: "hongkong", instance_id: "main", name: "香港 · HK-01", region: "HK", address: "203.0.113.10", online: true, granted: true, ping: true },
+        ],
+        node1_name: "东京 · JP-03",
+        node1_region: "JP",
+        node2_name: "香港 · HK-01",
+        node2_region: "HK",
+        bidirectional: true,
+        parameters: { tool: "ping", protocol: "icmp", count: 5, interval_ms: 200, timeout_ms: 1000, size: 56 },
+        auto_enabled: true,
+        auto_interval_seconds: 60,
+        revision: 1,
+        availability: { ready: true, running: false },
+        latest: {
+          sampled_at: new Date(Date.now() - 5000).toISOString(),
+          forward: { state: "succeeded", sent: 5, received: 5, loss_percent: 0, min_ms: 41.2, avg_ms: 43.8, max_ms: 46.1, stdev_ms: 1.8, reached: true },
+          reverse: { state: "succeeded", sent: 5, received: 4, loss_percent: 20, min_ms: 42.0, avg_ms: 45.4, max_ms: 49.0, stdev_ms: 2.6, reached: true },
+          hops: [
+            {
+              hop_index: 0,
+              from: "tokyo",
+              to: "hongkong",
+              forward: { state: "succeeded", sent: 5, received: 5, loss_percent: 0, min_ms: 41.2, avg_ms: 43.8, max_ms: 46.1, stdev_ms: 1.8, reached: true },
+              reverse: { state: "succeeded", sent: 5, received: 4, loss_percent: 20, min_ms: 42.0, avg_ms: 45.4, max_ms: 49.0, stdev_ms: 2.6, reached: true },
+            },
+          ],
+        },
+        history: [
+          { id: "s1", sampled_at: new Date(Date.now() - 65000).toISOString(), state: "succeeded", forward: { avg_ms: 42.1, loss_percent: 0, reached: true }, reverse: { avg_ms: 44.0, loss_percent: 0, reached: true } },
+          { id: "s2", sampled_at: new Date(Date.now() - 5000).toISOString(), state: "succeeded", forward: { avg_ms: 43.8, loss_percent: 0, reached: true }, reverse: { avg_ms: 45.4, loss_percent: 20, reached: true } },
+        ],
+      },
+      {
+        id: "prb_2",
+        name: "Cloudflare IP",
+        group_name: "新加坡外部测速",
+        target_mode: "ip",
+        node1: { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", address: "198.51.100.20" },
+        node2: { name: "1.1.1.1", address: "1.1.1.1" },
+        nodes: [
+          { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", address: "198.51.100.20" },
+          { name: "1.1.1.1", address: "1.1.1.1" },
+        ],
+        chain: [
+          { agent_id: "singapore", instance_id: "main", name: "新加坡 · SG-02", region: "SG", address: "198.51.100.20", online: false, granted: true, ping: false },
+        ],
+        node1_name: "新加坡 · SG-02",
+        node1_region: "SG",
+        bidirectional: false,
+        parameters: { tool: "ping", protocol: "icmp", count: 5, interval_ms: 200, timeout_ms: 1000, size: 56 },
+        auto_enabled: false,
+        auto_interval_seconds: 60,
+        revision: 2,
+        availability: { ready: false, reason: "目标或源节点缺少 ping 能力" },
+        latest: {
+          sampled_at: new Date(Date.now() - 30000).toISOString(),
+          forward: { state: "succeeded", sent: 5, received: 5, loss_percent: 0, min_ms: 2.1, avg_ms: 2.4, max_ms: 2.8, stdev_ms: 0.2, reached: true },
+        },
+        history: [],
+      },
+    ],
   };
   window.__dashboardBrowserTestAPI = fixture;
   const json = (value, status = 200) => new Response(JSON.stringify(value), {
     status, headers: { "Content-Type": "application/json" },
   });
+  const canSession = (perm) => perm === "certificates.read" || session.role === "admin" || session.permissions.includes(perm);
+
   window.fetch = async (input, options = {}) => {
+    const method = (options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
     const url = new URL(input instanceof Request ? input.url : input, location.href);
     const path = url.pathname.replace(/^\/api\/v1/, "");
-    fixture.calls.push({ path, query: url.search });
-    if (path === "/preferences/node-order") return json({ ids: JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order") || "[]"), revision: 1 });
+    fixture.calls.push({ method, path, query: url.search });
+
+    if (path === "/preferences/ui") {
+      if (method === "PATCH") {
+        const body = JSON.parse(options.body || "{}");
+        const nextValues = { ...fixture.uiPrefs.values };
+        for (const [page, fields] of Object.entries(body.values || {})) {
+          nextValues[page] = { ...(nextValues[page] || {}), ...(fields || {}) };
+        }
+        fixture.uiPrefs = {
+          values: nextValues,
+          revision: fixture.uiPrefs.revision + 1,
+        };
+      }
+      return json(fixture.uiPrefs);
+    }
+    if (path === "/preferences/node-order") {
+      assert(canSession("agents.read"), "unauthorized node-order request");
+      return json({ ids: JSON.parse(accountStorage.getItem("qcontrolhub:node-card-order") || "[]"), revision: 1 });
+    }
     if (path === "/auth/session") return json(session);
     if (path === "/agent-access") return json({ isolated: false, shares: [] });
     if (path === "/overview") return json({ agents: 4, agents_online: 3, node_configs: 12, configs: 2, tasks_pending: 2, tasks_queued: 1, tasks_running: 1, tasks_failed: 1 });
     if (path === "/settings") return json({ panel_name: "QControlHub", ui_font_scale: 100, time_display: "relative", task_poll_interval_ms: 5000 });
-    if (path === "/agents") return json(agents.map(agent => ({ ...agent, metrics: { ...agent.metrics, collected_at: new Date().toISOString() } })));
+    if (path === "/agents") {
+      assert(canSession("agents.read"), "unauthorized /agents request");
+      return json(agents.map((agent) => ({ ...agent, metrics: { ...agent.metrics, collected_at: new Date().toISOString() } })));
+    }
     if (path === "/tasks") return json(tasks);
     if (path === "/panel-metrics") {
       if (fixture.denied) return json({ error: "permission denied" }, 403);
       assert(hasPanel, "a user without panel-metrics.read requested global host counters");
-      // Deliberately allow a late response after abort: the view must reject
-      // it by route ownership even when a transport cannot cancel its work.
       const sample = { collected_at: new Date().toISOString(), ...fixture.metrics };
       if (fixture.gate) await fixture.gate;
       return fixture.failed ? json({ error: "test metrics temporarily unavailable" }, 503) : json(sample);
     }
     if (path === "/traffic-usage") {
+      assert(canSession("traffic.read"), "unauthorized /traffic-usage request");
       if (fixture.trafficFailed) return json({ error: "test traffic temporarily unavailable" }, 503);
       const month = url.searchParams.get("month");
       const current = new Date().toISOString().slice(0, 7);
       const dayCount = month === current ? new Date().getUTCDate() : 28;
       if (fixture.trafficGate) await fixture.trafficGate;
-      return json({ month, timezone: "UTC", days: Array.from({ length: dayCount }, (_, index) => {
-        const received = (1.2 + ((index * 7) % 11) * .43) * GiB * (fixture.trafficMultiplier || 1);
-        const sent = (0.7 + ((index * 3) % 7) * .32) * GiB * (fixture.trafficMultiplier || 1);
-        return { agent_id: agents[index % agents.length].id, day: `${month}-${String(index + 1).padStart(2, "0")}`, received_bytes: received, sent_bytes: sent, used_bytes: received + sent, peak_receive_bps: 3 * 1024 ** 2, peak_send_bps: 1.2 * 1024 ** 2 };
-      }) });
+      return json({
+        month,
+        timezone: "UTC",
+        days: Array.from({ length: dayCount }, (_, index) => {
+          const received = (1.2 + ((index * 7) % 11) * 0.43) * GiB * (fixture.trafficMultiplier || 1);
+          const sent = (0.7 + ((index * 3) % 7) * 0.32) * GiB * (fixture.trafficMultiplier || 1);
+          return {
+            agent_id: agents[index % agents.length].id,
+            day: `${month}-${String(index + 1).padStart(2, "0")}`,
+            received_bytes: received,
+            sent_bytes: sent,
+            used_bytes: received + sent,
+            peak_receive_bps: 3 * 1024 ** 2,
+            peak_send_bps: 1.2 * 1024 ** 2,
+          };
+        }),
+      });
     }
-    throw new Error(`unexpected dashboard fixture request: ${path}`);
+    if (path === "/traffic-policies") {
+      assert(canSession("traffic.read"), "unauthorized /traffic-policies request");
+      const ts = new Date().toISOString();
+      return json({
+        agents: agents.map((a) => ({ id: a.id, name: a.name, region_code: a.region_code, status: a.status, is_current_user: a.id !== "frankfurt" })),
+        policies: [
+          { agent_id: "tokyo", port: 443, received_bytes: 18 * GiB, sent_bytes: 9 * GiB, used_bytes: 27 * GiB, receive_bps: 650 * 1024, send_bps: 310 * 1024, limit_bytes: 40 * GiB, quota_enabled: true, auto_block: true, is_current_user: true, last_collected_at: ts },
+          { agent_id: "hongkong", port: 8443, received_bytes: 12 * GiB, sent_bytes: 6 * GiB, used_bytes: 18 * GiB, receive_bps: 420 * 1024, send_bps: 180 * 1024, limit_bytes: 20 * GiB, quota_enabled: true, auto_block: true, is_current_user: true, last_collected_at: ts },
+          { agent_id: "singapore", port: 443, received_bytes: 25 * GiB, sent_bytes: 10 * GiB, used_bytes: 35 * GiB, receive_bps: 0, send_bps: 0, limit_bytes: 30 * GiB, quota_enabled: true, auto_block: true, blocked: true, is_current_user: false, owner_name: "partner", last_collected_at: ts },
+        ],
+      });
+    }
+    if (path === "/dashboard/probes") {
+      assert(canSession("agents.read") && canSession("tasks.read"), "unauthorized /dashboard/probes read");
+      if (method === "GET") return json({ pairs: fixture.probes });
+      if (method === "POST") {
+        assert(canSession("tasks.execute"), "unauthorized probe create");
+        const body = JSON.parse(options.body || "{}");
+        const groupName = String(body.group_name || "").trim();
+        if (fixture.probes.some((p) => p.group_name === groupName)) {
+          return json({ error: `监测分组“${groupName}”已存在链路，每个分组仅允许配置一条链路` }, 409);
+        }
+        const rawNodes = Array.isArray(body.nodes) && body.nodes.length >= 2 ? body.nodes : [body.node1, body.node2].filter(Boolean);
+        const created = {
+          id: `prb_${fixture.probes.length + 1}`,
+          name: body.name || "",
+          group_name: groupName,
+          target_mode: body.target_mode || "",
+          node1: body.node1,
+          node2: body.node2,
+          nodes: rawNodes,
+          chain: rawNodes.filter((ep) => ep?.agent_id).map((ep) => ({
+            agent_id: ep.agent_id,
+            instance_id: ep.instance_id || "main",
+            name: ep.name,
+            address: ep.address,
+            online: true,
+            granted: true,
+            ping: true,
+          })),
+          bidirectional: Boolean(body.bidirectional),
+          parameters: body.parameters,
+          auto_enabled: Boolean(body.auto_enabled),
+          auto_interval_seconds: body.auto_interval_seconds || 60,
+          revision: 1,
+          availability: { ready: true, running: false },
+          latest: null,
+          history: [],
+        };
+        fixture.probes = [created, ...fixture.probes];
+        return json(created, 201);
+      }
+    }
+    if (path.startsWith("/dashboard/probes/")) {
+      assert(canSession("tasks.execute"), "unauthorized probe mutation");
+      const segments = path.slice("/dashboard/probes/".length).split("/");
+      const id = segments[0];
+      const action = segments[1] || "";
+      const target = fixture.probes.find((p) => p.id === id);
+      if (!target) return json({ error: "not found" }, 404);
+      if (action === "run" && method === "POST") {
+        target.availability = { ready: true, running: true };
+        target.active_state = "running";
+        return json(target, 201);
+      }
+      if (action === "stop" && method === "POST") {
+        target.availability = { ready: true, running: false };
+        target.active_state = "";
+        return json(target);
+      }
+      if (!action && method === "PUT") {
+        const body = JSON.parse(options.body || "{}");
+        const groupName = String(body.group_name || "").trim();
+        if (fixture.probes.some((p) => p.id !== id && p.group_name === groupName)) {
+          return json({ error: `监测分组“${groupName}”已存在链路，每个分组仅允许配置一条链路` }, 409);
+        }
+        Object.assign(target, { ...body, revision: (target.revision || 0) + 1 });
+        return json(target);
+      }
+      if (!action && method === "DELETE") {
+        fixture.probes = fixture.probes.filter((p) => p.id !== id);
+        return new Response(null, { status: 204 });
+      }
+    }
+    if (path === "/network-diagnostics/nodes") {
+      assert(canSession("tasks.execute"), "unauthorized /network-diagnostics/nodes read");
+      return json(diagNodes);
+    }
+    if (path === "/client-connections") {
+      assert(canSession("core-logs.read"), "unauthorized /client-connections request");
+      return json({
+        ips: 18,
+        flows: 142,
+        sources: [{ agent_id: "tokyo", status: "ok" }, { agent_id: "hongkong", status: "ok" }],
+        timeline: Array.from({ length: 12 }, (_, idx) => ({ time: new Date(Date.now() - (11 - idx) * 3600000).toISOString(), flows: idx * 5 + 3, ips: idx + 1 })),
+      });
+    }
+    if (path === "/certificates") {
+      assert(canSession("certificates.read"), "unauthorized /certificates request");
+      if (limited) return json({ items: [] });
+      return json({
+        items: [
+          { id: "crt_1", name: "edge.example.com", owned: true, status: "active", not_after: new Date(Date.now() + 5 * 86400000).toISOString() },
+          { id: "crt_2", name: "ok.example.com", owned: true, status: "active", not_after: new Date(Date.now() + 90 * 86400000).toISOString() },
+          { id: "crt_shared", name: "shared.example.com", owned: false, status: "active", not_after: new Date(Date.now() + 2 * 86400000).toISOString() },
+        ],
+      });
+    }
+    if (path === "/ip-quality") {
+      assert(canSession("agents.read"), "unauthorized /ip-quality request");
+      return json({ records: [{ agent_id: "tokyo", status: "succeeded" }, { agent_id: "hongkong", status: "succeeded" }, { agent_id: "singapore", status: "failed" }] });
+    }
+    if (path.startsWith("/metrics/")) {
+      assert(canSession("metrics.read"), "unauthorized /metrics/{id} request");
+      return json([
+        { sampled_at: new Date(Date.now() - 3600000).toISOString(), cpu_percent: 12, memory_percent: 38.5, rx_rate_bps: 1024, tx_rate_bps: 512 },
+        { sampled_at: new Date().toISOString(), cpu_percent: 18, memory_percent: 42.1, rx_rate_bps: 2048, tx_rate_bps: 1024 },
+      ]);
+    }
+    throw new Error(`unexpected dashboard fixture request: ${method} ${path}`);
   };
+
   document.querySelector('link[href^="/assets/app.css"]')?.remove();
   location.hash = "#dashboard";
-  const stylesheet = document.createElement("link"); stylesheet.rel = "stylesheet"; stylesheet.href = "/assets/analytics/theme.css";
-  const styled = new Promise((resolve, reject) => { stylesheet.onload=resolve;stylesheet.onerror=reject; });
-  document.head.append(stylesheet);await styled;
-  (await import("./analytics/app.js")).startAnalytics({app:document.querySelector("#app"),session});
-  const card = title => [...document.querySelectorAll(".a-main section.a-card")].find(card=>card.querySelector("h2")?.textContent===title);
-  const panel = ()=>card("面板运行资源"), traffic = ()=>card("流量概况"), nodes = ()=>card("节点运行状态"), activity=()=>card("最近任务");
-  const metric = label=>panel()?.querySelector(`[data-refresh-key="${label}"] strong`);
-  const cpu = ()=>metric("CPU 使用率");
-  const reads=path=>fixture.calls.filter(call=>call.path===path).length;
-  const refreshButton=()=>document.querySelector(".a-top-inner > .a-actions > button");
-  const settled=()=>!refreshButton()?.disabled;
-  const refresh=async()=>{await waitFor(settled,"refresh remained busy");const count=reads("/overview");refreshButton().click();await waitFor(()=>reads("/overview")>count&&settled(),"manual refresh did not settle");};
-  await waitFor(()=>document.title.startsWith("仪表盘")&&reads("/overview"),"dashboard did not render");
-  assert(!document.body.textContent.includes("undefined"),"missing overview fields leaked");
-  if(!hasPanel){
-    assert(!panel(),"panel-host card leaked");assert(reads("/panel-metrics")===0,"unauthorized host request");
-    if(limited){
-      for(const path of ["/agents","/tasks","/traffic-usage","/settings","/preferences/node-order"])assert(reads(path)===0,`overview-only user requested ${path}`);
-      assert(!nodes()&&!activity()&&!traffic(),"inaccessible shortcuts exposed");
-      await waitFor(()=>document.querySelector(".a-main").textContent.includes("共 4 个节点"),"overview-only user lost allowed summary");
-    }else assert(traffic(),"readonly user lost own traffic");
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = "/assets/analytics/theme.css";
+  const styled = new Promise((resolve, reject) => { stylesheet.onload = resolve; stylesheet.onerror = reject; });
+  document.head.append(stylesheet);
+  await styled;
+  (await import("./analytics/app.js")).startAnalytics({ app: document.querySelector("#app"), session });
+
+  const card = (title) => [...document.querySelectorAll(".a-main section.a-card")].find((c) => c.querySelector("h2")?.textContent === title);
+  const panel = () => card("面板运行资源");
+  const traffic = () => card("流量概况");
+  const ranking = () => card("流量累计排行");
+  const topology = () => card("网络延迟监测拓扑");
+  const activeDialog = () => [...document.querySelectorAll("dialog.a-dialog[open]")].at(-1);
+  const nodes = () => card("节点运行状态");
+  const activity = () => card("最近任务");
+  const metric = (label) => panel()?.querySelector(`[data-refresh-key="${label}"] strong`);
+  const cpu = () => metric("CPU 使用率");
+  const reads = (path) => fixture.calls.filter((call) => call.path === path).length;
+  const refreshButton = () => document.querySelector(".a-top-inner > .a-actions > button");
+  const settled = () => !refreshButton()?.disabled;
+  const refresh = async () => {
+    await waitFor(settled, "refresh remained busy");
+    const count = reads("/overview");
+    refreshButton().click();
+    await waitFor(() => reads("/overview") > count && settled(), "manual refresh did not settle");
+  };
+
+  await waitFor(() => document.title.startsWith("仪表盘") && reads("/overview"), "dashboard did not render");
+  assert(!document.body.textContent.includes("undefined"), "missing overview fields leaked");
+
+  if (!hasPanel) {
+    assert(!panel(), "panel-host card leaked");
+    assert(reads("/panel-metrics") === 0, "unauthorized host request");
+    if (limited) {
+      for (const path of ["/agents", "/tasks", "/traffic-usage", "/traffic-policies", "/dashboard/probes", "/network-diagnostics/nodes", "/client-connections", "/ip-quality", "/settings", "/preferences/node-order"]) {
+        assert(reads(path) === 0, `overview-only user requested ${path}`);
+      }
+      assert(!nodes() && !activity() && !traffic() && !ranking() && !topology() && !card("节点链路监控"), "inaccessible shortcuts exposed");
+      await waitFor(() => document.querySelector(".a-main").textContent.includes("3/4") && document.querySelector(".a-main").textContent.includes("在线率 75%"), "overview-only user lost allowed summary");
+    } else {
+      assert(traffic() && ranking(), "readonly user lost own traffic");
+      await waitFor(() => topology()?.querySelector(".a-topo-single-stage") && topology()?.querySelectorAll(".a-topo-group-pill").length === 2, "readonly user with agents.read+tasks.read should view single-group topology and switcher");
+      assert(topology().querySelectorAll(".a-topo-single-stage").length === 1, "homepage topology must render strictly one group link at a time");
+      assert(![...topology().querySelectorAll("button")].some((b) => ["+ 新建监测组", "立即探测", "暂停自动", "编辑", "删除"].includes(b.textContent)), "readonly user exposed probe write controls");
+      topology().querySelectorAll(".a-topo-group-pill")[1].click();
+      await waitFor(() => topology()?.querySelector('.a-topo-single-stage[data-group-name="新加坡外部测速"]'), "readonly user failed to switch monitoring group");
+      assert(reads("/network-diagnostics/nodes") === 0, "readonly user fetched diagnostic node write metadata");
+    }
     return;
   }
-  await waitFor(()=>fixture.failed?panel()?.textContent.includes("资源读取失败"):cpu()?.textContent==="23.6%","initial host metrics not settled");
-  if(preview)return;
-  if(fixture.failed){assert(cpu().textContent==="—","failed first sample became zero");assert(nodes()&&traffic(),"optional host failure blocked dashboard");fixture.failed=false;await refresh();}
-  assert(cpu().textContent==="23.6%","CPU usage differs from panel API");
-  assert(metric("内存使用率").textContent==="43.5%"&&metric("根目录磁盘").textContent==="33.0%","capacity percentages differ from the panel API");
-  const summary = card('运行概况');
-  await waitFor(() => summary?.querySelector('[data-refresh-key="运行内核"] strong')?.textContent === '3', 'offline runtime counted as live or scoped installed cores lost');
-  assert(summary?.querySelector('[data-refresh-key="节点速率合计"] strong')?.textContent !== '—', 'valid fleet rates missing');
-  await waitFor(() => traffic()?.querySelectorAll('path[data-series]').length === 2, 'receive and send series are not independently plotted');
-  const series = [...traffic().querySelectorAll('path[data-series]')];
-  assert(series[0].getAttribute('stroke-dasharray') !== series[1].getAttribute('stroke-dasharray'), 'traffic directions rely only on color');
-  assert(traffic().querySelector('[aria-label="节点流量排行"] a[href^="#traffic?agent="]'), 'ranked nodes cannot open their own traffic');
-  await waitFor(()=>nodes()?.querySelector("tbody a")?.textContent.includes("东京"),"saved node order ignored");
-  assert(!activity() && reads('/tasks') === 0, 'retired recent-task area still renders or polls');
-  assert(traffic().querySelectorAll('[aria-label="节点流量排行"] > [data-refresh-key]').length === 3, 'node usage ranking does not show three authorized nodes');
-  const bands = () => [...traffic().querySelectorAll('[data-chart-day]')];
-  const firstDay = bands()[0], firstDate = firstDay.dataset.chartDay;
-  firstDay.scrollIntoView({block:'center',behavior:'instant'});
-  firstDay.dispatchEvent(new PointerEvent('pointerover', {bubbles:true,pointerType:'mouse'}));
-  await waitFor(() => document.querySelector('.a-tooltip'), 'daily traffic hover has no tooltip');
-  const tip = document.querySelector('.a-tooltip');
-  assert(tip.textContent.includes(firstDate) && tip.textContent.replace(/\s/g,'').includes('接收1.2GB') && tip.textContent.includes('发送') && tip.textContent.includes('合计'), 'daily tooltip omits date, directions or actual usage');
-  fixture.trafficMultiplier=2;await refresh();
-  await waitFor(()=>tip.textContent.replace(/\s/g,'').includes('接收2.4GB'),'daily tooltip did not update its current sample');
-  assert(document.querySelector('.a-tooltip')===tip && bands()[0]===firstDay,'poll recreated the hovered day or tooltip');
-  fixture.trafficMultiplier=1;await refresh();
-  firstDay.focus();
-  firstDay.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
-  const keyboardDay=bands()[Math.min(1,bands().length-1)];
-  await waitFor(()=>document.activeElement===keyboardDay && document.querySelector('.a-tooltip')?.textContent.includes(keyboardDay.dataset.chartDay),'keyboard cannot inspect adjacent daily traffic');
-  firstDay.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch'}));
-  firstDay.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,pointerType:'touch'}));
-  assert(document.querySelector('.a-tooltip')?.textContent.includes(firstDate),'touch cannot inspect daily traffic');
-  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-  assert(!document.querySelector('.a-tooltip'),'Escape did not dismiss daily tooltip');
-  const assertLayout=()=>{
-    assert(document.documentElement.scrollWidth<=innerWidth+1,`viewport overflow ${innerWidth}`);
-    for(const element of document.querySelectorAll(".a-stat,.a-card-body,.a-chart-container,.a-chart-meta,.a-stat-grid"))assert(element.scrollWidth<=element.clientWidth+1,`content overflow ${element.className}`);
-    for(const element of document.querySelectorAll('[aria-label="节点运行状态"],[aria-label="最近任务"]'))assert(element.scrollWidth<=element.clientWidth+1,`dashboard summary needs horizontal scrolling ${element.getAttribute('aria-label')}`);
-    const summary = traffic().querySelector('[data-refresh-key="月累计流量"]');
-    assert(Math.abs(summary.querySelector('.a-stat-heading').getBoundingClientRect().left-summary.querySelector('.a-probe-network').getBoundingClientRect().left)<1,'monthly traffic and direction counters are not aligned');
-    assert(Math.abs(summary.querySelector('.a-stat-heading').getBoundingClientRect().left-traffic().querySelector('h2').getBoundingClientRect().left)<1,'traffic summary ignores the card content edge');
-    assert(Math.abs(traffic().querySelector('[name=traffic_month]').getBoundingClientRect().bottom-[...traffic().querySelectorAll('button')].find(button=>button.textContent==='流量明细').getBoundingClientRect().bottom)<1,'month and detail controls are not aligned');
-  };
-  for(const scale of [90,100,110,135]){document.documentElement.style.fontSize=`${scale}%`;await delay(80);assertLayout();}
-  document.documentElement.style.fontSize="100%";await delay(80);
-  const stablePanel=panel(),stableCPU=cpu(),stableNode=nodes().querySelector("tbody tr"),stableSVG=traffic().querySelector("svg");
-  const month=()=>traffic().querySelector('[name="traffic_month"]');
-  month().focus();fixture.metrics.cpu_percent=92;await refresh();
-  assert(cpu().textContent==="92.0%","manual metrics refresh failed");
-  assert(panel()===stablePanel&&cpu()===stableCPU,"refresh replaced metric nodes");
-  assert(document.activeElement===month(),"refresh stole filter focus");
-  [...traffic().querySelectorAll("button")].find(button=>button.textContent==="流量明细").click();
-  const dialog=document.querySelector("dialog[open]");assert(dialog?.matches(":modal"),"traffic detail modal missing");
-  const detailTable=dialog.querySelector('[aria-label="每日流量明细"]');assert(detailTable,"traffic daily data missing");
-  const scroll=dialog.querySelector(".a-dialog-body");scroll.scrollTop=150;const beforeScroll=scroll.scrollTop;
-  fixture.metrics.cpu_percent=41.2;await waitFor(()=>cpu()?.textContent==="41.2%","automatic metrics refresh failed");
-  assert(dialog.matches(":modal")&&scroll.scrollTop===beforeScroll,"poll disturbed detail modal");
-  assert(nodes().querySelector("tbody tr")===stableNode&&traffic().querySelector("svg")===stableSVG,"poll rebuilt unchanged business content");
-  dialog.close();fixture.failed=true;await refresh();
-  assert(panel().textContent.includes("刷新失败")&&cpu().textContent==="41.2%","failed refresh discarded metrics");
-  fixture.failed=false;fixture.metrics.cpu_percent=0;fixture.metrics.memory_available=false;fixture.metrics.network_available=false;await refresh();
-  assert(cpu().textContent==="0.0%","idle CPU became unavailable");assert(metric("内存使用率").textContent==="—","unavailable memory became zero");assert(metric("网络接收速率").textContent==="—","unavailable network became zero");
-  fixture.metrics.memory_available=true;
-  const memoryTotal=fixture.metrics.memory_total_bytes;
-  for(const total of [0,-1,null,'10']) {
-    fixture.metrics.memory_total_bytes=total;await refresh();
-    assert(metric('内存使用率').textContent==='—','invalid memory capacity was displayed as a valid percentage');
-  }
-  fixture.metrics.memory_total_bytes=memoryTotal;fixture.metrics.memory_available=false;
-  fixture.metrics.network_available=true;fixture.metrics.network_rx_bps=null;await refresh();
-  assert(metric("网络接收速率").textContent==="—","invalid network sample became a real rate");
-  fixture.metrics.network_rx_bps='<img src=x onerror=alert(1)>';await refresh();
-  assert(metric("网络接收速率").textContent==="—"&&!panel().querySelector('img'),"untrusted metric became HTML or a real sample");
-  fixture.metrics.network_rx_bps=2048;fixture.metrics.network_tx_bps=512;await refresh();
-  assert(metric("网络接收速率").textContent.replace(/\s/g,'')==='2KB/s'&&panel().textContent.includes('容器可见'),"network recovery or container scope lost");
-  fixture.metrics.collected_at="invalid";await refresh();
-  assert(panel().textContent.includes("尚无有效采样"),"invalid timestamp presented a fresh sample");
-  assert(!/NaN|undefined|Infinity/.test(panel().textContent),"invalid metric text leaked");
 
-  fixture.metrics.collected_at=new Date(Date.now()-60000).toISOString();await refresh();assert(panel().textContent.includes("采样已过期"),"stale sample presented live");delete fixture.metrics.collected_at;
-  fixture.denied=true;await refresh();assert(cpu().textContent==="—"&&panel().textContent.includes("权限"),"denied host read retained protected data");fixture.denied=false;await refresh();
-  const chooseMonth=value=>{month().value=value;month().dispatchEvent(new Event("change",{bubbles:true}));};
-  const period=()=>traffic().querySelector(".a-chart-meta").textContent;
-  const oldMonth=month().value;
-  assert(traffic().textContent.includes("UTC 今日"),"current-month total lost UTC day semantics");
-  fixture.trafficFailed=true;const oldReads=reads("/traffic-usage");chooseMonth(`${new Date().getUTCFullYear()-1}-01`);
-  await waitFor(()=>reads("/traffic-usage")>oldReads&&traffic().textContent.includes("刷新失败"),"failed month request not shown");
-  assert(period().includes(oldMonth),"old chart attributed to failed month");
-  fixture.metrics.cpu_percent=37;await waitFor(()=>cpu()?.textContent==="37.0%","failed month stopped host polling");fixture.trafficFailed=false;
-  const february=`${new Date().getUTCFullYear()-1}-02`;chooseMonth(february);await waitFor(()=>period().includes(february),"February not loaded");
-  const days=new Date(Date.UTC(new Date().getUTCFullYear()-1,2,0)).getUTCDate();assert(traffic().textContent.includes(`· ${days} 天`),"historical average uses incorrect day count");
-  assert(!traffic().textContent.includes("UTC 今日"),"historical month claims current day");
-  assert(traffic().querySelector('svg [d]')&&traffic().querySelector("svg").textContent.includes(`02-${days}`),"February axis lost final day");
-  assertLayout();
-  if(mode==="dashboard"){
-    Object.defineProperty(document,"hidden",{configurable:true,value:true});document.dispatchEvent(new Event("visibilitychange"));const hidden=reads("/panel-metrics");await delay(5200);assert(reads("/panel-metrics")===hidden,"hidden dashboard polled");delete document.hidden;document.dispatchEvent(new Event("visibilitychange"));await waitFor(()=>reads("/panel-metrics")>hidden,"visible dashboard did not refresh");
+  await waitFor(() => (fixture.failed ? panel()?.textContent.includes("资源读取失败") : cpu()?.textContent === "23.6%"), "initial host metrics not settled");
+  if (preview) return;
+  if (fixture.failed) {
+    assert(cpu().textContent === "—", "failed first sample became zero");
+    assert(nodes() && traffic() && ranking() && topology(), "optional host failure blocked dashboard");
+    fixture.failed = false;
+    await refresh();
   }
+
+  assert(cpu().textContent === "23.6%", "CPU usage differs from panel API");
+  assert(metric("内存使用率").textContent === "43.5%" && metric("根目录磁盘").textContent === "33.0%", "capacity percentages differ from the panel API");
+  assert(panel().querySelectorAll("svg.a-dash-spark").length >= 3, "panel sparklines missing despite multi-sample window");
+
+  const summary = card("运行概况");
+  await waitFor(() => summary?.querySelector('[data-refresh-key="运行内核"] strong')?.textContent === "3", "offline runtime counted as live or scoped installed cores lost");
+  assert(summary?.querySelector('[data-refresh-key="全网实时吞吐"] strong')?.textContent !== "—", "valid fleet rates missing");
+  assert(summary?.querySelector('a[href="#tasks?status=failed"]'), "failed task shortcut missing");
+
+  await waitFor(() => traffic()?.querySelectorAll("path[data-series]").length === 2, "receive and send series are not independently plotted");
+  const series = [...traffic().querySelectorAll("path[data-series]")];
+  assert(series[0].getAttribute("stroke-dasharray") !== series[1].getAttribute("stroke-dasharray"), "traffic directions rely only on color");
+
+  await waitFor(() => ranking()?.querySelector('[aria-label="节点流量排行"] a[href^="#traffic?agent="]'), "ranked nodes cannot open their own traffic");
+  await waitFor(() => ranking().querySelectorAll('[aria-label="节点流量排行"] > [data-refresh-key]').length === 4, "ranking did not show authorized nodes under Top 5");
+  const scopeSelect = ranking().querySelector('[name="traffic_rank_scope"]');
+  assert(scopeSelect && !scopeSelect.closest("[hidden]"), "scope filter missing with shared owner traffic");
+  ranking().querySelector('[name="traffic_rank_period"]').value = "cycle";
+  ranking().querySelector('[name="traffic_rank_period"]').dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => ranking().textContent.includes("已封禁") && ranking().textContent.includes("当前周期"), "billing cycle view lost blocked quota state");
+  scopeSelect.value = "current";
+  scopeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => ranking().querySelectorAll('[aria-label="节点流量排行"] > [data-refresh-key]').length === 2, "current-user scope filter failed");
+  scopeSelect.value = "all";
+  scopeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  ranking().querySelector('[name="traffic_rank_period"]').value = "month";
+  ranking().querySelector('[name="traffic_rank_period"]').dispatchEvent(new Event("change", { bubbles: true }));
+
+  await waitFor(() => nodes()?.querySelector(".a-dash-matrix-row a")?.textContent.includes("东京"), "saved node order ignored");
+  assert(nodes().textContent.includes("时钟异常") && nodes().textContent.includes("IPv6"), "matrix omitted clock_sync or IPv6 capability badges");
+  assert(!activity() && reads("/tasks") === 0, "retired recent-task area still renders or polls");
+
+  assert(!card("节点链路监控"), "probes card must not render alongside topology card");
+  await waitFor(() => topology()?.querySelectorAll(".a-topo-single-stage").length === 1 && topology()?.querySelectorAll(".a-topo-group-pill").length === 2, "dashboard topology did not render single selected group with switcher");
+  assert(topology().querySelector('.a-topo-single-stage')?.getAttribute("data-group-name") === "东京香港专线", "initial group should default to first group");
+  assert(topology().querySelector("svg.a-dash-topo-map-svg"), "homepage topology should default directly to pacific map");
+  assert(topology().textContent.includes("43.8ms") && topology().textContent.includes("45.4ms"), "topology did not render forward/reverse hop metrics");
+  assert(!/(B\/s|KB\/s|MB\/s|GB\/s|实时入站|实时出站|本月)/.test(topology().textContent), "topology must not display traffic rates or monthly totals");
+
+  // Focus single node and single hop in inspect strip via map entity click
+  topology().querySelector('[data-topo-entity="node:tokyo"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => topology()?.querySelector('[data-topo-entity="node:tokyo"]')?.classList.contains("is-active") && topology()?.querySelector(".a-topo-inspect")?.textContent.includes("东京 · JP-03"), "topology node selection did not update inspect bar");
+  topology().querySelector('[data-topo-entity^="probe:"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => topology()?.querySelector('[data-topo-entity^="probe:"]')?.classList.contains("is-active") && topology()?.querySelector(".a-topo-inspect")?.textContent.includes("跳段 1/1"), "topology hop selection did not update inspect bar");
+
+  // Verify run/stop and toggle actions directly from single-group header (single entry per action)
+  const runBtns = [...topology().querySelectorAll("button")].filter((b) => b.textContent === "立即探测");
+  assert(runBtns.length === 1, "expected strictly one run button in homepage single-group context");
+  runBtns[0].click();
+  await waitFor(() => [...topology().querySelectorAll("button")].some((b) => b.textContent === "停止"), "run action did not switch to stop");
+  [...topology().querySelectorAll("button")].find((b) => b.textContent === "停止").click();
+  await waitFor(() => [...topology().querySelectorAll("button")].some((b) => b.textContent === "立即探测"), "stop action did not settle");
+
+  // Toggle dashboard history chart & verify preference persistence
+  [...topology().querySelectorAll("button")].find((b) => b.textContent === "历史趋势").click();
+  await waitFor(() => topology().querySelector("svg.a-topo-history-svg") && fixture.uiPrefs.values?.dashboard?.topo_show_history === true, "dashboard history chart toggle did not render or persist");
+
+  // Create a 3-hop chain group via unified dialog, verifying uniqueness check before save
+  [...topology().querySelectorAll("button")].find((b) => b.textContent === "+ 新建监测组").click();
+  await waitFor(() => activeDialog()?.querySelector('select[name="hop_node_1"] option[value="singapore/main"]'), "diagnostic nodes not populated in create group dialog");
+  const addDialog = activeDialog();
+  const groupInput = addDialog.querySelector('input[name="group_name"]');
+  groupInput.value = "东京香港专线";
+  groupInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitFor(() => groupInput.validationMessage.includes("已存在链路"), "duplicate group_name validation did not fire");
+  groupInput.value = "亚太核心组";
+  groupInput.dispatchEvent(new Event("input", { bubbles: true }));
+  addDialog.querySelector('input[name="name"]').value = "三跳测试链路";
+  addDialog.querySelector('select[name="hop_node_0"]').value = "tokyo/main";
+  addDialog.querySelector('select[name="hop_node_0"]').dispatchEvent(new Event("change", { bubbles: true }));
+  addDialog.querySelector('select[name="hop_node_1"]').value = "hongkong/main";
+  addDialog.querySelector('select[name="hop_node_1"]').dispatchEvent(new Event("change", { bubbles: true }));
+  addDialog.querySelector('[data-refresh-key="add-hop"]').click();
+  await waitFor(() => addDialog.querySelector('select[name="hop_node_2"]'), "adding 3rd chain hop failed");
+  addDialog.querySelector('select[name="hop_node_2"]').value = "singapore/main";
+  addDialog.querySelector('select[name="hop_node_2"]').dispatchEvent(new Event("change", { bubbles: true }));
+  addDialog.querySelector('button[type="submit"]').click();
+  await waitFor(() => !addDialog.open && topology()?.querySelector('.a-topo-single-stage[data-group-name="亚太核心组"]'), "newly created group link was not selected and rendered");
+  assert(topology().querySelectorAll('.a-topo-single-stage svg.a-dash-topo-map-svg [data-refresh-key^="map-arc-"], .a-topo-single-stage svg.a-dash-topo-map-svg [data-refresh-key^="m-map-arc-"]').length === 2, "3-hop chain did not render 2 hop arcs on map");
+
+  // Switch back to 东京香港专线 and re-focus node:tokyo for stability refresh assertions
+  topology().querySelector('.a-topo-group-pill[data-group-name="东京香港专线"]').click();
+  await waitFor(() => topology()?.querySelector('.a-topo-single-stage[data-group-name="东京香港专线"]'), "failed to switch back to 东京香港专线");
+  topology().querySelector('[data-topo-entity="node:tokyo"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await waitFor(() => topology()?.querySelector('[data-topo-entity="node:tokyo"]')?.classList.contains("is-active"), "failed to focus tokyo node");
+
+  // Verify node telemetry matrix 24h dialog opens and renders metrics without interfering with polling.
+  const trendBtn = [...nodes().querySelector(".a-dash-matrix-row").querySelectorAll("button")].find((b) => b.textContent === "24h 趋势");
+  assert(trendBtn, "matrix 24h trend button missing");
+  trendBtn.click();
+  await waitFor(() => document.querySelector('dialog[open] [aria-label="节点历史指标"]') && document.querySelector("dialog[open] svg.a-chart"), "matrix 24h dialog did not render chart");
+  document.querySelector("dialog[open]").close();
+  await delay(60);
+
+  await waitFor(() => card("入站连接脉冲 (24h)")?.querySelector("svg.a-dash-pulse-svg"), "connections pulse card missing");
+  await waitFor(() => card("证书健康")?.textContent.includes("14 天内到期 1"), "certificates expiring count wrong or included unowned cert");
+  await waitFor(() => card("IP 质量概况")?.textContent.includes("异常/失败"), "ip-quality summary card missing");
+
+  const bands = () => [...traffic().querySelectorAll("[data-chart-day]")];
+  const firstDay = bands()[0], firstDate = firstDay.dataset.chartDay;
+  firstDay.scrollIntoView({ block: "center", behavior: "instant" });
+  firstDay.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+  await waitFor(() => document.querySelector(".a-tooltip"), "daily traffic hover has no tooltip");
+  const tip = document.querySelector(".a-tooltip");
+  assert(tip.textContent.includes(firstDate) && tip.textContent.replace(/\s/g, "").includes("接收1.2GB") && tip.textContent.includes("发送") && tip.textContent.includes("合计"), "daily tooltip omits date, directions or actual usage");
+  fixture.trafficMultiplier = 2;
+  await refresh();
+  await waitFor(() => tip.textContent.replace(/\s/g, "").includes("接收2.4GB"), "daily tooltip did not update its current sample");
+  assert(document.querySelector(".a-tooltip") === tip && bands()[0] === firstDay, "poll recreated the hovered day or tooltip");
+  assert(traffic().querySelector(".a-dash-chart-inspect")?.textContent.includes(firstDate) && traffic().querySelector(".a-dash-chart-inspect")?.textContent.replace(/\s/g, "").includes("2.4GB"), "chart inspect readout did not update on hovered refresh");
+  fixture.trafficMultiplier = 1;
+  await refresh();
+  firstDay.focus();
+  firstDay.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  const keyboardDay = bands()[Math.min(1, bands().length - 1)];
+  await waitFor(() => document.activeElement === keyboardDay && document.querySelector(".a-tooltip")?.textContent.includes(keyboardDay.dataset.chartDay), "keyboard cannot inspect adjacent daily traffic");
+  firstDay.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }));
+  firstDay.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, pointerType: "touch" }));
+  assert(document.querySelector(".a-tooltip")?.textContent.includes(firstDate), "touch cannot inspect daily traffic");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert(!document.querySelector(".a-tooltip"), "Escape did not dismiss daily tooltip");
+
+  const assertLayout = () => {
+    assert(document.documentElement.scrollWidth <= innerWidth + 1, `viewport overflow ${innerWidth}`);
+    for (const element of document.querySelectorAll(".a-card-body,.a-chart-container,.a-chart-meta,.a-dash-deck,.a-dash-subbar,.a-dash-cmd-grid,.a-dash-cmd-cell,.a-dash-dial-grid,.a-dash-dial-cell,.a-dash-host-io,.a-dash-traffic-ledger,.a-dash-ledger-cell,.a-dash-chart-inspect,.a-dash-chart-box,.a-topo-body,.a-topo-switcher-box,.a-topo-switcher-row,.a-topo-switcher-collapsed,.a-topo-switcher,.a-topo-single-stage,.a-topo-inspect,.a-topo-controls-bar,.a-topo-domain-bar,.a-topo-fleet-map-panel,.a-topo-map-wrap,.a-dash-topo-map-stage,.a-dash-matrix,.a-dash-matrix-row,.a-dash-rank-list,.a-dash-rank-headbar,.a-dash-rank-row,.a-dash-edge-grid,.a-dash-edge-stats,.a-dash-edge-viz")) {
+      if (element.classList.contains("a-topo-switcher") && getComputedStyle(element).overflowX === "auto") continue;
+      assert(element.scrollWidth <= element.clientWidth + 1, `content overflow ${element.className}`);
+    }
+    for (const element of document.querySelectorAll('[aria-label="节点运行状态"]')) {
+      assert(element.scrollWidth <= element.clientWidth + 1, `dashboard summary needs horizontal scrolling ${element.getAttribute("aria-label")}`);
+    }
+    if (panel()) {
+      assert(panel().querySelectorAll(".a-dash-dial-svg").length === 3, "panel dial gauges missing");
+    }
+    if (traffic()) {
+      const statSummary = traffic().querySelector('[data-refresh-key="月累计流量"]');
+      assert(Math.abs(statSummary.querySelector(".a-dash-ledger-head").getBoundingClientRect().left - statSummary.querySelector(".a-dash-ledger-duplex").getBoundingClientRect().left) < 1, "monthly traffic and direction counters are not aligned");
+      assert(Math.abs(statSummary.querySelector(".a-dash-ledger-head").getBoundingClientRect().left - traffic().querySelector("h2").getBoundingClientRect().left) < 1, "traffic summary ignores the card content edge");
+      assert(Math.abs(traffic().querySelector("[name=traffic_month]").getBoundingClientRect().bottom - [...traffic().querySelectorAll("button")].find((b) => b.textContent === "流量明细").getBoundingClientRect().bottom) < 1, "month and detail controls are not aligned");
+    }
+  };
+  for (const scale of [90, 100, 110, 135]) {
+    document.documentElement.style.fontSize = `${scale}%`;
+    await delay(80);
+    assertLayout();
+  }
+  document.documentElement.style.fontSize = "100%";
+  await delay(80);
+
+  const scrollHost = document.scrollingElement || document.documentElement;
+  scrollHost.scrollTop = 200;
+  const beforePageScroll = scrollHost.scrollTop;
+  const stablePanel = panel(), stableCPU = cpu(), stableNode = nodes().querySelector(".a-dash-matrix-row"), stableSVG = traffic().querySelector("svg.a-chart");
+  const stableNodeAction = nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a");
+  const stableRankRow = ranking().querySelector(".a-dash-rank-row");
+  const stableTopoStage = topology().querySelector(".a-topo-single-stage");
+  const stableTopoSVG = topology().querySelector("svg.a-dash-topo-map-svg");
+  const stablePanelSVGs = [...panel().querySelectorAll("svg")];
+  const stablePanelGrads = [...panel().querySelectorAll("linearGradient")].map((g) => g.id);
+  await refresh();
+  assert(scrollHost.scrollTop === beforePageScroll, "unchanged refresh disturbed page scroll");
+  assert(topology().querySelector(".a-topo-single-stage") === stableTopoStage, "unchanged refresh rebuilt topology stage");
+  assert(stableTopoSVG && topology().querySelector("svg.a-dash-topo-map-svg") === stableTopoSVG, "unchanged refresh rebuilt topology map SVG");
+  assert(topology().querySelector('[data-topo-entity="node:tokyo"]')?.classList.contains("is-active"), "unchanged refresh lost focused node (after refresh)");
+  assert(stablePanelSVGs.length > 0 && [...panel().querySelectorAll("svg")].every((svg, idx) => svg === stablePanelSVGs[idx]), "unchanged refresh rebuilt panel SVG");
+  assert(JSON.stringify([...panel().querySelectorAll("linearGradient")].map((g) => g.id)) === JSON.stringify(stablePanelGrads), "panel gradient IDs churned across refresh");
+  assert(ranking().querySelector(".a-dash-rank-row") === stableRankRow && nodes().querySelector(".a-dash-matrix-row button, .a-dash-matrix-row a") === stableNodeAction, "unchanged refresh replaced card DOM nodes");
+  const month = () => traffic().querySelector('[name="traffic_month"]');
+  month().focus();
+  fixture.metrics.history = [];
+  fixture.metrics.cpu_percent = 92;
+  await refresh();
+  assert(cpu().textContent === "92.0%", "manual metrics refresh failed");
+  assert(panel() === stablePanel && cpu() === stableCPU, "refresh replaced metric nodes");
+  assert(document.activeElement === month(), "refresh stole filter focus");
+  [...traffic().querySelectorAll("button")].find((button) => button.textContent === "流量明细").click();
+  const dialog = document.querySelector("dialog[open]");
+  assert(dialog?.matches(":modal"), "traffic detail modal missing");
+  const detailTable = dialog.querySelector('[aria-label="每日流量明细"]');
+  assert(detailTable, "traffic daily data missing");
+  const scroll = dialog.querySelector(".a-dialog-body");
+  scroll.scrollTop = 150;
+  const beforeScroll = scroll.scrollTop;
+  fixture.metrics.cpu_percent = 41.2;
+  await waitFor(() => cpu()?.textContent === "41.2%", "automatic metrics refresh failed");
+  assert(dialog.matches(":modal") && scroll.scrollTop === beforeScroll, "poll disturbed detail modal");
+  assert(nodes().querySelector(".a-dash-matrix-row") === stableNode && traffic().querySelector("svg.a-chart") === stableSVG, "poll rebuilt unchanged business content");
+  dialog.close();
+  fixture.failed = true;
+  await refresh();
+  assert(panel().textContent.includes("刷新失败") && cpu().textContent === "41.2%", "failed refresh discarded metrics");
+  fixture.failed = false;
+  fixture.metrics.cpu_percent = 0;
+  fixture.metrics.memory_available = false;
+  fixture.metrics.network_available = false;
+  await refresh();
+  assert(cpu().textContent === "0.0%", "idle CPU became unavailable");
+  assert(metric("内存使用率").textContent === "—", "unavailable memory became zero");
+  assert(metric("网络接收速率").textContent === "—", "unavailable network became zero");
+  fixture.metrics.memory_available = true;
+  const memoryTotal = fixture.metrics.memory_total_bytes;
+  for (const total of [0, -1, null, "10"]) {
+    fixture.metrics.memory_total_bytes = total;
+    await refresh();
+    assert(metric("内存使用率").textContent === "—", "invalid memory capacity was displayed as a valid percentage");
+  }
+  fixture.metrics.memory_total_bytes = memoryTotal;
+  fixture.metrics.memory_available = false;
+  fixture.metrics.network_available = true;
+  fixture.metrics.network_rx_bps = null;
+  await refresh();
+  assert(metric("网络接收速率").textContent === "—", "invalid network sample became a real rate");
+  fixture.metrics.network_rx_bps = "<img src=x onerror=alert(1)>";
+  await refresh();
+  assert(metric("网络接收速率").textContent === "—" && !panel().querySelector("img"), "untrusted metric became HTML or a real sample");
+  fixture.metrics.network_rx_bps = 2048;
+  fixture.metrics.network_tx_bps = 512;
+  await refresh();
+  assert(metric("网络接收速率").textContent.replace(/\s/g, "") === "2KB/s" && panel().textContent.includes("容器可见"), "network recovery or container scope lost");
+  fixture.metrics.collected_at = "invalid";
+  await refresh();
+  assert(panel().textContent.includes("尚无有效采样"), "invalid timestamp presented a fresh sample");
+  assert(!/NaN|undefined|Infinity/.test(panel().textContent), "invalid metric text leaked");
+
+  fixture.metrics.collected_at = new Date(Date.now() - 60000).toISOString();
+  await refresh();
+  assert(panel().textContent.includes("采样已过期"), "stale sample presented live");
+  delete fixture.metrics.collected_at;
+  fixture.denied = true;
+  await refresh();
+  assert(cpu().textContent === "—" && panel().textContent.includes("权限"), "denied host read retained protected data");
+  fixture.denied = false;
+  await refresh();
+  assert(cpu().textContent === "0.0%", "manual refresh did not recover host metrics after 403 cleared");
+
+  const chooseMonth = (value) => {
+    month().value = value;
+    month().dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const period = () => traffic().querySelector(".a-chart-meta").textContent;
+  const oldMonth = month().value;
+  assert(traffic().textContent.includes("UTC 今日"), "current-month total lost UTC day semantics");
+  fixture.trafficFailed = true;
+  const oldReads = reads("/traffic-usage");
+  chooseMonth(`${new Date().getUTCFullYear() - 1}-01`);
+  await waitFor(() => reads("/traffic-usage") > oldReads && traffic().textContent.includes("刷新失败"), "failed month request not shown");
+  assert(period().includes(oldMonth), "old chart attributed to failed month");
+  fixture.metrics.cpu_percent = 37;
+  await waitFor(() => cpu()?.textContent === "37.0%", "failed month stopped host polling");
+  fixture.trafficFailed = false;
+  const february = `${new Date().getUTCFullYear() - 1}-02`;
+  chooseMonth(february);
+  assert(!traffic().textContent.includes("读取中"), "month change flashed loading text over ready chart");
+  await waitFor(() => period().includes(february), "February not loaded");
+  const days = new Date(Date.UTC(new Date().getUTCFullYear() - 1, 2, 0)).getUTCDate();
+  assert(traffic().textContent.includes(`· ${days} 天`), "historical average uses incorrect day count");
+  assert(!traffic().textContent.includes("UTC 今日"), "historical month claims current day");
+  assert(traffic().querySelector("svg.a-chart [d]") && traffic().querySelector("svg.a-chart").textContent.includes(`02-${days}`), "February axis lost final day");
+  assertLayout();
+
+  if (mode === "dashboard-mobile") {
+    const mobSwitcher = topology().querySelector(".a-topo-switcher");
+    assert(mobSwitcher && getComputedStyle(mobSwitcher).overflowX === "auto", "mobile topology switcher must enable horizontal scrolling");
+    assert(mobSwitcher.getBoundingClientRect().height < 80, "mobile topology switcher should remain a single horizontal row");
+    await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg.is-mobile"), "mobile dashboard topology should default to pacific map");
+    assert(!topology().querySelector("[data-topo-dash-view]"), "dashboard topology must not render removed flow/map toggle");
+    const mobHudText = topology().querySelector(".a-dash-topo-map-hud")?.textContent || "";
+    assert(mobHudText.includes("去43.8ms/回45.4ms") && mobHudText.includes("丢包20%") && !mobHudText.includes("均 "), `unexpected mobile single-group HUD: ${mobHudText}`);
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => /^\d+%$/.test(topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || ""), "mobile map reset did not clear selection");
+    const mobDefaultPct = topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || "";
+    assert(Number.parseInt(mobDefaultPct, 10) > 100, `expected mobile single-group map auto-focus >100%, got ${mobDefaultPct}`);
+    topology().querySelector('[data-refresh-key="map-zoom-in"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "mobile map zoom in did not update scale");
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === mobDefaultPct, "mobile map zoom reset did not restore auto-focus");
+    assertLayout();
+  }
+
+  if (mode === "dashboard") {
+    assert(!topology().querySelector("[data-topo-dash-view]"), "dashboard topology should not render flow switcher");
+    assert(topology().querySelector('[data-refresh-key="open-topology-page"]')?.getAttribute("href") === "#topology", "dashboard topology detail link missing");
+
+    // Verify homepage group switcher collapse/expand & persistence
+    topology().querySelector('[data-refresh-key="dash-groups-toggle"]')?.click();
+    await waitFor(() => topology().querySelector(".a-topo-switcher-collapsed") && fixture.uiPrefs.values?.dashboard?.topo_groups_collapsed === true, "homepage group switcher failed to collapse");
+    assertLayout();
+    topology().querySelector('[data-refresh-key="dash-groups-toggle"]')?.click();
+    await waitFor(() => topology().querySelector(".a-topo-switcher") && fixture.uiPrefs.values?.dashboard?.topo_groups_collapsed === false, "homepage group switcher failed to expand");
+    assertLayout();
+
+    // Verify homepage Pacific map auto-focus, zoom, drag & reset
+    await waitFor(() => topology().querySelector("svg.a-dash-topo-map-svg"), "homepage topology failed to render pacific map by default");
+    const deskHudText = topology().querySelector(".a-dash-topo-map-hud")?.textContent || "";
+    assert(deskHudText.includes("去 43.8ms / 回 45.4ms") && deskHudText.includes("丢包 20%") && !deskHudText.includes("均 "), `unexpected desktop single-group HUD: ${deskHudText}`);
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => /^\d+%$/.test(topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || ""), "homepage map reset did not clear selection");
+    const defaultPct = topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent || "";
+    assert(Number.parseInt(defaultPct, 10) > 100, `expected desktop single-group auto-focus >100%, got ${defaultPct}`);
+    assertLayout();
+    topology().querySelector('[data-refresh-key="map-zoom-in"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "homepage map zoom in did not update scale");
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === defaultPct, "homepage map zoom reset did not restore auto-focus");
+    const dragSvg = topology().querySelector("svg.a-dash-topo-map-svg");
+    const dragRect = dragSvg.getBoundingClientRect();
+    const sx = dragRect.left + dragRect.width * 0.5;
+    const sy = dragRect.top + dragRect.height * 0.5;
+    dragSvg.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: sx, clientY: sy }));
+    dragSvg.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, pointerType: "mouse", clientX: sx + 48, clientY: sy + 24 }));
+    dragSvg.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: sx + 48, clientY: sy + 24 }));
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent.includes("重置"), "dragging zoomed map did not pan viewport");
+    topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.click();
+    await waitFor(() => topology().querySelector('[data-refresh-key="map-zoom-reset"]')?.textContent === defaultPct, "map reset after drag did not restore auto-focus");
+
+    location.hash = "#topology";
+    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-topo-fleet-map-panel svg.a-dash-topo-map-svg"), "standalone topology page did not default to pacific map");
+    assert(!topology().querySelector('[data-refresh-key="open-topology-page"]'), "standalone topology page should not render duplicate detail link");
+    assert(!topology().querySelector('[data-topo-view-btn="overview"]') && !topology().querySelector('[data-topo-view-btn="flow"]'), "removed overview and flow modes must not appear");
+    assert(topology().querySelector(".a-topo-domain-bar") && topology().querySelector('[data-topo-domain-btn="domain:multihop"]'), "standalone domain filter bar missing multi-hop domain");
+    assert(topology().querySelector('[data-refresh-key="fleet-map-compare"]')?.getAttribute("aria-selected") === "true", "standalone map should default to multi-group panorama");
+    topology().querySelector('.a-topo-fleet-map-panel [data-topo-entity^="probe:"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await waitFor(() => topology().querySelector('[data-refresh-key="topo-map-inspect"] [data-refresh-key="map-focus-group"]'), "fleet map click did not update inspect action strip");
+    topology().querySelector('[data-topo-domain-btn="domain:multihop"]').click();
+    await waitFor(() => topology().querySelector('[data-topo-domain-btn="domain:multihop"]')?.getAttribute("aria-pressed") === "true" && fixture.uiPrefs.values?.topology?.domain_group === "domain:multihop", "domain filter did not persist");
+    topology().querySelector('[data-topo-domain-btn="all"]').click();
+    await waitFor(() => topology().querySelector('[data-topo-domain-btn="all"]')?.getAttribute("aria-pressed") === "true", "resetting domain filter to all failed");
+    assertLayout();
+
+    // Filter, direction switch, sort, and focus view mode + preference persistence
+    topology().querySelector('.a-dash-topo-filter-btn[data-filter="abnormal"]').click();
+    await waitFor(() => topology().querySelectorAll('.a-topo-fleet-map-bar [data-group-name]').length === 2 && topology().querySelector('.a-dash-topo-filter-btn[data-filter="abnormal"]')?.getAttribute("aria-pressed") === "true", "standalone filter abnormal did not filter groups");
+    topology().querySelector('[data-topo-dir-btn="reverse"]').click();
+    const sortSelect = topology().querySelector('select[name="topo_sort_by"]');
+    sortSelect.value = "name_asc";
+    sortSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    topology().querySelector('[data-topo-view-btn="focus"]').click();
+    await waitFor(() => topology().querySelector(".a-topo-focus-details") && topology().querySelector(".a-topo-single-stage svg.a-dash-topo-map-svg"), "standalone topology did not switch to focus map mode");
+    assert(!topology().querySelector('[data-topo-focus-viz]'), "focus mode must not render removed flow toggle");
+    topology().querySelector('.a-topo-group-pill[data-group-name="东京香港专线"]')?.click();
+    await waitFor(() => fixture.uiPrefs.values?.topology?.view_mode === "focus" && fixture.uiPrefs.values?.topology?.status_filter === "abnormal" && fixture.uiPrefs.values?.topology?.metric_dir === "reverse" && fixture.uiPrefs.values?.topology?.sort_by === "name_asc" && fixture.uiPrefs.values?.topology?.selected_group === "东京香港专线", "standalone topology preferences did not persist");
+
+    // Navigate away and revisit #topology to confirm preference restore
+    location.hash = "#tasks";
+    await waitFor(() => document.title.startsWith("任务"), "failed to leave topology before preference restore check");
+    location.hash = "#topology";
+    await waitFor(() => document.title.startsWith("网络拓扑") && topology()?.querySelector(".a-topo-focus-details") && topology()?.querySelector('.a-topo-single-stage svg.a-dash-topo-map-svg') && topology()?.querySelector('.a-dash-topo-filter-btn[data-filter="abnormal"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector('[data-topo-dir-btn="reverse"]')?.getAttribute("aria-pressed") === "true" && topology()?.querySelector('select[name="topo_sort_by"]')?.value === "name_asc", "saved standalone topology preferences did not restore on revisit");
+
+    // Reset filter to all, focus and delete created 亚太核心组, verify deterministic fallback
+    topology().querySelector('.a-dash-topo-filter-btn[data-filter="all"]').click();
+    await waitFor(() => topology().querySelector('.a-topo-group-pill[data-group-name="亚太核心组"]'), "resetting filter did not reveal created group");
+    topology().querySelector('.a-topo-group-pill[data-group-name="亚太核心组"]').click();
+    await waitFor(() => topology()?.querySelector('.a-topo-single-stage[data-group-name="亚太核心组"]'), "failed to focus created group before delete");
+    [...topology().querySelector(".a-topo-single-head").querySelectorAll("button")].find((b) => b.textContent === "删除").click();
+    const delConfirm = activeDialog();
+    assert(delConfirm, "delete group confirmation dialog missing");
+    [...delConfirm.querySelectorAll("button")].find((b) => b.textContent === "删除监测分组").click();
+    await waitFor(() => !topology().querySelector('.a-topo-group-pill[data-group-name="亚太核心组"]') && topology().querySelector(".a-topo-single-stage"), "deleting active group failed or did not deterministically fall back");
+
+    // Reset standalone view back to map/both/default and return to dashboard
+    topology().querySelector('[data-topo-dir-btn="both"]').click();
+    topology().querySelector('[data-topo-view-btn="map"]').click();
+    const resetSort = topology().querySelector('select[name="topo_sort_by"]');
+    resetSort.value = "default";
+    resetSort.dispatchEvent(new Event("change", { bubbles: true }));
+
+    location.hash = "#dashboard";
+    await waitFor(() => document.title.startsWith("仪表盘") && topology()?.querySelector('.a-topo-single-stage[data-group-name="东京香港专线"]') && topology()?.querySelector("svg.a-topo-history-svg") && topology()?.querySelector("svg.a-dash-topo-map-svg"), "dashboard topology group or history preference did not restore on revisit");
+    [...topology().querySelectorAll("button")].find((b) => b.textContent === "历史趋势").click();
+    await waitFor(() => fixture.uiPrefs.values?.dashboard?.topo_show_history === false, "resetting dashboard history toggle did not persist");
+
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    const hidden = reads("/panel-metrics");
+    await delay(5200);
+    assert(reads("/panel-metrics") === hidden, "hidden dashboard polled");
+    delete document.hidden;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => reads("/panel-metrics") > hidden, "visible dashboard did not refresh");
+  }
+
   // A pending optional resource cannot delay node/traffic refreshes or page navigation.
-  let release;fixture.gate=new Promise(resolve=>{release=resolve;});const beforeGate=reads("/panel-metrics");refreshButton().click();await waitFor(()=>reads("/panel-metrics")>beforeGate,"slow metrics read missing");
-  const beforeNodes=reads("/agents");await delay(5300);assert(reads("/agents")>beforeNodes,"slow host read blocked node polling");
-  location.hash="#tasks";await waitFor(()=>document.title.startsWith("任务"),"route departure blocked on metrics");const afterLeave=reads("/panel-metrics");fixture.gate=null;release();await delay(2200);assert(!panel()&&reads("/panel-metrics")===afterLeave,"old metrics response/timer survived navigation");
-  assert(cspViolations.length===0,`CSP violations: ${cspViolations.join(", ")}`);
+  let release;
+  fixture.gate = new Promise((resolve) => { release = resolve; });
+  const beforeGate = reads("/panel-metrics");
+  refreshButton().click();
+  await waitFor(() => reads("/panel-metrics") > beforeGate, "slow metrics read missing");
+  const beforeNodes = reads("/agents");
+  await delay(5300);
+  assert(reads("/agents") > beforeNodes, "slow host read blocked node polling");
+  location.hash = "#tasks";
+  await waitFor(() => document.title.startsWith("任务"), "route departure blocked on metrics");
+  const afterLeave = reads("/panel-metrics");
+  fixture.gate = null;
+  release();
+  await delay(2200);
+  assert(!panel() && reads("/panel-metrics") === afterLeave, "old metrics response/timer survived navigation");
+  assert(cspViolations.length === 0, `CSP violations: ${cspViolations.join(", ")}`);
 }

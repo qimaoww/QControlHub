@@ -26,6 +26,10 @@ func mapError(err error) error {
 		return ErrNotFound
 	}
 	if isUniqueViolation(err) {
+		var pgError *pgconn.PgError
+		if errors.As(err, &pgError) && pgError.ConstraintName == "dashboard_probe_pairs_owner_group_uidx" {
+			return fmt.Errorf("%w: 该监测分组已存在链路，每个分组仅允许配置一条链路", ErrConflict)
+		}
 		return fmt.Errorf("%w: duplicate value", ErrConflict)
 	}
 	return err
