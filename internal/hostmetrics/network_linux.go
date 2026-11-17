@@ -20,21 +20,17 @@ const ipv6DefaultDestination = "00000000000000000000000000000000"
 
 func networkInterfaceDetails(names []string) ([]core.HostNetworkInterface, error) {
 	details := make([]core.HostNetworkInterface, 0, len(names))
-	problems := make([]error, 0)
 	for _, name := range names {
 		if !safeNetworkInterfaceName(name) {
-			problems = append(problems, errors.New("unsafe network interface name"))
-			continue
+			return nil, errors.New("unsafe network interface name")
 		}
 		device, err := net.InterfaceByName(name)
 		if err != nil {
-			problems = append(problems, fmt.Errorf("read %s addresses: %w", name, err))
-			continue
+			return nil, fmt.Errorf("read %s addresses: %w", name, err)
 		}
 		assigned, err := device.Addrs()
 		if err != nil {
-			problems = append(problems, fmt.Errorf("read %s addresses: %w", name, err))
-			continue
+			return nil, fmt.Errorf("read %s addresses: %w", name, err)
 		}
 		addresses := make([]string, 0, len(assigned))
 		seen := make(map[netip.Addr]struct{}, len(assigned))
@@ -72,7 +68,7 @@ func networkInterfaceDetails(names []string) ([]core.HostNetworkInterface, error
 			details = append(details, core.HostNetworkInterface{Name: name, Addresses: addresses})
 		}
 	}
-	return details, errors.Join(problems...)
+	return details, nil
 }
 
 func usableNetworkAddress(ip net.IP) bool {
@@ -160,7 +156,8 @@ func fallbackNetworkInterfaces() []string {
 	}
 	result := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() && safeNetworkInterfaceName(entry.Name()) && entry.Name() != "lo" {
+		// sysfs class entries are links to devices, not directory entries.
+		if (entry.IsDir() || entry.Type()&os.ModeSymlink != 0) && safeNetworkInterfaceName(entry.Name()) {
 			result = append(result, entry.Name())
 		}
 	}

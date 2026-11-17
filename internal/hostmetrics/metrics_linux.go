@@ -203,10 +203,6 @@ func collectNetworkInterfacesCached(previous *metricSample, next *metricSample, 
 		return nil, nil, "", false, err
 	}
 	details, detailsErr := networkInterfaceDetails(interfaces)
-	if detailsErr != nil && len(details) == 0 {
-		// Failed discovery cannot confirm that all old addresses disappeared.
-		details = nil
-	}
 	key := strings.Join(interfaces, ",")
 	next.interfaces = interfaces
 	next.interfaceDetails = details
