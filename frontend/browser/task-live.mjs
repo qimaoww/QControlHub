@@ -171,7 +171,11 @@ export async function testLiveTaskRuntime(preview = false) {
     button('详情',row('live-0')).click();
     const install=await waitFor(()=>!document.querySelector('dialog[open] [aria-busy=true]') && document.querySelector('dialog[open]'),'安装任务详情未打开');
     assert.ok(install.textContent.includes('节点 Alpha')&&install.textContent.includes('development')&&install.textContent.includes('vernesong/mihomo 镜像（第三方）'),'任务详情缺少节点名称、安装版本或来源');
+    // The browser queues close; its handler disposes the detail poller.
+    const closed = new Promise(resolve => install.addEventListener('close', resolve, { once: true }));
     install.querySelector('[aria-label=关闭]').click();
+    await closed;
+    assert.equal(pollTimers.size,1,'关闭任务详情后仍保留详情轮询计时器');
     const updatedName='节点 Alpha · 更新后 '+ 'LongNodeNameWithoutSpaces'.repeat(30);
     agents=[{id:'alpha',name:updatedName},{id:'beta',name:'节点 Beta'}];
     settings={task_page_size:500,task_poll_interval_ms:600};clockOffset=31000;
