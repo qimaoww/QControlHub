@@ -122,6 +122,7 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
 
   // Exercise real settings consumption, then restore the account defaults.
   const originalSettings = await api(page, identity, "GET", "/settings");
+  const originalTaskFilters = (await api(page, identity, "GET", "/preferences/ui")).values.tasks || {};
   await api(page, identity, "PUT", "/settings", { ...originalSettings, task_page_size: 50, task_poll_interval_ms: 2000 });
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#tasks` }, page);
   await wait(page, "document.querySelector('.a-main [name=limit]')?.value==='50' && !document.querySelector('[aria-busy=true]')");
@@ -136,12 +137,19 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   await wait(page, "document.querySelector('.a-main [name=action]')?.value==='network-diagnostic' && document.querySelector('.a-main [name=limit]')?.value==='50' && !document.querySelector('[aria-busy=true]')");
   const currentSettings = await api(page, identity, "GET", "/settings");
   await api(page, identity, "PUT", "/settings", { ...originalSettings, revision: currentSettings.revision });
+  const currentPreferences = await api(page, identity, "GET", "/preferences/ui");
+  await api(page, identity, "PATCH", "/preferences/ui", {
+    revision: currentPreferences.revision,
+    values: { tasks: { status: "", agent_id: "", action: "", limit: String(originalSettings.task_page_size), ...originalTaskFilters } },
+  });
 
   await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#dashboard` }, page);
   await wait(page, "!!document.querySelector('.a-chart [data-series]') && !document.querySelector('[aria-busy=true]')");
   await evaluate(page, "document.documentElement.style.setProperty('--ink','rgb(12, 34, 56)')");
   assert.equal(await evaluate(page, "getComputedStyle(document.querySelector('.a-chart [data-series=received_bytes]')).stroke"), "rgb(12, 34, 56)");
-  await evaluate(page, "document.documentElement.style.removeProperty('--ink')");
+  await evaluate(page, "document.documentElement.style.removeProperty('--ink');document.querySelector('.a-chart-container').scrollIntoView({block:'center'})");
+  await screenshot(page, "analytics-chart");
+  await evaluate(page, "window.scrollTo(0,0)");
   record(`${mode}: measured chart widths, semantic theme tokens and nondefault account task pagination/refresh passed`);
   await checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record, call });
   await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call });
