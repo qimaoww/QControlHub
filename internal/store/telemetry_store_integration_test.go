@@ -351,6 +351,19 @@ func TestCleanupNoncesAndSingleCTEMetricsUpdateWithPostgreSQL(t *testing.T) {
 	if stored.Metrics.ClockSync == nil || stored.Metrics.ClockSync.Status != "synchronized" {
 		t.Fatalf("omitted clock_sync not preserved on compact update: %+v", stored.Metrics.ClockSync)
 	}
+	// An explicit empty snapshot clears old addresses; the next omission
+	// must keep that empty snapshot rather than resurrect the old interface.
+	for _, interfaces := range [][]core.HostNetworkInterface{{}, nil} {
+		compactMetrics.NetworkInterfaces = interfaces
+		compactMetrics.CollectedAt = compactMetrics.CollectedAt.Add(time.Second)
+		if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, compactMetrics); err != nil {
+			t.Fatal(err)
+		}
+		var empty bool
+		if err := dataStore.pool.QueryRow(ctx, `SELECT metrics->'network_interfaces'='[]'::jsonb FROM agent_live_state WHERE agent_id=$1`, agent.ID).Scan(&empty); err != nil || !empty {
+			t.Fatalf("empty interface snapshot not persisted: empty=%v err=%v", empty, err)
+		}
+	}
 
 	if err := dataStore.DeleteAgent(WithConfigScope(ctx, "", true), agent.ID); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)

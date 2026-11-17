@@ -103,6 +103,9 @@ func TestSameHostMetricsSnapshotAndMergeCompact(t *testing.T) {
 	if sameHostMetricsSnapshot(prev, clearedIfaces) {
 		t.Fatal("explicit empty NetworkInterfaces should differ from non-empty snapshot")
 	}
+	if sameHostMetricsSnapshot(compactUnchanged, clearedIfaces) || !sameHostMetricsSnapshot(clearedIfaces, compactUnchanged) {
+		t.Fatal("first explicit clear after reconnect must be written; a later omission must not rewrite it")
+	}
 }
 
 func TestSamePortTrafficUsageSliceAndClone(t *testing.T) {
