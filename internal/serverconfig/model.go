@@ -50,6 +50,7 @@ type Protocol struct {
 	Docs                 string       `json:"docs"`
 	DefaultPort          int          `json:"default_port"`
 	Credential           string       `json:"credential_label"`
+	CredentialHint       string       `json:"credential_hint,omitempty"`
 	SecondaryCredential  string       `json:"secondary_credential_label"`
 	IgnoresUsername      bool         `json:"ignores_username"`
 	Methods              []string     `json:"methods"`

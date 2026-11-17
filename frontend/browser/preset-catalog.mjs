@@ -19,6 +19,7 @@ export async function testPresetCatalogRuntime(catalog) {
         edit('reality_server_name','reality.example.test');
       }
       if(actual.protocol.snell_version) {
+        assert(Boolean(actual.protocol.credential_hint)&&form().textContent.includes(actual.protocol.credential_hint),'Snell input requirements did not come from the catalog');
         assert(!control('snell_version')&&!control('snell_mode')&&!control('snell_obfs_mode')&&!control('snell_shadow_tls_version'),'fixed Snell identity exposed as editable fields');
         assert(Boolean(control('snell_shadow_tls_password'))===Boolean(actual.protocol.snell_shadow_tls),'Snell carrier fields do not match the preset');
         assert(!control('tls_server_name')&&!control('certificate_path'),'native Snell requires unrelated TLS configuration');

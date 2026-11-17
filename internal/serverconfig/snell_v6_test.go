@@ -214,7 +214,7 @@ func TestSnellMultipleInboundsAndMetadataIsolation(t *testing.T) {
 
 func TestSnellNativeAmbiguityPreservesSource(t *testing.T) {
 	base := "listeners: [{name: raw, type: snell, listen: 127.0.0.1, port: 21777, version: 6, psk: abcdefghijkl, %s}]"
-	for _, extra := range []string{"mode: 123", "mode: null", "udp: invalid", "res-tls: {enable: true}",
+	for _, extra := range []string{"mode: 123", "mode: null", "udp: invalid", "res-tls: {enable: true}", "jls-config: {enable: true, password: native-password}",
 		"shadow-tls: {enable: true, version: 3, strict-mode: true, handshake: {dest: 'cover.example:443', extra: retain}, users: [{name: user, password: password123}]}",
 		"shadow-tls: {enable: true, version: 3, strict-mode: true, handshake: {dest: 'cover.example:443'}, users: [{name: user, password: password123, extra: retain}]}",
 		"shadow-tls: {enable: true, version: 3, strict-mode: true, handshake: {dest: 'cover.example:443'}, users: [{name: first, password: password123}, {name: second, password: password456}]}"} {
@@ -222,6 +222,11 @@ func TestSnellNativeAmbiguityPreservesSource(t *testing.T) {
 		parsed, ok := Parse(core.EngineMihomo, source)
 		if ok && !parsed.SourceOnly {
 			t.Fatalf("ambiguous input became editable: %s", extra)
+		}
+		if ok {
+			if _, err := BuildClientProfile(parsed, "node.example.test", ""); err == nil {
+				t.Fatalf("ambiguous input produced a partial client export: %s", extra)
+			}
 		}
 		if _, err := MutateGenerated(core.EngineMihomo, source, "", "raw", "modify"); err == nil {
 			t.Fatal("opaque source overwritten")

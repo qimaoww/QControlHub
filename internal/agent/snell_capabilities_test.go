@@ -19,6 +19,7 @@ func TestMihomoSnellMinimumVersion(t *testing.T) {
 			for _, source := range []string{
 				"listeners: [{type: snell, version: 6, mode: unshaped}]",
 				"proxies: [{type: snell, version: 6, mode: default}]",
+				"proxies: [{type: snell, version: '6', mode: default}]",
 			} {
 				if err := validateMihomoSnellCapabilities(context.Background(), binary, source); (err == nil) != version.valid {
 					t.Fatalf("version %s: %v", version.value, err)
@@ -28,5 +29,16 @@ func TestMihomoSnellMinimumVersion(t *testing.T) {
 				t.Fatal("v5 regression", err)
 			}
 		})
+	}
+}
+
+func TestMihomoSnellGateIgnoresUnrelatedVersionFields(t *testing.T) {
+	for _, source := range []string{
+		"proxies: [{name: direct-extra, type: direct, version: custom-metadata}]\nrules: ['MATCH,DIRECT']",
+		"listeners: [{name: socks, type: socks, port: 21080, version: custom-metadata}]",
+	} {
+		if err := validateMihomoSnellCapabilities(context.Background(), "/does-not-exist", source); err != nil {
+			t.Fatalf("unrelated version field triggered Snell validation: %v", err)
+		}
 	}
 }

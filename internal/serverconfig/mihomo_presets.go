@@ -33,6 +33,25 @@ var snellPresets = []snellPreset{
 	{ProtocolSnellV6UnshapedShadowTLS, "Snell v6 unshaped + ShadowTLS v3", "unshaped", 6, true},
 }
 
+var snellVersions = []struct {
+	version, minimumPSK, maximumPSK int
+	minimumMihomo                   string
+}{
+	{5, 16, 128, ""},
+	{6, 12, 255, "1.19.34"},
+}
+
+// SnellMinimumMihomoVersion shares the catalog's capability requirement with
+// native configuration validation, independently of a preset's carrier/mode.
+func SnellMinimumMihomoVersion(version int) string {
+	for _, spec := range snellVersions {
+		if spec.version == version {
+			return spec.minimumMihomo
+		}
+	}
+	return ""
+}
+
 func snellPresetFor(key string) (snellPreset, bool) {
 	for _, preset := range snellPresets {
 		if preset.key == key {
@@ -46,12 +65,17 @@ func snellProtocols(base string) []Protocol {
 	result := make([]Protocol, 0, len(snellPresets))
 	for _, preset := range snellPresets {
 		description := "支持 UDP over TCP 与连接复用。"
-		if preset.version == 6 {
-			description = "需要 Mihomo 1.19.34+；" + description
+		minimum, maximum := snellPSKBounds(preset.version)
+		hint := fmt.Sprintf("PSK：%d–%d 字节", minimum, maximum)
+		if required := SnellMinimumMihomoVersion(preset.version); required != "" {
+			description = "需要 Mihomo " + required + "+；" + description
+			hint += "；需要 Mihomo " + required + "+。"
+		} else {
+			hint += "；Surge 使用 v4 兼容模式，不启用 QUIC Proxy。"
 		}
 		result = append(result, Protocol{Key: preset.key, Group: "Snell", Name: preset.name, Badge: "SNELL", Description: description,
 			Docs: base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）", Transports: []string{"raw"}, IgnoresUsername: true,
-			SnellVersion: preset.version, SnellMode: preset.mode, SnellShadowTLS: preset.shadow})
+			SnellVersion: preset.version, SnellMode: preset.mode, SnellShadowTLS: preset.shadow, CredentialHint: hint})
 	}
 	return result
 }
@@ -353,10 +377,7 @@ func validatePathRoot(value string) error {
 }
 
 func validateSnellPSK(input Input) error {
-	minimum, maximum := 16, 128
-	if input.SnellVersion == 6 {
-		minimum, maximum = 12, 255
-	}
+	minimum, maximum := snellPSKBounds(input.SnellVersion)
 	if len(input.Credential) < minimum || len(input.Credential) > maximum {
 		return fmt.Errorf("Snell v%d PSK 必须为 %d–%d 字节", input.SnellVersion, minimum, maximum)
 	}
@@ -364,4 +385,13 @@ func validateSnellPSK(input Input) error {
 		return errors.New("Snell PSK 不能包含控制字符")
 	}
 	return nil
+}
+
+func snellPSKBounds(version int) (int, int) {
+	for _, spec := range snellVersions {
+		if spec.version == version {
+			return spec.minimumPSK, spec.maximumPSK
+		}
+	}
+	return 0, 0
 }

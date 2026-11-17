@@ -5653,6 +5653,9 @@
           "badge": {
             "type": "string"
           },
+          "credential_hint": {
+            "type": "string"
+          },
           "credential_label": {
             "type": "string"
           },
@@ -11241,6 +11244,7 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
@@ -11642,6 +11646,7 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
@@ -16587,6 +16592,7 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,

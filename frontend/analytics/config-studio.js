@@ -290,7 +290,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const special=Object.keys(labels).filter(key=>(!key.startsWith('snell_')||snellFields.includes(key))&&key!=='mieru_custom_pattern'&&(!['xhttp_backend_port','xhttp_tls_port','xhttp_tls_address','xhttp_tls_client_port','xhttp_tls_host'].includes(key)||isXHTTPGroup(protocol.key))&&!(key==='wireguard_server_address'&&engine!=='sing-box')&&prefixes.some(prefix=>key.startsWith(prefix)));
       if(protocol.port_forward)special.push('target_address','target_port','network');
       if(engine==='ss-rust')special.push('ss_rust_dns','ss_rust_outbound_bind_addr','ss_rust_ipv6_first');
-      if(protocol.snell_version)sections.push(muted(protocol.snell_version===6?'PSK：12–255 字节；需要 Mihomo 1.19.34+。':'PSK：16–128 字节；Surge 使用 v4 兼容模式，不启用 QUIC Proxy。'));
+      if(protocol.credential_hint)sections.push(muted(protocol.credential_hint));
       if(special.length)sections.push(group('协议参数',node('div',{className:'a-form-grid'},special.map(control)),true));
       sections.push(group('客户端与路由',node('div',{className:'a-form-grid'},['client_address','client_port','client_host',...(engine==='mihomo'?['listener_routing_mark','listener_rule','listener_proxy']:[])].map(control))));
       area.replaceChildren(...sections);

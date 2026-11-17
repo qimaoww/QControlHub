@@ -448,7 +448,7 @@ func unsupportedSnellNativeFields(listener map[string]any) bool {
 			return true
 		}
 	}
-	for _, key := range []string{"users", "res-tls", "jls", "reality-config"} {
+	for _, key := range []string{"users", "res-tls", "jls", "jls-config", "reality-config"} {
 		if _, exists := listener[key]; exists {
 			return true
 		}
