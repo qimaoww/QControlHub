@@ -65,15 +65,17 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 
 var listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
 
-// root is a store-owned SQL expression, never request input.
-func agentOfflineThresholdWithRootSQL(root string) string {
-	return fmt.Sprintf(`(CASE WHEN agents.owner_id='' THEN %s
+// Both expressions are store-owned SQL, never request input.
+func agentOfflineThresholdForOwnerSQL(owner, root string) string {
+	return fmt.Sprintf(`(CASE WHEN %[1]s='' THEN %[2]s
 		ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer
-			FROM user_panel_settings WHERE owner_id=agents.owner_id),%d) END)`,
-		root, core.DefaultPanelSettings().AgentOfflineThresholdSeconds)
+			FROM user_panel_settings WHERE owner_id=%[1]s),%[3]d) END)`,
+		owner, root, core.DefaultPanelSettings().AgentOfflineThresholdSeconds)
 }
 
-var agentOfflineThresholdSQL = agentOfflineThresholdWithRootSQL(`(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)`)
+const rootOfflineThresholdSQL = `(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)`
+
+var agentOfflineThresholdSQL = agentOfflineThresholdForOwnerSQL("agents.owner_id", rootOfflineThresholdSQL)
 
 var agentColumnsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,

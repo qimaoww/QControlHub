@@ -100,6 +100,21 @@ func TestOwnerPresenceDefaultsAndSavedThresholdStayIndependent(t *testing.T) {
 		if err != nil || len(agents) != 1 || agents[0].Status != want {
 			t.Fatalf("owner agents = %+v, %v; want %s", agents, err, want)
 		}
+		sources, err := db.ListCoreLogSources(owner)
+		if err != nil || len(sources) == 0 {
+			t.Fatalf("owner log sources: %d, %v", len(sources), err)
+		}
+		for _, source := range sources {
+			// This fixture advertises no log feature. An online node therefore
+			// reports unsupported, rather than offline or collecting.
+			status := "unsupported"
+			if want == "offline" {
+				status = "offline"
+			}
+			if source.AgentID != agent.ID || source.Status != status {
+				t.Fatalf("log source %s/%s: got %s, want %s", source.AgentID, source.Engine, source.Status, status)
+			}
+		}
 		if _, err := db.AgentPresenceTransitions(ctx, now, 180*time.Second); err != nil {
 			t.Fatal(err)
 		}
