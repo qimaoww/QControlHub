@@ -1,6 +1,7 @@
 export const routeModuleNames = Object.freeze({
   themes: "themes",
   dashboard: "dashboard",
+  topology: "dashboard",
   "network-tools": "network-tools",
   certificates: "certificates",
   "ip-quality": "ip-quality",

@@ -156,11 +156,24 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		return core.DiagnosticSession{}, err
 	}
 	defer tx.Rollback(ctx)
+	now := time.Now().UTC()
+	session, err := createDiagnosticTx(ctx, tx, in, now, now.Add(10*time.Minute))
+	if err != nil {
+		return core.DiagnosticSession{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return core.DiagnosticSession{}, err
+	}
+	s.signalDiagnosticRequestParticipantsAfterCommit(ctx, session.Request)
+	return session, nil
+}
+
+func createDiagnosticTx(ctx context.Context, tx pgx.Tx, in core.DiagnosticRequest, now, deadline time.Time) (core.DiagnosticSession, error) {
 	fail := func(e error) (core.DiagnosticSession, error) { return core.DiagnosticSession{}, e }
-	if err = lockAgentUser(ctx, tx); err != nil {
+	if err := lockAgentUser(ctx, tx); err != nil {
 		return fail(err)
 	}
-	if err = requireTaskPermission(ctx, tx, core.ActionStatus, false); err != nil {
+	if err := requireTaskPermission(ctx, tx, core.ActionStatus, false); err != nil {
 		return fail(err)
 	}
 	if in.RequestID == "" || len(in.RequestID) > 80 || strings.ContainsAny(in.RequestID, "\n\r\x00") {
@@ -169,40 +182,78 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	if in.TargetMode != "" && in.TargetMode != "ip" {
 		return fail(ErrInvalid)
 	}
+	path := in.PathEndpoints()
 	if in.TargetMode == "ip" {
-		if in.Node2.AgentID != "" || in.Node2.InstanceID != "" || in.Bidirectional {
-			return fail(fmt.Errorf("%w: 自定义 IP 不支持双向执行或关联节点", ErrInvalid))
+		if len(path) != 2 || path[1].AgentID != "" || path[1].InstanceID != "" || in.Bidirectional {
+			return fail(fmt.Errorf("%w: 自定义 IP 不支持多跳、双向执行或关联节点", ErrInvalid))
 		}
-		ip, e := core.DiagnosticAddress(in.Node2.Address)
+		ip, e := core.DiagnosticAddress(path[1].Address)
 		if e != nil {
 			return fail(fmt.Errorf("%w: %v", ErrInvalid, e))
 		}
-		in.Node2.Name = ip.String()
-		if in.Node1.Address == in.Node2.Address {
+		path[1].Address = ip.String()
+		path[1].Name = ip.String()
+		if path[0].Address == path[1].Address {
 			return fail(fmt.Errorf("%w: 目标 IP 不能与源地址相同", ErrInvalid))
 		}
+		in.Node1 = path[0]
+		in.Node2 = path[1]
+		if len(in.Nodes) > 0 {
+			in.Nodes = path
+		}
+	} else {
+		if len(path) < 2 || len(path) > core.DashboardProbeMaxHops {
+			return fail(fmt.Errorf("%w: 全程监测需配置 2 至 %d 个节点", ErrInvalid, core.DashboardProbeMaxHops))
+		}
+		if len(path) > 2 && in.Parameters.Tool != "ping" {
+			return fail(fmt.Errorf("%w: 多跳链路仅支持 ping 工具", ErrInvalid))
+		}
+		seen := map[string]bool{}
+		for i, ep := range path {
+			if ep.AgentID == "" {
+				return fail(fmt.Errorf("%w: 请选择第 %d 跳托管节点", ErrInvalid, i+1))
+			}
+			if seen[ep.AgentID] {
+				return fail(fmt.Errorf("%w: 同一诊断链路不能包含重复节点", ErrInvalid))
+			}
+			seen[ep.AgentID] = true
+		}
+		in.Node1 = path[0]
+		in.Node2 = path[len(path)-1]
+		if len(in.Nodes) > 0 {
+			in.Nodes = path
+		}
 	}
-	if in.Node1.AgentID == in.Node2.AgentID {
-		return fail(fmt.Errorf("%w: 请选择两个不同节点", ErrInvalid))
-	}
-	// Serialize capacity reservations in stable node order, including two
-	// overlapping requests with reversed endpoint order.
-	ids := []string{in.Node1.AgentID}
-	if in.TargetMode != "ip" {
-		ids = append(ids, in.Node2.AgentID)
+	// Serialize capacity reservations in stable node order, including overlapping
+	// multi-hop or reversed chains.
+	ids := []string{}
+	endpoints := []*core.DiagnosticEndpoint{}
+	if len(in.Nodes) >= 2 {
+		for i := range in.Nodes {
+			if in.TargetMode == "ip" && i == len(in.Nodes)-1 {
+				continue
+			}
+			ids = append(ids, in.Nodes[i].AgentID)
+			endpoints = append(endpoints, &in.Nodes[i])
+		}
+	} else {
+		ids = append(ids, in.Node1.AgentID)
+		endpoints = append(endpoints, &in.Node1)
+		if in.TargetMode != "ip" {
+			ids = append(ids, in.Node2.AgentID)
+			endpoints = append(endpoints, &in.Node2)
+		}
 	}
 	slices.Sort(ids)
+	var err error
 	for _, id := range ids {
 		var found string
 		if err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&found); err != nil {
 			return fail(mapError(err))
 		}
 	}
-	endpoints := []*core.DiagnosticEndpoint{&in.Node1}
-	if in.TargetMode != "ip" {
-		endpoints = append(endpoints, &in.Node2)
-	}
-	for _, ep := range endpoints {
+	var firstIs6 bool
+	for idx, ep := range endpoints {
 		if err = diagnosticEndpointAccess(ctx, tx, *ep); err != nil {
 			return fail(err)
 		}
@@ -228,6 +279,11 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		ip, e := core.DiagnosticAddress(ep.Address)
 		if e != nil {
 			return fail(fmt.Errorf("%w: %v", ErrInvalid, e))
+		}
+		if idx == 0 {
+			firstIs6 = ip.Is6()
+		} else if ip.Is6() != firstIs6 {
+			return fail(fmt.Errorf("%w: 链路各节点必须使用同一地址族", ErrInvalid))
 		}
 		if e = in.Parameters.Validate(ip.Is6()); e != nil {
 			return fail(fmt.Errorf("%w: %v", ErrInvalid, e))
@@ -259,12 +315,21 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 			}
 		}
 	}
-	a, _ := core.DiagnosticAddress(in.Node1.Address)
-	b, _ := core.DiagnosticAddress(in.Node2.Address)
-	if a.Is6() != b.Is6() {
-		return fail(fmt.Errorf("%w: 两端必须使用同一地址族", ErrInvalid))
+	if len(in.Nodes) >= 2 {
+		in.Node1 = in.Nodes[0]
+		in.Node2 = in.Nodes[len(in.Nodes)-1]
+	} else if in.TargetMode != "ip" {
+		b, _ := core.DiagnosticAddress(in.Node2.Address)
+		if b.Is6() != firstIs6 {
+			return fail(fmt.Errorf("%w: 两端必须使用同一地址族", ErrInvalid))
+		}
+	} else {
+		b, _ := core.DiagnosticAddress(in.Node2.Address)
+		if b.Is6() != firstIs6 {
+			return fail(fmt.Errorf("%w: 两端必须使用同一地址族", ErrInvalid))
+		}
 	}
-	if in.Bidirectional && in.Parameters.Tool != "mtr" && in.Parameters.Tool != "traceroute" {
+	if in.Bidirectional && in.Parameters.Tool != "ping" && in.Parameters.Tool != "mtr" && in.Parameters.Tool != "traceroute" {
 		return fail(ErrInvalid)
 	}
 	var existing []byte
@@ -283,7 +348,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		return fail(err)
 	}
 	var busy bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM network_diagnostic_sessions WHERE state IN ('preparing','running','stopping','cleanup_pending') AND (node1=ANY($1) OR node2=ANY($1)))`, ids).Scan(&busy); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM network_diagnostic_sessions WHERE state IN ('preparing','running','stopping','cleanup_pending') AND (node1=ANY($1::text[]) OR node2=ANY($1::text[]) OR node_ids && $1::text[]))`, ids).Scan(&busy); err != nil {
 		return fail(err)
 	}
 	if busy {
@@ -293,8 +358,8 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 	if err != nil {
 		return fail(err)
 	}
-	now := time.Now().UTC()
-	deadline := now.Add(10 * time.Minute)
+	now = now.UTC()
+	deadline = deadline.UTC()
 	session := core.DiagnosticSession{ID: id, OwnerID: scopeForConfig(ctx).OwnerID, Request: in, State: "preparing", Results: map[string]core.DiagnosticResult{}, CreatedAt: now, Deadline: deadline}
 	if in.Parameters.Tool == "iperf3" && in.Parameters.Protocol == "tcp" && in.Parameters.Bandwidth == 0 {
 		for _, ep := range endpoints {
@@ -312,7 +377,7 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 		return fail(err)
 	}
 	raw, _ := json.Marshal(session)
-	if _, err = tx.Exec(ctx, `INSERT INTO network_diagnostic_sessions(id,owner_id,owner_admin,api_key_id,request_id,node1,node2,document,state,deadline) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, id, session.OwnerID, scopeForConfig(ctx).Admin, keyID, in.RequestID, in.Node1.AgentID, in.Node2.AgentID, raw, session.State, deadline); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO network_diagnostic_sessions(id,owner_id,owner_admin,api_key_id,request_id,node1,node2,node_ids,document,state,deadline) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, id, session.OwnerID, scopeForConfig(ctx).Admin, keyID, in.RequestID, in.Node1.AgentID, in.Node2.AgentID, ids, raw, session.State, deadline); err != nil {
 		return fail(err)
 	}
 	if err = recordAPIKeyWork(ctx, tx, "network-diagnostic", id); err != nil {
@@ -328,10 +393,6 @@ func (s *Store) CreateDiagnostic(ctx context.Context, in core.DiagnosticRequest)
 			}
 		}
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return fail(err)
-	}
-	s.signalDiagnosticRequestParticipantsAfterCommit(ctx, in)
 	return session, nil
 }
 
@@ -413,19 +474,31 @@ func (s *Store) StopDiagnostic(ctx context.Context, id string) error {
 	return nil
 }
 
-func diagnosticCommands(d core.DiagnosticSession) []core.DiagnosticCommand {
+func plannedDiagnosticCommands(d core.DiagnosticSession) []core.DiagnosticCommand {
 	p := d.Request.Parameters
-	a, b := d.Request.Node1, d.Request.Node2
+	path := d.Request.PathEndpoints()
 	makeCommand := func(suffix, role string, source, target core.DiagnosticEndpoint) core.DiagnosticCommand {
 		return core.DiagnosticCommand{ID: d.ID + suffix, SessionID: d.ID, Role: role, Source: source, Target: target, Parameters: p, Deadline: d.Deadline, ByteLimit: d.ByteLimit}
 	}
 	if p.Tool != "iperf3" {
+		if len(path) >= 3 && d.Request.TargetMode != "ip" {
+			commands := make([]core.DiagnosticCommand, 0, (len(path)-1)*2)
+			for i := 0; i < len(path)-1; i++ {
+				commands = append(commands, makeCommand(fmt.Sprintf("-f%d", i), "probe", path[i], path[i+1]))
+				if d.Request.Bidirectional && path[i+1].AgentID != "" {
+					commands = append(commands, makeCommand(fmt.Sprintf("-r%d", i), "probe", path[i+1], path[i]))
+				}
+			}
+			return commands
+		}
+		a, b := path[0], path[len(path)-1]
 		commands := []core.DiagnosticCommand{makeCommand("-forward", "probe", a, b)}
 		if d.Request.Bidirectional {
 			commands = append(commands, makeCommand("-reverse", "probe", b, a))
 		}
 		return commands
 	}
+	a, b := d.Request.Node1, d.Request.Node2
 	if d.Request.TargetMode == "ip" {
 		return []core.DiagnosticCommand{makeCommand("-client", "client", a, b)}
 	}
@@ -437,10 +510,56 @@ func diagnosticCommands(d core.DiagnosticSession) []core.DiagnosticCommand {
 	}
 	return commands
 }
+
+func diagnosticCommands(d core.DiagnosticSession) []core.DiagnosticCommand {
+	planned := plannedDiagnosticCommands(d)
+	path := d.Request.PathEndpoints()
+	if len(path) < 3 || d.Request.TargetMode == "ip" || d.Request.Parameters.Tool == "iperf3" {
+		return planned
+	}
+	// Each agent runs at most one command at a time; emit already-dispatched
+	// incomplete commands first and schedule at most one next hop per free agent.
+	active := make([]core.DiagnosticCommand, 0, len(planned))
+	busyAgent := map[string]bool{}
+	started := map[string]bool{}
+	for _, c := range planned {
+		if r, ok := d.Results[c.ID]; ok {
+			started[c.ID] = true
+			if !r.Terminal() || !r.Cleaned {
+				active = append(active, c)
+				busyAgent[c.Source.AgentID] = true
+			}
+		}
+	}
+	if d.State != "stopping" && d.State != "cleanup_pending" {
+		for _, c := range planned {
+			if started[c.ID] {
+				continue
+			}
+			if !busyAgent[c.Source.AgentID] {
+				active = append(active, c)
+				busyAgent[c.Source.AgentID] = true
+			}
+		}
+	}
+	return active
+}
+
 func diagnosticComplete(d *core.DiagnosticSession) {
-	commands := diagnosticCommands(*d)
+	planned := plannedDiagnosticCommands(*d)
+	path := d.Request.PathEndpoints()
+	isMultiHop := len(path) >= 3 && d.Request.TargetMode != "ip" && d.Request.Parameters.Tool != "iperf3"
+	if isMultiHop && (d.State == "stopping" || d.State == "cleanup_pending") {
+		for _, c := range planned {
+			if r, ok := d.Results[c.ID]; ok && (!r.Terminal() || !r.Cleaned) {
+				return
+			}
+		}
+		d.State = "canceled"
+		return
+	}
 	all, failed, canceled := true, false, false
-	for _, c := range commands {
+	for _, c := range planned {
 		r, ok := d.Results[c.ID]
 		if !ok || !r.Terminal() || !r.Cleaned {
 			all = false
@@ -477,7 +596,7 @@ func (s *Store) AgentDiagnosticCommands(ctx context.Context, agentID string) ([]
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT document,owner_admin,api_key_id FROM network_diagnostic_sessions WHERE (node1=$1 OR node2=$1) AND state IN ('preparing','running','stopping','cleanup_pending') ORDER BY id FOR UPDATE`, agentID)
+	rows, err := tx.Query(ctx, `SELECT document,owner_admin,api_key_id FROM network_diagnostic_sessions WHERE (node1=$1 OR node2=$1 OR $1=ANY(node_ids)) AND state IN ('preparing','running','stopping','cleanup_pending') ORDER BY id FOR UPDATE`, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -688,8 +807,10 @@ func syncDiagnosticTask(ctx context.Context, tx pgx.Tx, d core.DiagnosticSession
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO task_diagnostics(task_id,attempt,output,error,source) VALUES($1,1,$2,$3,'network-diagnostic') ON CONFLICT DO NOTHING`, d.ID, string(b), detail)
-	return err
+	if _, err = tx.Exec(ctx, `INSERT INTO task_diagnostics(task_id,attempt,output,error,source) VALUES($1,1,$2,$3,'network-diagnostic') ON CONFLICT DO NOTHING`, d.ID, string(b), detail); err != nil {
+		return err
+	}
+	return syncDashboardProbeSampleTx(ctx, tx, d)
 }
 
 func diagnosticTaskAccessClause(ctx context.Context, args *[]any) string {
@@ -714,14 +835,24 @@ func diagnosticTaskAccessClause(ctx context.Context, args *[]any) string {
 		}
 		clause += ` AND (` + condition + `)`
 	}
+	ownChain := `EXISTS(SELECT 1 FROM agents diag_owner WHERE diag_owner.id=(chain_ep->>'agent_id') AND diag_owner.owner_id=` + owner + `)`
+	if scope.Admin || strings.HasPrefix(scope.OwnerID, "token_") {
+		ownChain = "true"
+	}
+	clause += ` AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(ds.document#>'{request,nodes}','[]'::jsonb)) WITH ORDINALITY AS t(chain_ep, ord) WHERE COALESCE(ds.document #>> '{request,target_mode}','')<>'ip' AND NOT (EXISTS(SELECT 1 FROM agents diag_agent WHERE diag_agent.id=(chain_ep->>'agent_id') AND diag_agent.revoked_at IS NULL` + agentAccessClause(ctx, "diag_agent.id", args) + `) AND ((COALESCE(chain_ep->>'instance_id','')='' AND ` + ownChain + `) OR EXISTS(SELECT 1 FROM agent_shares sh JOIN network_diagnostic_grants g ON g.share_id=sh.id WHERE sh.id=(chain_ep->>'instance_id') AND sh.agent_id=(chain_ep->>'agent_id') AND sh.user_id=` + owner + ` AND sh.enabled AND sh.status='accepted' AND cardinality(sh.engines)>0 AND g.enabled))))`
 	return clause + `)`
 }
 
 func diagnosticEndpoints(r core.DiagnosticRequest) []core.DiagnosticEndpoint {
-	if r.TargetMode == "ip" {
-		return []core.DiagnosticEndpoint{r.Node1}
+	path := r.PathEndpoints()
+	out := make([]core.DiagnosticEndpoint, 0, len(path))
+	for i, ep := range path {
+		if r.TargetMode == "ip" && i == len(path)-1 {
+			continue
+		}
+		out = append(out, ep)
 	}
-	return []core.DiagnosticEndpoint{r.Node1, r.Node2}
+	return out
 }
 
 func (s *Store) signalDiagnosticRequestParticipantsAfterCommit(ctx context.Context, r core.DiagnosticRequest) {

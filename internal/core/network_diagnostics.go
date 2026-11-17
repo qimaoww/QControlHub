@@ -138,8 +138,18 @@ type DiagnosticRequest struct {
 	RequestID     string               `json:"request_id"`
 	Node1         DiagnosticEndpoint   `json:"node1"`
 	Node2         DiagnosticEndpoint   `json:"node2"`
+	Nodes         []DiagnosticEndpoint `json:"nodes,omitempty"`
 	Parameters    DiagnosticParameters `json:"parameters"`
 	Bidirectional bool                 `json:"bidirectional"`
+}
+
+// PathEndpoints returns the ordered hop sequence for the request, falling back
+// to [Node1, Node2] for two-endpoint requests.
+func (r DiagnosticRequest) PathEndpoints() []DiagnosticEndpoint {
+	if len(r.Nodes) >= 2 {
+		return r.Nodes
+	}
+	return []DiagnosticEndpoint{r.Node1, r.Node2}
 }
 
 func DiagnosticAddress(s string) (netip.Addr, error) {
