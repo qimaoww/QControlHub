@@ -163,12 +163,12 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					if isVLESSEncryptionProtocol(input.Protocol) && proxy["encryption"] != input.VLESSEncryption {
 						t.Fatal("VLESS client encryption was lost")
 					}
-				case ProtocolSnell, ProtocolSnellShadowTLS:
+				case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 					wantType = "snell"
-					if proxy["psk"] != input.Credential || intValue(proxy["version"]) != 5 || proxy["tfo"] != true {
+					if proxy["psk"] != input.Credential || intValue(proxy["version"]) != input.SnellVersion || proxy["tfo"] != true {
 						t.Fatal("Snell v5 client settings were lost")
 					}
-					if protocol.Key == ProtocolSnellShadowTLS {
+					if protocol.SnellShadowTLS {
 						opts := mapValue(proxy["obfs-opts"])
 						if opts["mode"] != "shadow-tls" || opts["password"] != input.SnellShadowTLSPassword || opts["host"] != input.SnellObfsHost || intValue(opts["version"]) != 3 {
 							t.Fatal("ShadowTLS client settings were lost")

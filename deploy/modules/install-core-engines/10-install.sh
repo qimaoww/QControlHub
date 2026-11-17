@@ -10,7 +10,7 @@ for tool in awk curl find gunzip install jq sha256sum tar timeout unzip xz; do
   command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "missing tool: $tool" >&2; exit 1; }
 done
 
-mihomo_gz="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1-v1.19.33.gz"
+mihomo_gz="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-v1-v1.19.34.gz"
 xray_zip="https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip"
 singbox_tgz="https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz"
 ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/shadowsocks-v1.25.0.x86_64-unknown-linux-${linux_libc}.tar.xz"
@@ -51,7 +51,7 @@ atomic_install() {
   mv -f "$staged" "$core_dir/$2" || { rm -f "$staged"; return 1; }
 }
 
-echo '== mihomo v1.19.33 =='
+echo '== mihomo v1.19.34 =='
 version_output=$(qch_stage_gzip_binary "$work/mihomo.gz" "$work/mihomo" -v)
 printf '%s\n' "$version_output" | head -n1
 

@@ -55,11 +55,14 @@ func generateMihomo(input Input) (string, error) {
 		mihomoTransport(listener, input)
 	case ProtocolMieru:
 		configureMieruListener(listener, input)
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 		listener["type"] = "snell"
 		listener["psk"] = input.Credential
 		listener["version"] = input.SnellVersion
 		listener["udp"] = input.SnellUDP
+		if input.SnellVersion == 6 {
+			listener["mode"] = input.SnellMode
+		}
 		switch input.SnellObfsMode {
 		case SnellObfsShadowTLS:
 			shadowTLS := map[string]any{
@@ -170,15 +173,20 @@ func parseMihomo(content string) (Input, bool) {
 	input.ListenerProxy = stringValue(listener["proxy"])
 	input.VLESSDecryption = stringValue(listener["decryption"])
 	if input.Protocol == ProtocolSnell {
+		input.presetUnsupported = unsupportedSnellNativeFields(listener)
 		input.Credential = stringValue(listener["psk"])
 		input.SnellVersion = intValue(listener["version"])
 		if input.SnellVersion == 0 {
 			input.SnellVersion = 4
 		}
-		if input.SnellVersion != 5 {
+		if input.SnellVersion != 5 && input.SnellVersion != 6 {
 			return Input{}, false
 		}
-		input.SnellUDP = true
+		input.SnellMode = stringValue(listener["mode"])
+		if input.SnellVersion == 6 && input.SnellMode == "" {
+			input.SnellMode = "default"
+		}
+		input.SnellUDP = false
 		if value, present := listener["udp"]; present {
 			input.SnellUDP = boolValue(value)
 		}
@@ -192,6 +200,15 @@ func parseMihomo(content string) (Input, bool) {
 		if shadowTLS := mapValue(listener["shadow-tls"]); boolValue(shadowTLS["enable"]) {
 			input.SnellObfsMode = SnellObfsShadowTLS
 			input.SnellShadowTLSVersion = intValue(shadowTLS["version"])
+			users, _ := shadowTLS["users"].([]any)
+			if len(users) != 1 || !boolValue(shadowTLS["strict-mode"]) {
+				input.presetUnsupported = true
+			}
+			for key := range shadowTLS {
+				if key != "enable" && key != "version" && key != "handshake" && key != "strict-mode" && key != "users" {
+					input.presetUnsupported = true
+				}
+			}
 			input.SnellShadowTLSPassword = stringValue(shadowTLS["password"])
 			if user := firstMap(shadowTLS["users"]); user != nil {
 				input.SnellShadowTLSUser = stringValue(user["name"])
@@ -202,8 +219,20 @@ func parseMihomo(content string) (Input, bool) {
 			input.SnellShadowTLSProxy = stringValue(handshake["proxy"])
 			input.SnellObfsHost = endpointHost(input.SnellShadowTLSHandshake)
 		}
+		if input.SnellVersion == 6 {
+			input.Protocol = ProtocolSnellV6
+			if input.SnellMode == "unshaped" {
+				input.Protocol = ProtocolSnellV6Unshaped
+			}
+		}
 		if input.SnellObfsMode == SnellObfsShadowTLS && input.SnellShadowTLSVersion == 3 {
 			input.Protocol = ProtocolSnellShadowTLS
+			if input.SnellVersion == 6 {
+				input.Protocol = ProtocolSnellV6ShadowTLS
+				if input.SnellMode == "unshaped" {
+					input.Protocol = ProtocolSnellV6UnshapedShadowTLS
+				}
+			}
 		} else if input.SnellObfsMode != SnellObfsNone {
 			return Input{}, false
 		}
@@ -397,4 +426,71 @@ func sortedUserKeys(users map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Keep configurations outside the preset's exact expressible semantics in the
+// source editor. Incremental edits must not silently drop nested auth settings.
+func unsupportedSnellNativeFields(listener map[string]any) bool {
+	for _, key := range []string{"psk", "mode"} {
+		if value, exists := listener[key]; exists {
+			if _, ok := value.(string); !ok {
+				return true
+			}
+		}
+	}
+	if value, exists := listener["version"]; exists {
+		if _, ok := value.(int); !ok {
+			return true
+		}
+	}
+	if value, exists := listener["udp"]; exists {
+		if _, ok := value.(bool); !ok {
+			return true
+		}
+	}
+	for _, key := range []string{"users", "res-tls", "jls", "reality-config"} {
+		if _, exists := listener[key]; exists {
+			return true
+		}
+	}
+	if raw, exists := listener["shadow-tls"]; exists {
+		shadow := mapValue(raw)
+		if shadow == nil {
+			return true
+		}
+		if _, ok := shadow["enable"].(bool); !ok {
+			return true
+		}
+		if !boolValue(shadow["enable"]) {
+			return true
+		}
+		if boolValue(shadow["enable"]) {
+			if obfs := mapValue(listener["obfs-opts"]); len(obfs) > 0 {
+				return true
+			}
+			if _, ok := shadow["strict-mode"].(bool); !ok {
+				return true
+			}
+			if _, ok := shadow["version"].(int); !ok {
+				return true
+			}
+			for key, value := range mapValue(shadow["handshake"]) {
+				if key != "dest" && key != "proxy" {
+					return true
+				}
+				if _, ok := value.(string); !ok {
+					return true
+				}
+			}
+			for key, value := range firstMap(shadow["users"]) {
+				if key != "name" && key != "password" {
+					return true
+				}
+				if _, ok := value.(string); !ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

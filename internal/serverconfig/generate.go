@@ -258,6 +258,9 @@ func validateCredential(input Input) error {
 		}
 		return nil
 	}
+	if isSnellProtocol(input.Protocol) {
+		return validateSnellPSK(input)
+	}
 	if len(input.Credential) < 16 || len(input.Credential) > 128 {
 		return errors.New("服务端用户密码必须在 16 到 128 个字符之间")
 	}

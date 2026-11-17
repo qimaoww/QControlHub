@@ -183,13 +183,16 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.Format = "VLESS URI"
 		profile.URI = clientURL("vless", url.User(input.Credential), host, query, fragment)
 		profile.SubscriptionCompatible = true
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 		profile.Format = "Surge Snell"
-		if input.Protocol == ProtocolSnellShadowTLS {
+		if input.SnellObfsMode == SnellObfsShadowTLS {
 			profile.Format = "Surge Snell + ShadowTLS"
 		}
-		profile.URI = buildSnellSurgeConfig(input, address, fragment)
-		profile.SubscriptionCompatible = true
+		profile.URI, err = buildSnellSurgeConfig(input, address, fragment)
+		profile.SubscriptionCompatible = err == nil
+		if err != nil {
+			profile.URIError = err.Error()
+		}
 	case ProtocolMieru:
 		profile.Format = "Mihomo Mieru YAML"
 		profile.URI, err = buildMieruMihomoYAML(input, address, fragment)
@@ -317,6 +320,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		// URL export remains available for protocols whose security options
 		// cannot be represented by Mihomo without losing information.
 		profile.MihomoError = err.Error()
+	}
+	if isSnellProtocol(input.Protocol) && profile.URIError != "" && profile.MihomoError == "" {
+		profile.Format, profile.URI, profile.SubscriptionCompatible = "Mihomo Snell YAML", profile.Mihomo, true
 	}
 	if nativeReason != "" {
 		profile.URIError = nativeReason

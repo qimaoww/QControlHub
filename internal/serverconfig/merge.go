@@ -124,7 +124,7 @@ func mutateGeneratedInbound(engine core.Engine, currentContent, generatedContent
 			"name", "listen", "port", "type", "cipher", "password", "udp", "users", "transport", "traffic-pattern",
 			"up", "down", "alpn", "congestion-controller", "max-idle-time", "authentication-timeout",
 			"certificate", "private-key", "reality-config", "decryption", "ws-path", "grpc-service-name", "xhttp-config", "network", "target",
-			"routing-mark", "rule", "proxy", "psk", "version", "obfs-opts", "shadow-tls",
+			"routing-mark", "rule", "proxy", "psk", "version", "mode", "obfs-opts", "shadow-tls",
 			"key", "aead-method", "padding-min", "padding-max", "table-type", "custom-table", "custom-tables",
 			"handshake-timeout", "enable-pure-downlink", "httpmask", "disable-http-mask", "http-mask-mode", "path-root", "fallback", "mux-option",
 		}

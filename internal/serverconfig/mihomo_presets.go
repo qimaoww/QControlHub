@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"filippo.io/edwards25519"
 )
@@ -17,42 +18,93 @@ const (
 	SnellObfsShadowTLS = "shadow-tls"
 )
 
+type snellPreset struct {
+	key, name, mode string
+	version         int
+	shadow          bool
+}
+
+var snellPresets = []snellPreset{
+	{ProtocolSnell, "Snell v5", "", 5, false},
+	{ProtocolSnellShadowTLS, "Snell v5 + ShadowTLS v3", "", 5, true},
+	{ProtocolSnellV6, "Snell v6", "default", 6, false},
+	{ProtocolSnellV6Unshaped, "Snell v6 unshaped", "unshaped", 6, false},
+	{ProtocolSnellV6ShadowTLS, "Snell v6 + ShadowTLS v3", "default", 6, true},
+	{ProtocolSnellV6UnshapedShadowTLS, "Snell v6 unshaped + ShadowTLS v3", "unshaped", 6, true},
+}
+
+func snellPresetFor(key string) (snellPreset, bool) {
+	for _, preset := range snellPresets {
+		if preset.key == key {
+			return preset, true
+		}
+	}
+	return snellPreset{}, false
+}
+
+func snellProtocols(base string) []Protocol {
+	result := make([]Protocol, 0, len(snellPresets))
+	for _, preset := range snellPresets {
+		description := "支持 UDP over TCP 与连接复用。"
+		if preset.version == 6 {
+			description = "需要 Mihomo 1.19.34+；" + description
+		}
+		result = append(result, Protocol{Key: preset.key, Group: "Snell", Name: preset.name, Badge: "SNELL", Description: description,
+			Docs: base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）", Transports: []string{"raw"}, IgnoresUsername: true,
+			SnellVersion: preset.version, SnellMode: preset.mode, SnellShadowTLS: preset.shadow})
+	}
+	return result
+}
+
 func isSnellProtocol(protocol string) bool {
-	return protocol == ProtocolSnell || protocol == ProtocolSnellShadowTLS
+	_, ok := snellPresetFor(protocol)
+	return ok
 }
 
 func validateSnellPresetIdentity(input Input) error {
-	if input.SnellVersion != 0 && input.SnellVersion != 5 {
-		return errors.New("Snell 预设固定使用 v5；旧版本请通过完整源码管理")
+	preset, ok := snellPresetFor(input.Protocol)
+	if !ok {
+		return errors.New("不支持的 Snell 预设")
 	}
-	if input.Protocol == ProtocolSnell && input.SnellObfsMode != "" && input.SnellObfsMode != SnellObfsNone {
-		return errors.New("Snell 预设不启用额外承载；请改用 Snell + ShadowTLS v3 预设")
+	if input.SnellVersion != 0 && input.SnellVersion != preset.version {
+		return fmt.Errorf("此 Snell 预设固定使用 v%d", preset.version)
 	}
-	if input.Protocol == ProtocolSnellShadowTLS {
-		if input.SnellObfsMode != "" && input.SnellObfsMode != SnellObfsShadowTLS {
-			return errors.New("Snell + ShadowTLS v3 预设固定使用 ShadowTLS")
-		}
-		if input.SnellShadowTLSVersion != 0 && input.SnellShadowTLSVersion != 3 {
-			return errors.New("Snell + ShadowTLS v3 预设固定使用 ShadowTLS v3")
-		}
+	if input.SnellMode != "" && input.SnellMode != preset.mode {
+		return errors.New("Snell mode 与所选预设不匹配，请切换预设")
+	}
+	expectedObfs := SnellObfsNone
+	if preset.shadow {
+		expectedObfs = SnellObfsShadowTLS
+	}
+	if input.SnellObfsMode != "" && input.SnellObfsMode != expectedObfs {
+		return errors.New("Snell 承载与所选预设不匹配，请选择对应的 ShadowTLS v3 预设")
+	}
+	if preset.shadow && input.SnellShadowTLSVersion != 0 && input.SnellShadowTLSVersion != 3 {
+		return errors.New("Snell + ShadowTLS v3 预设固定使用 ShadowTLS v3")
+	}
+	if input.Transport != "" && input.Transport != "raw" || input.TLSEnabled || input.RealityEnabled {
+		return errors.New("Snell 预设仅支持原生 TCP 与预设指定的承载")
 	}
 	return nil
 }
 
 func normalizeSnellInput(input *Input) {
-	input.SnellVersion = 5
-	if input.SnellObfsMode == "" {
-		input.SnellObfsMode = SnellObfsNone
+	preset, ok := snellPresetFor(input.Protocol)
+	if !ok {
+		return
 	}
-	if input.Protocol == ProtocolSnell {
-		input.SnellObfsMode = SnellObfsNone
-	}
-	if input.Protocol == ProtocolSnellShadowTLS {
-		input.SnellObfsMode = SnellObfsShadowTLS
-		input.SnellShadowTLSVersion = 3
-	}
-	if input.SnellClientFingerprint == "" {
-		input.SnellClientFingerprint = "chrome"
+	input.SnellVersion, input.SnellMode = preset.version, preset.mode
+	input.SnellObfsMode = SnellObfsNone
+	if preset.shadow {
+		input.SnellObfsMode, input.SnellShadowTLSVersion = SnellObfsShadowTLS, 3
+		if input.SnellClientFingerprint == "" {
+			input.SnellClientFingerprint = "chrome"
+		}
+	} else {
+		input.SnellObfsHost, input.SnellClientFingerprint = "", ""
+		input.SnellShadowTLSVersion = 0
+		input.SnellShadowTLSPassword, input.SnellShadowTLSUser, input.SnellShadowTLSHandshake = "", "", ""
+		input.SnellShadowTLSProxy, input.SnellShadowTLSALPN = "", ""
 	}
 }
 
@@ -124,8 +176,11 @@ func validateListenerOptions(input Input) error {
 }
 
 func validateSnellInput(input Input) error {
-	if input.SnellVersion != 5 {
-		return errors.New("Snell 预设固定使用 v5")
+	if err := validateSnellPresetIdentity(input); err != nil {
+		return err
+	}
+	if err := validateSnellPSK(input); err != nil {
+		return err
 	}
 	if input.SnellObfsMode == "" {
 		input.SnellObfsMode = SnellObfsNone
@@ -142,6 +197,9 @@ func validateSnellInput(input Input) error {
 		}
 		if _, _, ok := splitForwardTarget(input.SnellShadowTLSHandshake); !ok {
 			return errors.New("ShadowTLS 握手目标必须是有效的 host:port")
+		}
+		if strings.ContainsFunc(input.SnellShadowTLSPassword, unicode.IsControl) {
+			return errors.New("ShadowTLS 密码不能包含控制字符")
 		}
 		if input.SnellShadowTLSVersion >= 2 && len(input.SnellShadowTLSPassword) < 8 {
 			return errors.New("ShadowTLS v2/v3 密码至少需要 8 个字符")
@@ -290,6 +348,20 @@ func validatePathRoot(value string) error {
 			continue
 		}
 		return errors.New("HTTPMask Path Root 只能包含字母、数字、下划线和短横线")
+	}
+	return nil
+}
+
+func validateSnellPSK(input Input) error {
+	minimum, maximum := 16, 128
+	if input.SnellVersion == 6 {
+		minimum, maximum = 12, 255
+	}
+	if len(input.Credential) < minimum || len(input.Credential) > maximum {
+		return fmt.Errorf("Snell v%d PSK 必须为 %d–%d 字节", input.SnellVersion, minimum, maximum)
+	}
+	if strings.ContainsFunc(input.Credential, unicode.IsControl) {
+		return errors.New("Snell PSK 不能包含控制字符")
 	}
 	return nil
 }

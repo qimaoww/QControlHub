@@ -12,6 +12,12 @@ import (
 // until that metadata has established a matching preset. Client export reads
 // native connection parameters independently of form eligibility.
 func matchesParsedPreset(engine core.Engine, input Input) bool {
+	if input.presetUnsupported {
+		return false
+	}
+	if isSnellProtocol(input.Protocol) && validateSnellInput(input) != nil {
+		return false
+	}
 	if input.Port < 1 || input.Port > 65535 {
 		return false
 	}
