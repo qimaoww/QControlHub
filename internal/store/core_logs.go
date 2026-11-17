@@ -60,8 +60,8 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	// connection. PostgreSQL executes them in order; any failed read or write
 	// still rolls the complete transaction back before an ACK can be sent.
 	prelude := &pgx.Batch{}
-	prelude.Queue(`SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
-		,agents.owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID)
+	prelude.Queue(`SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "$2::text")+`
+		,agents.owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID, core.DefaultPanelSettings().CoreLogMinimumLevel)
 	prelude.Queue(`INSERT INTO core_log_batches (id,agent_id,received_at) VALUES ($1,$2,$3)
 		ON CONFLICT (id) DO NOTHING`, batch.ID, agentID, receivedAt)
 	results := tx.SendBatch(ctx, prelude)

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"time"
 )
 
@@ -86,7 +89,7 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		settings, err := s.PanelSettings(account)
 		if err != nil {
 			failures = append(failures, err)
-			longestLogRetention = 30 // Never delete logs under an unreadable policy.
+			longestLogRetention = slices.Max(core.PanelSettingOptions()["core_log_retention_days"]) // Keep the longest allowed history under an unreadable policy.
 			continue
 		}
 		if settings.CoreLogRetentionDays > longestLogRetention {

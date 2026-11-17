@@ -63,12 +63,19 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 	return agents, s.overlaySharedInstanceRuntime(ctx, agents)
 }
 
-const listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
+var listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
 
-const agentOfflineThresholdSQL = `(CASE WHEN agents.owner_id='' THEN (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
-	ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer FROM user_panel_settings WHERE owner_id=agents.owner_id),45) END)`
+// root is a store-owned SQL expression, never request input.
+func agentOfflineThresholdWithRootSQL(root string) string {
+	return fmt.Sprintf(`(CASE WHEN agents.owner_id='' THEN %s
+		ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer
+			FROM user_panel_settings WHERE owner_id=agents.owner_id),%d) END)`,
+		root, core.DefaultPanelSettings().AgentOfflineThresholdSeconds)
+}
 
-const agentColumnsSQL = `
+var agentOfflineThresholdSQL = agentOfflineThresholdWithRootSQL(`(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)`)
+
+var agentColumnsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
 				time_zone_mode,time_zone,applied_time_zone,time_zone_status,time_zone_error,time_zone_revision,time_zone_auto_address_hash,
@@ -77,7 +84,7 @@ const agentColumnsSQL = `
 
 const agentSelectFromSQL = ` FROM agents WHERE revoked_at IS NULL`
 
-const listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
+var listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
 
 func scopedAgentsSQL(ctx context.Context, args *[]any) string {
 	if scopeForConfig(ctx).Admin {
