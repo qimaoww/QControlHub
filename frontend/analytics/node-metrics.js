@@ -44,7 +44,7 @@ export function nodeMetrics(ctx, agent) {
     if(!samples.length){content.replaceChildren(summary,muted('暂无指标记录'));return;}
     const graph=node('div',{className:'a-chart-container'});
     const draw=width=>graph.replaceChildren(metricChart(samples,Math.max(320,width),agent.name));
-    content.replaceChildren(summary,graph,muted('实线：接收 · 虚线：发送'),table(['采样时间','CPU','内存','接收速率','发送速率'],[...samples].reverse().map(sample=>[date(sample.sampled_at),`${sample.cpu_percent.toFixed(1)}%`,`${sample.memory_percent.toFixed(1)}%`,`${bytes(sample.rx_rate_bps)}/s`,`${bytes(sample.tx_rate_bps)}/s`]),{label:'节点历史指标',paginate:24}));
+    content.replaceChildren(node('figure',{className:'a-node-history-plot'},node('figcaption',{},summary,muted('实线：接收 · 虚线：发送')),graph),table(['采样时间','CPU','内存','接收速率','发送速率'],[...samples].reverse().map(sample=>[date(sample.sampled_at),`${sample.cpu_percent.toFixed(1)}%`,`${sample.memory_percent.toFixed(1)}%`,`${bytes(sample.rx_rate_bps)}/s`,`${bytes(sample.tx_rate_bps)}/s`]),{label:'节点历史指标',paginate:24}));
     draw(graph.getBoundingClientRect().width);
     observer=new ResizeObserver(entries=>{if(ctx.current()&&box.open)draw(entries[0].contentRect.width);});
     observer.observe(graph);
@@ -52,7 +52,7 @@ export function nodeMetrics(ctx, agent) {
   box=ctx.dialog(`${agent.name} · 指标历史`,stack(content),{wide:true});
   box.addEventListener('close',stop,{once:true});
   const local = dialogContext(ctx, box);
-  const region = readRegion(local, '历史指标', read, () => {});
+  const region = readRegion(local, '历史指标', read, () => {}, {clear(){stop();content.replaceChildren();}});
   content.before(region.element);
   const refresh = button('刷新指标', () => void load());
   async function load() {

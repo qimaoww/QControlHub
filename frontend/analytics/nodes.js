@@ -30,6 +30,9 @@ const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels
 export async function nodesPage(ctx) {
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
   let agents = [], preference = null, loaded = false;
+  const account = ctx.session?.user_id || ctx.session?.username;
+  const returnTo = account && history.state?.nodeReturn?.account === account ? history.state.nodeReturn : null;
+  if (history.state?.nodeReturn) { const {nodeReturn,...other} = history.state; history.replaceState(other,''); }
   let liveTable, loadSequence = 0, renderSignature;
   const dialogUpdates = new Set();
   const actionBusy = new Set();
@@ -94,8 +97,8 @@ export async function nodesPage(ctx) {
     meter('内存',percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
     meter('磁盘',percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`));}
   function dragControl(agent) { return dragHandle(agent.id, agent.name); }
-  function controls(agent,compact=false){return actions(ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
-    button(compact?'设置':'查看设置',()=>settings(agent),{title:'查看设置'}),
+  function controls(agent,compact=false){return actions(button(compact?'设置':'查看设置',()=>settings(agent),{title:'查看设置',glyph:'settings'}),
+    ctx.can('agent-config.read')&&link(compact?'配置':'实时配置',`#live-config?agent=${pathID(agent.id)}`),
     dragControl(agent));}
   function traffic(agent, key, rate = false) {
     const metrics = agent.metrics || {}, value = metrics[key];
@@ -112,9 +115,9 @@ export async function nodesPage(ctx) {
     const trigger = button('', () => chooseRegion(agent), { className: 'a-region-trigger', 'aria-label': `选择国家／地区：${agent.name}`, 'aria-haspopup': 'dialog', title: `${region?.name || '国家／地区未知'} · 选择国家／地区` });
     trigger.append(flag); return trigger;
   }
-  function chooseRegion(agent) {
+  function chooseRegion(agent, parentDirty = () => false) {
     if (!canManage(agent)) return;
-    return nodeRegion(ctx, agent, async code => {
+    return nodeRegion({...ctx,setDirty:value=>ctx.setDirty(value || parentDirty())}, agent, async code => {
       agent.labels = { ...(agent.labels || {}) };
       if (code) agent.labels.region_code = code; else { delete agent.labels.region_code; agent.region_code = ''; }
       draw();
@@ -205,11 +208,12 @@ export async function nodesPage(ctx) {
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));renderSignature = signature;return;}
     if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
       node('article',{className:'a-card a-probe','data-agent-id':agent.id},
-        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch} · ${agent.can_manage===false?'本人共享实例':'主实例'}`)),
-          status(agent.status)),
-        node('div',{className:'a-probe-body'},metrics(agent),network(agent),addresses(agent)),
-        node('div',{className:'a-probe-meta'},muted((agent.capabilities||[]).join(' · ')||'无内核'),muted(`最近在线 · ${date(agent.last_seen)}`)),
-        node('footer',{className:'a-probe-footer'},controls(agent)))));
+        node('header',{className:'a-node-passport'},
+          node('div',{className:'a-node-identifiers'},regionFlag(agent),status(agent.status)),
+          node('h2',{},agent.name), muted(`${agent.os} / ${agent.arch} · ${agent.can_manage===false?'本人共享实例':'主实例'}`),
+          addresses(agent), muted((agent.capabilities||[]).join(' · ')||'无内核')),
+        node('div',{className:'a-node-telemetry'},metrics(agent),network(agent)),
+        node('footer',{className:'a-node-actions'},muted(`最近在线 · ${date(agent.last_seen)}`),controls(agent)))));
       if (results.firstElementChild?.matches('.a-probe-grid')) patch(results.firstElementChild, fresh); else results.replaceChildren(fresh);
     }
     else{
@@ -220,7 +224,7 @@ export async function nodesPage(ctx) {
           metricTrack(percent, available),
           detail&&muted(available?detail:'暂无数据'));
       };
-      const columns = ['节点','CPU','内存','磁盘','网络收发','连接地址','内核与实例','最近在线'];
+      const columns = ['节点','CPU','内存','磁盘','接收','发送','连接地址','内核与实例','最近在线'];
       const rows = shown.map(agent=>{
         const m=agent.metrics||{},online=agent.status==='online';
         return [
@@ -229,16 +233,14 @@ export async function nodesPage(ctx) {
           compactMeter(m.cpu_percent,online&&m.cpu_available),
           compactMeter(percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
           compactMeter(percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`),
-          node('div',{className:'a-probe-rates'},
-            node('div',{},muted('实时接收'),node('span',{},traffic(agent,'network_rx_bps',true))),
-            node('div',{},muted('实时发送'),node('span',{},traffic(agent,'network_tx_bps',true))),
-            node('div',{},muted('累计接收'),muted(traffic(agent,'network_rx_bytes'))),
-            node('div',{},muted('累计发送'),muted(traffic(agent,'network_tx_bytes')))),
+          ...[['接收','rx'],['发送','tx']].map(([label,key]) => node('div',{className:'a-probe-rates'},
+            node('div',{},muted('实时'+label),node('strong',{},traffic(agent,`network_${key}_bps`,true))),
+            node('div',{},muted('累计'+label),node('span',{},traffic(agent,`network_${key}_bytes`))))),
           addresses(agent),stack(muted(`${agent.os} / ${agent.arch}`), (agent.capabilities||[]).join(' · ')||'无内核',muted(agent.can_manage===false?'本人共享实例':'主实例')),date(agent.last_seen)];
       });
       if (liveTable && results.contains(liveTable)) liveTable.updateRows(rows);
       else {
-        const widths = { '节点': 168, 'CPU': 110, '内存': 146, '磁盘': 146, '网络收发': 232, '连接地址': 250, '内核与实例': 158, '最近在线': 138 };
+        const widths = { '节点': 168, 'CPU': 100, '内存': 150, '磁盘': 150, '接收': 230, '发送': 230, '连接地址': 230, '内核与实例': 160, '最近在线': 150 };
         liveTable = table(columns, rows, {paginate:false, label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
         results.replaceChildren(node('div',{className:'a-card a-probe-list'},liveTable));
       }
@@ -248,9 +250,11 @@ export async function nodesPage(ctx) {
 
   function command(created) {
     const value = enrollmentInstallCommand(created);
-    ctx.dialog('QAgent 安装命令', stack(code(value), button('复制命令', event => void ctx.mutate(event.currentTarget, async () => {
+    const box = ctx.dialog('QAgent 安装命令', code(value));
+    box.classList.add('a-node-command');
+    box.querySelector('.a-dialog-head h2').after(button('复制命令', event => void ctx.mutate(event.currentTarget, async () => {
       await copyText(value); ctx.announce('安装命令已复制');
-    }))));
+    }), {glyph:'copy'}));
   }
   async function enrollment() {
     const records = node('div', { className: 'a-traffic-list' }, muted('正在读取添加记录…'));
@@ -270,7 +274,7 @@ export async function nodesPage(ctx) {
         })),
         button('删除记录', async event => {
           const control = event.currentTarget;
-          if (!await ctx.confirm('删除此添加记录？已接入的节点不会被卸载。', '删除记录') || !ctx.current()) return;
+          if (!await ctx.confirm(`删除“${token.name}”的添加记录？已接入的节点不会被卸载。`, '删除记录') || !ctx.current() || !box.open) return;
           await ctx.mutate(control, async () => { await ctx.api(`/enrollment-tokens/${pathID(token.id)}`, { method: 'DELETE' }); await reload(); });
         }, { tone: 'danger' }),
       )]), { label: '节点添加记录' }));
@@ -297,13 +301,14 @@ export async function nodesPage(ctx) {
   }
   function directory() {
     let entries = [];
-    const content = node('div', {}, loadingTable(['节点', '所有者', '状态', '内核', '操作'], '节点目录'));
+    const columns = ['节点','归属与内核','操作'];
+    const content = node('div', {className:'a-node-directory'}, loadingTable(columns, '节点目录'));
     const body = stack(content);
     const box = ctx.dialog('节点目录', body, { wide: true });
     const local = dialogContext(ctx, box);
     function drawDirectory() {
-      content.replaceChildren(table(['节点', '所有者', '状态', '内核', '操作'], entries.map(entry => [
-        stack(entry.name, muted(entry.id)), entry.owner_username || '未分配账号', status(entry.status), (entry.capabilities || []).join(' · '),
+      content.replaceChildren(table(columns, entries.map(entry => [
+        stack(actions(node('strong',{},entry.name),status(entry.status)), muted(entry.id)), stack(entry.owner_username || '未分配账号',muted((entry.capabilities || []).join(' · ')||'无内核')),
         nodeDeleteControl(local, entry, { available: () => box.open && ctx.can('users.manage'), onDeleted() {
           entries.splice(entries.indexOf(entry), 1); agents = agents.filter(agent => agent.id !== entry.id); drawDirectory(); draw(true);
         }, refresh: load }),
@@ -313,7 +318,7 @@ export async function nodesPage(ctx) {
     body.prepend(read.element); void read.load();
     return box;
   }
-  async function settings(agent, deepLink = false) {
+  async function settings(agent, deepLink = false, back = null) {
     const base = `/agents/${pathID(agent.id)}`;
     const manage = canManage(agent);
     const settingsScope = () => JSON.stringify([agent.can_manage !== false, agent.owner_id || '', agent.shared_allocation?.owner_id || '',
@@ -377,7 +382,7 @@ export async function nodesPage(ctx) {
       const nameField = field('节点名称', 'name', agent.name, { required: true, maxlength: 100 });
       const visibilityField = agent.can_hide && field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' });
       sections.push(section('节点资料', node('div', { className: 'a-card-body' }, stack(
-        nameField, actions(button('国家／地区', () => chooseRegion(agent)), visibilityField),
+        nameField, actions(button('国家／地区', () => chooseRegion(agent, () => box.open && nodeDirty())), visibilityField),
       ))));
       sections.push(section('节点地址', node('div',{className:'a-card-body'}, address.view)));
       settingsUpdates.push(() => {
@@ -450,25 +455,23 @@ export async function nodesPage(ctx) {
             if (actionBusy.has(key) || uninstallReason()) return;
             actionBusy.add(key); control.disabled = true;
             try {
-              if (!await ctx.confirm(`卸载 ${engine}？目标服务会停止，内核文件将删除，已保存配置保留。`, '卸载内核') || !ctx.current()) return;
+              if (!await ctx.confirm(`从“${agent.name}”卸载 ${engine}？目标服务会停止，内核文件将删除，已保存配置保留。`, '卸载内核') || !ctx.current()) return;
               await ctx.mutate(null, async () => { await load(); if (box.open && available() && !uninstallReason()) await submit(agent, engine, 'uninstall'); });
             } finally { actionBusy.delete(key); if (ctx.current()) dialogUpdates.forEach(update => update()); }
           }, { tone: 'danger', disabled: busy || uninstallReason() });
-          return stack(
-            actions(instance ? badge(instance.label, instance.tone) : status(runtime.service_status === 'running' ? 'active' : runtime.service_status), !enabled && badge('能力已关闭', 'warn')),
-            node('p', {}, muted(runtime.version || (runtime.installed === true ? '版本未上报' : runtime.installed === false ? '尚未安装' : '安装状态未知'))),
-            instance && stack(muted(instance.version), instance.reason && notice(instance.reason)),
-            runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
-            runtime.imported_resource_update_error && notice(runtime.imported_resource_update_error),
-            controls, actions(install, enabled && ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
-              runtime.existing_config_available && ctx.can('host.manage', agent) && link('导入系统配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}&source=import`)),
-            agent.can_manage !== false && uninstall && actions(uninstall),
-          );
+          return node('div',{className:'a-core-service'},
+            stack(actions(instance ? badge(instance.label, instance.tone) : status(runtime.service_status === 'running' ? 'active' : runtime.service_status), !enabled && badge('能力已关闭', 'warn')),
+              muted(runtime.version || (runtime.installed === true ? '版本未上报' : runtime.installed === false ? '尚未安装' : '安装状态未知')),
+              instance && muted(instance.version), instance?.reason && notice(instance.reason)),
+            stack(controls, actions(install, enabled && ctx.can('agent-config.read') && link('编辑配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}`),
+              runtime.existing_config_available && ctx.can('host.manage', agent) && link('导入系统配置', `#live-config?agent=${pathID(agent.id)}&engine=${engine}&source=import`),
+              agent.can_manage !== false && uninstall), runtime.existing_config_unsupported_reason && notice(runtime.existing_config_unsupported_reason),
+              runtime.imported_resource_update_error && notice(runtime.imported_resource_update_error)));
         };
         let view = coreViews.get(engine);
         if (!view) {
           const service = renderService();
-          const card = section(engine, node('div', { className: 'a-card-body a-stack' }, capabilities.get(engine)?.view, service));
+          const card = node('section',{className:'a-core-record'},stack(node('h2',{},engine),capabilities.get(engine)?.view),service);
           card.dataset.refreshKey = engine;
           view = { card, service }; coreViews.set(engine, view); runtimes.append(card);
         } else patch(view.service, renderService());
@@ -477,7 +480,7 @@ export async function nodesPage(ctx) {
       }
       if (!engines.length && !runtimes.firstChild) runtimes.append(muted('暂无可用内核'));
       else if (engines.length && runtimes.firstChild?.nodeName === 'SPAN') runtimes.firstChild.remove();
-      runtimes.className = engines.length > 1 ? 'a-grid' : 'a-stack';
+      runtimes.className = 'a-core-manifest';
     };
     const changedCapabilities = () => [...capabilities].filter(([, capability]) => !capability.input.disabled && capability.input.checked !== agent.capabilities.includes(capability.input.dataset.engineCapability));
     const capabilityForm = manage && ctx.form([runtimes], '保存内核能力', async () => {
@@ -520,12 +523,17 @@ export async function nodesPage(ctx) {
       ctx.can('metrics.read') && button('查看指标历史',()=>nodeMetrics(ctx,agent)),
       ctx.can('host.manage',agent) && button('升级 Agent',async event=>{
         const control=event.currentTarget;
-        if(!await ctx.confirm('升级此节点的 QAgent？替换后自动重连，期间节点会短暂离线。','升级 Agent')||!ctx.current())return;
+        if(!await ctx.confirm(`升级“${agent.name}”的 QAgent？替换后自动重连，期间节点会短暂离线。`,'升级 Agent')||!ctx.current())return;
         await ctx.mutate(control,async () => { await load(); if (available() && ctx.can('host.manage',agent) && ctx.can('tasks.execute') && agent.status==='online' && agent.features?.includes('agent-self-upgrade-v1')) await submit(agent,undefined,'upgrade-agent'); });
       },{disabled:agent.status!=='online'||!agent.features?.includes('agent-self-upgrade-v1'),title:agent.features?.includes('agent-self-upgrade-v1')?'升级 QAgent':'当前 Agent 需重新执行安装命令'}),
       manage && agent.enrollment_command_available && button('查看安装命令', event => void ctx.mutate(event.currentTarget, async () => { const created = await ctx.api(`${base}/enrollment-command`, { method: 'POST' }); if (available()) command(created); })),
       manage && nodeDeleteControl(ctx, agent, { available: () => box.open && settingsScope() === openedScope && canManage(agent), onDeleted() {
+        const records = [...results.querySelectorAll('[data-agent-id]')];
+        const index = records.findIndex(item => item.dataset.agentId === agent.id);
         agents = agents.filter(value => value.id !== agent.id); box.close(); draw(true);
+        const remaining = [...results.querySelectorAll('[data-agent-id]')];
+        const next = remaining[Math.min(Math.max(index,0),remaining.length-1)]?.querySelector('button[title="查看设置"]');
+        (next || search.querySelector('input')).focus({preventScroll:true});
       }, refresh: load }),
     );
     const nodeOperations = renderNodeOperations();
@@ -556,8 +564,19 @@ export async function nodesPage(ctx) {
     const coreTab = button('内核设置', () => selectPanel('core'), { 'aria-pressed': 'false' });
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
-    const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
+    const box = ctx.dialog(`${agent.name} · 节点设置`, stack(nodePanel, corePanel), { wide: true });
+    box.querySelector('.a-dialog-head h2').after(navigation);
     box.classList.add('a-node-settings');
+    box.addEventListener('click', event => {
+      const link = event.target.closest('a[href^="#live-config?"]');
+      if (!account || !link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      history.replaceState({...history.state,nodeReturn:{account,id:agent.id,panel:activePanel,page:paging.page,scroll:box.scrollTop,href:link.hash}},'');
+    });
+    if (back) {
+      selectPanel(back.panel === 'core' ? 'core' : 'node',false);
+      const link = [...box.querySelectorAll('a[href]')].find(item => item.hash === back.href);
+      box.scrollTop=back.scroll; link?.focus({preventScroll:true});
+    }
     if (!deepLink) void ctx.preferences?.ready().then(() => {
       if (!panelTouched && ctx.current() && box.open && !nodeDirty() && ctx.preferences.get('nodes').settings_panel === 'core') selectPanel('core',false);
     });
@@ -610,7 +629,8 @@ export async function nodesPage(ctx) {
     ], shared ? '准备内核' : '提交安装', async values => {
       if (!await targetForSubmit(values)) return;
       if (values.release_channel === 'custom' && !values.custom_version.trim()) throw new Error('请输入软件发行版本');
-      if (!await ctx.confirm(shared ? '准备缺少的稳定版内核？已有版本会复用。' : '安装完成后将重启对应内核服务，确定继续？', '提交安装') || !ctx.current()) return;
+      const version = values.release_channel === 'custom' ? values.custom_version.trim() : values.release_channel === 'development' ? '开发版' : '稳定版';
+      if (!await ctx.confirm(`${agent.name} · ${engine} · ${version}。${shared ? '准备本人共享实例的内核，已有版本会复用。' : '安装完成后将重启对应内核服务，确定继续？'}`, '提交安装') || !ctx.current()) return;
       if (!await targetForSubmit(values)) return;
       const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action: 'install', expected_instance_id: agent.runtime?.[engine]?.instance?.id || '', core_version: values.release_channel === 'custom' ? values.custom_version.trim() : values.release_channel, core_source: coreSourceForInstall(engine, values.release_channel, values.core_source) } });
       feedback.textContent = ''; ctx.announce('安装任务已提交');
@@ -625,6 +645,7 @@ export async function nodesPage(ctx) {
     };
     form.elements.release_channel.addEventListener('change', sync); sync();
     const box = ctx.dialog(`${agent.name} · ${engine}`, form);
+    box.classList.add('a-node-install');
     const update = () => {
       if (!ctx.current() || !agents.includes(agent) || scope(agent) !== openedScope) box.close();
       else sync();
@@ -646,10 +667,11 @@ export async function nodesPage(ctx) {
     || new URLSearchParams(location.hash.split('?')[1] || '').get('agent');
   let openedDeep = false;
   const nodeRead = readRegion(ctx, '节点', async () => { try { await load(); } catch (error) { if (ctx.current()) failedRefresh(error); throw error; } }, () => {
-    if (deepID && !openedDeep) {
+    if ((deepID || returnTo) && !openedDeep) {
       openedDeep = true;
-      const agent = agents.find(agent => agent.id === deepID);
-      if (agent) settings(agent,true);
+      const agent = agents.find(agent => agent.id === (deepID || returnTo.id));
+      const back = returnTo?.id === agent?.id ? returnTo : null;
+      if (agent) settings(agent,true,back);
       else ctx.dialog('节点不可用', notice('节点不存在或当前账号没有访问权限。'));
     }
   }, {view:results});
@@ -661,9 +683,9 @@ export async function nodesPage(ctx) {
   const orderRead = readRegion(ctx, '节点排序', () => ordering.load(), () => draw(true));
   void nodeRead.load(); void preferenceRead.load(); void orderRead.load();
   ctx.onRefresh(() => Promise.all([nodeRead.load(), !preference && preferenceRead.load(), orderRead.load()]));
-  return stack(node('div', { className: 'a-probe-toolbar' }, search, node('div',{className:'a-actions a-node-view',role:'group','aria-label':'节点视图'},cardToggle, listToggle, pageSize.element), actions(
-    ctx.can('enrollment.manage') && button('添加节点', enrollment, { tone: 'primary' }),
-    ctx.can('users.manage') && button('节点目录', directory),
-    batchToggle,
-  )), nodeRead.element, preferenceRead.element, pageSize.status, orderRead.element, refreshState, results, pages);
+  const toolbar = node('div',{className:'a-probe-toolbar'},search,actions(
+    ctx.can('users.manage') && button('节点目录', directory,{glyph:'server'}), batchToggle,
+    ctx.can('enrollment.manage') && button('添加节点', enrollment, {tone:'primary',glyph:'plug'})));
+  const viewBar = node('div',{className:'a-node-viewbar'},node('div',{className:'a-node-view',role:'group','aria-label':'节点视图'},cardToggle,listToggle),pageSize.element,refreshState);
+  return stack(toolbar,nodeRead.element,preferenceRead.element,pageSize.status,orderRead.element,viewBar,results,pages);
 }

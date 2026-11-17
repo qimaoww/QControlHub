@@ -65,7 +65,7 @@ export function nodeRegion(ctx, agent, onSaved) {
   let selected = initial, regions = [], loading = true, changed = false;
   const controller = new AbortController();
   const signal = AbortSignal.any([ctx.signal, controller.signal]);
-  const form = ctx.form([actions(automatic, selectedText), search, choices, feedback, actions(retry)], '保存国家／地区', async () => {
+  const form = ctx.form([search, choices, actions(automatic, selectedText), feedback, actions(retry)], '保存国家／地区', async () => {
     if (loading || (selected && !regions.some(region => region.code === selected))) throw new Error('请选择可用的国家／地区。');
     const saved = await ctx.api(`/agents/${pathID(agent.id)}/region`, { method: 'PUT', body: { country_code: selected }, signal });
     if (!ctx.current() || !box.open) return;
@@ -76,6 +76,7 @@ export function nodeRegion(ctx, agent, onSaved) {
   });
   const submit = form.querySelector('button[type=submit]');
   const box = ctx.dialog(`${agent.name} · 国家／地区`, form);
+  box.classList.add('a-node-region');
   bindPreferenceFields(ctx, 'node-region', [search], { restore: () => { if (box.open && !loading) draw(); } });
   function select(code) {
     selected = code; changed = selected !== initial; ctx.setDirty(changed);

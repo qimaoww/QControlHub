@@ -3,6 +3,7 @@ import { coreInstallBlockReason } from '../modules/core-install-state.js';
 import { coreSourceForInstall } from '../modules/core-install-source.js';
 import { createServiceActionGuard } from '../modules/agent-service-state.js';
 import { poll } from './live-dom.js';
+import { dialogContext } from './loading.js';
 import { node, button, actions, stack, table, field, muted, notice, list, pathID } from './ui.js';
 import { actionName, taskDetail } from './operations.js';
 
@@ -18,6 +19,7 @@ export function openNodeBatch(ctx, getAgents) {
   const source = field('开发版来源', 'core_source', 'official', { options: [['official', 'MetaCubeX 官方'], ['mirror', 'vernesong 镜像']] });
   const operationFields = node('div', { className: 'a-filter-fields' }, action, engine, channel, version, source);
   const summary = notice('', 'ok'), stale = notice('');
+  summary.dataset.batchSummary = '';
   const selection = muted('');
   selection.setAttribute('role', 'status');
   let agents = getAgents(), busy = false, box, targetTable, refreshSequence = 0;
@@ -90,11 +92,12 @@ export function openNodeBatch(ctx, getAgents) {
   function count() {
     const values = [...rows.values()].map(row => row.result).filter(Boolean);
     const submitted = values.filter(value => value.task).length;
-    const failed = values.filter(value => value.error).length;
-    const text = values.length ? `已提交 ${submitted}，提交失败 ${failed}${busy ? ' · 提交中' : ''}` : '';
+    const failed = values.filter(value => value.error && !value.unknown).length;
+    const unknown = values.filter(value => value.unknown).length;
+    const text = values.length ? `已提交 ${submitted}，提交失败 ${failed}${unknown ? `，待核实 ${unknown}` : ''}${busy ? ' · 提交中' : ''}` : '';
     if (summary.textContent !== text) summary.textContent = text;
-    summary.classList.toggle('error', failed > 0);
-    summary.classList.toggle('ok', failed === 0);
+    summary.classList.toggle('error', failed + unknown > 0);
+    summary.classList.toggle('ok', failed + unknown === 0);
   }
   function syncCandidates() {
     for (const agent of agents) {
@@ -138,6 +141,7 @@ export function openNodeBatch(ctx, getAgents) {
         if (error.name === 'AbortError') throw error;
         if (!active()) return;
         row.result.error = error.message;
+        row.result.unknown = Boolean(error.outcomeUnknown);
       }
     }
     controls(); count();
@@ -157,7 +161,6 @@ export function openNodeBatch(ctx, getAgents) {
       const context = [options.engine, options.core_version && batchCoreVersionLabel(options.core_version), options.core_source && ({official:'MetaCubeX 官方',mirror:'vernesong 镜像'}[options.core_source])].filter(Boolean).join(' · ');
       if (!await ctx.confirm(`对 ${targets.length} 个节点执行“${actionName(options.action)}”${context ? ` · ${context}` : ''}？${hint}`, '执行批量操作') || !active()) return;
       if (!await refresh()) return;
-      for (const row of rows.values()) row.result = null;
       for (const id of targets) {
         if (!active()) break;
         const original = JSON.parse(openedScopes.get(id).get(options.engine));
@@ -168,16 +171,16 @@ export function openNodeBatch(ctx, getAgents) {
   function renderRow(row) {
     return Object.assign(() => {
       const result = row.result;
-      const text = result?.task ? ({pending:'等待执行',running:'执行中',succeeded:'执行成功',failed:'执行失败',canceled:'已取消'}[result.task.status] || '已提交') : result?.error || (result ? '正在提交' : '');
+      const text = result?.task ? (ctx.can('tasks.read') && {pending:'等待执行',running:'执行中',succeeded:'执行成功',failed:'执行失败',canceled:'已取消'}[result.task.status] || '已提交') : result?.error || (result ? '正在提交' : '');
       return [field(row.name, `batch:${row.id}`, row.selected, { type: 'checkbox', disabled: busy || Boolean(row.reason), 'aria-label': `批量操作：${row.name}`,
         onchange(event) { row.selected = event.target.checked; controls(); } }), muted(row.reason || '可执行'), stack(result?.error ? notice(text, 'error') : node('span', {}, text), notice(result?.task?.error || '', 'error'), actions(
         button('重试提交', () => void ctx.mutate(null, async () => {
-          if (busy || !row.result?.error) return;
+          if (busy || !row.result?.error || row.result.unknown) return;
           const options = { ...row.result.options };
           busy = true; controls();
           try { if (await refresh()) await submitOne(row.id, options); }
           finally { busy = false; if (active()) { controls(); count(); } }
-        }), { hidden: !result?.error, disabled: busy || Boolean(result && eligibility(agents.find(agent => agent.id === row.id), result.options)) }),
+        }), { hidden: !result?.error || result.unknown, disabled: busy || Boolean(result && eligibility(agents.find(agent => agent.id === row.id), result.options)) }),
         button('任务详情', event => void ctx.mutate(event.currentTarget, () => taskDetail(ctx, row.result.task.id)), { hidden: !result?.task || !ctx.can('tasks.read') }),
       ))];
     }, { id: row.id });
@@ -186,11 +189,12 @@ export function openNodeBatch(ctx, getAgents) {
     label: '批量操作节点与结果', rowKey: row => row.id, emptyText: '暂无授权节点',
   });
   const fields = form.querySelector('fieldset');
-  const candidates = node('div', {className:'a-stack'}, fields.lastElementChild, node('div', {className:'a-port-list'}, targetTable), summary);
+  const candidates = node('div', {className:'a-stack'}, fields.lastElementChild, summary, node('div', {className:'a-port-list'}, targetTable));
   fields.append(candidates);
   for (const control of [engine, action, channel, source]) element(control).addEventListener('change', controls);
   form.querySelector('[type=submit]').addEventListener('mutationend', controls);
   box = ctx.dialog('批量操作', form, { wide: true });
+  ctx = dialogContext(ctx,box);
   box.classList.add('a-node-batch');
   syncCandidates();
   poll({ ...ctx, current: active, onRefreshError: () => { if (!stale.textContent) stale.textContent = '任务状态刷新失败，保留已有结果。'; } }, async () => {

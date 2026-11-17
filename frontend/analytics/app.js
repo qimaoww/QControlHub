@@ -197,7 +197,15 @@ export function startAnalytics({ app, session }) {
       node("div", { className: "a-dialog-head" }, heading, closeButton),
       node("div", { className: "a-dialog-body" }, content));
     box.closeWhilePending = closeWhilePending;
-    if (route === 'node-settings') box.classList.add('a-node-dialog');
+    if (route === 'node-settings') {
+      box.classList.add('a-node-dialog');
+      const parent = [...document.querySelectorAll('dialog.a-node-dialog:modal')].at(-1);
+      if (parent) {
+        const dismiss = () => box.close();
+        parent.addEventListener('close',dismiss,{once:true});
+        box.addEventListener('close',()=>parent.removeEventListener('close',dismiss),{once:true});
+      }
+    }
     document.body.append(box);
     box.addEventListener("cancel", event => {
       if ((pending && !box.closeWhilePending) || box.onRequestClose) event.preventDefault();

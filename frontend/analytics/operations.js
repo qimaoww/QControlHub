@@ -397,6 +397,10 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
     context, timing, failure, diagnosis, previousAttempts, output);
   const box = ctx.dialog(title, content, { wide: true });
   box.classList.add("a-task-dialog");
+  if (box.matches('.a-node-dialog')) {
+    content.classList.add('a-node-receipt');
+    content.prepend(node('div',{className:'a-stack a-node-receipt-target'},heading,timing,context));
+  }
   let reading = false;
   const controller = new AbortController();
   const signal = AbortSignal.any([ctx.signal, controller.signal]);

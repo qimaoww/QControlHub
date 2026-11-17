@@ -87,10 +87,11 @@ export async function testAgentBatchActions(fixture) {
   await waitFor(() => writes() === next + 1, '第二个任务没有串行提交');
   assert.equal(testAPI.pendingTasks[next].payload.agent_id, 'bravo');
   testAPI.pendingTasks[next++].fail('bravo temporary failure'); await idle();
-  assert.ok(form.textContent.includes('已提交 1，提交失败 1') && form.lastElementChild.classList.contains('error'), '部分失败汇总错误');
+  assert.ok(form.querySelector('[data-batch-summary].error')?.textContent.includes('已提交 1，提交失败 1'), '部分失败汇总错误');
   assert.ok(nativeBatchButton('重试提交', row('bravo')) && !nativeBatchButton('重试提交', row('bravo')).hidden, '失败节点不能重试');
   nativeBatchButton('重试提交', row('bravo')).click();
   await waitFor(() => writes() === next + 1, '部分失败重试未提交');
+  assert.equal(testAPI.pendingTasks[next].payload.agent_id,'bravo','重试不能发给已受理的节点');
   testAPI.pendingTasks[next++].ok({ id: 'task-bravo-retry' }); await idle();
   assert.ok(nativeBatchButton('重试提交', row('bravo')).hidden && form.textContent.includes('已提交 2，提交失败 0'), '重试结果未更新');
   confirmation = await confirm(); nativeBatchButton('执行批量操作', confirmation).click();
