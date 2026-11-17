@@ -56,5 +56,5 @@ export function nodeAddress(ctx, agent, { available, form }) {
   form.addEventListener('input', sync);
   form.addEventListener('change', sync);
   submit.addEventListener('mutationend', sync);
-  return { view: stack(node('h3', {}, '节点地址'), fields), save, update, dirty: () => !same(values(), baseline) };
+  return { view: stack(fields), save, update, dirty: () => !same(values(), baseline) };
 }

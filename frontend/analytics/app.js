@@ -197,6 +197,7 @@ export function startAnalytics({ app, session }) {
       node("div", { className: "a-dialog-head" }, heading, closeButton),
       node("div", { className: "a-dialog-body" }, content));
     box.closeWhilePending = closeWhilePending;
+    if (route === 'node-settings') box.classList.add('a-node-dialog');
     document.body.append(box);
     box.addEventListener("cancel", event => {
       if ((pending && !box.closeWhilePending) || box.onRequestClose) event.preventDefault();
@@ -205,7 +206,7 @@ export function startAnalytics({ app, session }) {
     box.addEventListener("close", () => {
       const restore = document.activeElement === document.body || box.contains(document.activeElement);
       notifications.position(); box.remove();
-      if (restore && active?.isConnected) active.focus();
+      if (restore && active?.isConnected) active.focus({preventScroll:true});
     }, { once: true });
     openDialog(box);
     notifications.position();
@@ -216,7 +217,7 @@ export function startAnalytics({ app, session }) {
       const box = dialog(label, stack(node("p", {}, message), actions(
         button("取消", () => box.close(), { autofocus: true }),
         button(label, () => { resolve(true); box.close(); }, { tone: "primary" }),
-      )));
+      )), {closeWhilePending:true});
       box.addEventListener("close", () => resolve(false), { once: true });
     });
   }

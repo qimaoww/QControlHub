@@ -122,7 +122,7 @@ var uiPreferenceRules = map[string]map[string]preferenceRule{
 	"node-region":   {"region_search": preferenceText(200)},
 	"notifications": {"template_event": preferenceEnum("task.failed", "agent.offline", "agent.online", "traffic.quota", "traffic.warning", "speed.high", "speed.low", "speed.recovered", "panel.update")},
 	"shell":         {"collapsed": preferenceBool},
-	"nodes":         {"search": preferenceText(200)},
+	"nodes":         {"search": preferenceText(200), "settings_panel": preferenceEnum("node", "core")},
 	"certificates":  {"search": preferenceText(200)},
 	"users":         {"query": preferenceText(200)},
 	"traffic":       {"search": preferenceText(200), "scope": preferenceEnum("current", "all"), "agent": preferenceAgent, "engine": enginePreference(), "status": preferenceEnum("", "active", "metering", "blocked", "waiting", "stopped", "offline", "error"), "view": preferenceEnum("cards", "list"), "advanced": preferenceBool, "manage": preferenceBool},

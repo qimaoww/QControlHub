@@ -70,7 +70,8 @@ export async function testNativeOrdering({ mode, testAPI }, preview=false, coord
     const grip=grips()[0], first=row(grip);
     assert.ok(grip.querySelector('svg') && !grip.textContent.trim(), '拖拽手柄必须只有图标');
     assert.ok(grip.parentElement.lastElementChild === grip, '手柄必须放在操作组最后');
-    if(type.endsWith('list') || type === 'traffic') assert.equal(grip.closest('td'), first.lastElementChild, '列表手柄必须放在最后一列');
+    if(type === 'nodes-list') assert.equal(grip.closest('td'), first.firstElementChild, '节点手柄应留在固定身份列');
+    else if(type.endsWith('list') || type === 'traffic') assert.equal(grip.closest('td'), first.lastElementChild, '列表手柄必须放在最后一列');
     assert.ok(![...root.querySelectorAll('button')].some(control=>['调整顺序','完成排序','按位置调整','排序','拖动排序'].includes(control.textContent.trim())), '页面仍有排序按钮');
     grip.focus();key(grip,'ArrowDown');key(grip,'ArrowDown');key(grip,'ArrowUp');
     const moved=[original[1],original[0],...original.slice(2)];

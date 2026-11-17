@@ -274,7 +274,7 @@ export async function copyText(value, isCurrent = () => true) {
   const controlSelection = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
   const source = node("textarea", { className: "a-clipboard", readonly: true });
   source.value = String(value);
-  (document.querySelector('dialog:modal') || document.body).append(source);
+  (active?.closest('dialog:modal') || [...document.querySelectorAll('dialog:modal')].at(-1) || document.body).append(source);
   source.focus({ preventScroll: true }); source.select();
   try { if (!document.execCommand('copy')) throw new Error('浏览器拒绝了剪贴板操作'); }
   finally {

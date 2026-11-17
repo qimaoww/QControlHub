@@ -20905,7 +20905,8 @@
                     "region_search": "example"
                   },
                   "nodes": {
-                    "search": "example"
+                    "search": "example",
+                    "settings_panel": "node"
                   },
                   "notifications": {
                     "template_event": "task.failed"
@@ -21192,11 +21193,18 @@
                       },
                       "nodes": {
                         "additionalProperties": false,
-                        "maxProperties": 1,
+                        "maxProperties": 2,
                         "minProperties": 1,
                         "properties": {
                           "search": {
                             "maxLength": 200,
+                            "type": "string"
+                          },
+                          "settings_panel": {
+                            "enum": [
+                              "node",
+                              "core"
+                            ],
                             "type": "string"
                           }
                         },

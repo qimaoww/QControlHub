@@ -46,6 +46,11 @@ async function testSettingsPanels(box, testAPI) {
   openCoreSettings(box);
   const capability = corePanel.querySelector('[data-engine-capability=xray]');
   const before = capability.checked; capability.click();
+  const nested = [...corePanel.querySelectorAll('button')].find(control => !control.disabled && ['切换版本','安装内核'].includes(control.textContent));
+  nested.click();
+  const child = await waitFor(() => [...document.querySelectorAll('dialog[open]')].at(-1)?.querySelector('[name=release_channel]')?.closest('dialog'), '安装子窗未打开');
+  child.querySelector('[aria-label=关闭]').click();
+  await waitFor(() => !child.isConnected, '关闭子窗未返回内核设置');
   const stable = capability.closest('form');
   testAPI.agents[0].runtime.mihomo.version = 'v1.2.3';
   await waitFor(() => corePanel.textContent.includes('v1.2.3'), '内核设置未实时更新');
@@ -59,6 +64,8 @@ async function testSettingsPanels(box, testAPI) {
   assert.equal(corePanel.querySelectorAll('[type=submit]').length, 1, '内核能力未使用统一保存入口');
   [...box.querySelectorAll('button')].find(control => control.textContent === '节点设置').click();
   assert.equal(name.value, '未提交的节点名称', '分区切换丢失名称草稿');
+  assert.equal(document.activeElement,name,'返回分区没有恢复编辑焦点');
+  assert.equal(name.selectionStart,1); assert.equal(name.selectionEnd,3);
   openCoreSettings(box); assert.equal(capability.checked, !before, '分区切换丢失能力草稿'); capability.click();
   [...box.querySelectorAll('button')].find(control => control.textContent === '节点设置').click(); name.value = original;
 }

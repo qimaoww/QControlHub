@@ -185,11 +185,13 @@ export function openNodeBatch(ctx, getAgents) {
   targetTable = table(['节点', '条件', '执行结果'], [], {
     label: '批量操作节点与结果', rowKey: row => row.id, emptyText: '暂无授权节点',
   });
-  form.querySelector('fieldset').append(node('div', { className: 'a-port-list' }, targetTable));
-  form.append(summary);
+  const fields = form.querySelector('fieldset');
+  const candidates = node('div', {className:'a-stack'}, fields.lastElementChild, node('div', {className:'a-port-list'}, targetTable), summary);
+  fields.append(candidates);
   for (const control of [engine, action, channel, source]) element(control).addEventListener('change', controls);
   form.querySelector('[type=submit]').addEventListener('mutationend', controls);
   box = ctx.dialog('批量操作', form, { wide: true });
+  box.classList.add('a-node-batch');
   syncCandidates();
   poll({ ...ctx, current: active, onRefreshError: () => { if (!stale.textContent) stale.textContent = '任务状态刷新失败，保留已有结果。'; } }, async () => {
     if (busy) return;

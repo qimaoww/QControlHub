@@ -60,6 +60,6 @@ export function nodeMetrics(ctx, agent) {
     try { await region.load(); }
     finally { if (local.current()) refresh.disabled = false; }
   }
-  box.querySelector('.a-dialog-body').append(actions(refresh));
+  box.querySelector('.a-dialog-head h2').after(refresh);
   void load();
 }

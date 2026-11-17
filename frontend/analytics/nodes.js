@@ -21,7 +21,7 @@ import { createServiceActionGuard } from '../modules/agent-service-state.js';
 import { enrollmentInstallCommand } from '../modules/enrollment-command.js';
 import { formatSharedPorts } from '../modules/user-model.js';
 import { sharedInstancePresentation } from '../modules/shared-instance-model.js';
-import { copyText, node, button, dragHandle, actions, stack, grid, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
+import { copyText, node, button, dragHandle, actions, stack, section, table, field, code, badge, muted, notice, link, pathID, list } from './ui.js';
 import { date, bytes, status, actionName, taskDetail } from './operations.js';
 
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
@@ -55,8 +55,8 @@ export async function nodesPage(ctx) {
   const nextPage = button('下一页', () => paging.setPage(paging.page + 1));
   const pages = node('div', { className: 'a-pagination', hidden: true }, pageCount, actions(previousPage, nextPage));
   let batchBox;
-  const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')));
-  const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')));
+  const cardToggle = button('卡片',event=>void ctx.mutate(event.currentTarget,()=>setView('cards')), { glyph:'grid' });
+  const listToggle = button('列表',event=>void ctx.mutate(event.currentTarget,()=>setView('list')), { glyph:'list' });
   const batchToggle = ctx.can('tasks.execute') && button('批量操作', batch);
   async function setView(value) {
     if (!preference) return;
@@ -81,7 +81,7 @@ export async function nodesPage(ctx) {
   const shownAgents = () => {
     const query = search.querySelector('input').value.trim().toLowerCase();
     const ordered = orderNodesBySavedOrder(agents, ordering.ids());
-    return ordered.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
+    return ordered.filter(agent => [agent.name, agent.id, agent.labels?.client_address, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
   };
   const percentage=(used,total)=>total>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):0;
   function meter(label,value,available,detail){
@@ -172,7 +172,8 @@ export async function nodesPage(ctx) {
     dialogUpdates.forEach(update => update());
   }
   async function submit(agent, engine, action, extra = {}) {
-    const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action, ...extra } });
+    const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action,
+      ...(engine && { expected_instance_id: agent.runtime?.[engine]?.instance?.id || '' }), ...extra } });
     if (!ctx.current()) return;
     ctx.announce('任务已提交');
     if (action === 'uninstall' && ctx.can('tasks.read') && !taskTerminal(task)) {
@@ -204,10 +205,10 @@ export async function nodesPage(ctx) {
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));renderSignature = signature;return;}
     if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
       node('article',{className:'a-card a-probe','data-agent-id':agent.id},
-        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),
+        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch} · ${agent.can_manage===false?'本人共享实例':'主实例'}`)),
           status(agent.status)),
-        node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
-        node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
+        node('div',{className:'a-probe-body'},metrics(agent),network(agent),addresses(agent)),
+        node('div',{className:'a-probe-meta'},muted((agent.capabilities||[]).join(' · ')||'无内核'),muted(`最近在线 · ${date(agent.last_seen)}`)),
         node('footer',{className:'a-probe-footer'},controls(agent)))));
       if (results.firstElementChild?.matches('.a-probe-grid')) patch(results.firstElementChild, fresh); else results.replaceChildren(fresh);
     }
@@ -219,13 +220,12 @@ export async function nodesPage(ctx) {
           metricTrack(percent, available),
           detail&&muted(available?detail:'暂无数据'));
       };
-      const columns = ['节点','状态','CPU','内存','磁盘','网络收发','操作'];
+      const columns = ['节点','CPU','内存','磁盘','网络收发','连接地址','内核与实例','最近在线'];
       const rows = shown.map(agent=>{
         const m=agent.metrics||{},online=agent.status==='online';
         return [
-          node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
-            muted(agent.can_manage===false?'本人共享实例':'主实例')),
-          node('div',{className:'a-probe-state',title:`最近在线 · ${date(agent.last_seen)}`},status(agent.status)),
+          node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),status(agent.status),
+            node('div',{className:'a-probe-row-actions'},controls(agent,true))),
           compactMeter(m.cpu_percent,online&&m.cpu_available),
           compactMeter(percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
           compactMeter(percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`),
@@ -234,11 +234,11 @@ export async function nodesPage(ctx) {
             node('div',{},muted('实时发送'),node('span',{},traffic(agent,'network_tx_bps',true))),
             node('div',{},muted('累计接收'),muted(traffic(agent,'network_rx_bytes'))),
             node('div',{},muted('累计发送'),muted(traffic(agent,'network_tx_bytes')))),
-          node('div',{className:'a-probe-row-actions'},controls(agent,true))];
+          addresses(agent),stack(muted(`${agent.os} / ${agent.arch}`), (agent.capabilities||[]).join(' · ')||'无内核',muted(agent.can_manage===false?'本人共享实例':'主实例')),date(agent.last_seen)];
       });
       if (liveTable && results.contains(liveTable)) liveTable.updateRows(rows);
       else {
-        const widths = { '节点': 360, '状态': 90, 'CPU': 110, '内存': 180, '磁盘': 180, '网络收发': 230, '操作': 190 };
+        const widths = { '节点': 168, 'CPU': 110, '内存': 146, '磁盘': 146, '网络收发': 232, '连接地址': 250, '内核与实例': 158, '最近在线': 138 };
         liveTable = table(columns, rows, {paginate:false, label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
         results.replaceChildren(node('div',{className:'a-card a-probe-list'},liveTable));
       }
@@ -285,6 +285,7 @@ export async function nodesPage(ctx) {
     });
     for (const type of ['input', 'change']) form.addEventListener(type, () => { changed = Boolean(form.elements.name.value || form.elements.admin_hidden.checked); ctx.setDirty(changed); });
     const box = ctx.dialog('添加节点', stack(form, history));
+    box.classList.add('a-node-enrollment','wide');
     box.onRequestClose = async () => {
       if (changed && !await ctx.confirm('放弃未保存的节点添加信息？', '放弃更改')) return;
       ctx.setDirty(false); box.close();
@@ -312,7 +313,7 @@ export async function nodesPage(ctx) {
     body.prepend(read.element); void read.load();
     return box;
   }
-  async function settings(agent) {
+  async function settings(agent, deepLink = false) {
     const base = `/agents/${pathID(agent.id)}`;
     const manage = canManage(agent);
     const settingsScope = () => JSON.stringify([agent.can_manage !== false, agent.owner_id || '', agent.shared_allocation?.owner_id || '',
@@ -339,32 +340,33 @@ export async function nodesPage(ctx) {
       const zoneChanged = zone?.dirty();
       if (addressChanged && !await ctx.confirm('更改节点默认地址将影响继承它的客户端配置，独立端口覆盖保持不变。', nodeForm.elements.node_address_mode.value === 'auto' ? '恢复自动获取' : '保存并应用') || !available()) return;
       savingNode = true;
-      let savedCount = 0;
+      const applied = [];
+      const planned = [addressChanged && '连接地址', nameChanged && '节点名称', visibilityChanged && '可见性', zoneChanged && '时区'].filter(Boolean);
       try {
         await load();
         if (!available()) return;
-        if (addressChanged) { await address.save(); savedCount++; }
+        if (addressChanged) { await address.save(); applied.push('连接地址'); }
         if (!available()) return;
         if (nameChanged) {
           const saved = await ctx.api(`${base}/name`, { method: 'PUT', body: { name } });
           if (!available()) return;
           savedName = agent.name = saved.name;
           if (nodeForm.elements.name.value.trim() === name) nodeForm.elements.name.value = saved.name;
-          updateTitle(); savedCount++;
+          updateTitle(); applied.push('节点名称');
         }
         if (visibilityChanged) {
           const saved = await ctx.api(`${base}/visibility`, { method: 'PUT', body: { admin_hidden: visibility } });
           if (!available()) return;
-          savedVisibility = agent.admin_hidden = Boolean(saved.admin_hidden); savedCount++;
+          savedVisibility = agent.admin_hidden = Boolean(saved.admin_hidden); applied.push('可见性');
         }
         if (!available()) return;
-        if (zone && (zoneChanged || !addressChanged && !nameChanged && !visibilityChanged)) { await zone.save(); savedCount++; }
+        if (zone && (zoneChanged || !addressChanged && !nameChanged && !visibilityChanged)) { await zone.save(); applied.push('时区'); }
         if (!available()) return;
         ctx.announce('节点设置已保存');
         try { await load(); }
         catch (error) { if (available() && error.name !== 'AbortError') ctx.announce(`节点设置已保存，刷新失败。\n${error.message}`, 'error'); }
       } catch (error) {
-        if (savedCount && available()) throw new Error(`部分设置已保存，其余更改尚未保存：${error.message}`);
+        if (applied.length && available()) throw new Error(`部分设置已保存：${applied.join('、')}。待保存：${planned.filter(item => !applied.includes(item)).join('、')}。${error.message}`);
         throw error;
       } finally { savingNode = false; if (available()) settingsUpdates.forEach(update => update()); }
     }) : null;
@@ -375,8 +377,9 @@ export async function nodesPage(ctx) {
       const nameField = field('节点名称', 'name', agent.name, { required: true, maxlength: 100 });
       const visibilityField = agent.can_hide && field('对管理员隐藏', 'admin_hidden', agent.admin_hidden, { type: 'checkbox' });
       sections.push(section('节点资料', node('div', { className: 'a-card-body' }, stack(
-        nameField, button('国家／地区', () => chooseRegion(agent)), address.view, visibilityField,
+        nameField, actions(button('国家／地区', () => chooseRegion(agent)), visibilityField),
       ))));
+      sections.push(section('节点地址', node('div',{className:'a-card-body'}, address.view)));
       settingsUpdates.push(() => {
         const name = nameField.querySelector('input');
         if (!savingNode && name.value === savedName) { name.value = agent.name; savedName = agent.name; }
@@ -448,7 +451,7 @@ export async function nodesPage(ctx) {
             actionBusy.add(key); control.disabled = true;
             try {
               if (!await ctx.confirm(`卸载 ${engine}？目标服务会停止，内核文件将删除，已保存配置保留。`, '卸载内核') || !ctx.current()) return;
-              await ctx.mutate(null, async () => { await load(); if (ctx.current() && !uninstallReason()) await submit(agent, engine, 'uninstall'); });
+              await ctx.mutate(null, async () => { await load(); if (box.open && available() && !uninstallReason()) await submit(agent, engine, 'uninstall'); });
             } finally { actionBusy.delete(key); if (ctx.current()) dialogUpdates.forEach(update => update()); }
           }, { tone: 'danger', disabled: busy || uninstallReason() });
           return stack(
@@ -518,16 +521,16 @@ export async function nodesPage(ctx) {
       ctx.can('host.manage',agent) && button('升级 Agent',async event=>{
         const control=event.currentTarget;
         if(!await ctx.confirm('升级此节点的 QAgent？替换后自动重连，期间节点会短暂离线。','升级 Agent')||!ctx.current())return;
-        await ctx.mutate(control,()=>submit(agent,undefined,'upgrade-agent'));
+        await ctx.mutate(control,async () => { await load(); if (available() && ctx.can('host.manage',agent) && ctx.can('tasks.execute') && agent.status==='online' && agent.features?.includes('agent-self-upgrade-v1')) await submit(agent,undefined,'upgrade-agent'); });
       },{disabled:agent.status!=='online'||!agent.features?.includes('agent-self-upgrade-v1'),title:agent.features?.includes('agent-self-upgrade-v1')?'升级 QAgent':'当前 Agent 需重新执行安装命令'}),
-      manage && agent.enrollment_command_available && button('查看安装命令', event => void ctx.mutate(event.currentTarget, async () => command(await ctx.api(`${base}/enrollment-command`, { method: 'POST' })))),
+      manage && agent.enrollment_command_available && button('查看安装命令', event => void ctx.mutate(event.currentTarget, async () => { const created = await ctx.api(`${base}/enrollment-command`, { method: 'POST' }); if (available()) command(created); })),
       manage && nodeDeleteControl(ctx, agent, { available: () => box.open && settingsScope() === openedScope && canManage(agent), onDeleted() {
         agents = agents.filter(value => value.id !== agent.id); box.close(); draw(true);
       }, refresh: load }),
     );
     const nodeOperations = renderNodeOperations();
     const operations = nodeOperations.childElementCount > 0 && section('节点操作', node('div', { className: 'a-card-body' }, nodeOperations));
-    const details = sections.length > 1 ? grid(sections) : stack(sections);
+    const details = stack(sections);
     if (nodeForm) {
       nodeForm.querySelector('fieldset').append(details);
       nodeForm.querySelector('[type=submit]').disabled = !manage;
@@ -536,19 +539,30 @@ export async function nodesPage(ctx) {
     nodePanel.dataset.settingsPanel = 'node'; nodePanel.setAttribute('role', 'region'); nodePanel.setAttribute('aria-label', '节点设置');
     let activePanel = 'node';
     const scrollPositions = { node: 0, core: 0 };
+    const focusByPanel = new Map();
     const updateTitle = () => { box.querySelector('.a-dialog-head h2').textContent = `${agent.name} · ${activePanel === 'node' ? '节点设置' : '内核设置'}`; };
-    const selectPanel = value => {
+    let panelTouched = false;
+    const selectPanel = (value, remember = true) => {
+      if (remember) { panelTouched = true; ctx.preferences?.patch('nodes',{settings_panel:value}); }
+      if (value === activePanel) return;
       scrollPositions[activePanel] = box.scrollTop; activePanel = value;
       nodePanel.hidden = value !== 'node'; corePanel.hidden = value !== 'core';
       nodeTab.setAttribute('aria-pressed', String(value === 'node')); coreTab.setAttribute('aria-pressed', String(value === 'core'));
       updateTitle(); box.scrollTop = scrollPositions[value];
+      const previous = focusByPanel.get(value);
+      if (previous?.isConnected && !previous.disabled) previous.focus({preventScroll:true});
     };
     const nodeTab = button('节点设置', () => selectPanel('node'), { 'aria-pressed': 'true' });
     const coreTab = button('内核设置', () => selectPanel('core'), { 'aria-pressed': 'false' });
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
-    const nodeDirty = () => address?.dirty() || zone?.dirty() || nodeForm?.elements.name && nodeForm.elements.name.value !== savedName || nodeForm?.elements.admin_hidden && nodeForm.elements.admin_hidden.checked !== savedVisibility;
+    box.classList.add('a-node-settings');
+    if (!deepLink) void ctx.preferences?.ready().then(() => {
+      if (!panelTouched && ctx.current() && box.open && !nodeDirty() && ctx.preferences.get('nodes').settings_panel === 'core') selectPanel('core',false);
+    });
+    for (const panel of [nodePanel,corePanel]) panel.addEventListener('focusin', event => focusByPanel.set(panel.dataset.settingsPanel,event.target));
+    const nodeDirty = () => changedCapabilities().length || address?.dirty() || zone?.dirty() || nodeForm?.elements.name && nodeForm.elements.name.value !== savedName || nodeForm?.elements.admin_hidden && nodeForm.elements.admin_hidden.checked !== savedVisibility;
     box.onRequestClose = async () => {
       if (nodeDirty() && !await ctx.confirm('存在未保存的设置更改，确定关闭？', '放弃更改')) return;
       if (ctx.current()) box.close();
@@ -562,8 +576,11 @@ export async function nodesPage(ctx) {
       renderRuntimes();
     };
     settingsUpdates.forEach(refresh => refresh());
-    if (nodeForm) for (const event of ['input', 'change']) nodeForm.addEventListener(event, () => ctx.setDirty(Boolean(nodeDirty())));
-    nodeForm?.querySelector('[type=submit]').addEventListener('mutationend', () => { if (ctx.current() && box.open) ctx.setDirty(Boolean(nodeDirty())); });
+    for (const form of [nodeForm, capabilityForm].filter(Boolean)) {
+      const syncDirty = () => { if (ctx.current() && box.open) ctx.setDirty(Boolean(nodeDirty())); };
+      for (const event of ['input','change']) form.addEventListener(event, syncDirty);
+      form.querySelector('[type=submit]').addEventListener('mutationend', syncDirty);
+    }
     box.addEventListener('close', () => { if (ctx.current()) ctx.setDirty(false); }, { once: true });
     dialogUpdates.add(update);
     box.addEventListener('close', () => dialogUpdates.delete(update), { once: true });
@@ -595,7 +612,7 @@ export async function nodesPage(ctx) {
       if (values.release_channel === 'custom' && !values.custom_version.trim()) throw new Error('请输入软件发行版本');
       if (!await ctx.confirm(shared ? '准备缺少的稳定版内核？已有版本会复用。' : '安装完成后将重启对应内核服务，确定继续？', '提交安装') || !ctx.current()) return;
       if (!await targetForSubmit(values)) return;
-      const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action: 'install', core_version: values.release_channel === 'custom' ? values.custom_version.trim() : values.release_channel, core_source: coreSourceForInstall(engine, values.release_channel, values.core_source) } });
+      const task = await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, engine, action: 'install', expected_instance_id: agent.runtime?.[engine]?.instance?.id || '', core_version: values.release_channel === 'custom' ? values.custom_version.trim() : values.release_channel, core_source: coreSourceForInstall(engine, values.release_channel, values.core_source) } });
       feedback.textContent = ''; ctx.announce('安装任务已提交');
       if (ctx.can('tasks.read')) { await taskDetail(ctx, task.id); if (taskTerminal(task)) await load(); }
     });
@@ -632,7 +649,7 @@ export async function nodesPage(ctx) {
     if (deepID && !openedDeep) {
       openedDeep = true;
       const agent = agents.find(agent => agent.id === deepID);
-      if (agent) settings(agent);
+      if (agent) settings(agent,true);
       else ctx.dialog('节点不可用', notice('节点不存在或当前账号没有访问权限。'));
     }
   }, {view:results});
@@ -644,8 +661,7 @@ export async function nodesPage(ctx) {
   const orderRead = readRegion(ctx, '节点排序', () => ordering.load(), () => draw(true));
   void nodeRead.load(); void preferenceRead.load(); void orderRead.load();
   ctx.onRefresh(() => Promise.all([nodeRead.load(), !preference && preferenceRead.load(), orderRead.load()]));
-  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
-    cardToggle, listToggle, pageSize.element,
+  return stack(node('div', { className: 'a-probe-toolbar' }, search, node('div',{className:'a-actions a-node-view',role:'group','aria-label':'节点视图'},cardToggle, listToggle, pageSize.element), actions(
     ctx.can('enrollment.manage') && button('添加节点', enrollment, { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', directory),
     batchToggle,
