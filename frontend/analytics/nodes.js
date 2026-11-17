@@ -31,7 +31,7 @@ const transferColumns = [
   ['实时接收', 'network_rx_bps', true], ['实时发送', 'network_tx_bps', true],
   ['累计接收', 'network_rx_bytes', false], ['累计发送', 'network_tx_bytes', false],
 ];
-const nodeColumns = ['节点', 'CPU', '内存', '磁盘', ...transferColumns.map(([label]) => label), '节点资料'];
+const nodeColumns = ['节点', '地址', 'CPU', '内存', '磁盘', ...transferColumns.map(([label]) => label)];
 export async function nodesPage(ctx) {
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
   let agents = [], preference = null, loaded = false;
@@ -162,8 +162,9 @@ export async function nodesPage(ctx) {
       received = list(received);
     }
     catch (error) {
-      if (error.status === 403 && ctx.current() && sequence === loadSequence) {
-        agents = []; draw(true);
+      if ([401,403].includes(error.status) && ctx.current() && sequence === loadSequence) {
+        agents = []; loaded = false; renderSignature = undefined; liveTable = null;
+        results.replaceChildren(); pages.hidden = true;
         dialogUpdates.forEach(update => update());
       }
       throw error;
@@ -231,15 +232,15 @@ export async function nodesPage(ctx) {
           node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),
             actions(status(agent.status),muted(agent.can_manage===false?'本人共享实例':'主实例')),
             node('div',{className:'a-probe-row-actions'},controls(agent,true))),
+          stack(addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),muted(`最近在线 · ${date(agent.last_seen)}`)),
           compactMeter(m.cpu_percent,online&&m.cpu_available),
           compactMeter(percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
           compactMeter(percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`),
-          ...transferColumns.map(([,key,rate]) => node('span',{className:'a-transfer-value'},traffic(agent,key,rate))),
-          stack(addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),muted(`最近在线 · ${date(agent.last_seen)}`))];
+          ...transferColumns.map(([,key,rate]) => node('span',{className:'a-transfer-value'},traffic(agent,key,rate)))];
       });
       if (liveTable && results.contains(liveTable)) liveTable.updateRows(rows);
       else {
-        liveTable = table(nodeColumns, rows, {paginate:false, label:'节点监控', columnWidths:[215,105,160,160,...transferColumns.map(() => 130),250], rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
+        liveTable = table(nodeColumns, rows, {paginate:false, label:'节点监控', columnWidths:[200,265,90,150,150,...transferColumns.map(() => 110)], rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
         results.replaceChildren(node('div',{className:'a-card a-probe-list a-node-list'},liveTable));
       }
     }
@@ -366,7 +367,7 @@ export async function nodesPage(ctx) {
       } catch (error) {
         if (savedCount && available()) throw new Error(`部分设置已保存，其余更改尚未保存：${error.message}`);
         throw error;
-      } finally { savingNode = false; if (available()) settingsUpdates.forEach(update => update()); }
+      } finally { savingNode = false; if (available()) { draw(true); settingsUpdates.forEach(update => update()); } }
     }) : null;
     if (nodeForm) nodeForm.dataset.nodeSettingsForm = agent.id;
     if (manage) {

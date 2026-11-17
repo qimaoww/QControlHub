@@ -76,7 +76,7 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
     const agent = agents.find(item => item.id === agentID);
     assert.equal(agent.region_code, 'JP');
     assert.ok(await evaluate(page, `(() => {
-      const identity=[...document.querySelectorAll('.a-probe,.a-probe-identity')].find(item=>item.querySelector('.a-probe-flag[data-region-code="JP"]'));
+      const identity=document.querySelector('[data-agent-id='+CSS.escape(${JSON.stringify(agentID)})+']')?.closest('article,tr');
       return identity && identity.querySelector('[data-ip-family=v4] [dir]').textContent===${JSON.stringify(agent.metrics.public_ipv4)}
         && identity.querySelector('[data-ip-family=v6] [dir]').textContent===${JSON.stringify(agent.metrics.public_ipv6)}
         && identity.querySelector('.a-probe-flag').getAttribute('aria-label')==='日本'
@@ -85,9 +85,8 @@ export async function checkAnalyticsWorkflows({ page, mode, fixture, evaluate, w
         && document.documentElement.scrollWidth<=innerWidth+1;
     })()`), 'card/list display both real API address families and the resolved region');
     for (const [family, value] of [['v4',agent.metrics.public_ipv4],['v6',agent.metrics.public_ipv6]]) {
-      const selector=`.a-probe-flag[data-region-code="JP"]`;
       await evaluate(page, `(() => {
-        const identity=[...document.querySelectorAll('.a-probe,.a-probe-identity')].find(item=>item.querySelector(${JSON.stringify(selector)}));
+        const identity=document.querySelector('[data-agent-id='+CSS.escape(${JSON.stringify(agentID)})+']').closest('article,tr');
         window.__ipCopyControl=identity.querySelector('[data-ip-family=${family}] button');
         window.__ipCopyControl.click();
       })()`);

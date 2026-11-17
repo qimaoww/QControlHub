@@ -404,10 +404,16 @@ strong, b { font-weight: 600; }
 .a-node-readings .a-probe-meter-label { flex-wrap: wrap; gap: 4px; }
 .a-node-readings .a-probe-network { padding-top: 12px; border-top: 1px solid var(--border); }
 .a-node-list { min-width: 0; }
-.a-node-list td { vertical-align: top; }
+.a-node-list td { vertical-align: middle; padding-block: 10px; }
+.a-node-list td[data-column="地址"] .a-stack { gap: 2px; }
+.a-node-list .a-probe-cell { min-height: 0; }
+.a-node-list .a-probe-identity { gap: 3px; }
 .a-node-list td:has(.a-transfer-value), .a-node-list th:is([data-column^="实时"],[data-column^="累计"]) { text-align: end; }
 .a-transfer-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .a-node-list :is(th,td):first-child { background: var(--canvas); border-inline-end: 1px solid var(--border); }
+@media (min-width: 40rem) {
+  .a-node-list :is(th,td):first-child { position: sticky; inset-inline-start: 0; z-index: 1; }
+}
 @container (max-width: 32rem) {
   .a-node-head, .a-node-profile, .a-node-readings { grid-column: 1 / -1; }
   .a-node-profile { grid-row: 2; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); }
