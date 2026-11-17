@@ -21274,6 +21274,7 @@
                               "restart",
                               "status",
                               "upgrade-agent",
+                              "network-diagnostic",
                               "ip-quality",
                               "enable-bbr",
                               "disable-bbr",

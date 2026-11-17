@@ -126,6 +126,7 @@ COPY frontend/modules/ui-preferences.js frontend/modules/read-coordinator.js fro
     frontend/modules/outbound-preset-model.js \
     frontend/modules/permissions.js \
     frontend/modules/poller.js \
+    frontend/modules/runtime-defaults.js \
     frontend/modules/preset-route.js \
     frontend/modules/record-display.js \
     frontend/modules/region-model.js \

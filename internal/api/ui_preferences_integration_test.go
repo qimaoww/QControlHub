@@ -38,8 +38,8 @@ func TestAccountUIPreferences(t *testing.T) {
 	if p := read(alice); p.Revision != 0 || len(p.Values) != 0 {
 		t.Fatalf("default: %+v", p)
 	}
-	p := patch(alice, map[string]any{"logs": map[string]any{"q": "search", "automatic": false}, "traffic": map[string]any{"scope": "all"}, "live-config": map[string]any{"agent": "agt_0123456789abcdef"}}, 0, 200)
-	if p.Revision != 1 || string(p.Values["logs"]["automatic"]) != "false" {
+	p := patch(alice, map[string]any{"logs": map[string]any{"q": "search", "automatic": false}, "traffic": map[string]any{"scope": "all"}, "live-config": map[string]any{"agent": "agt_0123456789abcdef"}, "tasks": map[string]any{"action": "network-diagnostic"}}, 0, 200)
+	if p.Revision != 1 || string(p.Values["logs"]["automatic"]) != "false" || string(p.Values["tasks"]["action"]) != `"network-diagnostic"` {
 		t.Fatalf("save: %+v", p)
 	}
 	if p := read(bob); p.Revision != 0 || len(p.Values) != 0 {

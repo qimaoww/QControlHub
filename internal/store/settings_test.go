@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -94,5 +95,32 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 	invalid.UIFontScale = 125
 	if _, err := dataStore.SavePanelSettings(ctx, invalid); err == nil {
 		t.Fatal("unsupported UI font scale was saved")
+	}
+}
+
+func TestPartialOwnerSettingsPreserveExplicitValues(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	// Owner settings may predate newer fields. Saved zero/false/[] must survive
+	// default hydration; omitted policy fields must remain valid after restart.
+	owner := "settings-partial-owner"
+	if _, err := db.pool.Exec(ctx, `INSERT INTO user_panel_settings(owner_id,content,revision,updated_at) VALUES($1,$2,1,now())`, owner, `{"panel_name":"saved","task_page_size":50,"task_poll_interval_ms":2000,"notify_task_failed":false,"agent_core_log_rotate_count":0,"default_agent_engines":[]}`); err != nil {
+		t.Fatal(err)
+	}
+	value, err := db.panelSettingsForOwner(ctx, db.pool, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.PanelName != "saved" || value.TaskPageSize != 50 || value.TaskPollIntervalMS != 2000 || value.NotifyTaskFailed || value.AgentCoreLogRotateCount != 0 || value.DefaultAgentEngines == nil || len(value.DefaultAgentEngines) != 0 {
+		t.Fatalf("explicit saved values lost: %+v", value)
+	}
+	if value.AgentHeartbeatIntervalSeconds != 15 || value.AgentMetricsIntervalSeconds != 1 || value.ClientConnectionRetentionDays != 30 {
+		t.Fatalf("missing defaults not hydrated: %+v", value)
+	}
+	if err := value.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := db.panelSettingsForOwner(ctx, db.pool, owner)
+	if err != nil || !reflect.DeepEqual(value, again) {
+		t.Fatalf("reload = %+v, %v", again, err)
 	}
 }

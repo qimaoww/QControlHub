@@ -147,7 +147,7 @@ func RefreshExistingCoreDiscovery(
 	allSources := make(map[core.Engine][]existingDiscoverySpec)
 	automatic := make(map[core.Engine]EngineSpec)
 	issues := make(map[core.Engine]string)
-	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+	for _, engine := range core.AllEngines() {
 		if _, explicit := manualSpecs[engine]; explicit {
 			continue
 		}

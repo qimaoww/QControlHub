@@ -50,12 +50,7 @@ func (b *wsRateBucket) allow(now time.Time) bool {
 }
 
 func buildAgentSessionPolicy(baseProbe core.PublicIPProbeConfig, settings core.PanelSettings) (core.AgentPolicy, core.PublicIPProbeConfig) {
-	policy := core.AgentPolicy{
-		HeartbeatIntervalSeconds: uint32(settings.AgentHeartbeatIntervalSeconds),
-		MetricsIntervalSeconds:   uint32(settings.AgentMetricsIntervalSeconds),
-		CoreLogMaxMiB:            uint32(settings.AgentCoreLogMaxMiB),
-		CoreLogRotateCount:       uint32(settings.AgentCoreLogRotateCount),
-	}
+	policy := settings.AgentPolicy()
 	probe := baseProbe
 	probe.IntervalSeconds = uint32(settings.PublicIPProbeIntervalSeconds)
 	return policy, probe

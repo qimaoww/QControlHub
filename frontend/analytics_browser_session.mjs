@@ -61,6 +61,14 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
   for (const [width, height] of widths) {
     await call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);
     assert.ok(await evaluate(page, "document.documentElement.scrollWidth<=innerWidth+1"), `analytics ${width}x${height}: no page overflow`);
+    await evaluate(page, "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+    assert.ok(await evaluate(page, "Math.abs(document.querySelector('.a-chart').viewBox.baseVal.width-document.querySelector('.a-chart-container').getBoundingClientRect().width)<1"), `${width}x${height}: chart measures its container`);
+
+    assert.ok(await evaluate(page, `(() => {
+      const chart=document.querySelector('.a-chart').getBoundingClientRect();
+      const labels=[...document.querySelectorAll('[data-chart-date]')].map(label=>label.getBoundingClientRect());
+      return labels.length>0 && labels.every((box,index)=>box.left>=chart.left && box.right<=chart.right && (!index || box.left>=labels[index-1].right));
+    })()`), `${width}x${height}: date labels fit without overlap`);
     if (width === 1920 || width === 3840 || width === 844) await screenshot(page, `analytics-dashboard-${width}x${height}`);
   }
   await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);
@@ -116,6 +124,38 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
       await chooseScale(100);
     }
   }
+
+  // Exercise real settings consumption, then restore the account defaults.
+  const originalSettings = await api(page, identity, "GET", "/settings");
+  const originalTaskFilters = (await api(page, identity, "GET", "/preferences/ui")).values.tasks || {};
+  await api(page, identity, "PUT", "/settings", { ...originalSettings, task_page_size: 50, task_poll_interval_ms: 2000 });
+  await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#tasks` }, page);
+  await wait(page, "document.querySelector('.a-main [name=limit]')?.value==='50' && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page, "document.querySelector('.a-main [name=limit]').value='100';[...document.querySelectorAll('.a-main button')].find(button=>button.textContent==='重置').click()");
+  await wait(page, "document.querySelector('.a-main [name=limit]').value==='50' && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page, `window.__cadence=[];window.__cadenceFetch=window.fetch;window.fetch=async (...args)=>{if(String(args[0]).includes('/tasks?'))window.__cadence.push(performance.now());return window.__cadenceFetch(...args)}`);
+  await wait(page, "window.__cadence.length>=2");
+  assert.ok(await evaluate(page, "window.__cadence[1]-window.__cadence[0]>=1800"), "task list consumes nondefault 2000ms account interval");
+  await evaluate(page, `window.fetch=async (...args)=>{const response=await window.__cadenceFetch(...args);if(String(args[0]).includes('/preferences/ui')&&args[1]?.method==='PATCH'&&response.ok)window.__taskFilterSaved=(await response.clone().json()).values?.tasks?.action==='network-diagnostic';return response};const action=document.querySelector('.a-main [name=action]');action.value='network-diagnostic';action.dispatchEvent(new Event('change',{bubbles:true}))`);
+  await wait(page, "window.__taskFilterSaved===true");
+  await call("Page.reload", {}, page);
+  await wait(page, "document.querySelector('.a-main [name=action]')?.value==='network-diagnostic' && document.querySelector('.a-main [name=limit]')?.value==='50' && !document.querySelector('[aria-busy=true]')");
+  const currentSettings = await api(page, identity, "GET", "/settings");
+  await api(page, identity, "PUT", "/settings", { ...originalSettings, revision: currentSettings.revision });
+  const currentPreferences = await api(page, identity, "GET", "/preferences/ui");
+  await api(page, identity, "PATCH", "/preferences/ui", {
+    revision: currentPreferences.revision,
+    values: { tasks: { status: "", agent_id: "", action: "", limit: String(originalSettings.task_page_size), ...originalTaskFilters } },
+  });
+
+  await call("Page.navigate", { url: `${base}/assets/testdata/analytics-runtime.html#dashboard` }, page);
+  await wait(page, "!!document.querySelector('.a-chart [data-series]') && !document.querySelector('[aria-busy=true]')");
+  await evaluate(page, "document.documentElement.style.setProperty('--ink','rgb(12, 34, 56)')");
+  assert.equal(await evaluate(page, "getComputedStyle(document.querySelector('.a-chart [data-series=received_bytes]')).stroke"), "rgb(12, 34, 56)");
+  await evaluate(page, "document.documentElement.style.removeProperty('--ink');document.querySelector('.a-chart-container').scrollIntoView({block:'center'})");
+  await screenshot(page, "analytics-chart");
+  await evaluate(page, "window.scrollTo(0,0)");
+  record(`${mode}: measured chart widths, semantic theme tokens and nondefault account task pagination/refresh passed`);
   await checkAnalyticsObservability({ page, mode, evaluate, wait, screenshot, record, call });
   await checkAnalyticsWorkflows({ page, mode, fixture, evaluate, wait, screenshot, api, identity, record, call });
   await checkAnalyticsMotion({ page, base, mode, call, evaluate, wait, screenshot, record, api, identity });

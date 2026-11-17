@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
-	limit := 100
+	limit := core.DefaultPanelSettings().TaskPageSize
 	if rawLimit := request.URL.Query().Get("limit"); rawLimit != "" {
 		parsed, err := strconv.Atoi(rawLimit)
 		if err != nil || parsed < 1 {

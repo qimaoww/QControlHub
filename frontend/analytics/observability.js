@@ -1,3 +1,4 @@
+import { allEngines as engines } from "../modules/runtime-defaults.js";
 import { bindPreferenceFields } from "./preferences.js";
 import { sourceStatus } from "./source-status.js";
 import { redactDiagnostic } from "../modules/errors.js";
@@ -14,7 +15,6 @@ import { node, button, actions, stack, section, filterbar, field, muted, notice,
 import { observationStream } from "./observability-table.js";
 import { date } from "./operations.js";
 export { connectionsPage } from "./connections.js";
-const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const engineName = engine => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "Shadowsocks Rust" })[engine] || engine;
 const instanceLabel = source => source?.username && source.instance_id !== "main" ? `${source.username} · 共享实例` : coreLogInstanceName(source);
 

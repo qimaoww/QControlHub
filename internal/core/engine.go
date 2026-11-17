@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -15,12 +16,7 @@ const (
 )
 
 func (e Engine) Valid() bool {
-	switch e {
-	case EngineMihomo, EngineXray, EngineSingBox, EngineShadowsocksRust:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(AllEngines(), e)
 }
 
 func ParseEngine(value string) (Engine, error) {

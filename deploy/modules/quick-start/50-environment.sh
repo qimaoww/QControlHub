@@ -4,7 +4,7 @@ prepare_default_agent_engines() {
     DEFAULT_AGENT_ENGINES="$(read_env_key QCH_DEFAULT_AGENT_ENGINES)"
     # Existing installations keep the database-owned choice on upgrade.
     [ ! -f "$ENV_FILE" ] || return 0
-    selection="${QCH_DEFAULT_AGENT_ENGINES:-mihomo,xray,sing-box,ss-rust}"
+    selection="${QCH_DEFAULT_AGENT_ENGINES:-$qch_default_agent_engines}"
     if [ -z "${QCH_DEFAULT_AGENT_ENGINES:-}" ] && [ -t 0 ]; then
         echo ""
         echo "选择新 Agent 默认启用的内核能力（不自动安装内核）。"

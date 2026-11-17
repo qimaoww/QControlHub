@@ -26,9 +26,7 @@ func (s *Store) AgentPresenceTransitions(ctx context.Context, now time.Time, off
 	// heartbeat or another monitor. Skipped transitions are retried next tick.
 	// Keeping observation and update in one statement avoids holding every
 	// Agent row across N remote UPDATE round trips.
-	threshold := `CASE WHEN agents.owner_id='' THEN $2::integer
-		ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer
-			FROM user_panel_settings WHERE owner_id=agents.owner_id),45) END`
+	threshold := agentOfflineThresholdWithRootSQL("$2::integer")
 	online := `last_seen > $1::timestamptz - make_interval(secs => (` + threshold + `))`
 	rows, err := s.pool.Query(ctx, `
 		WITH changed AS MATERIALIZED (

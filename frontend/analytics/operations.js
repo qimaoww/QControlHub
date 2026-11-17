@@ -1,3 +1,5 @@
+import { panelDefaults, panelSettingOptions, taskFilterActions } from "../modules/runtime-defaults.js";
+import { createPoller } from "../modules/poller.js";
 import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable, dialogContext, preparedDialog } from "./loading.js";
 import { quotaInvitations } from "./invitations.js";
@@ -32,20 +34,40 @@ export const actionName = value => ({
 
 function responsiveChart(days, signal) {
   const container = node("div", { className: "a-chart-container" });
-  let currentDays = days, selectedDay = '', previous = "", width = Math.max(280, innerWidth - (innerWidth > 896 ? 256 : 0) - 96);
+  let currentDays = days, selectedDay = '', previous = "", width = 0;
   const render = () => {
+    if (width <= 0) return;
     const signature = JSON.stringify([Math.round(width), currentDays]);
     if (signature === previous) return;
     previous = signature;
     if (!currentDays.some(day => day.day === selectedDay)) selectedDay = '';
-    const fresh = chart(currentDays, Math.max(280, width), selectedDay, day => { selectedDay = day; });
+    const fresh = chart(currentDays, width, selectedDay, day => { selectedDay = day; });
     if (container.firstChild) patch(container.firstChild, fresh); else container.append(fresh);
+    const labels = [...container.querySelectorAll('[data-chart-date]')];
+    if (labels.length > 1) {
+      const gap = parseFloat(getComputedStyle(labels[0]).fontSize);
+      const lastStart = labels.at(-1).getBoundingClientRect().left;
+      let previousEnd = -Infinity;
+      for (const label of labels.slice(0, -1)) {
+        const box = label.getBoundingClientRect();
+        if (box.left >= previousEnd + gap && box.right + gap <= lastStart) previousEnd = box.right;
+        else label.remove();
+      }
+    }
   };
   render();
+  void document.fonts.ready.then(() => { if (!signal.aborted) { previous = ""; render(); } });
   container.updateDays = value => { currentDays = value; render(); };
-  const observer = new ResizeObserver(entries => { width = entries[0].contentRect.width; render(); });
+  let frame;
+  const observer = new ResizeObserver(entries => {
+    width = entries[0].contentRect.width;
+    // Drawing changes the observed box's height. Commit on the next frame so
+    // ResizeObserver never writes layout inside its own delivery cycle.
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => { if (!signal.aborted) render(); });
+  });
   observer.observe(container);
-  signal.addEventListener("abort", () => observer.disconnect(), { once: true });
+  signal.addEventListener("abort", () => { observer.disconnect(); cancelAnimationFrame(frame); }, { once: true });
   return container;
 }
 
@@ -68,20 +90,21 @@ function chart(days, width, selectedDay, selectDay) {
   };
   for (let i = 0; i < 4; i++) {
     const y = top + i / 3 * (height - top - bottom);
-    add("path", { d: `M${left} ${y}H${width - right}`, stroke: "#e4e4e7", "stroke-dasharray": "3 4" });
+    add("path", { d: `M${left} ${y}H${width - right}`, stroke: "var(--border)", "stroke-dasharray": "3 4" });
     add("text", { x: left - 8, y: y + 4, "text-anchor": "end" }, bytes(max * (1 - i / 3)));
   }
   if (days.length) {
-    for (const [key, label, stroke, dash] of [['received_bytes', '接收', '#3f3f46', ''], ['sent_bytes', '发送', '#62626b', '5 4']]) {
+    for (const [key, label, stroke, dash] of [['received_bytes', '接收', 'var(--ink)', ''], ['sent_bytes', '发送', 'var(--soft-ink)', '5 4']]) {
       const series = points(key);
       const line = series.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-      if (!dash) add("path", { d: `${line}L${series.at(-1)[0]} ${height - bottom}H${left}Z`, fill: "#e4e4e7", opacity: ".55" });
+      if (!dash) add("path", { d: `${line}L${series.at(-1)[0]} ${height - bottom}H${left}Z`, fill: "var(--border)", opacity: ".55" });
       add("path", { d: line, stroke, "stroke-width": "2", 'stroke-dasharray': dash, fill: "none", 'data-series': key, 'aria-label': label });
       if (days.length === 1) add('circle', { cx: series[0][0], cy: series[0][1], r: 3, fill: stroke });
     }
     days.forEach((day, index) => {
-      if (index % 5 === 0 || index === days.length - 1)
-        add("text", { x: points('received_bytes')[index][0], y: height - 6, "text-anchor": "middle" }, day.day.slice(5));
+      add("text", { x: points('received_bytes')[index][0], y: height - 6,
+        "text-anchor": index === 0 ? "start" : index === days.length - 1 ? "end" : "middle",
+        'data-chart-date': day.day, 'data-refresh-key': `chart-date-${day.day}` }, day.day.slice(5));
     });
     const xValues = points('received_bytes').map(([x]) => x);
     days.forEach((day, index) => {
@@ -374,10 +397,10 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
     context, timing, failure, diagnosis, previousAttempts, output);
   const box = ctx.dialog(title, content, { wide: true });
   box.classList.add("a-task-dialog");
-  let timer, reading = false;
+  let reading = false;
   const controller = new AbortController();
   const signal = AbortSignal.any([ctx.signal, controller.signal]);
-  const stop = () => { clearTimeout(timer); controller.abort(); };
+  const stop = () => { detailPoller.stop(); controller.abort(); };
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", () => void initialRead.load());
   refresh.addEventListener('mutationend', () => { refresh.disabled = task.status === 'denied'; });
@@ -466,26 +489,33 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
       throw error;
     } finally { reading = false; }
   }
-  async function poll() {
-    try { if (!document.hidden && active()) await read({ automatic: true }); }
-    catch (error) { if (active() && error.name !== "AbortError") failure.textContent = error.message; }
-    finally { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); }
-  }
+  // Terminal receipts still reauthorize access; this detail cadence is independent
+  // of the account's task-list refresh preference.
+  const detailPoller = createPoller({
+    isActive: () => active() && task.status !== 'denied', coalesce: false, delay: () => 2000,
+    async run() {
+      try { if (!document.hidden) await read({ automatic: true }); }
+      catch (error) { if (active() && error.name !== 'AbortError') failure.textContent = error.message; }
+    },
+  });
   box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
   const initialRead = readRegion(dialogContext(ctx, box), '任务详情', () => read(), () => {});
   content.prepend(initialRead.element);
-  void initialRead.load().finally(() => { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); });
+  void initialRead.load().finally(() => detailPoller.start());
 }
 
 export async function tasksPage(ctx) {
-  const pageSize = ctx.state.data.settings?.task_page_size;
-  const filters = ctx.state.data.taskFilters || { limit: String([50, 100, 500].includes(pageSize) ? pageSize : 100) };
+  const defaultPageSize = () => {
+    const value = ctx.state.data.settings?.task_page_size;
+    return panelSettingOptions.task_page_size.includes(value) ? value : panelDefaults.task_page_size;
+  };
+  const filters = ctx.state.data.taskFilters || { limit: String(defaultPageSize()) };
   let settingsLoadedAt = ctx.state.data.settings ? Date.now() : -Infinity;
   let preferencesAdopted = Boolean(ctx.state.data.settings || ctx.state.data.taskFilters), queryTouched = false;
   const pollDelay = () => {
     const value = ctx.state.data.settings?.task_poll_interval_ms;
-    return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
+    return panelSettingOptions.task_poll_interval_ms.includes(value) ? value : panelDefaults.task_poll_interval_ms;
   };
   let readSequence = 0, filtering = false, tasksLoaded = false;
   let agents = [], agentsLoadedAt = -Infinity, lastTasks = [], agentsPending, agentsVerified = false;
@@ -511,8 +541,8 @@ export async function tasksPage(ctx) {
     node("div", { className: "a-form-grid" },
       field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
       agentField,
-      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "network-diagnostic", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp", "panel-failure"].map(action => [action, actionName(action)])] }),
-      field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
+      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...taskFilterActions.map(action => [action, actionName(action)])] }),
+      field("条数", "limit", filters.limit ?? String(panelDefaults.task_page_size), { type: "number", min: 1, max: 500 })),
   ], async (values, _, request) => {
     const sequence = ++readSequence; filtering = true;
     try {
@@ -520,7 +550,7 @@ export async function tasksPage(ctx) {
       if (!request.current() || sequence !== readSequence) return;
       ctx.state.data.taskFilters = values; draw(tasks);
     } finally { if (sequence === readSequence) filtering = false; }
-  }, { status: "", agent_id: "", action: "", limit: "100" });
+  }, () => ({ status: "", agent_id: "", action: "", limit: String(defaultPageSize()) }));
   const preferenceFields = bindPreferenceFields(ctx, 'tasks', [filter], { restore: () => {
     preferencesAdopted = true; queryTouched = true;
     ctx.state.data.taskFilters = Object.fromEntries(new FormData(filter));
@@ -622,7 +652,7 @@ export async function tasksPage(ctx) {
           if (!ctx.current()) return;
           if (!preferencesAdopted) {
             preferencesAdopted = true;
-            if (!queryTouched && !ctx.state.data.taskFilters && [50, 100, 500].includes(settings.task_page_size)) {
+            if (!queryTouched && !ctx.state.data.taskFilters && panelSettingOptions.task_page_size.includes(settings.task_page_size)) {
               filters.limit = filter.elements.limit.value = String(settings.task_page_size);
               filter.requestSubmit();
             }
