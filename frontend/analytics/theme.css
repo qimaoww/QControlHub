@@ -419,12 +419,26 @@ strong, b { font-weight: 600; }
   .a-node-profile { grid-row: 2; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); }
   .a-node-readings { grid-row: 3; border-inline-start: 0; border-top: 1px solid var(--border); }
 }
-.a-dialog:has([data-settings-navigation]) { overscroll-behavior: contain; scroll-padding-block: 5rem 1rem; }
-.a-dialog:has([data-settings-navigation]) .a-dialog-head h2 { overflow-wrap: anywhere; min-width: 0; }
+body:has(.a-node-tools) > .a-dialog { overscroll-behavior: contain; scroll-padding-block: 5rem 1rem; }
+body:has(.a-node-tools) > .a-dialog .a-dialog-head h2 { overflow-wrap: anywhere; min-width: 0; }
+body:has(.a-node-tools) .a-dialog .a-dialog-head > button { flex: none; }
+body:has(.a-node-tools) .a-dialog .a-region-options { grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); overscroll-behavior: contain; }
+body:has(.a-node-tools) .a-dialog .a-code { white-space: pre-wrap; overflow-wrap: anywhere; }
+body:has(.a-node-tools) .a-dialog .a-dialog-body > .a-stack:has(> p + .a-actions) > .a-actions { justify-content: end; }
+.a-node-directory td:first-child { overflow-wrap: anywhere; }
+.a-node-directory .a-table-scroll { max-block-size: 65dvh; }
+.a-node-directory th { position: sticky; top: 0; background: var(--canvas); }
+.a-node-enrollment { grid-template-columns: repeat(auto-fit,minmax(min(100%,21rem),1fr)); align-items: start; }
+.a-node-enrollment .a-disclosure { min-width: 0; }
+body:has(.a-node-tools) .a-dialog .a-filter-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); align-items: end; }
+@media (min-width: 56rem) {
+  .a-dialog-body > .a-stack:has(> [data-settings-navigation]) { grid-template-columns: max-content minmax(0,1fr); align-items: start; }
+  .a-dialog [data-settings-navigation] { flex-direction: column; align-items: stretch; position: sticky; top: 5rem; }
+}
 .a-dialog [data-settings-panel] .a-grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,23rem),1fr)); }
 .a-dialog [data-settings-panel] :is(fieldset,.a-card,.a-field) { min-width: 0; }
 @media (max-height: 32rem) {
-  .a-dialog:has([data-settings-navigation]) .a-dialog-head { position: static; }
+  body:has(.a-node-tools) .a-dialog :is(.a-dialog-head,[data-settings-navigation]) { position: static; }
 }
 
 .a-ipq-filter > .a-form-fields { display: flex; align-items: flex-end; }

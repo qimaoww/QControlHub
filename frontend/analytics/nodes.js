@@ -50,7 +50,8 @@ export async function nodesPage(ctx) {
   bindPreferenceFields(ctx, 'nodes', [search], { restore: () => draw(true) });
   const dragging = bindNodeOrdering(ctx, results, {
     enabled: () => true,
-    order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids), redraw: () => draw(true),
+    order: () => shownAgents().map(agent => agent.id), save: ids => ordering.save(ids),
+    redraw: () => { renderSignature = undefined; draw(true); },
   });
   let view = 'cards';
   const paging = recordPages(() => draw(true));
@@ -84,9 +85,13 @@ export async function nodesPage(ctx) {
   }
   search.addEventListener('input', () => paging.setPage(1));
   const shownAgents = () => {
-    const query = search.querySelector('input').value.trim().toLowerCase();
+    const terms = search.querySelector('input').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const ordered = orderNodesBySavedOrder(agents, ordering.ids());
-    return ordered.filter(agent => [agent.name, agent.id, ...addressRows(agent).map(row => row.value)].some(value => String(value || '').toLowerCase().includes(query)));
+    return ordered.filter(agent => {
+      const values = [agent.name, agent.id, agent.labels?.client_address, ...addressRows(agent).filter(row=>row.ok).map(row=>row.value)]
+        .map(value => String(value || '').toLowerCase());
+      return terms.every(term => values.some(value => value.includes(term)));
+    });
   };
   const percentage=(used,total)=>total>0?Math.min(100,Math.max(0,Number(used)/Number(total)*100)):0;
   function meter(label,value,available,detail){
@@ -285,7 +290,9 @@ export async function nodesPage(ctx) {
       changed = false; ctx.setDirty(false); box.close(); command(created);
     });
     for (const type of ['input', 'change']) form.addEventListener(type, () => { changed = Boolean(form.elements.name.value || form.elements.admin_hidden.checked); ctx.setDirty(changed); });
-    const box = ctx.dialog('添加节点', stack(form, history));
+    const body = stack(form, history);
+    body.classList.add('a-node-enrollment');
+    const box = ctx.dialog('添加节点', body, {wide:true});
     box.onRequestClose = async () => {
       if (changed && !await ctx.confirm('放弃未保存的节点添加信息？', '放弃更改')) return;
       ctx.setDirty(false); box.close();
@@ -297,7 +304,7 @@ export async function nodesPage(ctx) {
   }
   function directory() {
     let entries = [];
-    const content = node('div', {}, loadingTable(['节点', '所有者', '状态', '内核', '操作'], '节点目录'));
+    const content = node('div', {className:'a-node-directory'}, loadingTable(['节点', '所有者', '状态', '内核', '操作'], '节点目录'));
     const body = stack(content);
     const box = ctx.dialog('节点目录', body, { wide: true });
     const local = dialogContext(ctx, box);
