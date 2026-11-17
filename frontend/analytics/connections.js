@@ -1,3 +1,4 @@
+import { allEngines } from "../modules/runtime-defaults.js";
 import { bindPreferenceFields } from "./preferences.js";
 import { createConnectionCache, connectionSessionStorage } from "../modules/client-connection-cache.js";
 import { requestCoreLogJSON as boundedRead } from "../modules/core-log-read.js";
@@ -60,7 +61,7 @@ export async function connectionsPage(ctx) {
     field("查询范围", "period", filters.period, { options: [["day", "当天"], ["month", "所在月份"]] }),
     field("客户端来源 IP", "client_ip", filters.client_ip, { type: "search" }),
     field("国家/地区", "country_code", filters.country_code, { options: [["", "全部国家/地区"], ...(filters.country_code ? [[filters.country_code, geoRegionDetails(filters.country_code)?.name || filters.country_code]] : [])] }),
-    field("内核", "engine", filters.engine, { options: [["", "全部内核"], ...["mihomo", "xray", "sing-box", "ss-rust"].map(value => [value, engineName(value)])] })),
+    field("内核", "engine", filters.engine, { options: [["", "全部内核"], ...allEngines.map(value => [value, engineName(value)])] })),
     field("包含非公网地址", "include_non_public", filters.include_non_public === "true", { type: "checkbox" }),
     actions(button("今日", () => {
       const recent = defaultConnectionFilters();

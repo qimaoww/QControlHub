@@ -120,9 +120,9 @@ strong, b { font-weight: 600; }
 .a-table-scroll td { max-width: 480px; }
 .a-table-scroll[aria-label="客户端来源 IP 明细"] :is(th,td)[data-column="国家 / 地区"] { min-width: 160px; }
 .a-table-scroll[aria-label="客户端来源 IP 明细"] :is(th,td)[data-column="节点"] { min-width: 240px; }
-.a-table-scroll th { background: #fafafa; white-space: nowrap; font-size: var(--text-label); font-weight: 500; color: var(--soft-ink); }
+.a-table-scroll th { background: var(--canvas); white-space: nowrap; font-size: var(--text-label); font-weight: 500; color: var(--soft-ink); }
 .a-table-scroll tr:last-child td { border-bottom: 1px solid var(--border); }
-.a-table-scroll tbody tr:hover { background: #fafafa; }
+.a-table-scroll tbody tr:hover { background: var(--canvas); }
 .a-table-scroll td > .a-stack { gap: 4px; }
 .a-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px var(--card-gutter); }
 .a-empty { text-align: start; color: var(--soft-ink); padding: 16px var(--card-gutter); font-size: var(--text-body); line-height: 1.6; }
@@ -173,7 +173,7 @@ strong, b { font-weight: 600; }
 .a-chart { width: 100%; display: block; height: 240px; }
 .a-chart text { font-family: var(--font-ui); font-size: 12px; font-weight: 400; fill: var(--soft-ink); }
 .a-chart-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 12px; font-variant-numeric: tabular-nums; }
-.a-preview { min-height: 144px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; display: grid; grid-template-columns: 25% 1fr; gap: 8px; background: #fafafa; }
+.a-preview { min-height: 144px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); display: grid; grid-template-columns: 25% 1fr; gap: 8px; background: var(--canvas); }
 .a-preview span { background: #e4e4e7; border-radius: 4px; }
 .a-preview .a-preview-main { display: grid; gap: 8px; grid-template: 8px 1fr 1fr / repeat(3, 1fr); }
 .a-preview-main span:first-child, .a-preview-main span:last-child { grid-column: 1 / -1; }

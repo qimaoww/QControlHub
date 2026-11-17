@@ -109,16 +109,19 @@ type taskExecution struct {
 	completedAt time.Time
 }
 
+var (
+	defaultHeartbeatInterval = time.Duration(core.DefaultPanelSettings().AgentHeartbeatIntervalSeconds) * time.Second
+	defaultMetricsInterval   = time.Duration(core.DefaultPanelSettings().AgentMetricsIntervalSeconds) * time.Second
+)
+
 const (
 	webSocketHandshakeTimeout = 30 * time.Second
-	defaultHeartbeatInterval  = 15 * time.Second
 	minHeartbeatInterval      = time.Second
 	maxHeartbeatInterval      = 30 * time.Second
 	// Metrics pushes are lightweight /proc snapshots on a dedicated wire
 	// message so the panel's live card values refresh without waiting for the
 	// full heartbeat cycle.
-	defaultMetricsInterval = time.Second
-	minMetricsInterval     = time.Second
+	minMetricsInterval = time.Second
 	// maxReconnectBackoff bounds an ordinary transport reconnect so a panel
 	// restart or a transient network failure recovers within seconds.
 	maxReconnectBackoff = 30 * time.Second

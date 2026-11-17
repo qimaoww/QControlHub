@@ -154,7 +154,7 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 		if validGuard {
 			manager.recoverSharedEngines(guard.Records)
 		} else if !errors.Is(guardErr, os.ErrNotExist) || (err != nil && !errors.Is(err, os.ErrNotExist)) || (err == nil && !validState) {
-			manager.recoveryEngines = []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust}
+			manager.recoveryEngines = core.AllEngines()
 		}
 	}
 	if manager.records == nil {

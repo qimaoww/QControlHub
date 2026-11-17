@@ -302,7 +302,10 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 	if len(query.Search) > 120 || (query.Engine != "" && !query.Engine.Valid()) {
 		return nil, fmt.Errorf("%w: invalid core log query", ErrInvalid)
 	}
-	engines := []string{string(core.EngineMihomo), string(core.EngineXray), string(core.EngineSingBox), string(core.EngineShadowsocksRust)}
+	engines := make([]string, 0, len(core.AllEngines()))
+	for _, engine := range core.AllEngines() {
+		engines = append(engines, string(engine))
+	}
 	if query.Engine != "" {
 		engines = []string{string(query.Engine)}
 	}

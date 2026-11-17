@@ -79,6 +79,7 @@ func DefaultPanelSettings() PanelSettings {
 }
 
 func (settings PanelSettings) Validate() error {
+	options := PanelSettingOptions()
 	if err := ValidateACMEEmail(settings.ACMEEmail); err != nil {
 		return err
 	}
@@ -105,40 +106,40 @@ func (settings PanelSettings) Validate() error {
 	if !oneOfString(settings.TimeDisplay, "absolute-relative", "absolute") {
 		return errors.New("unsupported time display")
 	}
-	if !oneOf(settings.UIFontScale, 90, 100, 110) {
+	if !oneOf(settings.UIFontScale, options["ui_font_scale"]...) {
 		return errors.New("unsupported UI font scale")
 	}
 	if !oneOfString(settings.DefaultConfigEditor, "structured", "source") {
 		return errors.New("unsupported default config editor")
 	}
-	if !oneOf(settings.TaskPageSize, 50, 100, 500) {
+	if !oneOf(settings.TaskPageSize, options["task_page_size"]...) {
 		return errors.New("unsupported task page size")
 	}
-	if !oneOf(settings.TaskPollIntervalMS, 600, 1000, 2000, 5000) {
+	if !oneOf(settings.TaskPollIntervalMS, options["task_poll_interval_ms"]...) {
 		return errors.New("unsupported task polling interval")
 	}
-	if !oneOf(settings.AgentHeartbeatIntervalSeconds, 10, 15, 30) || !oneOf(settings.AgentMetricsIntervalSeconds, 1, 5, 15, 30) {
+	if !oneOf(settings.AgentHeartbeatIntervalSeconds, options["agent_heartbeat_interval_seconds"]...) || !oneOf(settings.AgentMetricsIntervalSeconds, options["agent_metrics_interval_seconds"]...) {
 		return errors.New("unsupported agent reporting interval")
 	}
-	if !oneOf(settings.AgentOfflineThresholdSeconds, 45, 60, 90, 180) || settings.AgentOfflineThresholdSeconds < settings.AgentHeartbeatIntervalSeconds*3 {
+	if !oneOf(settings.AgentOfflineThresholdSeconds, options["agent_offline_threshold_seconds"]...) || settings.AgentOfflineThresholdSeconds < settings.AgentHeartbeatIntervalSeconds*3 {
 		return errors.New("offline threshold must be at least three heartbeat intervals")
 	}
-	if !oneOf(settings.TaskStaleTimeoutSeconds, 60, 120, 300, 600) || !oneOf(settings.InstallTaskStaleTimeoutSeconds, 180, 360, 600, 900) || !oneOf(settings.TaskMaxAttempts, 1, 3, 5) {
+	if !oneOf(settings.TaskStaleTimeoutSeconds, options["task_stale_timeout_seconds"]...) || !oneOf(settings.InstallTaskStaleTimeoutSeconds, options["install_task_stale_timeout_seconds"]...) || !oneOf(settings.TaskMaxAttempts, options["task_max_attempts"]...) {
 		return errors.New("unsupported task recovery policy")
 	}
-	if !oneOf(settings.PublicIPProbeIntervalSeconds, 300, 900, 3600) {
+	if !oneOf(settings.PublicIPProbeIntervalSeconds, options["public_ip_probe_interval_seconds"]...) {
 		return errors.New("unsupported public IP probe interval")
 	}
 	if !oneOfString(settings.CoreLogMinimumLevel, "debug", "info", "warning", "error", "critical", "off") {
 		return errors.New("unsupported core log minimum level")
 	}
-	if !oneOf(settings.CoreLogRetentionDays, 1, 3, 7, 14, 30) || !oneOf(settings.AgentCoreLogMaxMiB, 1, 2, 4, 8, 16, 32, 64, 128) || !oneOf(settings.AgentCoreLogRotateCount, 0, 1, 2, 3, 5) {
+	if !oneOf(settings.CoreLogRetentionDays, options["core_log_retention_days"]...) || !oneOf(settings.AgentCoreLogMaxMiB, options["agent_core_log_max_mib"]...) || !oneOf(settings.AgentCoreLogRotateCount, options["agent_core_log_rotate_count"]...) {
 		return errors.New("unsupported core log retention policy")
 	}
 	if settings.ClientConnectionRetentionDays < 0 || settings.ClientConnectionRetentionDays > 3650 {
 		return errors.New("client IP history retention must be between 0 and 3650 days")
 	}
-	if !oneOf(settings.MetricRetentionDays, 7, 14, 30) || !oneOf(settings.AuditRetentionDays, 0, 30, 90, 180) || !oneOf(settings.TaskRetentionDays, 0, 30, 90, 180) || !oneOf(settings.ConfigRevisionRetention, 0, 50, 100) {
+	if !oneOf(settings.MetricRetentionDays, options["metric_retention_days"]...) || !oneOf(settings.AuditRetentionDays, options["audit_retention_days"]...) || !oneOf(settings.TaskRetentionDays, options["task_retention_days"]...) || !oneOf(settings.ConfigRevisionRetention, options["config_revision_retention"]...) {
 		return errors.New("unsupported database retention policy")
 	}
 	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)

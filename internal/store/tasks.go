@@ -16,7 +16,7 @@ func (s *Store) ListTasks(ctx context.Context, agentID string, limit int) ([]cor
 
 func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status core.TaskStatus, action core.Action, limit int) ([]core.Task, error) {
 	if limit < 1 {
-		limit = 100
+		limit = core.DefaultPanelSettings().TaskPageSize
 	}
 	if limit > 500 {
 		limit = 500

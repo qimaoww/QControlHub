@@ -76,7 +76,12 @@ func main() {
 	must(db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: batchID, Entries: []core.CoreLogEntry{{Engine: core.EngineMihomo, InstanceID: "main", Service: core.CoreLogService(core.EngineMihomo, "main", "systemd"), Level: "error", Message: "fixture failure line 12 token=PR304_LOG_CREDENTIAL"}}}))
 	base := os.Getenv("QCH_API_BASE")
 	if base == "" {
-		base = "http://127.0.0.1:38584/api/v1"
+		panic("QCH_API_BASE must identify the isolated loopback fixture API")
+	}
+	apiURL, err := url.Parse(base)
+	must(err)
+	if apiURL.Scheme != "http" || apiURL.Hostname() != "127.0.0.1" {
+		panic("verification requires a loopback fixture API")
 	}
 	client := http.Client{Timeout: 15 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
 	report := []map[string]any{}

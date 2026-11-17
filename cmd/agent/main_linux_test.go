@@ -258,3 +258,16 @@ func TestAgentStartupRefreshesAutomaticExistingCoreDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func TestConfiguredEnginesUsesDefaultAndExplicitSelection(t *testing.T) {
+	t.Setenv("QCH_AGENT_ENGINES", "")
+	defaults := configuredEngines()
+	if len(defaults) != 4 || defaults[0] != "mihomo" || defaults[3] != "ss-rust" {
+		t.Fatalf("defaults = %v", defaults)
+	}
+	t.Setenv("QCH_AGENT_ENGINES", "xray,sing-box")
+	selected := configuredEngines()
+	if len(selected) != 2 || selected[0] != "xray" || selected[1] != "sing-box" {
+		t.Fatalf("explicit selection = %v", selected)
+	}
+}

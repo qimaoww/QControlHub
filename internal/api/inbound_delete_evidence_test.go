@@ -101,14 +101,14 @@ func TestInboundDeleteEvidence(t *testing.T) {
 	mux.Handle("/api/", handler)
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(root))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, filepath.Join(root, "index.html")) })
-	listener, err := net.Listen("tcp", "127.0.0.1:18584")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	defer server.Close()
 	go server.Serve(listener)
-	t.Log("delete evidence http://127.0.0.1:18584")
+	t.Log("delete evidence http://" + listener.Addr().String())
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
