@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -67,8 +69,17 @@ func TestCoreLogAuthorizedSparseFleetWindow(t *testing.T) {
 	}
 	// Collection status cannot discard authorized history.
 	exec(`UPDATE agents SET last_seen=now()-interval '2 days',runtime='{"mihomo":{"installed":false}}' WHERE id=$1`, ids[14])
-	for _, analyzed := range []bool{false, true} {
-		if analyzed {
+	for _, analyzed := range []string{"none", "partitions", "all"} {
+		if analyzed == "partitions" {
+			names, err := s.coreLogPartitions(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range names {
+				exec("VACUUM (ANALYZE) " + name)
+			}
+		}
+		if analyzed == "all" {
 			exec(`VACUUM (ANALYZE) core_logs`)
 		}
 		for _, q := range []CoreLogQuery{{Limit: 100}, {Limit: 200}, {Limit: 500}, {Limit: 1000}, {Limit: 2000}, {AgentID: ids[14], Limit: 1000}, {AgentID: ids[0], InstanceID: "main", Limit: 1000}, {Engine: core.EngineXray, Limit: 1000}, {InstanceID: "shr_0000000000000001", Limit: 1000}} {
@@ -111,7 +122,7 @@ func TestCoreLogAuthorizedSparseFleetWindow(t *testing.T) {
 				t.Fatalf("q=%+v counts=%v want=%d/%d", q, counts, wantM, wantX)
 			}
 			if measure {
-				t.Logf("analyzed=%t q=%+v rows=%d read_ms=%.2f pool_wait_ms=%.3f", analyzed, q, len(entries), float64(elapsed.Microseconds())/1000, float64(poolWait.Microseconds())/1000)
+				t.Logf("analyzed=%s q=%+v rows=%d read_ms=%.2f pool_wait_ms=%.3f", analyzed, q, len(entries), float64(elapsed.Microseconds())/1000, float64(poolWait.Microseconds())/1000)
 			}
 			if q.AgentID == "" && q.Engine == "" && q.InstanceID == "" && (q.Limit == 100 || q.Limit == 1000) {
 				sql, args := scopedCoreLogWindowStatement(scope, q, selected)
@@ -132,7 +143,13 @@ func TestCoreLogAuthorizedSparseFleetWindow(t *testing.T) {
 				if filtered > float64(rowsPerNode*15)/10 {
 					t.Fatalf("empty identities scanned history: filtered=%.0f scanned=%.0f", filtered, scanned)
 				}
-				t.Logf("analyzed=%t limit=%d sql_ms=%.2f scanned=%.0f filtered=%.0f", analyzed, q.Limit, plans[0].ExecutionTime, scanned, filtered)
+				// Every global candidate belongs to this node owner. Work must
+				// follow the final window, not one full window per fleet node.
+				// Allow each engine's merge to initialize all 14 partitions.
+				if analyzed != "none" && scanned > 2*float64(len(entries)+14*len(engines)) {
+					t.Fatalf("fleet window multiplied by node count: scanned=%.0f returned=%d", scanned, len(entries))
+				}
+				t.Logf("analyzed=%s limit=%d sql_ms=%.2f scanned=%.0f filtered=%.0f", analyzed, q.Limit, plans[0].ExecutionTime, scanned, filtered)
 				if measure {
 					compact, _ := json.Marshal(json.RawMessage(raw))
 					t.Logf("plan=%s", compact)
@@ -147,6 +164,29 @@ func TestCoreLogAuthorizedSparseFleetWindow(t *testing.T) {
 	for _, entry := range shared {
 		if entry.OwnerID != recipient.ID || entry.InstanceID != "shr_0000000000000001" {
 			t.Fatal("recipient escaped its instance")
+		}
+	}
+	// A full foreign window for one engine must trigger its resource-first
+	// fallback without preventing other engines from taking the bounded path.
+	foreign, _ := sharedTestUser(t, s, ctx, "fleet-foreign")
+	foreignAgent, _ := seedPerformanceAgent(t, s, 0)
+	exec(`UPDATE agents SET owner_id=$2 WHERE id=$1`, foreignAgent, foreign.ID)
+	batch := "log_0000000000abcdef"
+	exec(`INSERT INTO core_log_batches(id,agent_id,received_at) VALUES($1,$2,$3)`, batch, foreignAgent, now)
+	exec(`INSERT INTO core_logs(batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at,instance_id,node_owner_id,owner_id)
+ SELECT $1,i,$2,'xray','info','foreign newest window',$3,$3,'main',$4,$4 FROM generate_series(1,2001) i`, batch, foreignAgent, now, foreign.ID)
+	for _, scope := range []context.Context{scope, recipientScope} {
+		for _, limit := range []int{100, 200, 500, 1000, 2000} {
+			got, err := s.ListCoreLogs(scope, CoreLogQuery{Limit: limit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The unbounded history cursor preserves the same result while
+			// exercising the independent resource-first implementation.
+			want, err := s.ListCoreLogs(scope, CoreLogQuery{Limit: limit, Before: math.MaxInt64})
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("mixed fleet window differs from authorized history (limit=%d): got=%d want=%d err=%v", limit, len(got), len(want), err)
+			}
 		}
 	}
 }
