@@ -112,8 +112,10 @@ async function testNativeAddressRefresh(testAPI) {
 
 async function testNetworkLayout(testAPI) {
   const original = structuredClone(testAPI.agents[0]);
-  const rates = () => document.querySelector('.a-probe-rates');
-  const stable = rates(), row = stable.closest('tr');
+  const row = document.querySelector('.a-probe-identity[data-agent-id=alpha]').closest('tr');
+  const columns = ['实时接收', '实时发送', '累计接收', '累计发送'];
+  const rates = () => columns.map(label => row.querySelector(`td[data-column="${label}"] .a-transfer-value`));
+  const stable = rates();
   const geometry = () => [row.getBoundingClientRect().height, ...[...row.cells].map(cell => cell.getBoundingClientRect().width)];
   const initial = geometry();
   const refresh = async () => {
@@ -123,34 +125,30 @@ async function testNetworkLayout(testAPI) {
   for (const value of [0, 999, 1024, 1024 ** 3, 2 ** 64 - 1]) {
     Object.assign(testAPI.agents[0].metrics, { network_rx_bps: value, network_tx_bps: value, network_rx_bytes: value, network_tx_bytes: value });
     await refresh();
-    await waitFor(() => rates().textContent.includes(value === 0 ? '0\u00a0B' : value === 999 ? '999\u00a0B' : value === 1024 ? '1\u00a0KB' : value === 1024 ** 3 ? '1\u00a0GB' : 'TB'), '收发单位或数值未更新');
-    assert.equal(rates(), stable, '数值更新替换网络统计');
+    await waitFor(() => rates().every(cell => cell.textContent.includes(value === 0 ? '0\u00a0B' : value === 999 ? '999\u00a0B' : value === 1024 ? '1\u00a0KB' : value === 1024 ** 3 ? '1\u00a0GB' : 'TB')), '收发单位或数值未更新');
+    assert.ok(rates().every((cell,i) => cell === stable[i]), '数值更新替换网络统计');
     assert.equal(JSON.stringify(geometry()), JSON.stringify(initial), '数值增长导致表格布局跳动');
-    assert.equal(rates().children.length, 4, '缺少收发统计');
-    const edges = [...rates().children].map(pair => {
-      assert.equal(pair.children.length, 2, '统计标签与数值未分开');
-      const [label, value] = [...pair.children].map(item => item.getBoundingClientRect());
-      assert.ok(label.right <= value.left, '统计标签与数值重叠');
-      assert.ok(value.right <= rates().getBoundingClientRect().right + 1, '统计数值溢出');
-      return value.right;
+    rates().forEach((cell,i) => {
+      const head = row.closest('table').querySelector(`th[data-column="${columns[i]}"]`).getBoundingClientRect();
+      const value = cell.getBoundingClientRect(), bounds = cell.parentElement.getBoundingClientRect();
+      assert.ok(Math.abs(head.right - bounds.right) < 1 && value.left >= head.left && value.right <= head.right, '网络数值未与列头对齐');
     });
-    assert.ok(edges.every(edge => Math.abs(edge - edges[0]) < 1), '速率与累计数值未对齐');
   }
   testAPI.agents[0].metrics.network_rx_bytes = undefined;
   testAPI.agents[0].metrics.network_tx_bytes = 0;
   await refresh();
-  await waitFor(() => rates().children[2].lastChild.textContent === '—', '缺失累计值被当作零');
-  assert.equal(rates().children[3].lastChild.textContent, '0\u00a0B', '真实零值被当作缺失');
+  await waitFor(() => rates()[2].textContent === '—', '缺失累计值被当作零');
+  assert.equal(rates()[3].textContent, '0\u00a0B', '真实零值被当作缺失');
   testAPI.agents[0].status = 'offline';
   await refresh();
-  await waitFor(() => rates().children[0].lastChild.textContent === '—', '离线节点仍显示实时速率');
-  assert.equal(rates().children[3].lastChild.textContent, '0\u00a0B', '离线清空已上报累计值');
+  await waitFor(() => rates()[0].textContent === '—', '离线节点仍显示实时速率');
+  assert.equal(rates()[3].textContent, '0\u00a0B', '离线清空已上报累计值');
   testAPI.agents[0].metrics.network_available = false;
   await refresh();
-  await waitFor(() => [...rates().children].every(pair => pair.lastChild.textContent === '—'), '不可用指标仍显示累计值');
+  await waitFor(() => rates().every(cell => cell.textContent === '—'), '不可用指标仍显示累计值');
   testAPI.agents[0] = original;
   await refresh();
-  await waitFor(() => rates().children[2].lastChild.textContent !== '—', '收发测试未恢复数据');
+  await waitFor(() => rates()[2].textContent !== '—', '收发测试未恢复数据');
 }
 
 async function testNodePageSizes(testAPI) {

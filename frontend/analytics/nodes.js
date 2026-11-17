@@ -27,6 +27,11 @@ import { date, bytes, status, actionName, taskDetail } from './operations.js';
 const engineIDs = ['mihomo', 'xray', 'sing-box', 'ss-rust'];
 const taskTerminal = task => ['succeeded', 'failed', 'canceled'].includes(task.status);
 const addressRows = agent => publicAddressRows(agent.metrics || {}, agent.labels || {}, agent.features || []);
+const transferColumns = [
+  ['实时接收', 'network_rx_bps', true], ['实时发送', 'network_tx_bps', true],
+  ['累计接收', 'network_rx_bytes', false], ['累计发送', 'network_tx_bytes', false],
+];
+const nodeColumns = ['节点', 'CPU', '内存', '磁盘', ...transferColumns.map(([label]) => label), '节点资料'];
 export async function nodesPage(ctx) {
   const ordering = createNodeOrderSync((path, options = {}) => ctx.api(path, { ...options, body: options.body ? JSON.parse(options.body) : undefined }), accountStorage, ctx.current);
   let agents = [], preference = null, loaded = false;
@@ -103,8 +108,8 @@ export async function nodesPage(ctx) {
       ? `${bytes(value)}${rate ? '/s' : ''}` : '—';
   }
   function network(agent){return node('div',{className:'a-probe-network'},
-    stack(muted('接收'),node('strong',{},traffic(agent,'network_rx_bps',true)),muted(`累计 ${traffic(agent,'network_rx_bytes')}`)),
-    stack(muted('发送'),node('strong',{},traffic(agent,'network_tx_bps',true)),muted(`累计 ${traffic(agent,'network_tx_bytes')}`)));}
+    stack(muted('实时接收'),node('strong',{},traffic(agent,'network_rx_bps',true)),muted(`累计 ${traffic(agent,'network_rx_bytes')}`)),
+    stack(muted('实时发送'),node('strong',{},traffic(agent,'network_tx_bps',true)),muted(`累计 ${traffic(agent,'network_tx_bytes')}`)));}
   function regionFlag(agent) {
     const region = geoRegionDetails(agent.labels?.region_code) || geoRegionDetails(agent.region_code);
     const flag = nodeRegionFlag(ctx, agent);
@@ -202,13 +207,14 @@ export async function nodesPage(ctx) {
     const regionsResolved = shown.every(agent => Object.hasOwn(agent, 'region_code') || geoRegionDetails(agent.labels?.region_code) || !ctx.can('agents.read'));
     if (regionsResolved && renderSignature === signature) return;
     if(!shown.length){results.replaceChildren(node('p',{className:'a-empty'},agents.length?'没有符合条件的节点':'暂无节点，添加 QAgent 后显示资源状态'));renderSignature = signature;return;}
-    if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid'},shown.map(agent=>
+    if(view==='cards') { liveTable = null; const fresh = node('div',{className:'a-probe-grid a-node-grid'},shown.map(agent=>
       node('article',{className:'a-card a-probe','data-agent-id':agent.id},
-        node('header',{className:'a-probe-head'},node('div',{},node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),muted(`${agent.os} / ${agent.arch}`)),
-          status(agent.status)),
-        node('div',{className:'a-probe-body'},addresses(agent),metrics(agent),network(agent)),
-        node('div',{className:'a-probe-meta'},actions((agent.capabilities||[]).map(engine=>badge(engine)),badge(agent.can_manage===false?'本人共享实例':'主实例')),muted(`最近在线 · ${date(agent.last_seen)}`)),
-        node('footer',{className:'a-probe-footer'},controls(agent)))));
+        node('header',{className:'a-node-head'},
+          node('div',{className:'a-probe-name'},regionFlag(agent),node('h2',{},agent.name)),
+          actions(status(agent.status),badge(agent.can_manage===false?'本人共享实例':'主实例')),controls(agent)),
+        node('div',{className:'a-node-profile'},addresses(agent),
+          stack(muted(`${agent.os} / ${agent.arch}`),actions((agent.capabilities||[]).map(engine=>badge(engine))),muted(`最近在线 · ${date(agent.last_seen)}`))),
+        node('div',{className:'a-node-readings'},metrics(agent),network(agent)))));
       if (results.firstElementChild?.matches('.a-probe-grid')) patch(results.firstElementChild, fresh); else results.replaceChildren(fresh);
     }
     else{
@@ -219,28 +225,22 @@ export async function nodesPage(ctx) {
           metricTrack(percent, available),
           detail&&muted(available?detail:'暂无数据'));
       };
-      const columns = ['节点','状态','CPU','内存','磁盘','网络收发','操作'];
       const rows = shown.map(agent=>{
         const m=agent.metrics||{},online=agent.status==='online';
         return [
-          node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),
-            muted(agent.can_manage===false?'本人共享实例':'主实例')),
-          node('div',{className:'a-probe-state',title:`最近在线 · ${date(agent.last_seen)}`},status(agent.status)),
+          node('div',{className:'a-probe-identity', 'data-agent-id':agent.id},node('div',{className:'a-probe-name'},regionFlag(agent),node('strong',{},agent.name)),
+            actions(status(agent.status),muted(agent.can_manage===false?'本人共享实例':'主实例')),
+            node('div',{className:'a-probe-row-actions'},controls(agent,true))),
           compactMeter(m.cpu_percent,online&&m.cpu_available),
           compactMeter(percentage(m.memory_used_bytes,m.memory_total_bytes),online&&m.memory_available,`${bytes(m.memory_used_bytes)} / ${bytes(m.memory_total_bytes)}`),
           compactMeter(percentage(m.disk_used_bytes,m.disk_total_bytes),online&&m.disk_available,`${bytes(m.disk_used_bytes)} / ${bytes(m.disk_total_bytes)}`),
-          node('div',{className:'a-probe-rates'},
-            node('div',{},muted('实时接收'),node('span',{},traffic(agent,'network_rx_bps',true))),
-            node('div',{},muted('实时发送'),node('span',{},traffic(agent,'network_tx_bps',true))),
-            node('div',{},muted('累计接收'),muted(traffic(agent,'network_rx_bytes'))),
-            node('div',{},muted('累计发送'),muted(traffic(agent,'network_tx_bytes')))),
-          node('div',{className:'a-probe-row-actions'},controls(agent,true))];
+          ...transferColumns.map(([,key,rate]) => node('span',{className:'a-transfer-value'},traffic(agent,key,rate))),
+          stack(addresses(agent),muted(`${agent.os} / ${agent.arch} · ${(agent.capabilities||[]).join(' / ')||'无内核'}`),muted(`最近在线 · ${date(agent.last_seen)}`))];
       });
       if (liveTable && results.contains(liveTable)) liveTable.updateRows(rows);
       else {
-        const widths = { '节点': 360, '状态': 90, 'CPU': 110, '内存': 180, '磁盘': 180, '网络收发': 230, '操作': 190 };
-        liveTable = table(columns, rows, {paginate:false, label:'节点监控', columnWidths: columns.map(column => widths[column]), rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
-        results.replaceChildren(node('div',{className:'a-card a-probe-list'},liveTable));
+        liveTable = table(nodeColumns, rows, {paginate:false, label:'节点监控', columnWidths:[215,105,160,160,...transferColumns.map(() => 130),250], rowKey: row => row.find(cell => cell?.dataset?.agentId)?.dataset.agentId});
+        results.replaceChildren(node('div',{className:'a-card a-probe-list a-node-list'},liveTable));
       }
     }
     renderSignature = signature;
@@ -380,7 +380,7 @@ export async function nodesPage(ctx) {
       settingsUpdates.push(() => {
         const name = nameField.querySelector('input');
         if (!savingNode && name.value === savedName) { name.value = agent.name; savedName = agent.name; }
-        const visibility = visibilityField?.querySelector('input');
+        const visibility = visibilityField && visibilityField.querySelector('input');
         if (visibility && !savingNode && visibility.checked === savedVisibility) { visibility.checked = Boolean(agent.admin_hidden); savedVisibility = Boolean(agent.admin_hidden); }
       });
       for (const engine of agent.supported_capabilities || engineIDs) {
@@ -623,7 +623,7 @@ export async function nodesPage(ctx) {
   const failedRefresh = error => { refreshState.textContent = error?.status === 403 ? '节点访问权限已变化' : loaded ? '更新失败，保留上次数据' : '节点读取失败，请重试'; };
   poll({ ...ctx, onRefreshError: failedRefresh }, async () => { if (loaded) await load(); });
   ctx.onRefresh(async () => { try { await load(); } catch (error) { if (ctx.current()) failedRefresh(error); throw error; } });
-  results.append(loadingTable(['节点','状态','CPU','内存','磁盘','网络收发','操作'], '节点监控'));
+  results.append(loadingTable(nodeColumns, '节点监控'));
   search.querySelector('input').addEventListener('input', draw);
   const deepID = location.hash.match(/^#(?:settings-node-|node-(?!settings(?:\?|$)))([^?]+)/)?.[1]
     || new URLSearchParams(location.hash.split('?')[1] || '').get('agent');
@@ -644,10 +644,11 @@ export async function nodesPage(ctx) {
   const orderRead = readRegion(ctx, '节点排序', () => ordering.load(), () => draw(true));
   void nodeRead.load(); void preferenceRead.load(); void orderRead.load();
   ctx.onRefresh(() => Promise.all([nodeRead.load(), !preference && preferenceRead.load(), orderRead.load()]));
-  return stack(node('div', { className: 'a-probe-toolbar' }, search, actions(
-    cardToggle, listToggle, pageSize.element,
+  return stack(node('div', { className: 'a-node-management' }, refreshState, actions(
     ctx.can('enrollment.manage') && button('添加节点', enrollment, { tone: 'primary' }),
     ctx.can('users.manage') && button('节点目录', directory),
     batchToggle,
-  )), nodeRead.element, preferenceRead.element, pageSize.status, orderRead.element, refreshState, results, pages);
+  )), node('div', { className: 'a-probe-toolbar a-node-tools' }, search,
+    actions(actions(cardToggle, listToggle), pageSize.element)),
+    nodeRead.element, preferenceRead.element, pageSize.status, orderRead.element, results, pages);
 }
