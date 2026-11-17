@@ -64,6 +64,11 @@ export async function runAnalyticsBrowser({ base, mode, fixture, createPage, log
     await evaluate(page, "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
     assert.ok(await evaluate(page, "Math.abs(document.querySelector('.a-chart').viewBox.baseVal.width-document.querySelector('.a-chart-container').getBoundingClientRect().width)<1"), `${width}x${height}: chart measures its container`);
 
+    assert.ok(await evaluate(page, `(() => {
+      const chart=document.querySelector('.a-chart').getBoundingClientRect();
+      const labels=[...document.querySelectorAll('[data-chart-date]')].map(label=>label.getBoundingClientRect());
+      return labels.length>0 && labels.every((box,index)=>box.left>=chart.left && box.right<=chart.right && (!index || box.left>=labels[index-1].right));
+    })()`), `${width}x${height}: date labels fit without overlap`);
     if (width === 1920 || width === 3840 || width === 844) await screenshot(page, `analytics-dashboard-${width}x${height}`);
   }
   await call("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1440, height: mode === "mobile" ? 844 : 1000, deviceScaleFactor: 1, mobile: mode === "mobile" }, page);

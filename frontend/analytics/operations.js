@@ -43,8 +43,20 @@ function responsiveChart(days, signal) {
     if (!currentDays.some(day => day.day === selectedDay)) selectedDay = '';
     const fresh = chart(currentDays, width, selectedDay, day => { selectedDay = day; });
     if (container.firstChild) patch(container.firstChild, fresh); else container.append(fresh);
+    const labels = [...container.querySelectorAll('[data-chart-date]')];
+    if (labels.length > 1) {
+      const gap = parseFloat(getComputedStyle(labels[0]).fontSize);
+      const lastStart = labels.at(-1).getBoundingClientRect().left;
+      let previousEnd = -Infinity;
+      for (const label of labels.slice(0, -1)) {
+        const box = label.getBoundingClientRect();
+        if (box.left >= previousEnd + gap && box.right + gap <= lastStart) previousEnd = box.right;
+        else label.remove();
+      }
+    }
   };
   render();
+  void document.fonts.ready.then(() => { if (!signal.aborted) { previous = ""; render(); } });
   container.updateDays = value => { currentDays = value; render(); };
   let frame;
   const observer = new ResizeObserver(entries => {
@@ -90,8 +102,9 @@ function chart(days, width, selectedDay, selectDay) {
       if (days.length === 1) add('circle', { cx: series[0][0], cy: series[0][1], r: 3, fill: stroke });
     }
     days.forEach((day, index) => {
-      if (index % 5 === 0 || index === days.length - 1)
-        add("text", { x: points('received_bytes')[index][0], y: height - 6, "text-anchor": "middle" }, day.day.slice(5));
+      add("text", { x: points('received_bytes')[index][0], y: height - 6,
+        "text-anchor": index === 0 ? "start" : index === days.length - 1 ? "end" : "middle",
+        'data-chart-date': day.day, 'data-refresh-key': `chart-date-${day.day}` }, day.day.slice(5));
     });
     const xValues = points('received_bytes').map(([x]) => x);
     days.forEach((day, index) => {
