@@ -38,12 +38,6 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(core.MaxCoreLogWireBytes)
 
 	id := agentID(request)
-	panelSettings, settingsErr := s.store.AgentPanelSettings(request.Context(), id)
-	if settingsErr != nil {
-		slog.Warn("load agent policy settings", "agent_id", id, "error", settingsErr)
-		panelSettings = core.DefaultPanelSettings()
-	}
-	agentPolicy, effectivePublicIPProbe := buildAgentSessionPolicy(s.publicIPProbe, panelSettings)
 	ctx, cancelConnection := context.WithCancel(request.Context())
 	defer cancelConnection()
 	connectionID, err := core.NewID("wss")
@@ -54,6 +48,14 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	timeZoneRefresh := s.agentTimeZoneRefreshChannel(id, connectionID)
 	policyRefresh := s.agentPolicyRefreshChannel(id, connectionID)
 	defer s.unregisterConnection(id, connectionID)
+	// Subscribe before reading the owner's policy: a concurrent commit must
+	// either be visible to the read or invalidate this session.
+	panelSettings, settingsErr := s.store.AgentPanelSettings(ctx, id)
+	if settingsErr != nil {
+		slog.Warn("load agent policy settings", "agent_id", id, "error", settingsErr)
+		return
+	}
+	agentPolicy, effectivePublicIPProbe := buildAgentSessionPolicy(s.publicIPProbe, panelSettings)
 	if err := s.store.UpdateAgentObservedPublicIP(ctx, id, observedPublicIP); err != nil {
 		// Address discovery is best-effort and must never take an authenticated
 		// Agent offline. Do not log the observed address.
@@ -298,7 +300,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			updatedSettings, settingsErr := s.store.AgentPanelSettings(ctx, id)
 			if settingsErr != nil {
 				slog.Warn("reload agent policy settings", "agent_id", id, "error", settingsErr)
-				continue
+				return
 			}
 			panelSettings = updatedSettings
 			agentPolicy, effectivePublicIPProbe = buildAgentSessionPolicy(s.publicIPProbe, panelSettings)
