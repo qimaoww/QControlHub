@@ -25,6 +25,7 @@ type clientMetadata struct {
 	TLSClientCertificate      string                            `json:"tls_client_certificate,omitempty"`
 	Version                   int                               `json:"version"`
 	Protocol                  string                            `json:"protocol"`
+	SnellBinding              string                            `json:"snell_binding,omitempty"`
 	SnellReuse                bool                              `json:"snell_reuse,omitempty"`
 	SnellObfsHost             string                            `json:"snell_obfs_host,omitempty"`
 	SnellClientFingerprint    string                            `json:"snell_client_fingerprint,omitempty"`
@@ -93,8 +94,9 @@ func MarshalClientMetadata(input Input) (string, error) {
 		return string(encoded), err
 	}
 	switch input.Protocol {
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 		normalizeSnellInput(&input)
+		metadata.SnellBinding = snellMetadataBinding(input)
 		metadata.SnellReuse, metadata.SnellObfsHost = input.SnellReuse, input.SnellObfsHost
 		metadata.SnellClientFingerprint, metadata.SnellShadowTLSALPN = input.SnellClientFingerprint, input.SnellShadowTLSALPN
 	case ProtocolSudoku:
@@ -197,7 +199,10 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 		input.Protocol = metadata.Protocol
 	}
 	switch input.Protocol {
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
+		if metadata.SnellBinding != "" && metadata.SnellBinding != snellMetadataBinding(*input) {
+			return nil
+		}
 		input.SnellReuse, input.SnellObfsHost = metadata.SnellReuse, metadata.SnellObfsHost
 		input.SnellClientFingerprint, input.SnellShadowTLSALPN = metadata.SnellClientFingerprint, metadata.SnellShadowTLSALPN
 	case ProtocolSudoku:
@@ -217,4 +222,11 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 		}
 	}
 	return nil
+}
+
+func snellMetadataBinding(input Input) string {
+	fields := []any{clientConnectionBinding(input), input.SnellVersion, input.SnellMode, input.SnellObfsMode,
+		input.SnellShadowTLSVersion, input.SnellShadowTLSPassword, input.SnellShadowTLSUser, input.SnellShadowTLSHandshake, input.SnellShadowTLSProxy}
+	encoded, _ := json.Marshal(fields)
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }

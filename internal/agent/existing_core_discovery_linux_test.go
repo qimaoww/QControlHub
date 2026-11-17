@@ -19,6 +19,9 @@ var existingDiscoveryCoreHelper []byte
 
 func TestMain(tests *testing.M) {
 	flag.Parse()
+	if os.Getenv("QCH_SNELL_SERVICE_MANAGER") != "" && (flag.Lookup("test.run").Value.String() == "^TestSnellManagedServiceMatrix$" || flag.Lookup("test.run").Value.String() == "^TestSnellManagedAPITask$") {
+		os.Exit(tests.Run())
+	}
 	if os.Getenv("QCH_TEST_CORE_UPDATE_SANDBOX") == "1" && flag.Lookup("test.run").Value.String() == "^TestMihomoUpdateWithAgentServiceSandbox$" {
 		os.Exit(tests.Run())
 	}

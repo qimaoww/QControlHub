@@ -5,33 +5,40 @@ package serverconfig
 import "github.com/qimaoww/qcontrolhub/internal/core"
 
 const (
-	ProtocolShadowsocks     = "shadowsocks"
-	ProtocolSS2022          = "ss2022"
-	ProtocolVLESS           = "vless"
-	ProtocolVLESSXHTTP      = "vless-xhttp-reality"
-	ProtocolXHTTPTLS        = "vless-xhttp-tls"
-	ProtocolXHTTPTLSReality = "vless-xhttp-tls-reality"
-	ProtocolXHTTPRealityTLS = "vless-xhttp-reality-tls"
-	ProtocolXHTTPFive       = "vless-xhttp-five"
-	ProtocolVLESSEncTCP     = "vless-enc-tcp-reality-vision"
-	ProtocolVLESSEncXHTTP   = "vless-enc-xhttp-reality-vision"
-	ProtocolVLESSEncPlain   = "vless-enc-tcp"
-	ProtocolVMess           = "vmess"
-	ProtocolTrojan          = "trojan"
-	ProtocolHy2             = "hysteria2"
-	ProtocolTUIC            = "tuic"
-	ProtocolAnyTLS          = "anytls"
-	ProtocolSnell           = "snell"
-	ProtocolSnellShadowTLS  = "snell-shadow-tls-v3"
-	ProtocolMieru           = "mieru"
-	ProtocolSudoku          = "sudoku"
-	ProtocolPortForward     = "port-forward"
-	ProtocolWireGuard       = "wireguard"
-	ProtocolTailscale       = "tailscale"
-	ProtocolOpenVPNServer   = "openvpn-server"
+	ProtocolShadowsocks              = "shadowsocks"
+	ProtocolSS2022                   = "ss2022"
+	ProtocolVLESS                    = "vless"
+	ProtocolVLESSXHTTP               = "vless-xhttp-reality"
+	ProtocolXHTTPTLS                 = "vless-xhttp-tls"
+	ProtocolXHTTPTLSReality          = "vless-xhttp-tls-reality"
+	ProtocolXHTTPRealityTLS          = "vless-xhttp-reality-tls"
+	ProtocolXHTTPFive                = "vless-xhttp-five"
+	ProtocolVLESSEncTCP              = "vless-enc-tcp-reality-vision"
+	ProtocolVLESSEncXHTTP            = "vless-enc-xhttp-reality-vision"
+	ProtocolVLESSEncPlain            = "vless-enc-tcp"
+	ProtocolVMess                    = "vmess"
+	ProtocolTrojan                   = "trojan"
+	ProtocolHy2                      = "hysteria2"
+	ProtocolTUIC                     = "tuic"
+	ProtocolAnyTLS                   = "anytls"
+	ProtocolSnell                    = "snell"
+	ProtocolSnellShadowTLS           = "snell-shadow-tls-v3"
+	ProtocolSnellV6                  = "snell-v6"
+	ProtocolSnellV6Unshaped          = "snell-v6-unshaped"
+	ProtocolSnellV6ShadowTLS         = "snell-v6-shadow-tls-v3"
+	ProtocolSnellV6UnshapedShadowTLS = "snell-v6-unshaped-shadow-tls-v3"
+	ProtocolMieru                    = "mieru"
+	ProtocolSudoku                   = "sudoku"
+	ProtocolPortForward              = "port-forward"
+	ProtocolWireGuard                = "wireguard"
+	ProtocolTailscale                = "tailscale"
+	ProtocolOpenVPNServer            = "openvpn-server"
 )
 
 type Protocol struct {
+	SnellVersion         int          `json:"snell_version,omitempty"`
+	SnellMode            string       `json:"snell_mode,omitempty"`
+	SnellShadowTLS       bool         `json:"snell_shadow_tls,omitempty"`
 	SupportsUDP443Block  bool         `json:"supports_udp_443_block,omitempty"`
 	StaticPages          []StaticPage `json:"static_pages,omitempty"`
 	SupportsManagedTLS   bool         `json:"supports_managed_tls,omitempty"`
@@ -43,6 +50,7 @@ type Protocol struct {
 	Docs                 string       `json:"docs"`
 	DefaultPort          int          `json:"default_port"`
 	Credential           string       `json:"credential_label"`
+	CredentialHint       string       `json:"credential_hint,omitempty"`
 	SecondaryCredential  string       `json:"secondary_credential_label"`
 	IgnoresUsername      bool         `json:"ignores_username"`
 	Methods              []string     `json:"methods"`
@@ -65,6 +73,7 @@ type Input struct {
 	// Protocol remains the internal protocol key for bound client metadata.
 	SourceOnly                   bool `json:"source_only,omitempty"`
 	parsedEngine                 core.Engine
+	presetUnsupported            bool
 	BlockUDP443                  *bool  `json:"block_udp_443,omitempty"`
 	PanelCertificateID           string `json:"panel_certificate_id,omitempty"`
 	XHTTPMode                    string `json:"xhttp_mode,omitempty"`
@@ -120,6 +129,7 @@ type Input struct {
 	ListenerProxy                string `json:"listener_proxy"`
 	MieruTransport               string `json:"mieru_transport,omitempty"`
 	MieruTrafficPattern          string `json:"mieru_traffic_pattern,omitempty"`
+	SnellMode                    string `json:"snell_mode"`
 	SnellVersion                 int    `json:"snell_version"`
 	SnellUDP                     bool   `json:"snell_udp"`
 	SnellReuse                   bool   `json:"snell_reuse"`
@@ -312,24 +322,15 @@ func Protocols(engine core.Engine) []Protocol {
 		protocols = append(protocols,
 			mieruProtocol(base),
 			Protocol{
-				Key: ProtocolSnell, Name: "Snell v5", Badge: "SNELL v5",
-				Description: "固定 Snell v5 的原生服务端，支持 UDP over TCP 与连接复用。",
-				Docs:        base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）",
-				Transports: []string{"raw"}, IgnoresUsername: true,
-			},
-			Protocol{
-				Key: ProtocolSnellShadowTLS, Name: "Snell v5 + ShadowTLS v3", Badge: "SNELL STLS",
-				Description: "固定 Snell v5 与 ShadowTLS v3；自动生成独立用户与强密码，并生成严格校验证书的匹配客户端配置。",
-				Docs:        base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）",
-				Transports: []string{"raw"}, IgnoresUsername: true,
-			},
-			Protocol{
 				Key: ProtocolSudoku, Name: "Sudoku", Badge: "SUDOKU",
 				Description: "按 SUDOKU-ASCII 上游生成 Ed25519 公私钥、AEAD、低熵字节表、HTTPMask 与原生复用。",
 				Docs:        base + "sudoku/", DefaultPort: 8443, Credential: "Master Public Key（服务端）",
 				Methods: []string{"chacha20-poly1305", "aes-128-gcm"}, Transports: []string{"raw"}, IgnoresUsername: true,
 			},
 		)
+	}
+	if engine == core.EngineMihomo {
+		protocols = append(protocols, snellProtocols(base)...)
 	}
 	if engine != core.EngineXray {
 		tuicPath, anyTLSPath := "tuic/", "anytls/"

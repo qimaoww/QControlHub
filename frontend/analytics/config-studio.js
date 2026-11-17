@@ -286,9 +286,11 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       }
       if(protocol.uses_vless_encryption)sections.push(group('VLESS Encryption',grid(control('vless_decryption'),control('vless_encryption')),true));
       const prefixes=protocol.key.startsWith('vless-xhttp')||protocol.key.includes('xhttp')?['xhttp_']:protocol.key.startsWith('snell')?['snell_']:protocol.key.startsWith('sudoku')?['sudoku_']:protocol.key.startsWith('mieru')?['mieru_']:protocol.uses_wireguard?['wireguard_']:protocol.key==='tailscale'?['tailscale_']:protocol.key==='openvpn-server'?['openvpn_']:[];
-      const special=Object.keys(labels).filter(key=>key!=='mieru_custom_pattern'&&(!['xhttp_backend_port','xhttp_tls_port','xhttp_tls_address','xhttp_tls_client_port','xhttp_tls_host'].includes(key)||isXHTTPGroup(protocol.key))&&!(key==='wireguard_server_address'&&engine!=='sing-box')&&prefixes.some(prefix=>key.startsWith(prefix)));
+      const snellFields = ['snell_udp','snell_reuse',...(protocol.snell_shadow_tls?['snell_obfs_host','snell_client_fingerprint','snell_shadow_tls_password','snell_shadow_tls_user','snell_shadow_tls_handshake','snell_shadow_tls_proxy','snell_shadow_tls_alpn']:[])];
+      const special=Object.keys(labels).filter(key=>(!key.startsWith('snell_')||snellFields.includes(key))&&key!=='mieru_custom_pattern'&&(!['xhttp_backend_port','xhttp_tls_port','xhttp_tls_address','xhttp_tls_client_port','xhttp_tls_host'].includes(key)||isXHTTPGroup(protocol.key))&&!(key==='wireguard_server_address'&&engine!=='sing-box')&&prefixes.some(prefix=>key.startsWith(prefix)));
       if(protocol.port_forward)special.push('target_address','target_port','network');
       if(engine==='ss-rust')special.push('ss_rust_dns','ss_rust_outbound_bind_addr','ss_rust_ipv6_first');
+      if(protocol.credential_hint)sections.push(muted(protocol.credential_hint));
       if(special.length)sections.push(group('协议参数',node('div',{className:'a-form-grid'},special.map(control)),true));
       sections.push(group('客户端与路由',node('div',{className:'a-form-grid'},['client_address','client_port','client_host',...(engine==='mihomo'?['listener_routing_mark','listener_rule','listener_proxy']:[])].map(control))));
       area.replaceChildren(...sections);
@@ -606,7 +608,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const nativeInput=inbounds.find(input=>input.tag===target.tag&&input.port===target.port);
       const input=nativeInput&&!nativeInput.source_only?nativeInput:null;
       const object=managed.find(item=>item.inbound&&item.tag===target.tag);
-      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),input?target.kind:'自定义',
+      const protocolName=input?(current.protocols.find(protocol=>protocol.key===input.protocol)?.name||target.kind):'自定义';
+      return [target.port||'无固定端口',stack(target.tag,muted([object?.listen||input?.listen,object?.network].filter(Boolean).join(' · '))),protocolName,
         deployment.inboundState(target.port,object?.enabled),actions(
         ctx.can('agent-config.read')&&button('访问限制',()=>restrictions(target)),
         writable&&object&&toggle(object),

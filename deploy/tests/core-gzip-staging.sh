@@ -38,6 +38,25 @@ fi
 printf '%s\n' 'Core gzip staging, execute permissions and version failure regressions passed'
 
 . "$stage_module"
+cat > "$test_root/stable.json" <<'RELEASE'
+{"tag_name":"v2.3.4","draft":false,"prerelease":false,"assets":[{"browser_download_url":"https://github.com/MetaCubeX/mihomo/releases/download/v2.3.4/mihomo-linux-amd64-v1-v2.3.4.gz"}]}
+RELEASE
+[ "$(qch_mihomo_stable_url "$test_root/stable.json")" = 'https://github.com/MetaCubeX/mihomo/releases/download/v2.3.4/mihomo-linux-amd64-v1-v2.3.4.gz' ]
+for change in '.draft = true' '.prerelease = true' '.assets = []' '.assets += .assets' '.assets[0].browser_download_url = "https://untrusted.invalid/mihomo.gz"'; do
+  jq "$change" "$test_root/stable.json" > "$test_root/invalid.json"
+  if qch_mihomo_stable_url "$test_root/invalid.json" >/dev/null 2>&1; then
+    printf '%s\n' 'accepted invalid stable release metadata' >&2; exit 1
+  fi
+done
+qch_mihomo_version_matches 'Mihomo Meta v2.3.4 linux amd64' v2.3.4
+qch_mihomo_version_matches 'Mihomo v2.3.4 linux amd64' v2.3.4
+for invalid in '' 'Mihomo Meta v2.3.3 linux amd64' 'Mihomo Meta v2.3.4-alpha linux amd64' 'unrecognized version'; do
+  if qch_mihomo_version_matches "$invalid" v2.3.4; then
+    printf '%s\n' 'accepted a mismatched Mihomo binary version' >&2; exit 1
+  fi
+done
+printf '%s\n' 'Mihomo stable metadata selection and actual binary version checks passed'
+
 cat > "$test_root/ssserver" <<'BINARY'
 #!/bin/sh
 echo 'shadowsocks 1.25.0'

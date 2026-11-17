@@ -5338,6 +5338,9 @@
           "snell_client_fingerprint": {
             "type": "string"
           },
+          "snell_mode": {
+            "type": "string"
+          },
           "snell_obfs_host": {
             "type": "string"
           },
@@ -5650,6 +5653,9 @@
           "badge": {
             "type": "string"
           },
+          "credential_hint": {
+            "type": "string"
+          },
           "credential_label": {
             "type": "string"
           },
@@ -5694,6 +5700,15 @@
           },
           "secondary_credential_label": {
             "type": "string"
+          },
+          "snell_mode": {
+            "type": "string"
+          },
+          "snell_shadow_tls": {
+            "type": "boolean"
+          },
+          "snell_version": {
+            "type": "integer"
           },
           "static_pages": {
             "items": {
@@ -9666,6 +9681,7 @@
                   "reality_target": "example",
                   "secondary_credential": "example",
                   "snell_client_fingerprint": "example",
+                  "snell_mode": "example",
                   "snell_obfs_host": "example",
                   "snell_obfs_mode": "example",
                   "snell_reuse": false,
@@ -9822,6 +9838,7 @@
                   "reality_target": "example",
                   "secondary_credential": "example",
                   "snell_client_fingerprint": "example",
+                  "snell_mode": "example",
                   "snell_obfs_host": "example",
                   "snell_obfs_mode": "example",
                   "snell_reuse": false,
@@ -10041,6 +10058,7 @@
                   "reality_target": "example",
                   "secondary_credential": "example",
                   "snell_client_fingerprint": "example",
+                  "snell_mode": "example",
                   "snell_obfs_host": "example",
                   "snell_obfs_mode": "example",
                   "snell_reuse": false,
@@ -11128,6 +11146,7 @@
                       "reality_target": "example",
                       "secondary_credential": "example",
                       "snell_client_fingerprint": "example",
+                      "snell_mode": "example",
                       "snell_obfs_host": "example",
                       "snell_obfs_mode": "example",
                       "snell_reuse": false,
@@ -11225,6 +11244,7 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
@@ -11241,6 +11261,9 @@
                       "port_forward": false,
                       "requires_tls": false,
                       "secondary_credential_label": "example",
+                      "snell_mode": "example",
+                      "snell_shadow_tls": false,
+                      "snell_version": 1,
                       "static_pages": [
                         null
                       ],
@@ -11525,6 +11548,7 @@
                       "reality_target": "example",
                       "secondary_credential": "example",
                       "snell_client_fingerprint": "example",
+                      "snell_mode": "example",
                       "snell_obfs_host": "example",
                       "snell_obfs_mode": "example",
                       "snell_reuse": false,
@@ -11622,6 +11646,7 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
@@ -11638,6 +11663,9 @@
                       "port_forward": false,
                       "requires_tls": false,
                       "secondary_credential_label": "example",
+                      "snell_mode": "example",
+                      "snell_shadow_tls": false,
+                      "snell_version": 1,
                       "static_pages": [
                         null
                       ],
@@ -16564,6 +16592,7 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
@@ -16580,6 +16609,9 @@
                       "port_forward": false,
                       "requires_tls": false,
                       "secondary_credential_label": "example",
+                      "snell_mode": "example",
+                      "snell_shadow_tls": false,
+                      "snell_version": 1,
                       "static_pages": [
                         null
                       ],

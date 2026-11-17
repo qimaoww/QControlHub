@@ -196,3 +196,47 @@ func TestOpenRCServiceEnableStateAcceptsOnlyDefaultRunlevel(t *testing.T) {
 		t.Fatalf("unsupported multi-runlevel state error = %v", err)
 	}
 }
+
+func TestSystemdExplicitRestartRecoversOnlyStartLimitOnce(t *testing.T) {
+	for _, test := range []struct {
+		name, result                      string
+		resetFails, stillFails, wantError bool
+		starts                            int
+	}{
+		{name: "limit", result: "start-limit-hit", starts: 2},
+		{name: "persistent-limit", result: "start-limit-hit", stillFails: true, wantError: true, starts: 2},
+		{name: "reset-fails", result: "start-limit-hit", resetFails: true, wantError: true, starts: 1},
+		{name: "crash", result: "exit-code", wantError: true, starts: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			logPath := filepath.Join(directory, "commands")
+			statePath := filepath.Join(directory, "reset")
+			helper := filepath.Join(directory, "systemctl")
+			script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$1" >> %s
+case "$1" in
+show) printf '%%s\n' '%s';;
+reset-failed) %s; touch %s;;
+restart) if [ -f %s ] && %s; then exit 0; fi; exit 1;;
+esac
+`, logPath, test.result, map[bool]string{true: "exit 1", false: "true"}[test.resetFails], statePath, statePath, map[bool]string{true: "false", false: "true"}[test.stillFails])
+			writeExecutable(t, helper, script)
+			manager := &ServiceManager{kind: ServiceManagerSystemd, executable: helper}
+			_, err := manager.command(context.Background(), "qagent-mihomo.service", core.ActionRestart)
+			if (err != nil) != test.wantError {
+				t.Fatalf("result %v", err)
+			}
+			data, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(data), "restart\n") != test.starts {
+				t.Fatalf("unbounded or missing retry: %s", data)
+			}
+			if test.result != "start-limit-hit" && strings.Contains(string(data), "reset-failed") {
+				t.Fatal("non-rate-limit failure reset")
+			}
+		})
+	}
+}

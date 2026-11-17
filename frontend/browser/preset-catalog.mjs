@@ -18,6 +18,13 @@ export async function testPresetCatalogRuntime(catalog) {
         assert(control('reality_server_name').value===''&&!control('reality_server_name').hasAttribute('list')&&control('reality_server_name').required,'new Reality SNI must be an empty required free-text field');
         edit('reality_server_name','reality.example.test');
       }
+      if(actual.protocol.snell_version) {
+        assert(Boolean(actual.protocol.credential_hint)&&form().textContent.includes(actual.protocol.credential_hint),'Snell input requirements did not come from the catalog');
+        assert(!control('snell_version')&&!control('snell_mode')&&!control('snell_obfs_mode')&&!control('snell_shadow_tls_version'),'fixed Snell identity exposed as editable fields');
+        assert(Boolean(control('snell_shadow_tls_password'))===Boolean(actual.protocol.snell_shadow_tls),'Snell carrier fields do not match the preset');
+        assert(!control('tls_server_name')&&!control('certificate_path'),'native Snell requires unrelated TLS configuration');
+        edit('snell_udp',false);edit('snell_reuse',false);
+      }
       if(actual.protocol.port_forward) { edit('target_address','127.0.0.1');edit('target_port',8080); }
       if(['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(actual.protocol.key)) { edit('tls_server_name','tls.example.test');edit('reality_server_name','reality.example.test');edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key'); }
       if(actual.protocol.supports_managed_tls) {
@@ -70,6 +77,13 @@ export async function testPresetCatalogRuntime(catalog) {
       const saved=await save();
       if(actual.plan.transport!=='xhttp')assert(saved.client_address==='edge.example.test'&&saved.client_port===34443&&control('client_address').value==='edge.example.test'&&control('client_port').value==='34443','client dial options lost on save/reopen');
       assert(saved.protocol===actual.protocol.key,'catalog submitted a different protocol');
+      if(actual.protocol.snell_version) {
+        assert(test.row(saved.tag).textContent.includes(actual.protocol.name),'Snell row exposes an internal protocol key');
+        assert(saved.snell_version===actual.protocol.snell_version&&saved.snell_mode===(actual.protocol.snell_mode||''),'Snell version/mode changed during save');
+        assert(saved.snell_obfs_mode===(actual.protocol.snell_shadow_tls?'shadow-tls':'none')&&saved.snell_shadow_tls_version===(actual.protocol.snell_shadow_tls?3:0),'Snell carrier changed during save');
+        assert(!saved.snell_udp&&!saved.snell_reuse&&!control('snell_udp').checked&&!control('snell_reuse').checked,'disabled UDP/reuse lost during save or refill');
+      }
+
       if(crossCoreWS) {
         assert(saved.transport==='websocket'&&saved.transport_path==='/custom-ws'&&saved.tls_server_name==='tls.example.test'&&saved.transport_host==='host.example.test','WS save conflated independent routing');
         assert(control('tls_server_name').value===saved.tls_server_name&&control('transport_host').value===saved.transport_host,'WS reopen lost SNI/Host');

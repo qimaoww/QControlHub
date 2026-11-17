@@ -71,9 +71,12 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 		proxy["type"], proxy["username"], proxy["password"] = "socks5", input.Username, input.Credential
 	case ProtocolAnyTLS:
 		proxy["type"], proxy["password"] = "anytls", input.Credential
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 		proxy["type"], proxy["psk"], proxy["version"] = "snell", input.Credential, input.SnellVersion
 		proxy["udp"], proxy["reuse"], proxy["tfo"] = input.SnellUDP, input.SnellReuse, true
+		if input.SnellVersion == 6 {
+			proxy["mode"] = input.SnellMode
+		}
 		if input.SnellObfsMode == SnellObfsShadowTLS {
 			alpn, err := validatedALPN(input.SnellShadowTLSALPN)
 			if err != nil {
