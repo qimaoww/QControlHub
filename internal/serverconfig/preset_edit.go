@@ -120,12 +120,15 @@ func presetDelta(current, before, after any) any {
 		}
 		for key, value := range newMap {
 			old, represented := oldMap[key]
-			existing, exists := result[key]
-			// An unchanged form default need not exist in the native source.
-			if !exists && represented && reflect.DeepEqual(old, value) {
-				continue
+			switch {
+			case represented && reflect.DeepEqual(old, value):
+				// Leave the native value (or its absence) alone.
+			case value == nil:
+				// A newly represented null can clear an existing native option.
+				result[key] = nil
+			default:
+				result[key] = presetDelta(result[key], old, value)
 			}
-			result[key] = presetDelta(existing, old, value)
 		}
 		return result
 	}

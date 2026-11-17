@@ -35,9 +35,9 @@ func TestPresetEditPreservesAbsentSnellOptions(t *testing.T) {
 }
 
 func TestNativeOutboundPatchDoesNotMaterializeFormDefaults(t *testing.T) {
-	const source = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"extension":9007199254740993,"username":null}`
+	const source = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"extension":9007199254740993,"username":null,"bind_interface":"eth7"}`
 	const baseline = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"version":"5","username":""}`
-	updated := strings.Replace(baseline, `"old.example"`, `"new.example","explicit":null`, 1)
+	updated := strings.Replace(baseline, `"old.example"`, `"new.example","explicit":null,"bind_interface":null`, 1)
 	result, err := PatchNativePreset(core.EngineSingBox, source, baseline, updated)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,8 @@ func TestNativeOutboundPatchDoesNotMaterializeFormDefaults(t *testing.T) {
 	if err := json.Unmarshal([]byte(result), &got); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal([]byte(strings.Replace(source, `"old.example"`, `"new.example","explicit":null`, 1)), &want); err != nil {
+	expected := strings.NewReplacer(`"old.example"`, `"new.example","explicit":null`, `"eth7"`, `null`).Replace(source)
+	if err := json.Unmarshal([]byte(expected), &want); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, want) {
