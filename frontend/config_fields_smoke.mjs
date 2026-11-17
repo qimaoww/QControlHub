@@ -27,7 +27,7 @@ assert.match(css, /\.a-form-grid \{ display: grid; grid-template-columns: repeat
 assert.match(css, /\.a-field \{[^}]*min-width: 0/);
 assert.match(css, /\.a-field textarea \{ resize: vertical/);
 assert.match(css, /\.a-code \{ max-height: 55dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var\(--tint\)/);
-assert.match(css, /\.a-code, \.a-editor textarea \{[^}]*font-size: var\(--text-label\)/);
+assert.match(css, /\.a-code, \.a-editor textarea, \.a-source-editor \{[^}]*font-size: var\(--text-label\)/);
 assert.match(css, /@media \(max-width: 40rem\)/);
 assert.match(css, /\.a-form-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
 assert.match(css, /\.a-button, \.a-nav-link, \.a-check, \.a-field input, \.a-field select \{ min-height: 44px/);
