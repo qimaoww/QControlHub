@@ -138,4 +138,31 @@ func TestRequeueStaleTasksUsesActionSpecificLeaseAndAttemptLimit(t *testing.T) {
 	if requeued, err := dataStore.GetTask(ctx, tlsTask.ID); err != nil || requeued.Status != core.TaskPending {
 		t.Fatalf("expired TLS task was not requeued: %+v %v", requeued, err)
 	}
+	if err := dataStore.CancelTask(ctx, tlsTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `UPDATE agents SET features=features||jsonb_build_array($2::text) WHERE id=$1`, agent.ID, core.AgentFeatureSelfUpgrade); err != nil {
+		t.Fatal(err)
+	}
+	upgrade, err := dataStore.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionUpgradeAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := dataStore.ClaimTask(ctx, agent.ID); err != nil || claimed == nil || claimed.ID != upgrade.ID {
+		t.Fatalf("claim Agent upgrade: %+v %v", claimed, err)
+	}
+	setTaskStartedAt(t, ctx, dataStore, upgrade.ID, time.Now().Add(-core.AgentBinaryDownloadTimeout-core.ManagedTLSOperationTimeout))
+	if err := dataStore.RequeueStaleTasks(ctx, time.Minute, 6*time.Minute, 3); err != nil {
+		t.Fatal(err)
+	}
+	if running, err := dataStore.GetTask(ctx, upgrade.ID); err != nil || running.Status != core.TaskRunning {
+		t.Fatalf("Agent upgrade lost its lease during a package update: %+v %v", running, err)
+	}
+	setTaskStartedAt(t, ctx, dataStore, upgrade.ID, time.Now().Add(-core.AgentUpgradeLeaseTimeout-time.Minute))
+	if err := dataStore.RequeueStaleTasks(ctx, time.Minute, 6*time.Minute, 3); err != nil {
+		t.Fatal(err)
+	}
+	if requeued, err := dataStore.GetTask(ctx, upgrade.ID); err != nil || requeued.Status != core.TaskPending {
+		t.Fatalf("expired Agent upgrade was not requeued: %+v %v", requeued, err)
+	}
 }

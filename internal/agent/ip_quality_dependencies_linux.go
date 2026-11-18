@@ -365,8 +365,12 @@ func ipQualityDependencyHelperArguments(executable, unit string) []string {
 }
 
 func runIPQualityCommand(ctx context.Context, executable string, args []string) (string, error) {
+	return runIPQualityCommandWithRestartMode(ctx, executable, args, "a")
+}
+
+func runIPQualityCommandWithRestartMode(ctx context.Context, executable string, args []string, restartMode string) (string, error) {
 	command := exec.CommandContext(ctx, executable, args...)
-	command.Env = append(commandEnvironment(""), "DEBIAN_FRONTEND=noninteractive", "NEEDRESTART_MODE=a", "TERM=dumb")
+	command.Env = append(commandEnvironment(""), "DEBIAN_FRONTEND=noninteractive", "NEEDRESTART_MODE="+restartMode, "TERM=dumb")
 	configureCommand(command)
 	output := &ipQualityDiagnosticTail{}
 	command.Stdout, command.Stderr = output, output

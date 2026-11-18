@@ -327,6 +327,7 @@ func TestManagedTLSFailureRecoverySandbox(t *testing.T) {
 	if err != nil || len(previous) != 2 {
 		t.Fatalf("expected two active TLS deployments: %+v %v", previous, err)
 	}
+	t.Run("nginx-package-upgrade", func(t *testing.T) { verifyManagedNginxPackageUpgrade(t, &m, previous) })
 	service := "qagent-sing-box.service"
 	if kind == ServiceManagerOpenRC {
 		service = "qagent-sing-box"
@@ -360,4 +361,86 @@ func TestManagedTLSFailureRecoverySandbox(t *testing.T) {
 		}
 	}
 	t.Log("real TLS hostname failure restored both instances after the deployment context expired")
+}
+
+func verifyManagedNginxPackageUpgrade(t *testing.T, m *tlsFrontendManager, deployments tlsDeployments) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	frontends, err := activeTLSFrontends(deployments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, _, _ := m.serviceDefinition("nginx", false)
+	binary := managedNginxBinary()
+	old, err := m.nginxMasterExecutable(ctx, service, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(m.root, "nginx.conf")
+	stored, err := readConfigurationFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreConfig := func() {
+		if err := m.writeConfig(config, stored, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer restoreConfig()
+	verifyLive := func(want os.FileInfo) {
+		t.Helper()
+		if live, err := m.nginxMasterExecutable(ctx, service, binary); err != nil || !os.SameFile(live, want) {
+			t.Fatalf("unexpected running Nginx executable: %v", err)
+		}
+		for _, f := range frontends {
+			if err := probeFrontendTLS(ctx, f, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	build := "upgrade-fixture"
+	unavailable := errors.New("repository unavailable")
+	failed := func(context.Context, string) (string, error) { return "", unavailable }
+	if _, err := m.upgradeManagedNginx(ctx, build, false, failed); !errors.Is(err, unavailable) {
+		t.Fatalf("package failure: %v", err)
+	}
+	verifyLive(old)
+
+	// Reproduce the inode change of a package transaction without depending
+	// on a mirror publishing a newer version during the test.
+	binaryContents, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := atomicDeployWithDefaultMetadata(binary, string(binaryContents), fileMetadata{mode: 0755})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(backup)
+	current, err := os.Stat(binary)
+	if err != nil || os.SameFile(current, old) {
+		t.Fatalf("fixture did not replace the disk executable: %v", err)
+	}
+	updated := func(context.Context, string) (string, error) { return "nginx fixture-revision", nil }
+	if err := m.writeConfig(config, "invalid_fixture_directive;\n", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.upgradeManagedNginx(ctx, build, false, updated); err == nil || !strings.Contains(err.Error(), "配置校验失败") {
+		t.Fatalf("candidate config failure: %v", err)
+	}
+	verifyLive(old)
+
+	restoreConfig()
+	if output, err := m.upgradeManagedNginx(ctx, build, false, updated); err != nil || !strings.Contains(output, "fixture-revision") {
+		t.Fatalf("verified package activation: %q, %v", output, err)
+	}
+	verifyLive(current)
+	if output, err := m.upgradeManagedNginx(ctx, build, false, failed); err != nil || output != "" {
+		t.Fatalf("same-build startup contacted package source again: %q, %v", output, err)
+	}
+	if _, err := m.upgradeManagedNginx(ctx, build, true, failed); !errors.Is(err, unavailable) {
+		t.Fatalf("explicit upgrade did not recheck package source: %v", err)
+	}
+	verifyLive(current)
 }

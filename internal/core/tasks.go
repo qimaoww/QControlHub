@@ -4,6 +4,11 @@ import (
 	"time"
 )
 
+const AgentBinaryDownloadTimeout = 6 * time.Minute
+
+// Leave time for candidate validation, package activation and task reporting.
+const AgentUpgradeLeaseTimeout = AgentBinaryDownloadTimeout + ManagedTLSOperationTimeout + 2*time.Minute
+
 func (s TaskStatus) Valid() bool {
 	switch s {
 	case TaskPending, TaskRunning, TaskSucceeded, TaskFailed, TaskCanceled:
