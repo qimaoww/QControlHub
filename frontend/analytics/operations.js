@@ -45,7 +45,7 @@ export const actionName = value => ({
   validate: "校验配置", deploy: "部署并重启", start: "启动服务", stop: "停止服务", restart: "重启服务", status: "查询状态",
   install: "安装内核", uninstall: "卸载内核", "read-config": "读取可导入配置", "read-managed-config": "读取托管配置",
   "panel-failure":"面板失败", "import-existing": "导入现有服务", "upgrade-agent": "升级 Agent", "enable-bbr": "启用 BBR",
-  "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
+  "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "check-nginx":"检查 Nginx", "update-nginx":"更新 Nginx", "check-caddy":"检查 Caddy", "update-caddy":"更新 Caddy", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
 })[value] || value;
 
 function responsiveChart(days, signal) {

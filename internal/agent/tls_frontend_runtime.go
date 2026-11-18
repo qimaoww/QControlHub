@@ -24,19 +24,34 @@ func (m *tlsFrontendManager) caddyEnvironment() []string {
 }
 
 func (m *tlsFrontendManager) runCaddy(ctx context.Context, identity *commandIdentity, args ...string) (string, error) {
-	return runTLSCommand(ctx, m.state, m.caddyEnvironment(), managedCaddyBinary, identity, args...)
+	return runTLSCommand(ctx, m.state, m.caddyEnvironment(), m.proxyBinary("caddy"), identity, args...)
 }
 
 // nginx -t opens listening sockets as well as checking syntax and files.
 // Match the proxy's non-root identity and its sole ambient capability. Dropping
 // UID alone clears capabilities, even when the privileged helper has them.
 func (m *tlsFrontendManager) validateNginx(ctx context.Context, path string) (string, error) {
+	return m.validateNginxBinary(ctx, path, m.nginxBinary())
+}
+
+func (m *tlsFrontendManager) validateNginxBinary(ctx context.Context, path, binary string) (string, error) {
+	return m.runNginx(ctx, binary, "-t", "-p", m.state+"/", "-c", path)
+}
+
+func (m *tlsFrontendManager) reloadNginx(ctx context.Context, path string) (string, error) {
+	return m.runNginx(ctx, m.nginxBinary(), "-p", m.state+"/", "-c", path, "-s", "reload")
+}
+
+func (m *tlsFrontendManager) runNginx(ctx context.Context, binary string, args ...string) (string, error) {
 	identity, err := managedCoreServiceIdentity()
 	if err != nil {
 		return "", err
 	}
 	identity.ambientCaps = []uintptr{unix.CAP_NET_BIND_SERVICE}
-	return runTLSCommand(ctx, m.state, nil, managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", path)
+	if privateNginxRevision(binary) != "" {
+		args = append(args, "-e", "stderr")
+	}
+	return runTLSCommand(ctx, m.state, nil, binary, &identity, args...)
 }
 
 func runTLSCommand(ctx context.Context, directory string, environment []string, binary string, identity *commandIdentity, args ...string) (string, error) {
@@ -194,7 +209,7 @@ func (m *tlsFrontendManager) upgradeHTTPChallengeRoutes(ctx context.Context, dep
 			if mode == "caddy" {
 				_, e = m.runCaddy(ctx, nil, "reload", "--config", path, "--address", "unix/"+filepath.Join(m.state, "caddy-admin.sock"))
 			} else {
-				_, e = run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", path, "-s", "reload")
+				_, e = m.reloadNginx(ctx, path)
 			}
 			return e
 		}

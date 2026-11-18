@@ -51,6 +51,7 @@ type SharedInstanceRuntime struct {
 }
 
 type Agent struct {
+	ManagedProxies             map[string]ProxyStatus          `json:"managed_proxies,omitempty"`
 	ID                         string                          `json:"id"`
 	OwnerID                    string                          `json:"-"`
 	CanManage                  bool                            `json:"can_manage"`

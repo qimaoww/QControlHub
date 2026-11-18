@@ -1,3 +1,4 @@
+import { nodeProxyManager } from './node-proxies.js';
 import { bindPreferenceFields } from "./preferences.js";
 import { pageSizePreference, recordPages } from './page-size.js';
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
@@ -532,7 +533,10 @@ export async function nodesPage(ctx) {
       nodeForm.querySelector('fieldset').append(details);
       nodeForm.querySelector('[type=submit]').disabled = !manage;
     }
-    const nodePanel = stack(nodeForm || details, allocation, operations);
+    const proxies = agent.can_manage !== false && nodeProxyManager(ctx, agent,
+      () => ctx.current() && box.open && settingsScope() === openedScope && agents.includes(agent), load);
+    if (proxies) settingsUpdates.push(proxies.render);
+    const nodePanel = stack(nodeForm || details, allocation, proxies?.element, operations);
     nodePanel.dataset.settingsPanel = 'node'; nodePanel.setAttribute('role', 'region'); nodePanel.setAttribute('aria-label', '节点设置');
     let activePanel = 'node';
     const scrollPositions = { node: 0, core: 0 };

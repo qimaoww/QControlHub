@@ -140,6 +140,14 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	invoke(shared, core.ActionDeploy, false, []core.TLSFrontend{other, caddyRoute}, true)
 	managerForRevoke, _ := NewServiceManager(kind)
 	executor := &Executor{Services: managerForRevoke, tlsFrontendHelperPath: "/usr/local/lib/qagent/qagent"}
+	if out, err := executor.runProxyTask(ctx, core.ActionUpdateCaddy, "test-build"); err != nil {
+		t.Fatalf("Caddy upgrade: %v %s", err, out)
+	}
+	if report := readProxyReports()["caddy"]; report.Running == "" || report.Running == "v2.11.8" || report.Running != report.Latest || report.Running != report.Installed {
+		t.Fatalf("Caddy upgrade report %+v", report)
+	} else {
+		t.Logf("Caddy v2.11.8 -> %s, verified active process and backend", report.Running)
+	}
 	stop, err := executor.reconcileSharedProxyIngresses(ctx, core.EngineSingBox, "shr_0000000000000001", []core.ProxyIngress{{Mode: "caddy", Scope: core.ProxyIngressTypeScope, Generation: 8}})
 	if err != nil || stop {
 		t.Fatalf("partial provider withdrawal stopped the instance: %t %v", stop, err)
@@ -166,10 +174,14 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 		args = append(args[:len(args)-3], "--setenv=QCH_TEST_TLS_FAILURE_MANAGER="+kind, "--setenv=QCH_TEST_MANAGED_TLS_SYSTEMD=1", "--", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSFailureRecoverySandbox$", "-test.v")
 		if output, err := runIPQualityCommand(ctx, "/usr/bin/systemd-run", args); err != nil {
 			t.Fatalf("actual TLS failure recovery: %v\n%s", err, output)
+		} else {
+			t.Log(output)
 		}
 	} else {
 		if output, err := runIPQualityCommand(ctx, "/usr/bin/env", []string{"QCH_TEST_TLS_FAILURE_MANAGER=" + kind, "QCH_TEST_MANAGED_TLS_SYSTEMD=1", "/usr/local/lib/qagent/tls.test", "-test.run=^TestManagedTLSFailureRecoverySandbox$", "-test.v"}); err != nil {
 			t.Fatalf("actual TLS failure recovery: %v\n%s", err, output)
+		} else {
+			t.Log(output)
 		}
 	}
 	invoke(service, core.ActionStop, false, nil, true)
@@ -327,6 +339,9 @@ func TestManagedTLSFailureRecoverySandbox(t *testing.T) {
 	if err != nil || len(previous) != 2 {
 		t.Fatalf("expected two active TLS deployments: %+v %v", previous, err)
 	}
+	if platform, _ := nginxHostPlatform(); platform.family == "debian" && kind == ServiceManagerSystemd {
+		t.Run("debian-private-binary", func(t *testing.T) { verifyDebianNginxMigration(t, &m, previous) })
+	}
 	t.Run("nginx-package-upgrade", func(t *testing.T) { verifyManagedNginxPackageUpgrade(t, &m, previous) })
 	service := "qagent-sing-box.service"
 	if kind == ServiceManagerOpenRC {
@@ -372,7 +387,7 @@ func verifyManagedNginxPackageUpgrade(t *testing.T, m *tlsFrontendManager, deplo
 		t.Fatal(err)
 	}
 	service, _, _ := m.serviceDefinition("nginx", false)
-	binary := managedNginxBinary()
+	binary := m.nginxBinary()
 	old, err := m.nginxMasterExecutable(ctx, service, binary)
 	if err != nil {
 		t.Fatal(err)
@@ -400,24 +415,8 @@ func verifyManagedNginxPackageUpgrade(t *testing.T, m *tlsFrontendManager, deplo
 		}
 	}
 	build := "upgrade-fixture"
-	t.Run("independent-nginx-pid-file", func(t *testing.T) {
-		// An upstream APT package can invoke binary upgrade directly when
-		// the separate service's PID file exists.
-		const path = "/run/nginx.pid"
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Remove(path) })
-		if err := file.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := m.checkIndependentNginx(ctx); err == nil {
-			t.Fatal("independent PID file allowed unattended package installation")
-		}
-	})
 	unavailable := errors.New("repository unavailable")
-	failed := func(context.Context, string) (string, error) { return "", unavailable }
+	failed := func(context.Context, string) (string, string, error) { return "", "", unavailable }
 	if _, err := m.upgradeManagedNginx(ctx, build, false, failed); !errors.Is(err, unavailable) {
 		t.Fatalf("package failure: %v", err)
 	}
@@ -438,7 +437,7 @@ func verifyManagedNginxPackageUpgrade(t *testing.T, m *tlsFrontendManager, deplo
 	if err != nil || os.SameFile(current, old) {
 		t.Fatalf("fixture did not replace the disk executable: %v", err)
 	}
-	updated := func(context.Context, string) (string, error) { return "nginx fixture-revision", nil }
+	updated := func(context.Context, string) (string, string, error) { return binary, "nginx fixture-revision", nil }
 	if err := m.writeConfig(config, "invalid_fixture_directive;\n", false); err != nil {
 		t.Fatal(err)
 	}

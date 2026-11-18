@@ -125,6 +125,8 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				output = "IPQuality check completed"
 			}
 		}
+	} else if task.Action.ProxyComponent() != "" {
+		output, executionErr = c.executor.runProxyTask(ctx, task.Action, c.config.Version)
 	} else if task.Action.SystemBBR() {
 		output, executionErr = c.bbr.Execute(ctx, task.Action, task.TCPSettings)
 	} else if task.Action == core.ActionUpgradeAgent {

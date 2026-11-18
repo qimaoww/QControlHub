@@ -14,7 +14,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func (e *Executor) upgradeNginxForAgentBuild(ctx context.Context, build string, action core.Action) (string, error) {
+func (e *Executor) upgradeProxiesForAgentBuild(ctx context.Context, build string, action core.Action) (string, error) {
 	if build == "" || !managedTLSStateExists() {
 		return "", nil
 	}
@@ -29,7 +29,7 @@ func (e *Executor) upgradeNginxForAgentBuild(ctx context.Context, build string, 
 
 // The TLS helper holds the same lock as deployments and certificate reloads.
 // A build marker avoids contacting package repositories on ordinary restarts.
-func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build string, explicit bool, upgradePackage func(context.Context, string) (string, error)) (string, error) {
+func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build string, explicit bool, upgradePackage func(context.Context, string) (string, string, error)) (string, error) {
 	deployments, err := m.load()
 	if err != nil {
 		return "", err
@@ -49,20 +49,13 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 		return "", errors.New("无效的 Agent 构建版本")
 	}
 	marker := filepath.Join(m.root, "nginx-package-build")
+	// A previous Agent can write the target build before the new Agent starts.
+	markerValue := "runtime-v2 " + build
 	if err := validateProtectedDirectoryChain(m.root); err != nil {
 		return "", err
 	}
-	if !explicit {
-		checked, err := readConfigurationFile(marker)
-		if err == nil && checked == build {
-			return "", nil
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-	}
 
-	service, unit, definition := m.serviceDefinition("nginx", false)
+	service, unit, _ := m.serviceDefinition("nginx", false)
 	status, err := m.services.status(ctx, service)
 	if err != nil {
 		return "", err
@@ -70,34 +63,10 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 	if status != "active" {
 		return "", fmt.Errorf("托管 Nginx 服务状态为 %s，请在维护窗口核对并更新", status)
 	}
-	if err = validateManagedUnitFile(unit); err != nil {
+	if err = m.checkProxyUnit(ctx, "nginx"); err != nil {
 		return "", err
 	}
-	if config, err := os.ReadFile(unit); err != nil || string(config) != definition {
-		return "", errors.New("托管 Nginx 服务定义已变更，请在维护窗口更新")
-	}
-	if m.services.Kind() == ServiceManagerSystemd {
-		if path, err := systemdUnitProperty(ctx, service, "FragmentPath"); err != nil || path != unit {
-			return "", errors.New("无法核对正在使用的托管 Nginx 单元")
-		}
-		err = validateManagedUnitDropIns(ctx, service)
-	} else {
-		err = validateOpenRCCoreOverrides(service)
-	}
-	if err != nil {
-		return "", err
-	}
-	binary := managedNginxBinary()
-	if err := validatePrivilegedExecutable(binary); err != nil {
-		return "", err
-	}
-	if _, err := m.nginxMasterExecutable(ctx, service, binary); err != nil {
-		return "", err
-	}
-	revision, err := upgradePackage(ctx, binary)
-	if err != nil {
-		return "", err
-	}
+	binary := m.nginxBinary()
 	if err := validatePrivilegedExecutable(binary); err != nil {
 		return "", err
 	}
@@ -105,42 +74,172 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 	if err != nil {
 		return "", err
 	}
+	if privateNginxRevision(binary) != "" {
+		digest, exists, err := protectedCoreMigrationFileDigest(binary, 64<<20)
+		if err != nil || !exists || !strings.HasSuffix(binary, "-"+digest) {
+			return "", errors.New("托管 Nginx 文件已变更，保留现有程序")
+		}
+	}
+	runningBinary := binary
 	running, err := m.nginxMasterExecutable(ctx, service, binary)
+	if err != nil && privateNginxRevision(binary) != "" {
+		// A previous update may have persisted the unit before restarting.
+		pid, pidErr := managedServiceProcessPID(ctx, m.services, service)
+		if pidErr != nil {
+			return "", pidErr
+		}
+		id, idErr := readOpenRCProcessIdentity(pid)
+		if idErr != nil {
+			return "", idErr
+		}
+		runningBinary = strings.TrimSuffix(id.Executable, " (deleted)")
+		if runningBinary != systemNginxBinary() && privateNginxRevision(runningBinary) == "" {
+			return "", err
+		}
+		running, err = m.nginxMasterExecutable(ctx, service, runningBinary)
+	}
 	if err != nil {
 		return "", err
 	}
-	if !os.SameFile(running, installed) {
-		if _, err := m.validateNginx(ctx, filepath.Join(m.root, "nginx.conf")); err != nil {
-			return "", fmt.Errorf("候选 Nginx 配置校验失败：%w", err)
+	if !explicit {
+		checked, err := readConfigurationFile(marker)
+		if err == nil && checked == markerValue && os.SameFile(running, installed) && runningBinary == binary {
+			return "", nil
 		}
-		// Only restart an active instance. Respect an administrator stopping
-		// the service while the package manager or config check was running.
-		restart := []string{"try-restart", service}
-		if m.services.Kind() == ServiceManagerOpenRC {
-			restart = []string{"--ifstarted", service, "restart"}
-		}
-		if _, err := run(ctx, m.services.executable, restart...); err != nil {
-			return "", fmt.Errorf("托管 Nginx 重启失败：%w", err)
-		}
-		check, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		if err := verifyNginxActivation(check, func(ctx context.Context) (string, error) {
-			status, err := m.services.status(ctx, service)
-			if err != nil || status != "active" {
-				return status, err
-			}
-			if running, err := m.nginxMasterExecutable(ctx, service, binary); err == nil && os.SameFile(running, installed) {
-				return status, nil
-			}
-			return "activating", nil
-		}); err != nil {
-			return "", fmt.Errorf("托管 Nginx 运行二进制核对失败：%w", err)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
 		}
 	}
-	if err := m.writeConfig(marker, build, true); err != nil {
+
+	candidate, revision, err := upgradePackage(ctx, binary)
+	if err != nil {
 		return "", err
 	}
+	if err := validatePrivilegedExecutable(candidate); err != nil {
+		return "", err
+	}
+	installed, err = os.Stat(candidate)
+	if err != nil {
+		return "", err
+	}
+	if !os.SameFile(running, installed) || candidate != binary {
+		if _, err := m.validateNginxBinary(ctx, filepath.Join(m.root, "nginx.conf"), candidate); err != nil {
+			return "", errors.New("候选 Nginx 配置校验失败，请在节点核对托管配置和读取权限")
+		}
+		if err := m.switchNginx(ctx, service, unit, runningBinary, candidate, installed); err != nil {
+			return "", err
+		}
+	}
+	if os.SameFile(running, installed) {
+		if err = m.verifyRunningProxy(ctx, "nginx", service, candidate, installed); err != nil {
+			return "", err
+		}
+	}
+	if privateNginxRevision(candidate) != "" {
+		if err = cleanupPrivateNginx(candidate); err != nil {
+			return "", err
+		}
+	}
+	if err := m.writeConfig(marker, markerValue, true); err != nil {
+		return "", err
+	}
+	if privateNginxRevision(candidate) != "" {
+		return fmt.Sprintf("托管 Nginx 正在运行 nginx.org 主线签名包 %s（已核对运行进程）。", revision), nil
+	}
 	return fmt.Sprintf("托管 Nginx 正在运行 %s。安全补丁以软件包来源公告为准。", revision), nil
+}
+
+func (m *tlsFrontendManager) switchNginx(ctx context.Context, service, unit, old, candidate string, installed os.FileInfo) error {
+	return m.switchProxy(ctx, "nginx", service, unit, old, candidate, installed)
+}
+
+func (m *tlsFrontendManager) switchProxy(ctx context.Context, mode, service, unit, old, candidate string, installed os.FileInfo) error {
+	if status, err := m.services.status(ctx, service); err != nil || status != "active" {
+		return fmt.Errorf("托管 %s 已停止切换，服务状态 %s：%v", mode, status, err)
+	}
+	if err := m.checkProxyUnit(ctx, mode); err != nil {
+		return err
+	}
+	if _, err := m.proxyMasterExecutable(ctx, mode, service, old); err != nil {
+		return err
+	}
+	pending := filepath.Join(m.root, mode+"-switch.pending")
+	if old != candidate {
+		digest, exists, err := protectedCoreMigrationFileDigest(old, 100<<20)
+		if err != nil || !exists {
+			return errors.New("无法保留原托管程序")
+		}
+		if err = m.writeConfig(pending, old+"\n"+candidate+"\n"+digest, true); err != nil {
+			return err
+		}
+	}
+	// Use try-restart so an independently stopped service stays stopped.
+	restart := []string{"try-restart", service}
+	if m.services.Kind() == ServiceManagerOpenRC {
+		restart = []string{"--ifstarted", service, "restart"}
+	}
+	activate := func() error {
+		if old != candidate {
+			if err := m.selectProxyUnit(ctx, mode, unit, candidate); err != nil {
+				return err
+			}
+		}
+		if _, err := run(ctx, m.services.executable, restart...); err != nil {
+			return err
+		}
+		return m.verifyRunningProxy(ctx, mode, service, candidate, installed)
+	}
+	err := activate()
+	if old == candidate {
+		return err
+	}
+	if err == nil {
+		return os.Remove(pending)
+	}
+	recoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if restoreErr := m.recoverProxySwitch(recoverCtx, mode); restoreErr != nil {
+		return fmt.Errorf("%s 切换失败（%v），恢复失败：%w", mode, err, restoreErr)
+	}
+	return fmt.Errorf("%s 切换失败，已恢复 %s：%w", mode, m.proxyVersion(recoverCtx, mode, old), err)
+}
+
+func (m *tlsFrontendManager) verifyRunningProxy(ctx context.Context, mode, service, binary string, installed os.FileInfo) error {
+	check, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := verifyNginxActivation(check, func(ctx context.Context) (string, error) {
+		status, err := m.services.status(ctx, service)
+		if err != nil || status != "active" {
+			return status, err
+		}
+		if running, err := m.proxyMasterExecutable(ctx, mode, service, binary); err == nil && os.SameFile(running, installed) {
+			return status, nil
+		}
+		return "activating", nil
+	})
+	if err != nil {
+		return err
+	}
+	deployments, err := m.load()
+	if err != nil {
+		return err
+	}
+	routes, err := activeTLSFrontends(deployments)
+	if err != nil {
+		return err
+	}
+	for _, f := range routes {
+		if f.Mode == mode {
+			if err := probeFrontendTLS(check, f, true, true); err != nil {
+				return errors.New("托管监听的 TLS 或业务请求校验失败")
+			}
+		}
+	}
+	running, err := m.proxyMasterExecutable(check, mode, service, binary)
+	if err != nil || !os.SameFile(running, installed) {
+		return errors.New("业务检查后主进程已变更")
+	}
+	return nil
 }
 
 func verifyNginxActivation(ctx context.Context, probe serviceStatusProbe) error {
@@ -167,7 +266,7 @@ func (m *tlsFrontendManager) nginxMasterExecutable(ctx context.Context, service,
 	if err != nil {
 		return nil, err
 	}
-	expected := "nginx: master process " + binary + " -p " + m.state + "/ -c " + filepath.Join(m.root, "nginx.conf")
+	expected := "nginx: master process " + binary + " " + m.nginxServiceArguments(binary)
 	if strings.TrimSuffix(identity.Executable, " (deleted)") != resolved || strings.TrimSpace(strings.Join(identity.Argv, " ")) != expected {
 		return nil, errors.New("运行中的 Nginx 与 QAgent 托管服务配置不一致")
 	}
@@ -175,107 +274,80 @@ func (m *tlsFrontendManager) nginxMasterExecutable(ctx context.Context, service,
 }
 
 var nginxDebPackage = regexp.MustCompile(`^nginx(-(core|full|light|extras))?(:[a-z0-9-]+)?$`)
-var nginxAPKRevision = regexp.MustCompile(`^nginx-[0-9][a-zA-Z0-9._+~-]*-r[0-9]+$`)
 
-func (m *tlsFrontendManager) upgradeSystemNginxPackage(ctx context.Context, binary string) (string, error) {
-	path, err := filepath.EvalSymlinks(binary)
+func (m *tlsFrontendManager) upgradeNginxBinary(ctx context.Context, binary string) (string, string, error) {
+	p, err := nginxHostPlatform()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	apt, err := findIPQualityExecutable("apt-get")
-	if err != nil {
-		return "", err
+	revision := privateNginxRevision(binary)
+	if revision == "" {
+		revision, err = systemNginxRevision(ctx, p, binary)
+		if err != nil {
+			return "", "", err
+		}
 	}
-	if apt != "" {
-		return m.upgradeAptNginx(ctx, apt, path)
-	}
-	apk, err := findIPQualityExecutable("apk")
-	if err != nil {
-		return "", err
-	}
-	if apk != "" {
-		return upgradeAPKNginx(ctx, apk, path)
-	}
-	return "", errors.New("此软件源需由管理员更新 Nginx 软件包并重启托管服务")
+	return fetchOfficialNginx(ctx, p, revision, "install")
 }
 
-func (m *tlsFrontendManager) upgradeAptNginx(ctx context.Context, apt, binary string) (string, error) {
+func systemNginxRevision(ctx context.Context, p nginxPlatform, binary string) (string, error) {
+	if p.family == "debian" || p.family == "ubuntu" {
+		_, v, err := nginxDebianOwner(ctx, binary)
+		return v, err
+	}
+	if p.family == "alpine" {
+		apk, err := findIPQualityExecutable("apk")
+		if err != nil {
+			return "", err
+		}
+		out, err := run(ctx, apk, "--no-network", "info", "--who-owns", binary)
+		_, v, ok := strings.Cut(out, " is owned by nginx-")
+		if err != nil || !ok || !nginxOfficialRevision.MatchString(v) {
+			return "", errors.New("无法核对 Nginx APK 文件归属")
+		}
+		audit, err := run(ctx, apk, "--no-network", "audit", "--system", binary)
+		if err != nil || audit != "" {
+			return "", errors.New("Nginx APK 文件已变更或无法核实")
+		}
+		return v, nil
+	}
+	rpm, err := findIPQualityExecutable("rpm")
+	if err != nil {
+		return "", err
+	}
+	out, err := run(ctx, rpm, "-qf", "--qf", "%{NAME} %{VERSION}-%{RELEASE}", binary)
+	v, ok := strings.CutPrefix(out, "nginx ")
+	if err != nil || !ok || !nginxOfficialRevision.MatchString(v) {
+		return "", errors.New("无法核对 Nginx RPM 文件归属")
+	}
+	verify, err := run(ctx, rpm, "-Vf", "--noscripts", binary)
+	if err != nil && verify == "" {
+		return "", err
+	}
+	for line := range strings.SplitSeq(verify, "\n") {
+		if strings.HasSuffix(line, " "+binary) {
+			return "", errors.New("Nginx RPM 文件已变更")
+		}
+	}
+	return v, nil
+}
+
+func nginxDebianOwner(ctx context.Context, binary string) (string, string, error) {
 	query, err := findIPQualityExecutable("dpkg-query")
 	if err != nil || query == "" {
-		return "", errors.New("无法核对 Nginx 的 Debian 软件包归属")
+		return "", "", errors.New("无法核对 Nginx 的 Debian 软件包归属")
 	}
 	owner, err := run(ctx, query, "--search", binary)
 	name, path, ok := strings.Cut(strings.TrimSpace(owner), ": ")
 	if err != nil || !ok || path != binary || !nginxDebPackage.MatchString(name) {
-		return "", errors.New("运行的 Nginx 可执行文件由管理员负责更新")
-	}
-	if _, err := runIPQualityCommandWithRestartMode(ctx, apt, []string{"-o", "Acquire::Retries=2", "--error-on=any", "update"}, "l"); err != nil {
-		return "", fmt.Errorf("更新 APT 软件包索引失败：%w", err)
-	}
-	// The upstream package can call the SysV binary upgrade directly when
-	// /run/nginx.pid exists, bypassing policy-rc.d.
-	if err := m.checkIndependentNginx(ctx); err != nil {
-		return "", err
-	}
-	cleanup, err := protectAptServices(ctx, "start", "stop", "restart", "try-restart", "reload", "force-reload", "upgrade")
-	if err != nil {
-		return "", err
-	}
-	defer cleanup()
-	args := []string{"-o", "DPkg::Lock::Timeout=30", "-o", "Acquire::Retries=2", "-o", "Dpkg::Options::=--force-confold",
-		"install", "-y", "--only-upgrade", "--no-remove", "--no-install-recommends", name}
-	if _, err := runIPQualityCommandWithRestartMode(ctx, apt, args, "l"); err != nil {
-		return "", fmt.Errorf("安装 APT 的 Nginx 更新失败：%w", err)
+		return "", "", errors.New("运行的 Nginx 可执行文件由管理员负责更新")
 	}
 	revision, err := run(ctx, query, "--show", "--showformat=${Version}", name)
 	if fields := strings.Fields(revision); err != nil || len(fields) != 1 {
-		return "", errors.New("无法核对已安装的 Nginx 软件包修订号")
+		return "", "", errors.New("无法核对已安装的 Nginx 软件包修订号")
 	}
-	return name + " " + strings.TrimSpace(revision), nil
-}
-
-func (m *tlsFrontendManager) checkIndependentNginx(ctx context.Context) error {
-	if _, err := os.Lstat("/run/nginx.pid"); !errors.Is(err, os.ErrNotExist) {
-		return errors.New("检测到独立 Nginx 进程文件或无法核对，请在维护窗口手动更新系统包")
+	if err = verifyDebianNginxFile(ctx, query, name, binary); err != nil {
+		return "", "", err
 	}
-	service := "nginx"
-	if m.services.Kind() == ServiceManagerSystemd {
-		service += ".service"
-	}
-	status, err := m.services.status(ctx, service)
-	if err != nil {
-		return fmt.Errorf("无法核对独立 Nginx 服务状态：%w", err)
-	}
-	switch status {
-	case "inactive", "failed":
-		return nil
-	default:
-		return errors.New("独立 Nginx 服务正在使用系统包，请在维护窗口手动更新")
-	}
-}
-
-func upgradeAPKNginx(ctx context.Context, apk, binary string) (string, error) {
-	revision := func() (string, error) {
-		owner, err := run(ctx, apk, "--no-network", "info", "--who-owns", binary)
-		_, version, ok := strings.Cut(strings.TrimSpace(owner), " is owned by ")
-		if err != nil || !ok || !nginxAPKRevision.MatchString(version) {
-			return "", errors.New("无法核对 Nginx 的 Alpine 软件包归属和修订号")
-		}
-		return version, nil
-	}
-	if _, err := revision(); err != nil {
-		return "", err
-	}
-	if _, err := runIPQualityCommandWithRestartMode(ctx, apk, []string{"--wait", "30", "--no-cache", "update"}, "l"); err != nil {
-		return "", fmt.Errorf("更新 APK 软件包索引失败：%w", err)
-	}
-	args := []string{"--wait", "30", "--no-cache", "--no-scripts", "--no-commit-hooks", "upgrade", "--latest", "nginx"}
-	output, err := runIPQualityCommandWithRestartMode(ctx, apk, args, "l")
-	if err != nil {
-		return "", fmt.Errorf("安装 APK 的 Nginx 更新失败：%w", err)
-	}
-	if strings.Contains(output, "WARNING: fetching ") {
-		return "", errors.New("APK 软件源未完整刷新，请核对 Nginx 软件包状态")
-	}
-	return revision()
+	return name, strings.TrimSpace(revision), nil
 }

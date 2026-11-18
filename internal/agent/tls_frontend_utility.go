@@ -15,18 +15,20 @@ import (
 )
 
 type tlsFrontendRequest struct {
-	NginxUpgrade  string                         `json:"nginx_upgrade,omitempty"`
-	DeferCleanup  bool                           `json:"defer_cleanup,omitempty"`
-	NativeHandoff string                         `json:"native_handoff,omitempty"`
-	Service       string                         `json:"service"`
-	Kind          string                         `json:"kind"`
-	Action        core.Action                    `json:"action"`
-	Stage         bool                           `json:"stage"`
-	Frontends     []core.TLSFrontend             `json:"frontends"`
-	Certificates  bool                           `json:"certificates,omitempty"`
-	Deadline      time.Time                      `json:"deadline,omitempty"`
-	SyncSource    *core.ManagedCertificateSource `json:"sync_source,omitempty"`
-	ConfigContent string                         `json:"config_content,omitempty"`
+	ObserveProxies bool                           `json:"observe_proxies,omitempty"`
+	ProxyBuild     string                         `json:"proxy_build,omitempty"`
+	NginxUpgrade   string                         `json:"nginx_upgrade,omitempty"`
+	DeferCleanup   bool                           `json:"defer_cleanup,omitempty"`
+	NativeHandoff  string                         `json:"native_handoff,omitempty"`
+	Service        string                         `json:"service"`
+	Kind           string                         `json:"kind"`
+	Action         core.Action                    `json:"action"`
+	Stage          bool                           `json:"stage"`
+	Frontends      []core.TLSFrontend             `json:"frontends"`
+	Certificates   bool                           `json:"certificates,omitempty"`
+	Deadline       time.Time                      `json:"deadline,omitempty"`
+	SyncSource     *core.ManagedCertificateSource `json:"sync_source,omitempty"`
+	ConfigContent  string                         `json:"config_content,omitempty"`
 }
 
 var tlsRequestName = regexp.MustCompile(`^[a-f0-9]{24}\.json$`)
@@ -109,15 +111,28 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 			return err
 		}
 	}
+	if request.ObserveProxies {
+		for _, mode := range []string{"nginx", "caddy"} {
+			if err := manager.saveProxyObservation(ctx, mode, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if mode := request.Action.ProxyComponent(); mode != "" {
+		return manager.proxyOperation(ctx, mode, request.Action, request.ProxyBuild, true)
+	}
 	if request.NginxUpgrade != "" {
 		if (request.Action != core.ActionStatus && request.Action != core.ActionUpgradeAgent) || request.Stage || request.Certificates || request.NativeHandoff != "" || len(request.Frontends) != 0 {
 			return errors.New("invalid managed Nginx upgrade request")
 		}
-		output, err := manager.upgradeManagedNginx(ctx, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent, manager.upgradeSystemNginxPackage)
-		if output != "" {
-			fmt.Println(output)
+		var results []error
+		for _, mode := range []string{"nginx", "caddy"} {
+			if err := manager.proxyOperation(ctx, mode, request.Action, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent); err != nil {
+				results = append(results, err)
+			}
 		}
-		return err
+		return errors.Join(results...)
 	}
 	if request.NativeHandoff != "" {
 		return manager.nativeHandoff(ctx, request.Service, request.ConfigContent, request.NativeHandoff, request.Frontends)

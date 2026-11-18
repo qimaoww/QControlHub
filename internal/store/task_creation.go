@@ -171,6 +171,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
+	if request.Action.ProxyComponent() != "" && !containsFeature(features, core.AgentFeatureManagedProxies) {
+		return core.Task{}, fmt.Errorf("%w: 需升级 QAgent", ErrConflict)
+	}
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
 	}
