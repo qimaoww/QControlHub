@@ -1,127 +1,173 @@
-const prefix = "qcontrolhub:connections:v2:", indexKey = `${prefix}index`;
-export const connectionCacheDay = at => {
- const day = new Date(at);
- return `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
-};
-export function connectionSessionStorage() {
-  try { return globalThis.sessionStorage; } catch { return null; }
-}
-export function clearConnectionStorage(storage = connectionSessionStorage()) {
-  try {
-    for (const key of Object.keys(storage || {})) if (key.startsWith("qcontrolhub:connections:")) storage.removeItem(key);
-  } catch { /* Disabled storage must not prevent login or API reads. */ }
-}
-const validResult = result => result && Array.isArray(result.records) && Array.isArray(result.sources)
-  && Array.isArray(result.timeline) && !result.preview
-  && Number.isSafeInteger(result.ips) && result.ips >= 0 && Number.isSafeInteger(result.flows) && result.flows >= 0
-  && ["next_cursor", "page_cursor"].every(key => result[key] === undefined || typeof result[key] === "string")
-  && result.records.every(row => row && typeof row.agent_id === "string" && typeof row.client_ip === "string" && typeof row.engine === "string"
-    && typeof row.first_seen === "string" && typeof row.last_seen === "string"
-    && (row.endpoints === undefined || Array.isArray(row.endpoints) && row.endpoints.every(endpoint => endpoint && Number.isInteger(endpoint.local_port))))
-  && result.sources.every(source => source && typeof source.agent_id === "string" && (source.agent_name === undefined || typeof source.agent_name === "string"));
+const databaseName = "qcontrolhub:connections";
+const storeName = "pages";
+const scopeRange = scope => IDBKeyRange.bound([scope], [scope, []]);
 
-// Persistence is tab/session scoped and can only be restored after a current
-// server scope check. Preference IDs and usernames never authorize IP history.
-export function createConnectionCache({ now = Date.now, ttl = 30_000, maxEntries = 24, maxBytes = 4 * 1024 * 1024, storage = null } = {}) {
-  const entries = new Map(), dirty = new Set(), deleted = new Set();
-  let bytes = 0, scope = "", selection = null, timer, restoring = false;
-  const remove = key => {
-    const entry = entries.get(key);
-    if (entry) bytes -= entry.bytes;
-    entries.delete(key); dirty.delete(key); deleted.add(key);
-  };
-  const prune = () => {
-    for (const [key, entry] of entries) if (now() < entry.at || connectionCacheDay(now()) !== connectionCacheDay(entry.at)) remove(key);
-  };
-  function flush() {
-    clearTimeout(timer); timer = null;
-    if (!storage || !scope) return;
-    prune();
-    try {
-      // Write changed pages only. Location completion and filter changes never
-      // serialize every retained result or change its original read time.
-      for (const key of deleted) storage.removeItem(prefix + key);
-      for (const key of dirty) {
-        const entry = entries.get(key);
-        if (entry) storage.setItem(prefix + key, JSON.stringify({ scope, at: entry.at, result: entry.result, locationsAttempted: entry.locationsAttempted }));
-      }
-      storage.setItem(indexKey, JSON.stringify({ version: 2, scope, selection, keys: [...entries.keys()] }));
-    } catch {
-      clearConnectionStorage(storage); storage = null;
+// Old tab entries are per login and cannot be used as persistent baselines.
+export function clearConnectionStorage() {
+  try {
+    for (const key of Object.keys(globalThis.sessionStorage)) {
+      if (key.startsWith(databaseName + ":")) globalThis.sessionStorage.removeItem(key);
     }
-    dirty.clear(); deleted.clear();
-  }
-  const schedule = () => { if (!timer && storage && scope) timer = setTimeout(flush, 100); };
-  const clear = () => {
-    clearTimeout(timer); timer = null; entries.clear(); dirty.clear(); deleted.clear(); bytes = 0; selection = null;
-    clearConnectionStorage(storage);
+  } catch { /* Storage can be disabled. */ }
+}
+
+export function sameConnectionValue(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameConnectionValue(a[key], b[key]));
+}
+
+function openConnectionDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB?.open(databaseName, 1);
+    if (!request) { resolve(null); return; }
+    request.onupgradeneeded = () => {
+      const store = request.result.createObjectStore(storeName, { keyPath: ["scope", "kind", "key"] });
+      store.createIndex("at", "at");
+    };
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => resolve(null);
+  }).catch(() => null);
+}
+
+function transaction(db, mode, work) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    tx.onabort = () => reject(tx.error);
+    const request = work(tx.objectStore(storeName));
+    tx.oncomplete = () => resolve(request?.result);
+  });
+}
+
+function trimPersistent(store, capacity, expired) {
+  const count = store.count(), index = store.index("at");
+  count.onsuccess = () => {
+    let excess = count.result - capacity;
+    index.openKeyCursor().onsuccess = event => {
+      const cursor = event.target.result;
+      if (!cursor || (excess <= 0 && cursor.key >= expired)) return;
+      excess--;
+      store.delete(cursor.primaryKey);
+      cursor.continue();
+    };
   };
-  const api = {
+}
+
+// Avoid serializing result payloads just to estimate their size. Each page
+// counts toward both the memory limit and a fixed share of the disk budget.
+function estimatedSize(value) {
+  if (typeof value === "string") return value.length * 2 + 16;
+  if (!value || typeof value !== "object") return 16;
+  return Object.entries(value).reduce((size, [key, item]) => size + 16 + key.length * 2 + estimatedSize(item), 32);
+}
+
+const validResult = result => result && Array.isArray(result.records) && Array.isArray(result.sources)
+  && Array.isArray(result.timeline) && !result.preview && Number.isSafeInteger(result.ips) && result.ips >= 0
+  && Number.isSafeInteger(result.flows) && result.flows >= 0 && result.records.every(row => row &&
+    typeof row.agent_id === "string" && typeof row.client_ip === "string" && typeof row.engine === "string"
+    && typeof row.first_seen === "string" && typeof row.last_seen === "string"
+    && (row.endpoints === undefined || Array.isArray(row.endpoints) && row.endpoints.every(port => port && Number.isInteger(port.local_port))))
+  && result.sources.every(source => source && typeof source.agent_id === "string")
+  && ["next_cursor", "page_cursor"].every(key => result[key] === undefined || typeof result[key] === "string");
+
+const validSelection = saved => saved?.filters && typeof saved.filters.date === "string"
+  && ["day", "month"].includes(saved.filters.period) && typeof saved.cursor === "string"
+  && Array.isArray(saved.cursors) && saved.cursors.length <= 100 && saved.cursors.every(value => typeof value === "string")
+  && Array.isArray(saved.nodeOrder) && saved.nodeOrder.length <= 500 && saved.nodeOrder.every(value => typeof value === "string")
+  && Array.isArray(saved.sources) && saved.sources.every(source => source && typeof source.agent_id === "string")
+  && ["agent_id", "engine", "client_ip", "country_code", "include_non_public"].every(key => saved.filters[key] === undefined || typeof saved.filters[key] === "string");
+
+export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl = 24 * 60 * 60_000, maxEntries = 24, maxBytes = 4 * 1024 * 1024, database = openConnectionDatabase() } = {}) {
+  const entries = new Map(), pending = new Set();
+  let scope = "", selection = null, selectionTime = 0, generation = 0;
+  const withinLifetime = at => Number.isFinite(at) && now() >= at && now() - at < historyTtl;
+  const prune = () => {
+    for (const [key, entry] of entries) if (!withinLifetime(entry.at)) entries.delete(key);
+    while (entries.size > maxEntries) entries.delete(entries.keys().next().value);
+  };
+  const run = operation => {
+    const task = Promise.resolve(database).then(db => db && operation(db)).catch(() => {});
+    pending.add(task); void task.finally(() => pending.delete(task));
+    return task;
+  };
+  const write = entry => {
+    if (!scope || estimatedSize(entry) > maxBytes / maxEntries) return;
+    const version = generation;
+    void run(db => {
+      if (version !== generation) return;
+      return transaction(db, "readwrite", store => {
+        const read = store.get([entry.scope, entry.kind, entry.key]);
+        read.onsuccess = () => {
+          // A request started in another tab can finish later. Never publish
+          // its older view over a newer read of the same authorized page.
+          if (read.result && read.result.observedAt >= entry.observedAt) return;
+          store.put(entry);
+          trimPersistent(store, maxEntries, now() - historyTtl);
+        };
+      });
+    });
+  };
+  const reset = verifiedScope => {
+    ++generation; scope = verifiedScope; entries.clear(); selection = null; selectionTime = 0;
+  };
+  return {
     get scope() { return scope; },
     get selection() { return selection; },
-    hasStored() { try { return Boolean(storage?.getItem(indexKey)); } catch { storage = null; return false; } },
-    restore(verifiedScope) {
-      if (!verifiedScope || typeof verifiedScope !== "string") { clear(); scope = ""; return; }
-      if (scope && scope !== verifiedScope) clear();
-      scope = verifiedScope;
-      try {
-        const raw = storage?.getItem(indexKey);
-        if (!raw) return;
-        if (raw.length > 128 * 1024) throw new Error("cache index size");
-        const index = JSON.parse(raw);
-        if (index.version !== 2 || index.scope !== scope || !Array.isArray(index.keys) || index.keys.length > maxEntries) throw new Error("cache index");
-        let restoredBytes = 0;
-        restoring = true;
-        for (const key of index.keys) {
-          if (typeof key !== "string" || key.length > 16384) throw new Error("cache key");
-          const value = storage.getItem(prefix + key);
-          if (!value) continue;
-          restoredBytes += value.length * 2 + key.length * 2;
-          if (restoredBytes > maxBytes + maxEntries * 1024) throw new Error("cache size");
-          const entry = JSON.parse(value);
-          if (entry.scope !== scope || !Number.isFinite(entry.at) || entry.at > now() || typeof entry.locationsAttempted !== "boolean" || !validResult(entry.result)) throw new Error("cache entry");
-          if (connectionCacheDay(now()) === connectionCacheDay(entry.at)) api.set(key, entry.result, entry.at, entry.locationsAttempted);
-          else deleted.add(key);
+    async restore(verifiedScope, current = () => true) {
+      if (!current()) return;
+      if (!verifiedScope) { reset(""); return; }
+      if (scope !== verifiedScope) reset(verifiedScope);
+      const version = generation;
+      const saved = await run(db => transaction(db, "readonly", store => store.getAll(scopeRange(verifiedScope), maxEntries)));
+      if (generation !== version || !current()) return;
+      for (const entry of (saved || []).sort((a, b) => a.at - b.at)) {
+        if (!withinLifetime(entry.at) || entry.scope !== scope || !Number.isFinite(entry.observedAt)) continue;
+        if (entry.kind === "page" && validResult(entry.result) && entry.result.cache_scope === scope
+          && (entries.get(entry.key)?.observedAt ?? -Infinity) < entry.observedAt) entries.set(entry.key, entry);
+        if (entry.kind === "position" && entry.observedAt > selectionTime && validSelection(entry.value)) {
+          selection = entry.value; selectionTime = entry.observedAt;
         }
-        const saved = index.selection;
-        if (saved && typeof saved === "object" && saved.filters && typeof saved.filters.date === "string"
-          && ["day", "month"].includes(saved.filters.period) && typeof saved.cursor === "string"
-          && Array.isArray(saved.cursors) && saved.cursors.length <= 100 && saved.cursors.every(value => typeof value === "string")
-          && Array.isArray(saved.nodeOrder) && saved.nodeOrder.length <= 500 && saved.nodeOrder.every(value => typeof value === "string")
-          && Array.isArray(saved.sources) && saved.sources.every(source => source && typeof source.agent_id === "string" && (source.agent_name === undefined || typeof source.agent_name === "string"))
-          && ["agent_id", "engine", "client_ip", "country_code", "include_non_public"].every(key => saved.filters[key] === undefined || typeof saved.filters[key] === "string")) selection = saved;
-      } catch { clear(); }
-      finally { restoring = false; }
+      }
+      prune();
     },
     bind(verifiedScope) {
-      if (typeof verifiedScope !== "string" || !verifiedScope) return;
-      if (scope !== verifiedScope) { clear(); scope = verifiedScope; }
+      if (verifiedScope && scope !== verifiedScope) reset(verifiedScope);
     },
-    select(value) { selection = value; schedule(); },
+    select(value, observedAt = now()) {
+      if (observedAt < selectionTime || sameConnectionValue(selection, value)) return;
+      selection = value; selectionTime = observedAt;
+      write({ scope, kind: "position", key: "", at: now(), observedAt, value });
+    },
     get(key) {
       prune();
       const entry = entries.get(key);
-      if (!entry) { schedule(); return null; }
+      if (!entry) return null;
       entries.delete(key); entries.set(key, entry);
-      return { ...entry, fresh: now() - entry.at < ttl };
+      const historical = Date.parse(new URLSearchParams(key).get("until")) <= entry.at;
+      return { ...entry, historical, fresh: now() - entry.at < (historical ? historyTtl : ttl) };
     },
-    set(key, result, at = now(), locationsAttempted = false) {
-      remove(key);
-      let size;
-      try { size = JSON.stringify(result).length * 2 + key.length * 2; } catch { return; }
-      if (size > maxBytes || !Number.isFinite(at) || at > now() || connectionCacheDay(now()) !== connectionCacheDay(at)) { schedule(); return; }
-      entries.set(key, { result, at, bytes: size, locationsAttempted });
-      deleted.delete(key); if (!restoring) dirty.add(key); bytes += size;
+    set(key, result, at = now(), { observedAt = at, etag = "", unchanged = false } = {}) {
+      if (!unchanged && estimatedSize(result) > maxBytes) return;
+      const previous = entries.get(key);
+      if (previous && observedAt < previous.observedAt) return;
+      // In-memory confirmation may advance the token/time; only a changed
+      // data page earns a structured clone and a durable write.
+      const entry = { scope, kind: "page", key, result, at, observedAt, etag };
+      entries.delete(key); entries.set(key, entry);
       prune();
-      while (entries.size > maxEntries || bytes > maxBytes) remove(entries.keys().next().value);
-      if (!restoring) schedule();
+      if (!unchanged) write(entry);
     },
     preview(query) {
       prune();
       if (query.has("cursor")) return null;
       for (const [key, entry] of [...entries].reverse()) {
         const candidate = new URLSearchParams(key);
-        if (candidate.has("cursor") || ["since", "until", "include_non_public", "group_by", "timeline", "bucket", "limit"].some(name => candidate.get(name) !== query.get(name)) || JSON.stringify(candidate.getAll("node_order")) !== JSON.stringify(query.getAll("node_order"))) continue;
+        if (candidate.has("cursor") || ["since", "until", "include_non_public", "group_by", "timeline", "bucket", "limit"].some(name => candidate.get(name) !== query.get(name)) || !sameConnectionValue(candidate.getAll("node_order"), query.getAll("node_order"))) continue;
         if (["agent_id", "engine", "client_ip", "country_code"].some(name => candidate.get(name) && candidate.get(name) !== query.get(name))) continue;
         const records = entry.result.records.filter(row => (!query.get("agent_id") || row.agent_id === query.get("agent_id")) && (!query.get("engine") || row.engine === query.get("engine")) && (!query.get("client_ip") || row.client_ip === query.get("client_ip")) && (!query.get("country_code") || !row.location?.non_public && row.location?.country_code === query.get("country_code")));
         if (!records.length) continue;
@@ -129,7 +175,11 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, maxEntries
       }
       return null;
     },
-    clear, flush,
+    clear() {
+      const revoked = scope;
+      reset("");
+      if (revoked) void run(db => transaction(db, "readwrite", store => store.delete(scopeRange(revoked))));
+    },
+    flush() { return Promise.all([...pending]); },
   };
-  return api;
 }

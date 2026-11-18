@@ -10,9 +10,23 @@ export async function bootConnectionReloadFixture() {
   Date.now = () => nativeNow() + config.offset;
   const nativeFetch = window.fetch;
   const identity = () => config.user ? { role: config.role, user_id: config.user, username: config.user, permissions: ['core-logs.read'], csrf_token: `fixture-${config.user}-${config.login}` } : null;
-  const scope = () => `${config.user}:${config.login}:${config.scope}`;
+  const scope = () => `${config.user}:${config.scope}`;
   const records = Array.from({ length: 6 }, (_, index) => ({ id: index + 1, agent_id: index < 3 ? 'alpha' : 'bravo', agent_name: index < 3 ? 'Alpha · 东京测试节点' : 'Bravo · 长名称边界测试节点-abcdefghijklmnopqrstuvwxyz0123456789', engine: index % 2 ? 'mihomo' : 'xray', client_ip: `8.8.8.${index + 1}`, first_seen: '2026-11-01T00:00:00Z', last_seen: '2026-11-08T00:00:00Z', endpoints: [{ local_port: 443 }, { local_port: 8443 }], location: { country_code: index < 3 ? 'US' : index < 5 ? 'CN' : 'TW', ...(index >= 3 && index < 5 ? { province: '广东' } : {}) } }));
+  const put = IDBObjectStore.prototype.put, stringify = JSON.stringify;
+  let diskWrites = 0, pageSerializations = 0;
+  IDBObjectStore.prototype.put = function(value) {
+    if (this.transaction.db.name === "qcontrolhub:connections") {
+      diskWrites++;
+      if (config.storage === "quota") throw new DOMException("quota exceeded", "QuotaExceededError");
+    }
+    return put.apply(this, arguments);
+  };
+  JSON.stringify = function(value, ...options) {
+    if (value?.kind === "page" || value?.records && value?.cache_scope && value?.delta === false) pageSerializations++;
+    return stringify(value, ...options);
+  };
   window.connectionFixture = {
+    storageCounts: () => ({ diskWrites, pageSerializations }),
     config, document: crypto.randomUUID(),
     configure(values) { Object.assign(config, values); save(); },
     counts: () => ({ reads: config.reads, checks: config.checks || 0, bytes: config.bytes }),
@@ -20,7 +34,7 @@ export async function bootConnectionReloadFixture() {
   window.fetch = async (input, options) => {
     const url = new URL(input instanceof Request ? input.url : input, location.href), path = url.pathname;
     if (!path.startsWith('/api/v1/') || path.startsWith('/api/v1/region-flags/')) return nativeFetch(input, options);
-    let value = {}, status = 200;
+    let value = {}, status = 200, etag;
     if (path.endsWith('/auth/session')) { value = identity() || { error: '请登录' }; status = config.user ? 200 : 401; }
     else if (path.endsWith('/auth/logout')) { config.user = null; save(); }
     else if (path.endsWith('/auth/login')) { const body = JSON.parse(options.body); config.user = body.username; config.login++; save(); value = identity(); }
@@ -54,16 +68,17 @@ export async function bootConnectionReloadFixture() {
         save();
         await new Promise(resolve => setTimeout(resolve, config.delay)); // Deliberately ignore abort: the app must reject late results.
         status = failure || 200; value = status === 200 ? snapshot : { error: status === 403 ? '连接查看权限已撤销' : '连接查询暂不可用' };
-        config.bytes += JSON.stringify(value).length; save();
+        if (status === 200) {
+          etag = `W/"fixture:${scope()}:${config.empty}:${url.search.replace(/&sync_token=[^&]*/, '')}"`;
+          if (snapshot.delta && options.headers?.['If-None-Match'] === etag) status = 304;
+        }
+        if (status !== 304) config.bytes += JSON.stringify(value).length;
+        save();
       }
     }
-    return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(status === 304 ? null : JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json', ...(etag ? { ETag: etag } : {}) } });
   };
-  if (config.storage === 'disabled') Object.defineProperty(window, 'sessionStorage', { configurable: true, get() { throw new Error('disabled storage'); } });
-  if (config.storage === 'quota') {
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function(name, value) { if (name.startsWith('qcontrolhub:connections:')) throw new Error('quota exceeded'); return setItem.call(this, name, value); };
-  }
+  if (config.storage === 'disabled') Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new Error('disabled storage'); } });
   const session = identity();
   const { startAnalytics } = await import('../analytics/app.js');
   startAnalytics({ app: document.querySelector('#app'), session });

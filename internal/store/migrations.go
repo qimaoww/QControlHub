@@ -52,6 +52,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("begin schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if appliedVersion < 103 {
+		// Only discard derived tracking state. The new journal starts with
+		// the first read snapshot; no observation or geography is rewritten.
+		if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS client_connection_changes,client_connection_revision`); err != nil {
+			return fmt.Errorf("replace client connection change counter: %w", err)
+		}
+	}
+
 	if appliedVersion < 74 {
 		// PostgreSQL names the old inline engine CHECK tasks_check because it
 		// references both action and engine. Replacing tasks_engine_check never

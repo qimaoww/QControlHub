@@ -1,13 +1,17 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"maps"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,45 +24,70 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
-// A sync position is independent of the stable node/engine/IP page cursor.
-// Snapshots are bounded, session/authority/query scoped and disposable. A miss
-// returns an authoritative page, never a delta against an unknown baseline.
-const connectionSyncBudget = 32 << 20
-const connectionSyncGroups = 40000
+// Keep the in-process working set bounded even when several accounts query
+// distinct windows. Durable entries share the journal's retention boundary.
+const (
+	connectionSyncBudget       = 32 << 20
+	connectionSyncGroups       = 40000
+	connectionSyncTTL          = 24 * time.Hour
+	connectionJournalTTL       = 2 * connectionSyncTTL
+	connectionRecordEstimate   = 512
+	connectionEndpointEstimate = 128
+)
 
 type connectionGroup struct {
 	Record   core.ClientConnectionRecord
 	Flows    int64
 	Revision int64
+	addr     netip.Addr
 }
+
 type connectionSnapshot struct {
-	mu         sync.Mutex
-	epoch      string
-	revision   int64
-	groups     map[string]connectionGroup
-	ordered    []connectionGroup
-	projected  bool
-	ips, flows int64
-	countries  []string
-	created    time.Time
-	touched    atomic.Int64
-	bytes      atomic.Int64
+	mu      sync.Mutex
+	pending *connectionSyncFlight
+	data    *connectionSnapshotData
+	touched atomic.Int64
+	bytes   atomic.Int64
+}
+
+type connectionSyncFlight struct {
+	done        chan struct{}
+	data        *connectionSnapshotData
+	sources     []core.ClientConnectionSource
+	err         error
+	recordsOnly bool
+}
+
+// A published snapshot is immutable except for its lazily computed projection.
+// The projection lock never encloses database I/O.
+type connectionSnapshotData struct {
+	epoch, position, generation string
+	revision                    int64
+	groups                      map[string]connectionGroup
+	byIP                        map[string][]string
+	bytes                       int64
+	created                     time.Time
+	projectionMu                sync.Mutex
+	projectionKey               string
+	projection                  *connectionProjection
 }
 
 func connectionGroupKey(r core.ClientConnectionRecord) string {
 	b, _ := json.Marshal([]string{r.AgentID, string(r.Engine), r.ClientIP})
 	return string(b)
 }
+
+func connectionDigest(v any) string {
+	b, _ := json.Marshal(v)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *Store) connectionSnapshot(key string) *connectionSnapshot {
 	s.connectionSyncMu.Lock()
 	defer s.connectionSyncMu.Unlock()
 	if s.connectionSync == nil {
 		s.connectionSync = map[string]*connectionSnapshot{}
-	}
-	for k, v := range s.connectionSync {
-		if time.Since(time.Unix(0, v.touched.Load())) > 24*time.Hour {
-			delete(s.connectionSync, k)
-		}
 	}
 	entry := s.connectionSync[key]
 	if entry == nil {
@@ -68,163 +97,288 @@ func (s *Store) connectionSnapshot(key string) *connectionSnapshot {
 	entry.touched.Store(time.Now().UnixNano())
 	return entry
 }
+
 func (s *Store) trimConnectionSnapshots() {
 	s.connectionSyncMu.Lock()
 	defer s.connectionSyncMu.Unlock()
 	for {
 		var size int64
 		oldest := ""
-		at := int64(1<<63 - 1)
+		at := time.Now().UnixNano()
 		for k, v := range s.connectionSync {
-			size += v.bytes.Load()
-			if v.touched.Load() < at {
-				oldest = k
-				at = v.touched.Load()
+			size += v.bytes.Load() + connectionRecordEstimate
+			if v.touched.Load() <= at {
+				oldest, at = k, v.touched.Load()
 			}
 		}
-		if len(s.connectionSync) <= 24 && size <= connectionSyncBudget {
+		if size <= connectionSyncBudget && time.Since(time.Unix(0, at)) < connectionSyncTTL {
 			return
 		}
 		delete(s.connectionSync, oldest)
 	}
 }
 
-// SyncClientConnections re-aggregates only dirty business groups, including
-// mutations to older rows, deletes and geography corrections. The committed
-// revision row prevents a late-committing transaction falling behind a cursor.
-// Very large working sets fall back to the ordinary paginated API.
+func connectionBaseQuery(q ClientConnectionQuery) ClientConnectionQuery {
+	q.Since, q.Until = q.Since.UTC().Truncate(time.Microsecond), q.Until.UTC().Truncate(time.Microsecond)
+	q.Cursor, q.CountryCode, q.Bucket = "", "", ""
+	q.NodeOrder, q.Limit = nil, 0
+	q.RecordsOnly = false
+	if q.ClientIP != "" {
+		ip, _ := netip.ParseAddr(q.ClientIP)
+		q.ClientIP = ip.Unmap().String()
+	}
+	return q
+}
+
+// Cache complete historical day/month windows exactly as requested, including
+// the client's UTC offset. Arbitrary sliding and highly selective queries use
+// the bounded in-process tier. Sealed windows can still receive late changes.
+func persistConnectionQuery(q ClientConnectionQuery, now time.Time) bool {
+	return !q.Until.After(now) && q.Until.Sub(q.Since) >= 23*time.Hour &&
+		q.Since.Equal(q.Since.Truncate(time.Minute)) && q.Until.Equal(q.Until.Truncate(time.Minute)) &&
+		q.ClientIP == "" && q.Port == 0 && q.Protocol == "" && q.Inbound == "" && q.Transport == ""
+}
+
+// SyncClientConnections builds the aggregate once for an authorized base
+// query. A token is bound to its projection; it never conveys authority.
 func (s *Store) SyncClientConnections(ctx context.Context, q ClientConnectionQuery, scope, token string) (core.ClientConnectionHistory, bool, error) {
-	empty := core.ClientConnectionHistory{}
-	if !q.GroupByIP || !q.SkipTimeline || q.RecordsOnly || scope == "" {
-		return empty, false, nil
+	if !q.GroupByIP || !q.SkipTimeline || scope == "" {
+		return core.ClientConnectionHistory{}, false, nil
 	}
 	if err := q.Validate(); err != nil {
-		return empty, true, err
+		return core.ClientConnectionHistory{}, true, err
 	}
-	identity := q
-	identity.Cursor = ""
-	payload, _ := json.Marshal([]any{scope, identity})
-	digest := sha256.Sum256(payload)
-	entry := s.connectionSnapshot(hex.EncodeToString(digest[:]))
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
+	base := connectionBaseQuery(q)
+	key := connectionDigest([]any{scope, scopeForConfig(ctx), base})
+	entry := s.connectionSnapshot(key)
 	defer s.trimConnectionSnapshots()
+	for {
+		entry.mu.Lock()
+		if active := entry.pending; active != nil {
+			entry.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return core.ClientConnectionHistory{}, true, ctx.Err()
+			case <-active.done:
+				// Overlapping pages share the same consistent DB view. A
+				// canceled leader or a location-only view cannot serve this
+				// request's complete response; start a new read in that case.
+				if active.err != nil || active.recordsOnly && !q.RecordsOnly {
+					continue
+				}
+				return active.page(q, token)
+			}
+		}
+		flight := &connectionSyncFlight{done: make(chan struct{}), recordsOnly: q.RecordsOnly}
+		previous := entry.data
+		entry.pending = flight
+		entry.mu.Unlock()
+		flight.data, flight.sources, flight.err = s.refreshConnectionSnapshot(ctx, base, key, previous, q.RecordsOnly)
+		entry.mu.Lock()
+		if flight.err == nil {
+			entry.data = flight.data
+			if flight.data != nil {
+				entry.bytes.Store(flight.data.bytes)
+			} else {
+				entry.bytes.Store(0)
+			}
+		}
+		close(flight.done)
+		entry.pending = nil
+		entry.mu.Unlock()
+		return flight.page(q, token)
+	}
+}
+
+func (f *connectionSyncFlight) page(q ClientConnectionQuery, token string) (core.ClientConnectionHistory, bool, error) {
+	if f.err != nil || f.data == nil {
+		return core.ClientConnectionHistory{}, f.err != nil, f.err
+	}
+	result, err := connectionSnapshotPage(f.data, q, token)
+	if !q.RecordsOnly {
+		result.Sources = f.sources
+	}
+	return result, true, err
+}
+
+func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectionQuery, key string, previous *connectionSnapshotData, recordsOnly bool) (*connectionSnapshotData, []core.ClientConnectionSource, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return empty, true, err
+		return nil, nil, err
 	}
 	defer tx.Rollback(ctx)
-	var revision int64
-	if err = tx.QueryRow(ctx, `SELECT revision FROM client_connection_revision WHERE id=1`).Scan(&revision); err != nil {
-		return empty, true, err
+
+	position, sources, err := connectionSyncPosition(ctx, tx, q, recordsOnly)
+	if err != nil {
+		return nil, nil, err
 	}
-	// Preserve the selected country only at projection time. Country choices and
-	// distinct IP/flow totals must cover the complete authorized query, not a page.
-	base := q
-	base.CountryCode = ""
-	if q.CountryCode != "" {
-		base.IncludeNonPublic = false
+	now := time.Now()
+	durable := persistConnectionQuery(q, now)
+	if previous != nil && now.Sub(previous.created) >= connectionSyncTTL {
+		previous = nil
 	}
-	var changed []core.ClientConnectionRecord
-	if entry.groups == nil || time.Since(entry.created) > 24*time.Hour {
-		groups, e := s.readConnectionGroups(ctx, tx, base, nil, revision)
-		if e != nil {
-			return empty, true, e
+	if previous == nil && durable {
+		previous, err = restoreConnectionSnapshot(ctx, tx, key, now)
+		if err != nil {
+			return nil, nil, err
 		}
-		if len(groups) > connectionSyncGroups {
-			return empty, false, nil
-		}
-		entry.groups = groups
-		entry.projected = false
-		entry.created = time.Now()
-		var nonce [16]byte
-		if _, err = rand.Read(nonce[:]); err != nil {
-			return empty, true, err
-		}
-		entry.epoch = hex.EncodeToString(nonce[:])
-	} else if revision != entry.revision {
-		// Authority is revalidated by the API before and after this transaction.
-		args := []any{entry.revision}
-		where := ` WHERE ch.revision>$1 AND (ch.agent_id='' OR (a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args) + `))`
-		rows, e := tx.Query(ctx, `SELECT ch.agent_id,ch.engine,host(ch.client_ip) FROM client_connection_changes ch LEFT JOIN agents a ON a.id=ch.agent_id`+where, args...)
-		if e != nil {
-			return empty, true, e
-		}
-		keys := map[string]core.ClientConnectionRecord{}
-		for rows.Next() {
-			var r core.ClientConnectionRecord
-			if e = rows.Scan(&r.AgentID, &r.Engine, &r.ClientIP); e != nil {
-				rows.Close()
-				return empty, true, e
-			}
-			if r.AgentID == "" {
-				for key, g := range entry.groups {
-					if g.Record.ClientIP == r.ClientIP {
-						keys[key] = g.Record
-					}
-				}
-			} else {
-				keys[connectionGroupKey(r)] = r
-			}
-		}
-		rows.Close()
-		if e = rows.Err(); e != nil {
-			return empty, true, e
-		}
-		for _, r := range keys {
-			changed = append(changed, r)
-		}
-		if len(changed) > 0 {
-			entry.projected = false
-			updates, e := s.readConnectionGroups(ctx, tx, base, changed, revision)
-			if e != nil {
-				return empty, true, e
-			}
-			for key := range keys {
-				delete(entry.groups, key)
-			}
-			for key, g := range updates {
-				entry.groups[key] = g
+	}
+	changeKeys := map[string]core.ClientConnectionRecord{}
+	complete := false
+	generation := ""
+	if previous != nil {
+		generation = previous.generation
+		complete = true
+		if position != previous.position {
+			complete, changeKeys, err = connectionDirtyGroups(ctx, tx, q, previous)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 	}
-	entry.revision = revision
-	var bytes int64
-	if !entry.projected {
-		for _, g := range entry.groups {
-			bytes += int64(512 + len(g.Record.AgentName)*2 + len(g.Record.Endpoints)*128)
+	var data *connectionSnapshotData
+	var upserts map[string]connectionGroup
+	if !complete {
+		upserts, err = s.readConnectionGroups(ctx, tx, q, nil, 1)
+		if err != nil {
+			return nil, nil, err
 		}
-		entry.bytes.Store(bytes)
+		data = newConnectionSnapshot(upserts, position, generation, now)
+	} else if len(changeKeys) == 0 {
+		data = previous
 	} else {
-		bytes = entry.bytes.Load()
+		upserts, err = s.readConnectionGroups(ctx, tx, q, slices.Collect(maps.Values(changeKeys)), previous.revision+1)
+		if err != nil {
+			return nil, nil, err
+		}
+		groups := maps.Clone(previous.groups)
+		for key := range changeKeys {
+			next, exists := upserts[key]
+			old, had := groups[key]
+			if exists && had && equalConnectionGroup(next, old) || !exists && !had {
+				delete(changeKeys, key)
+				delete(upserts, key)
+				continue
+			}
+			if exists {
+				groups[key] = next
+			} else {
+				delete(groups, key)
+			}
+		}
+		if len(changeKeys) == 0 {
+			data = previous
+		} else {
+			data = &connectionSnapshotData{epoch: previous.epoch, position: position, generation: generation,
+				revision: previous.revision + 1, groups: groups, created: previous.created}
+			data.index()
+		}
 	}
-	if len(entry.groups) > connectionSyncGroups || bytes > connectionSyncBudget {
-		entry.groups = nil
-		entry.bytes.Store(0)
-		return empty, false, nil
+
+	if len(data.groups) > connectionSyncGroups || data.bytes > connectionSyncBudget {
+		return nil, nil, nil
 	}
-	result, err := connectionSnapshotPage(entry, q, token)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, err
+	}
+
+	if durable && data != previous && (len(data.groups) != 0 || data.generation != "") {
+		// The repeatable-read view has already released its connection. Only the
+		// derived rows that changed are written, guarded by a cross-process CAS.
+		if err := s.saveConnectionSnapshot(ctx, key, data, !complete, changeKeys, upserts); err != nil && ctx.Err() == nil {
+			slog.Warn("persist client connection history cache", "error", err)
+		}
+	}
+	if data == previous && position != data.position {
+		// Advance the in-memory read position without rewriting any stored
+		// rows. Reuse the projection even during unrelated telemetry writes.
+		data.projectionMu.Lock()
+		advanced := &connectionSnapshotData{epoch: data.epoch, position: position, generation: data.generation,
+			revision: data.revision, groups: data.groups, byIP: data.byIP, bytes: data.bytes, created: data.created,
+			projectionKey: data.projectionKey, projection: data.projection}
+		data.projectionMu.Unlock()
+		data = advanced
+	}
+	return data, sources, nil
+}
+
+func equalConnectionGroup(a, b connectionGroup) bool {
+	x, y := a.Record, b.Record
+	return a.Flows == b.Flows && x.ID == y.ID && x.AgentName == y.AgentName &&
+		x.Location == y.Location && x.FirstSeen.Equal(y.FirstSeen) && x.LastSeen.Equal(y.LastSeen) &&
+		slices.Equal(x.Endpoints, y.Endpoints)
+}
+
+func newConnectionSnapshot(groups map[string]connectionGroup, position, generation string, now time.Time) *connectionSnapshotData {
+	var nonce [16]byte
+	_, _ = rand.Read(nonce[:])
+	data := &connectionSnapshotData{epoch: hex.EncodeToString(nonce[:]), position: position, generation: generation,
+		groups: groups, revision: 1, created: now}
+	data.index()
+	return data
+}
+
+func (data *connectionSnapshotData) index() {
+	data.byIP = make(map[string][]string)
+	for key, group := range data.groups {
+		data.byIP[group.Record.ClientIP] = append(data.byIP[group.Record.ClientIP], key)
+		data.bytes += int64(connectionRecordEstimate + len(key) + len(group.Record.AgentName)*2 + len(group.Record.Endpoints)*connectionEndpointEstimate)
+	}
+}
+
+func connectionDirtyGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, old *connectionSnapshotData) (bool, map[string]core.ClientConnectionRecord, error) {
+	var complete bool
+	err := tx.QueryRow(ctx, `SELECT xid < pg_snapshot_xmin($1::text::pg_snapshot) FROM client_connection_journal_floor WHERE id=1`, old.position).Scan(&complete)
+	if err != nil || !complete {
+		return complete, nil, err
+	}
+	args := []any{old.position, q.Since.Truncate(time.Minute), q.Until.Add(-time.Microsecond), q.AgentID, string(q.Engine), q.ClientIP}
+	agentClause := agentAdministrationClause(ctx, "a.id", &args)
+	// Snapshot visibility is the high-water range plus transactions active
+	// at the last read. Probe those IDs directly so an unrelated long writer
+	// cannot make every confirmation scan the entire intervening journal.
+	rows, err := tx.Query(ctx, `WITH changes AS (
+	   SELECT agent_id,engine,client_ip,day FROM client_connection_journal WHERE xid >= pg_snapshot_xmax($1::text::pg_snapshot)
+	   UNION ALL
+	   SELECT pending.* FROM pg_snapshot_xip($1::text::pg_snapshot) AS active(xid)
+	   CROSS JOIN LATERAL (
+	     SELECT agent_id,engine,client_ip,day FROM client_connection_journal WHERE xid=active.xid OFFSET 0
+	   ) pending
+	 )
+	 SELECT DISTINCT ch.agent_id,ch.engine,host(ch.client_ip) FROM changes ch
+	 LEFT JOIN agents a ON a.id=ch.agent_id
+	 WHERE ($6='' OR ch.client_ip=NULLIF($6,'')::inet)
+	 AND (ch.agent_id='' OR (ch.day BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date AND ($3::timestamptz AT TIME ZONE 'UTC')::date
+	   AND ($4='' OR ch.agent_id=$4) AND ($5='' OR ch.engine=$5) AND (a.id IS NULL OR (a.revoked_at IS NULL`+agentClause+`))))`, args...)
 	if err != nil {
-		return empty, true, err
+		return false, nil, err
 	}
-	result.Sources, err = s.connectionSyncSources(ctx, tx, q)
-	if err != nil {
-		return empty, true, err
+	defer rows.Close()
+	keys := map[string]core.ClientConnectionRecord{}
+	for rows.Next() {
+		var r core.ClientConnectionRecord
+		if err := rows.Scan(&r.AgentID, &r.Engine, &r.ClientIP); err != nil {
+			return false, nil, err
+		}
+		if r.AgentID == "" {
+			for _, key := range old.byIP[r.ClientIP] {
+				keys[key] = old.groups[key].Record
+			}
+		} else {
+			keys[connectionGroupKey(r)] = r
+		}
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return empty, true, err
-	}
-	return result, true, nil
+	return true, keys, rows.Err()
 }
 
 func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, wanted []core.ClientConnectionRecord, revision int64) (map[string]connectionGroup, error) {
-	where, args := connectionHistoryWhere(ctx, q)
+	where, args := connectionGroupWhere(ctx, q)
 	if wanted != nil {
 		data, _ := json.Marshal(wanted)
 		args = append(args, data)
 		where += fmt.Sprintf(` AND (c.agent_id,c.engine,c.client_ip) IN (SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text))`, len(args))
 	}
-	rows, err := tx.Query(ctx, connectionGroupsSQL(where), args...)
+	rows, err := tx.Query(ctx, connectionGroupsSQL(where, len(args)+1), append(args, connectionSyncGroups+1)...)
 	if err != nil {
 		return nil, err
 	}
@@ -237,8 +391,8 @@ func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientCon
 		if err = rows.Scan(&r.ID, &r.AgentID, &r.AgentName, &r.Engine, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &g.Flows, &ports, &r.Location.CountryCode, &r.Location.Country, &r.Location.Province); err != nil {
 			return nil, err
 		}
-		ip, _ := netip.ParseAddr(r.ClientIP)
-		r.Location.NonPublic = !netpolicy.IsPublicAddress(ip)
+		g.addr, _ = netip.ParseAddr(r.ClientIP)
+		r.Location.NonPublic = !netpolicy.IsPublicAddress(g.addr)
 		sort.Slice(ports, func(i, j int) bool { return ports[i] < ports[j] })
 		for _, port := range ports {
 			r.Endpoints = append(r.Endpoints, core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: int(port)})
@@ -248,48 +402,70 @@ func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientCon
 	}
 	return groups, rows.Err()
 }
-func connectionSnapshotPage(entry *connectionSnapshot, q ClientConnectionQuery, token string) (core.ClientConnectionHistory, error) {
+
+type connectionProjection struct {
+	groups     []connectionGroup
+	countries  []string
+	ips, flows int64
+}
+
+type connectionOrderKey struct {
+	rank               int
+	name, node, engine string
+	ip                 netip.Addr
+}
+
+func compareConnectionOrder(a, b connectionOrderKey) int {
+	if d := cmp.Compare(a.rank, b.rank); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(a.name, b.name); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(a.node, b.node); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(a.engine, b.engine); d != 0 {
+		return d
+	}
+	return a.ip.Compare(b.ip)
+}
+
+func connectionSnapshotPage(entry *connectionSnapshotData, q ClientConnectionQuery, token string) (core.ClientConnectionHistory, error) {
 	result := core.ClientConnectionHistory{Records: []core.ClientConnectionRecord{}, Timeline: []core.ClientConnectionBucket{}, Sources: []core.ClientConnectionSource{}, CountryCodes: []string{}, RecordKeys: []string{}}
+	projectionID := connectionDigest([]any{q.CountryCode, q.NodeOrder})
+	epoch := connectionDigest([]any{entry.epoch, projectionID, q.Limit, q.Cursor})[:32]
 	since := int64(-1)
-	if parts := strings.Split(token, ":"); len(parts) == 2 && parts[0] == entry.epoch {
-		if n, e := strconv.ParseInt(parts[1], 10, 64); e == nil && n >= 0 && n <= entry.revision {
-			since = n
-			result.Delta = true
+	if parts := strings.Split(token, ":"); len(parts) == 2 && parts[0] == epoch {
+		if n, e := strconv.ParseInt(parts[1], 10, 64); e == nil && n >= 1 && n <= entry.revision {
+			since, result.Delta = n, true
 		}
 	}
-	result.SyncToken = entry.epoch + ":" + strconv.FormatInt(entry.revision, 10)
+	result.SyncToken = epoch + ":" + strconv.FormatInt(entry.revision, 10)
 	rank := map[string]int{}
 	for i, id := range q.NodeOrder {
 		if _, ok := rank[id]; !ok {
 			rank[id] = i + 1
 		}
 	}
-	key := func(r core.ClientConnectionRecord) connectionIPCursor {
-		n := rank[r.AgentID]
-		if n == 0 {
-			n = 2147483647
+	getRank := func(node string) int {
+		if n := rank[node]; n != 0 {
+			return n
 		}
-		return connectionIPCursor{Scope: "node_engine_ip", Rank: n, Endpoint: []string{r.AgentName, r.AgentID, string(r.Engine)}, IP: r.ClientIP}
+		return 2147483647
 	}
-	compare := func(a, b connectionIPCursor) int {
-		if a.Rank < b.Rank {
-			return -1
-		}
-		if a.Rank > b.Rank {
-			return 1
-		}
-		for i := range a.Endpoint {
-			if n := strings.Compare(a.Endpoint[i], b.Endpoint[i]); n != 0 {
-				return n
-			}
-		}
-		x, _ := netip.ParseAddr(a.IP)
-		y, _ := netip.ParseAddr(b.IP)
-		return x.Compare(y)
+	orderKey := func(g connectionGroup) connectionOrderKey {
+		r := g.Record
+		return connectionOrderKey{getRank(r.AgentID), r.AgentName, r.AgentID, string(r.Engine), g.addr}
 	}
-	if !entry.projected {
+	cursorKey := func(r core.ClientConnectionRecord) connectionIPCursor {
+		return connectionIPCursor{Scope: "node_engine_ip", Rank: getRank(r.AgentID), Endpoint: []string{r.AgentName, r.AgentID, string(r.Engine)}, IP: r.ClientIP}
+	}
+	entry.projectionMu.Lock()
+	projection := entry.projection
+	if projection == nil || entry.projectionKey != projectionID {
 		ips, countries := map[string]bool{}, map[string]bool{}
-		groups := []connectionGroup{}
+		projection = &connectionProjection{countries: []string{}}
 		for _, g := range entry.groups {
 			r := g.Record
 			if !r.Location.NonPublic && r.Location.CountryCode != "" {
@@ -298,44 +474,39 @@ func connectionSnapshotPage(entry *connectionSnapshot, q ClientConnectionQuery, 
 			if q.CountryCode != "" && (r.Location.NonPublic || r.Location.CountryCode != q.CountryCode) {
 				continue
 			}
-			result.Flows += g.Flows
+			projection.flows += g.Flows
 			ips[r.ClientIP] = true
-			groups = append(groups, g)
+			projection.groups = append(projection.groups, g)
 		}
-		result.IPs = int64(len(ips))
-		for code := range countries {
-			result.CountryCodes = append(result.CountryCodes, code)
-		}
-		sort.Strings(result.CountryCodes)
-		sort.Slice(groups, func(i, j int) bool { return compare(key(groups[i].Record), key(groups[j].Record)) < 0 })
-		entry.ordered = groups
-		entry.ips = result.IPs
-		entry.flows = result.Flows
-		entry.countries = result.CountryCodes
-		entry.projected = true
+		projection.ips = int64(len(ips))
+		projection.countries = append(projection.countries, slices.Sorted(maps.Keys(countries))...)
+		sort.Slice(projection.groups, func(i, j int) bool {
+			return compareConnectionOrder(orderKey(projection.groups[i]), orderKey(projection.groups[j])) < 0
+		})
+		entry.projection, entry.projectionKey = projection, projectionID
 	}
-	result.IPs = entry.ips
-	result.Flows = entry.flows
-	result.CountryCodes = entry.countries
-	groups := entry.ordered
-
+	entry.projectionMu.Unlock()
+	result.IPs, result.Flows, result.CountryCodes = projection.ips, projection.flows, projection.countries
+	groups := projection.groups
 	if q.Cursor != "" {
 		cursor, err := decodeConnectionIPCursor(q.Cursor)
 		if err != nil {
 			return result, err
 		}
+		ip, _ := netip.ParseAddr(cursor.IP)
+		anchor := connectionOrderKey{cursor.Rank, cursor.Endpoint[0], cursor.Endpoint[1], cursor.Endpoint[2], ip}
 		start := sort.Search(len(groups), func(i int) bool {
-			n := compare(key(groups[i].Record), cursor)
+			n := compareConnectionOrder(orderKey(groups[i]), anchor)
 			return n > 0 || n == 0 && cursor.Inclusive
 		})
 		groups = groups[start:]
 	}
 	if len(groups) > q.Limit {
-		result.NextCursor = key(groups[q.Limit-1].Record).encode()
+		result.NextCursor = cursorKey(groups[q.Limit-1].Record).encode()
 		groups = groups[:q.Limit]
 	}
 	if len(groups) > 0 {
-		first := key(groups[0].Record)
+		first := cursorKey(groups[0].Record)
 		first.Inclusive = true
 		result.PageCursor = first.encode()
 	}
@@ -347,33 +518,49 @@ func connectionSnapshotPage(entry *connectionSnapshot, q ClientConnectionQuery, 
 	}
 	return result, nil
 }
-func (s *Store) connectionSyncSources(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery) ([]core.ClientConnectionSource, error) {
+
+func connectionSyncPosition(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, recordsOnly bool) (string, []core.ClientConnectionSource, error) {
+	var position string
+	sources := []core.ClientConnectionSource{}
+	if recordsOnly {
+		err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text`).Scan(&position)
+		return position, sources, err
+	}
 	args := []any{}
 	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
 	if q.AgentID != "" {
 		args = append(args, q.AgentID)
 		where += fmt.Sprintf(` AND a.id=$%d`, len(args))
 	}
-	rows, err := tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'no_logs'),COALESCE(s.detail,''),COALESCE(s.truncated,false) FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+where+` ORDER BY a.name,a.id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	sources := []core.ClientConnectionSource{}
-	for rows.Next() {
-		var r core.ClientConnectionSource
-		if err = rows.Scan(&r.AgentID, &r.AgentName, &r.UpdatedAt, &r.Status, &r.Detail, &r.Truncated); err != nil {
-			return nil, err
-		}
-		sources = append(sources, r)
-	}
-	return sources, rows.Err()
+	// Sources are independently mutable (even batches with no connections).
+	// Fetch them in the same round trip that establishes the MVCC position.
+	err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text,COALESCE((
+	  SELECT jsonb_agg(source ORDER BY agent_name,agent_id) FROM (
+		SELECT a.id agent_id,a.name agent_name,s.updated_at,COALESCE(s.status,'no_logs') status,
+		  COALESCE(s.detail,'') detail,COALESCE(s.truncated,false) truncated
+		FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+where+`
+	  ) source
+	),'[]'::jsonb)`, args...).Scan(&position, &sources)
+	return position, sources, err
 }
 
-func connectionGroupsSQL(where string) string {
-	return `SELECT min(c.id),c.agent_id,a.name,c.engine,host(c.client_ip),min(c.first_seen),max(c.last_seen),
- count(DISTINCT (c.protocol,c.inbound,c.transport,c.client_port,c.local_ip,c.local_port)),
- array_agg(DISTINCT COALESCE(c.inbound_port,c.local_port)),COALESCE(l.country_code,''),COALESCE(l.country,''),COALESCE(l.province,'')
- FROM client_connections c JOIN agents a ON a.id=c.agent_id LEFT JOIN client_connection_locations l ON l.client_ip=c.client_ip` + where + `
- GROUP BY c.agent_id,a.name,c.engine,c.client_ip,l.country_code,l.country,l.province LIMIT 40001`
+func connectionGroupsSQL(where string, limitArg int) string {
+	// The port can vary within a flow, so retain the observed port variants
+	// while counting each scalar flow tuple only once.
+	return fmt.Sprintf(`WITH variant AS MATERIALIZED (
+	 SELECT c.agent_id,c.engine,c.client_ip,c.protocol,c.inbound,c.transport,c.client_port,c.local_ip,c.local_port,
+	   min(c.id) id,min(c.first_seen) first_seen,max(c.last_seen) last_seen,COALESCE(c.inbound_port,c.local_port) port
+	 FROM client_connections c`+where+`
+	 GROUP BY c.agent_id,c.engine,c.client_ip,c.protocol,c.inbound,c.transport,c.client_port,c.local_ip,c.local_port,COALESCE(c.inbound_port,c.local_port)
+	), flows AS (
+	 SELECT *,row_number() OVER (PARTITION BY agent_id,engine,client_ip,protocol,inbound,transport,client_port,local_ip,local_port) variant_number
+	 FROM variant
+	), totals AS (
+	 SELECT min(id) id,agent_id,engine,client_ip,min(first_seen) first_seen,max(last_seen) last_seen,
+	   count(*) FILTER (WHERE variant_number=1) flows,array_agg(DISTINCT port) ports
+	 FROM flows GROUP BY agent_id,engine,client_ip LIMIT $%d
+	)
+	SELECT t.id,t.agent_id,a.name,t.engine,host(t.client_ip),t.first_seen,t.last_seen,t.flows,t.ports,
+	  COALESCE(l.country_code,''),COALESCE(l.country,''),COALESCE(l.province,'')
+	FROM totals t JOIN agents a ON a.id=t.agent_id LEFT JOIN client_connection_locations l ON l.client_ip=t.client_ip`, limitArg)
 }
