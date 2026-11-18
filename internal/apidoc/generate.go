@@ -233,6 +233,10 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 	params := []any{}
 	for _, segment := range strings.Split(path, "/") {
 		if strings.HasPrefix(segment, "{") {
+			if segment == "{component}" && strings.HasPrefix(path, "/api/v1/agents/{id}/proxies/") {
+				params = append(params, object{"name": "component", "in": "path", "required": true, "schema": object{"type": "string", "enum": []string{"nginx", "caddy"}}})
+				continue
+			}
 			params = append(params, object{"name": strings.Trim(segment, "{}"), "in": "path", "required": true, "schema": object{"type": "string", "minLength": 1}, "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。"})
 		}
 	}

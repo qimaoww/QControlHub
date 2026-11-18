@@ -1,4 +1,4 @@
-import { actions, button, muted, node, section, stack, table } from './ui.js';
+import { actions, badge, button, muted, node, section } from './ui.js';
 import { date } from './operations.js';
 import { patch } from './live-dom.js';
 
@@ -29,8 +29,8 @@ export function nodeProxyManager(ctx, agent, current, refresh) {
     feedback.delete(mode);
     render();
     try {
-      const action = `${update ? 'update' : 'check'}-${mode}`;
-      let task = update ? await ctx.api('/tasks', { method: 'POST', body: { agent_id: agent.id, action } }) : await ctx.api(`/agents/${encodeURIComponent(agent.id)}/proxies/${mode}/check`, { method: 'POST' });
+      const endpoint = `/agents/${encodeURIComponent(agent.id)}/proxies/${mode}/${update ? 'update' : 'check'}`;
+      let task = await ctx.api(endpoint, { method: 'POST' });
       if (!current()) return;
       if (!ctx.can('tasks.read')) { feedback.set(mode, '任务已提交'); return; }
       const deadline = Date.now() + 7 * 60 * 1000;
@@ -49,23 +49,31 @@ export function nodeProxyManager(ctx, agent, current, refresh) {
       if (current()) render();
     }
   }
+  function component(mode) {
+    const nginx = mode === 'nginx';
+    const label = nginx ? 'Nginx' : 'Caddy';
+    const row = agent.managed_proxies?.[mode];
+    const status = pending.get(mode) || presentation(agent, row);
+    const tone = row?.outcome ? 'bad' : ['待切换', '可更新'].includes(status) ? 'warn' : status === '已最新' ? 'good' : '';
+    const source = nginx ? 'nginx.org 主线' : 'Caddy 官方稳定版';
+    const managed = row?.managed ? '已托管' : '未托管';
+    const versions = [['运行版本', row?.running], ['磁盘版本', row?.installed], ['官方最新版', row?.latest]];
+    const checked = row?.checked_at ? date(row.checked_at) : '尚无记录';
+    return node('article', { className: 'a-proxy-row', 'data-refresh-key': mode, 'aria-label': label },
+      node('div', { className: 'a-proxy-identity' },
+        node('div', { className: 'a-proxy-title' }, node('strong', {}, label), badge(status, tone)),
+        muted(row ? `${source} · ${managed}` : source),
+        agent.status !== 'online' && muted(`离线 · ${date(row?.observed_at || agent.last_seen)}`)),
+      node('dl', { className: 'a-proxy-versions' }, versions.map(([title, value]) =>
+        node('div', {}, node('dt', {}, title), node('dd', value ? {} : { className: 'a-muted', 'aria-label': '未知' }, value || '—')))),
+      node('div', { className: 'a-proxy-checked' }, muted(`${row?.outcome === '检查失败' ? '上次成功检查（已过期）' : '上次成功检查'} · ${checked}`)),
+      node('div', { className: 'a-proxy-controls' }, actions(
+        ctx.can('agents.read') && button('检查更新', () => act(mode, label, false), { disabled: !online() || pending.has(mode), 'aria-label': `检查 ${label} 更新` }),
+        canUpdate() && button('更新', () => act(mode, label, true), { disabled: !online() || pending.has(mode) || !row?.managed || !['pending', 'active'].includes(row.state), 'aria-label': `更新 ${label}` }))),
+      feedback.has(mode) && node('div', { className: 'a-proxy-feedback', role: 'status' }, feedback.get(mode)));
+  }
   function content() {
-    return table(['组件', '托管状态', '版本', '操作'], ['nginx', 'caddy'].map(mode => {
-      const nginx = mode === 'nginx';
-      const label = nginx ? 'Nginx' : 'Caddy';
-      const row = agent.managed_proxies?.[mode];
-      const last = row?.checked_at ? date(row.checked_at) : '未知';
-      return [
-        stack(node('strong', {}, label), muted(nginx ? 'nginx.org 主线' : 'Caddy 官方稳定版')),
-        stack(node('span', {}, pending.get(mode) || presentation(agent, row)), row && row.state !== 'unmanaged' && muted(row.managed ? '已托管' : '未托管'),
-          agent.status !== 'online' && muted(`离线 · ${date(row?.observed_at || agent.last_seen)}`)),
-        stack(...[['已装', row?.installed], ['运行', row?.running], ['官方', row?.latest]].map(([title, value]) =>
-          node('div', { className: 'a-proxy-version' }, muted(title), node('span', {}, value || '未知'))), muted(`${row?.outcome === '检查失败' ? '上次成功 · 已过期' : '上次成功检查'}　${last}`)),
-        stack(actions(ctx.can('agents.read') && button('检查更新', () => act(mode, label, false), { disabled: !online() || pending.has(mode), 'aria-label': `检查 ${label} 更新` }),
-          canUpdate() && button('更新', () => act(mode, label, true), { disabled: !online() || pending.has(mode) || !row?.managed || !['pending','active'].includes(row.state), 'aria-label': `更新 ${label}` })),
-          feedback.has(mode) && node('span', { role: 'status' }, feedback.get(mode))),
-      ];
-    }), { paginate: false, motion: false, label: '节点代理版本' });
+    return node('div', { className: 'a-proxy-list' }, component('nginx'), component('caddy'));
   }
   const body = content();
   function render() { patch(body, content()); }

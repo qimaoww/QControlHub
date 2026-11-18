@@ -53,3 +53,51 @@ func TestManagedProxyNodePermissions(t *testing.T) {
 	}
 	completeConfigScopeAPITask(t, ctx, db, first)
 }
+
+func TestManagedProxyAPIKeyManagement(t *testing.T) {
+	db, ctx, _, owner, other := newConfigScopeAPIFixture(t)
+	node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "managed proxy key")
+	base := "/agents/" + node.ID + "/proxies"
+	write, _ := testCreateBusinessKey(t, owner, []core.Permission{core.PermissionAgentsRead, core.PermissionAgentsManage, core.PermissionTasksExecute, core.PermissionTasksRead})
+	check, _ := testCreateBusinessKey(t, owner, []core.Permission{core.PermissionAgentsRead})
+	var cred apiKeyCreation
+	owner.call("POST", "/settings/api-keys", core.APIKeyInput{Name: "status", Permissions: []core.Permission{core.PermissionAgentsRead}}, 201, &cred)
+	reader := configScopeAPIClient{t: t, handler: owner.handler, token: cred.Secret}
+	foreign, _ := testCreateBusinessKey(t, other, []core.Permission{core.PermissionAgentsRead, core.PermissionAgentsManage, core.PermissionTasksExecute})
+	var report nodeProxyReport
+	reader.call("GET", base, nil, 200, &report)
+	if report.Supported || report.Nginx.State != "unknown" || report.Caddy.State != "unknown" {
+		t.Fatalf("legacy node report %+v", report)
+	}
+	foreign.call("GET", base, nil, 404, nil)
+	grantConfigScopeAPIAgent(t, ctx, db, node, other, 21001)
+	foreign.call("GET", base, nil, 403, nil)
+	state := core.ProxyStatus{State: "active", Managed: true, Running: "v2.11.9"}
+	if err := db.Heartbeat(ctx, node.ID, core.HeartbeatRequest{Features: append(node.Features, core.AgentFeatureManagedProxies), ManagedProxies: map[string]core.ProxyStatus{"caddy": state}}); err != nil {
+		t.Fatal(err)
+	}
+	reader.call("GET", base, nil, 200, &report)
+	if !report.Supported || report.Caddy != state || report.AgentID != node.ID {
+		t.Fatalf("proxy status %+v", report)
+	}
+	for _, mode := range []string{"nginx", "caddy"} {
+		path := base + "/" + mode
+		foreign.call("POST", path+"/update", nil, 403, nil)
+		reader.call("POST", path+"/update", nil, 403, nil)
+		check.call("POST", path+"/update", nil, 403, nil)
+		for _, operation := range []string{"check", "update"} {
+			client := write
+			if operation == "check" {
+				client = check
+			}
+			var task core.Task
+			client.call("POST", path+"/"+operation, nil, 202, &task)
+			if string(task.Action) != operation+"-"+mode || task.AgentID != node.ID {
+				t.Fatalf("incorrect task %+v", task)
+			}
+			completeConfigScopeAPITask(t, ctx, db, task)
+			write.call("GET", "/tasks/"+task.ID, nil, 200, nil)
+		}
+	}
+	write.call("POST", base+"/other/update", nil, 400, nil)
+}

@@ -45,24 +45,6 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 // check, not an atomic compare-and-swap of the Agent's configuration.
 const automaticConfigReadCacheTTL = 600 * time.Second
 
-func (s *Server) checkManagedProxy(w http.ResponseWriter, r *http.Request) {
-	action := core.Action("check-" + r.PathValue("component"))
-	if !action.ChecksProxy() {
-		writeError(w, http.StatusBadRequest, "未知代理")
-		return
-	}
-	id := r.PathValue("id")
-	task, err := s.store.CreateTask(r.Context(), core.TaskRequest{Action: action, AgentID: id})
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	if !task.Reused {
-		s.recordAudit(r, "task.created", task.ID, string(action)+" "+id)
-	}
-	writeJSON(w, http.StatusAccepted, task)
-}
-
 func (s *Server) authorizeProxyTask(w http.ResponseWriter, r *http.Request, action core.Action) bool {
 	if action.ProxyComponent() == "" {
 		return true

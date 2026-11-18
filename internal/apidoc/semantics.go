@@ -157,6 +157,15 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		}
 	}
 	switch handler {
+	case "getManagedProxies":
+		op["summary"] = "读取节点 Nginx/Caddy 状态"
+		op["description"] = "读取节点已上报的运行版本、磁盘版本、官方候选、检查时间和影响范围。supported=false 表示需升级 QAgent。读取缓存不会联系上游。"
+	case "checkManagedProxy":
+		op["summary"] = "检查节点 Nginx/Caddy 官方版本"
+		op["description"] = "component 可选 nginx、caddy。创建版本查询任务，仅需节点读取权限。API Key 创建任务须使用读写模式。检查不改变节点服务。"
+	case "updateManagedProxy":
+		op["summary"] = "更新节点托管 Nginx/Caddy"
+		op["description"] = "component 可选 nginx、caddy。更新前读取托管监听和共享实例数量。切换可能短暂断连。通过 GET /tasks/{id} 跟踪任务，再读取节点代理状态核对运行版本。"
 	case "getPageSize", "putPageSize":
 		op["description"] = "当前认证账号的每页条数；page 为 nodes、traffic 或 tcp。缺失值为 30，允许 30、50、100、200；保存须带当前 revision，首次为 0，并发冲突返回 409。"
 		g.resolve(g.named("store.PageSizePreference"))["properties"].(object)["revision"].(object)["minimum"] = 0
@@ -177,6 +186,10 @@ func (g *generator) annotate(op object, handler, method, path string) {
 	}
 	response := op["responses"].(object)
 	switch handler {
+	case "getManagedProxies":
+		response["200"] = object{"description": "节点代理上报", "content": object{"application/json": object{"schema": g.named("api.nodeProxyReport")}}}
+	case "checkManagedProxy", "updateManagedProxy":
+		response["202"] = object{"description": "已受理或复用的任务", "content": object{"application/json": object{"schema": g.named("core.Task")}}}
 	case "deleteConfig", "deleteTemplate", "cancelTask", "deleteAgent", "revokeAPIKey":
 		response["204"] = object{"description": "操作成功，无响应体"}
 		delete(response, "200")

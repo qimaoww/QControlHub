@@ -654,6 +654,27 @@
         },
         "type": "object"
       },
+      "api_nodeProxyReport": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "caddy": {
+            "$ref": "#/components/schemas/core_ProxyStatus"
+          },
+          "nginx": {
+            "$ref": "#/components/schemas/core_ProxyStatus"
+          },
+          "status": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "api_subStoreImportTargetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12384,8 +12405,120 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/agents/{id}/proxies": {
+      "get": {
+        "description": "读取节点已上报的运行版本、磁盘版本、官方候选、检查时间和影响范围。supported=false 表示需升级 QAgent。读取缓存不会联系上游。",
+        "operationId": "getManagedProxies_api_v1_agents_{id}_proxies",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "agent_id": "example",
+                  "caddy": {
+                    "checked_at": "2026-11-10T12:00:00Z",
+                    "installed": "example",
+                    "latest": "example",
+                    "listeners": 1,
+                    "managed": false,
+                    "newer_installed": false,
+                    "observed_at": "2026-11-10T12:00:00Z",
+                    "outcome": "example",
+                    "running": "example",
+                    "shared_instances": 1,
+                    "state": "example"
+                  },
+                  "nginx": {
+                    "checked_at": "2026-11-10T12:00:00Z",
+                    "installed": "example",
+                    "latest": "example",
+                    "listeners": 1,
+                    "managed": false,
+                    "newer_installed": false,
+                    "observed_at": "2026-11-10T12:00:00Z",
+                    "outcome": "example",
+                    "running": "example",
+                    "shared_instances": 1,
+                    "state": "example"
+                  },
+                  "status": "example",
+                  "supported": false
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/api_nodeProxyReport"
+                }
+              }
+            },
+            "description": "节点代理上报"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "读取节点 Nginx/Caddy 状态",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/agents/{id}/proxies/{component}/check": {
       "post": {
+        "description": "component 可选 nginx、caddy。创建版本查询任务，仅需节点读取权限。API Key 创建任务须使用读写模式。检查不改变节点服务。",
         "operationId": "checkManagedProxy_api_v1_agents_{id}_proxies_{component}_check",
         "parameters": [
           {
@@ -12399,12 +12532,14 @@
             }
           },
           {
-            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
             "in": "path",
             "name": "component",
             "required": true,
             "schema": {
-              "minLength": 1,
+              "enum": [
+                "nginx",
+                "caddy"
+              ],
               "type": "string"
             }
           }
@@ -12499,7 +12634,7 @@
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "已受理或复用的任务"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -12534,7 +12669,7 @@
             "apiKey": []
           }
         ],
-        "summary": "检查ManagedProxy",
+        "summary": "检查节点 Nginx/Caddy 官方版本",
         "x-api-key": true,
         "x-authentication": "session_or_api_key",
         "x-effect": "write",
@@ -12549,6 +12684,183 @@
           "any": false,
           "permissions": [
             "agents.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/proxies/{component}/update": {
+      "post": {
+        "description": "component 可选 nginx、caddy。更新前读取托管监听和共享实例数量。切换可能短暂断连。通过 GET /tasks/{id} 跟踪任务，再读取节点代理状态核对运行版本。",
+        "operationId": "updateManagedProxy_api_v1_agents_{id}_proxies_{component}_update",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "enum": [
+                "nginx",
+                "caddy"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "action": "check-caddy",
+                  "agent_id": "example",
+                  "attempt": 1,
+                  "certificates": [
+                    {
+                      "certificate": "example",
+                      "id": "resource_example",
+                      "private_key": "example",
+                      "version": 1
+                    }
+                  ],
+                  "cnip_source": {
+                    "format": "example",
+                    "ipv4_url": "example",
+                    "ipv6_url": "example"
+                  },
+                  "config_content": "example",
+                  "config_id": "example",
+                  "config_version": 1,
+                  "core_source": "example",
+                  "core_version": "example",
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "engine": "mihomo",
+                  "error": "example",
+                  "existing_source_id": "example",
+                  "finished_at": "2026-11-10T12:00:00Z",
+                  "id": "resource_example",
+                  "import_source_digest": "example",
+                  "install_if_missing": false,
+                  "lease_id": "example",
+                  "mainland_access_policies": [
+                    {
+                      "agent_id": "example",
+                      "block_mainland_destination": false,
+                      "block_mainland_source": false,
+                      "cnip_prefixes": [
+                        "example"
+                      ],
+                      "config_version": 1,
+                      "engine": "mihomo",
+                      "kind": "example",
+                      "port": 1,
+                      "tag": "example"
+                    }
+                  ],
+                  "output": "example",
+                  "reused": false,
+                  "shared_instance": false,
+                  "shared_traffic_id": "example",
+                  "started_at": "2026-11-10T12:00:00Z",
+                  "status": "pending",
+                  "submission_id": "example",
+                  "tcp_settings": {},
+                  "tls_frontends": [
+                    {
+                      "acme_email": "example",
+                      "automatic_certificate": false,
+                      "backend_port": 1,
+                      "certificate": "example",
+                      "certificate_path": "example",
+                      "domain": "example",
+                      "host": "example",
+                      "local_only": false,
+                      "method": "example",
+                      "mode": "example",
+                      "path": "example",
+                      "private_key": "example",
+                      "private_key_path": "example",
+                      "public_port": 1,
+                      "reality_name": "example",
+                      "reality_names": [
+                        "example"
+                      ],
+                      "shared_ingress_generation": 1,
+                      "static_html": "example",
+                      "tag": "example",
+                      "transport": "example"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_Task"
+                }
+              }
+            },
+            "description": "已受理或复用的任务"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "更新节点托管 Nginx/Caddy",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "agents.manage",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "agents.manage",
+            "tasks.execute"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
