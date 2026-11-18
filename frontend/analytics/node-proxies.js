@@ -16,13 +16,14 @@ export function nodeProxyManager(ctx, agent, current, refresh) {
   const pending = new Map();
   const feedback = new Map();
   const online = () => agent.status === 'online' && agent.features?.includes('managed-proxies-v1');
+  const canUpdate = () => ctx.can('tasks.execute') && ctx.can('host.manage', agent) && ctx.can('agents.manage', agent);
   async function act(mode, label, update) {
     if (!current() || !online() || pending.has(mode)) return;
     const report = agent.managed_proxies?.[mode];
     if (update) {
-      if ((!ctx.can('host.manage', agent) || !ctx.can('agents.manage', agent)) || !report?.managed) return;
+      if (!canUpdate() || !report?.managed) return;
       const message = `更新 ${label} 会切换本节点的 ${report.listeners} 个托管监听，涉及 ${report.shared_instances} 个共享实例。切换期间连接可能短暂中断。`;
-      if (!await ctx.confirm(message, `更新 ${label}`) || !current() || !online()) return;
+      if (!await ctx.confirm(message, `更新 ${label}`) || !current() || !online() || !canUpdate() || pending.has(mode)) return;
     }
     pending.set(mode, update ? '更新中' : '检查中');
     feedback.delete(mode);
@@ -61,7 +62,7 @@ export function nodeProxyManager(ctx, agent, current, refresh) {
         stack(...[['已装', row?.installed], ['运行', row?.running], ['官方', row?.latest]].map(([title, value]) =>
           node('div', { className: 'a-proxy-version' }, muted(title), node('span', {}, value || '未知'))), muted(`${row?.outcome === '检查失败' ? '上次成功 · 已过期' : '上次成功检查'}　${last}`)),
         stack(actions(ctx.can('agents.read') && button('检查更新', () => act(mode, label, false), { disabled: !online() || pending.has(mode), 'aria-label': `检查 ${label} 更新` }),
-          ctx.can('host.manage', agent) && ctx.can('agents.manage', agent) && button('更新', () => act(mode, label, true), { disabled: !online() || pending.has(mode) || !row?.managed || !['pending','active'].includes(row.state), 'aria-label': `更新 ${label}` })),
+          canUpdate() && button('更新', () => act(mode, label, true), { disabled: !online() || pending.has(mode) || !row?.managed || !['pending','active'].includes(row.state), 'aria-label': `更新 ${label}` })),
           feedback.has(mode) && node('span', { role: 'status' }, feedback.get(mode))),
       ];
     }), { paginate: false, motion: false, label: '节点代理版本' });

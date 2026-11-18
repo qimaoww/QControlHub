@@ -1,3 +1,4 @@
+import { testProxyReports } from './node-proxies.mjs';
 import { assert, delay, waitFor } from './assertions.mjs';
 
 export async function testNodeAddressRuntime({ testAPI, mode }) {
@@ -20,6 +21,7 @@ export async function testNodeAddressRuntime({ testAPI, mode }) {
     }
     await settle();
   };
+  await testProxyReports(dialog, agent, refresh);
   assert.equal(picker.value, 'manual'); assert.equal(input.value, 'old.example');
   change(input, 'draft.example'); input.focus(); input.setSelectionRange(2, 6);
   await delay(400); dialog.scrollTop = 100; const scroll = dialog.scrollTop;

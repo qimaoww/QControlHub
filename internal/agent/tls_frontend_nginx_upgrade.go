@@ -74,6 +74,12 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 	if err != nil {
 		return "", err
 	}
+	if privateNginxRevision(binary) != "" {
+		digest, exists, err := protectedCoreMigrationFileDigest(binary, 64<<20)
+		if err != nil || !exists || !strings.HasSuffix(binary, "-"+digest) {
+			return "", errors.New("托管 Nginx 文件已变更，保留现有程序")
+		}
+	}
 	runningBinary := binary
 	running, err := m.nginxMasterExecutable(ctx, service, binary)
 	if err != nil && privateNginxRevision(binary) != "" {
@@ -228,6 +234,10 @@ func (m *tlsFrontendManager) verifyRunningProxy(ctx context.Context, mode, servi
 				return errors.New("托管监听的 TLS 或业务请求校验失败")
 			}
 		}
+	}
+	running, err := m.proxyMasterExecutable(check, mode, service, binary)
+	if err != nil || !os.SameFile(running, installed) {
+		return errors.New("业务检查后主进程已变更")
 	}
 	return nil
 }
