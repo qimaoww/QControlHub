@@ -183,7 +183,7 @@ func sameClockSyncStatus(a, b *core.ClockSyncStatus) bool {
 }
 
 func sameHostNetworkInterfaces(a, b []core.HostNetworkInterface) bool {
-	if len(a) != len(b) {
+	if (a == nil) != (b == nil) {
 		return false
 	}
 	return slices.EqualFunc(a, b, func(left, right core.HostNetworkInterface) bool {

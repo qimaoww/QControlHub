@@ -6,6 +6,7 @@ import (
 	"context"
 	"math"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,43 @@ func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
 	}
 	if len(second.NetworkInterfaces) == 0 || len(second.NetworkInterfaces[0].Addresses) == 0 {
 		t.Fatalf("live default-route interface addresses are missing: %+v", second.NetworkInterfaces)
+	}
+}
+
+func TestInterfaceDiscoveryPublishesOnlyCompleteSnapshots(t *testing.T) {
+	names, err := routedNetworkInterfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := networkInterfaceDetails(names)
+	if err != nil || len(good) == 0 {
+		t.Fatalf("real routed interface control: count=%d err=%v", len(good), err)
+	}
+	// A disappeared route interface must not erase previously known addresses.
+	// This name exceeds Linux IFNAMSIZ, so it cannot exist on the test host.
+	partial, err := networkInterfaceDetails(append(names, "qch-missing-interface"))
+	if err == nil || partial != nil {
+		t.Fatalf("incomplete discovery: got %d entries, omitted=%t, error=%v", len(partial), partial == nil, err)
+	}
+	empty, err := networkInterfaceDetails(nil)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("authoritative empty discovery: %v, %v", empty, err)
+	}
+}
+
+func TestSysfsFallbackFindsKernelNetworkInterfaces(t *testing.T) {
+	devices, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := fallbackNetworkInterfaces()
+	if slices.Contains(names, "lo") {
+		t.Fatal("loopback included in fallback")
+	}
+	for _, device := range devices {
+		if safeNetworkInterfaceName(device.Name) && !slices.Contains(names, device.Name) {
+			t.Fatalf("sysfs fallback omitted kernel interface %q", device.Name)
+		}
 	}
 }
 

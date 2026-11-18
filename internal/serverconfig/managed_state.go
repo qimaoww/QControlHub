@@ -336,6 +336,10 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 	if err != nil {
 		return nil, err
 	}
+	return managedObjects(engine, root, state), nil
+}
+
+func managedObjects(engine core.Engine, root map[string]any, state ManagedState) []ManagedObject {
 	disabled := map[ManagedResource]bool{}
 	for _, ref := range state.Disabled {
 		disabled[ref] = true
@@ -401,7 +405,7 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 			result = append(result, ManagedObject{Section: section, Tag: tag, Kind: kind, Listen: listen, Port: port, Network: network, Inbound: inbound, Enabled: !disabled[ManagedResource{section, tag}]})
 		}
 	}
-	return result, nil
+	return result
 }
 
 // Legacy SS Rust lists can name entries by position. An unlabelled disabled

@@ -208,7 +208,7 @@ func collectNetworkInterfacesCached(previous *metricSample, next *metricSample, 
 	next.interfaceDetails = details
 	next.interfacesKey = key
 	next.interfacesAt = now
-	next.interfacesValid = true
+	next.interfacesValid = detailsErr == nil
 	return interfaces, details, key, false, detailsErr
 }
 

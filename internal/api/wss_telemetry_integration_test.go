@@ -211,6 +211,9 @@ func TestHotPolicyReloadIsolationAndLegacyFallbackWithPostgreSQL(t *testing.T) {
 
 	var aliceCurrent core.PanelSettings
 	aliceLive.call("GET", "/settings", nil, http.StatusOK, &aliceCurrent)
+	secondLogin := loginLive("alice", alice.userID)
+	var delayed core.PanelSettings
+	secondLogin.call("GET", "/settings", nil, http.StatusOK, &delayed)
 	aliceUpdated := aliceCurrent
 	aliceUpdated.AgentHeartbeatIntervalSeconds = 30
 	aliceUpdated.AgentOfflineThresholdSeconds = 90
@@ -258,6 +261,27 @@ func TestHotPolicyReloadIsolationAndLegacyFallbackWithPostgreSQL(t *testing.T) {
 		t.Fatalf("bobModern updated policy = %+v, want MetricsIntervalSeconds=5", bobPolicy.AgentPolicy)
 	}
 	assertNoWSSFrame(t, aliceModernFrames, 250*time.Millisecond, "borrowed aliceModern after bob settings update")
+
+	// Another login's older edit arrives after the modern Agent reconnects.
+	reconnected := dialPublicIPProbeWSS(t, ctx, httpServer.URL, aliceModern.ID, aliceModernKey)
+	defer reconnected.Close(websocket.StatusNormalClosure, "done")
+	delayed.AgentHeartbeatIntervalSeconds = 10
+	secondLogin.call("PUT", "/settings", delayed, http.StatusConflict, nil)
+	if err := wsjson.Write(ctx, reconnected, core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
+		Version: "reconnected", Features: aliceModernFeatures,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	frames := startWSSFrameReader(ctx, reconnected)
+	_ = readWSSFrameType(t, frames, core.WirePublicIPProbe, 3*time.Second)
+	policy := readWSSFrameType(t, frames, core.WireAgentPolicy, 3*time.Second).AgentPolicy
+	if policy == nil || policy.HeartbeatIntervalSeconds != 30 || policy.MetricsIntervalSeconds != 15 {
+		t.Fatalf("reconnected policy after stale write: %+v", policy)
+	}
+	secondLogin.call("GET", "/settings", nil, http.StatusOK, &delayed)
+	if delayed.AgentHeartbeatIntervalSeconds != 30 || delayed.Revision <= aliceCurrent.Revision {
+		t.Fatal("second login did not recover the committed settings")
+	}
 }
 
 func TestWSSInboundTelemetryFloodProtectionWithPostgreSQL(t *testing.T) {

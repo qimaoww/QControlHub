@@ -23,7 +23,7 @@ type HostMetrics struct {
 	NetworkTXBytes       uint64                 `json:"network_tx_bytes"`
 	NetworkRXBPS         uint64                 `json:"network_rx_bps"`
 	NetworkTXBPS         uint64                 `json:"network_tx_bps"`
-	NetworkInterfaces    []HostNetworkInterface `json:"network_interfaces,omitempty"`
+	NetworkInterfaces    []HostNetworkInterface `json:"network_interfaces,omitzero"` // nil preserves the previous snapshot; [] clears it.
 	// ObservedPublicIP is assigned by the control plane from the authenticated
 	// WSS source. Agent-provided values are never trusted. It only ever
 	// reflects the address family the WSS connection itself used.
