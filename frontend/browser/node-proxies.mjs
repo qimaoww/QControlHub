@@ -17,7 +17,7 @@ export async function testProxyReports(dialog, agent, refresh) {
   assert.match(section.textContent, /待切换/);
   assert.ok(section.textContent.includes(agent.managed_proxies.nginx.running));
   assert.match(section.textContent, /更新受阻/);
-  assert.match(section.textContent, /可更新/);
+  assert.match(section.textContent, /有新版/);
   const previous = window.fetch;
   const requests = [];
   let release;

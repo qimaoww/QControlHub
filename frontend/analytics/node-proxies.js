@@ -8,14 +8,18 @@ const busy = task => ['pending', 'running'].includes(task?.status);
 
 function runtime(agent, row) {
   if (!agent.features?.includes('managed-proxies-v1')) return '需升级 QAgent';
-  if (row?.state === 'active' && row.latest && row.running) return row.running === row.latest ? '已最新' : row.newer_installed ? '已装版本较新' : '可更新';
+  if (row?.state === 'active' && row.latest && row.running) {
+    if (row.running === row.latest) return '已最新';
+    if (row.newer_installed) return '已装版本较新';
+    return row.update_state === 'blocked' ? '有新版' : '可更新';
+  }
   return states[row?.state] || '未知';
 }
 
 function taskMessage(task, label, attemptAt, receipt) {
-  if (receipt && task?.created_at === receipt) return '';
-  if (!task?.finished_at || Date.parse(attemptAt) > Date.parse(task.finished_at)) return '';
-  if (task.status === 'canceled') return label + '任务已取消';
+  if (!task?.finished_at) return '';
+  if (task.status === 'canceled') return '上次' + label + '任务已取消';
+  if (receipt && task.created_at === receipt || Date.parse(attemptAt) > Date.parse(task.finished_at)) return '';
   if (task.status === 'succeeded' && !(Date.parse(attemptAt) >= Date.parse(task.created_at))) {
     return label + (Date.now() - Date.parse(task.finished_at) < 120000 ? '任务已完成，等待节点上报' : '任务已完成，节点尚未确认本次结果');
   }
@@ -125,7 +129,7 @@ export function nodeProxyManager(ctx, agent, current, close) {
     const enabled = online() && !operation && !readError && snapshot;
     return node('article', { className: 'a-proxy-row', 'data-refresh-key': mode, 'aria-label': label },
       node('div', { className: 'a-proxy-identity' },
-        node('div', { className: 'a-proxy-title' }, node('strong', {}, label), badge(status, status === '已最新' ? 'good' : ['待切换', '可更新'].includes(status) ? 'warn' : '')),
+        node('div', { className: 'a-proxy-title' }, node('strong', {}, label), badge(status, status === '已最新' ? 'good' : ['待切换', '可更新', '有新版'].includes(status) ? 'warn' : '')),
         muted([source, managed].filter(Boolean).join(' · ')),
         agent.status !== 'online' && muted(`离线 · ${date(row?.observed_at || agent.last_seen)}`)),
       node('dl', { className: 'a-proxy-versions' }, versions.map(([title, value]) =>
