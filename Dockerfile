@@ -69,7 +69,7 @@ ENV QCH_SERVICE_MANAGER=openrc
 VOLUME ["/var/lib/qcontrolhub"]
 ENTRYPOINT ["/usr/local/bin/qagent"]
 
-FROM nginx:1.31.9-alpine-slim@sha256:a4d4bfb7422de90749b94dcc0374844d153b3c9e44d1d221a5f7ede18e9d60b4 AS qcontrol-web
+FROM nginx:1.31.9-alpine@sha256:0713660ff64e819a478be0d69ae314e52d21623c93672edd9f381a6e66fd95ff AS qcontrol-web
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
