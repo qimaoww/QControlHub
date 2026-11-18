@@ -124,11 +124,15 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 		}
 		check, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		if _, err := waitForServiceState(check, "active", time.Second, 100*time.Millisecond, func(ctx context.Context) (string, error) {
-			if running, err := m.nginxMasterExecutable(ctx, service, binary); err == nil && os.SameFile(running, installed) {
-				return m.services.status(ctx, service)
+		if err := verifyNginxActivation(check, func(ctx context.Context) (string, error) {
+			status, err := m.services.status(ctx, service)
+			if err != nil || status != "active" {
+				return status, err
 			}
-			return "", nil
+			if running, err := m.nginxMasterExecutable(ctx, service, binary); err == nil && os.SameFile(running, installed) {
+				return status, nil
+			}
+			return "activating", nil
 		}); err != nil {
 			return "", fmt.Errorf("托管 Nginx 运行二进制核对失败：%w", err)
 		}
@@ -137,6 +141,17 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 		return "", err
 	}
 	return fmt.Sprintf("托管 Nginx 正在运行 %s。安全补丁以软件包来源公告为准。", revision), nil
+}
+
+func verifyNginxActivation(ctx context.Context, probe serviceStatusProbe) error {
+	status, err := waitForServiceState(ctx, "active", time.Second, 100*time.Millisecond, probe)
+	if err != nil {
+		return err
+	}
+	if status != "active" {
+		return fmt.Errorf("托管 Nginx 服务状态为 %s", status)
+	}
+	return nil
 }
 
 func (m *tlsFrontendManager) nginxMasterExecutable(ctx context.Context, service, binary string) (os.FileInfo, error) {

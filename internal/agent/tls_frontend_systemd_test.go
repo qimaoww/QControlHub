@@ -460,3 +460,16 @@ func verifyManagedNginxPackageUpgrade(t *testing.T, m *tlsFrontendManager, deplo
 	}
 	verifyLive(current)
 }
+
+func TestNginxActivationRejectsStoppedService(t *testing.T) {
+	for _, status := range []string{"failed", "inactive"} {
+		t.Run(status, func(t *testing.T) {
+			err := verifyNginxActivation(t.Context(), func(context.Context) (string, error) {
+				return status, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), status) {
+				t.Fatalf("activation with service status %q returned %v", status, err)
+			}
+		})
+	}
+}
