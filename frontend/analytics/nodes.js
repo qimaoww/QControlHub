@@ -534,7 +534,7 @@ export async function nodesPage(ctx) {
       nodeForm.querySelector('[type=submit]').disabled = !manage;
     }
     const proxies = agent.can_manage !== false && nodeProxyManager(ctx, agent,
-      () => ctx.current() && box.open && settingsScope() === openedScope && agents.includes(agent), load);
+      () => ctx.current() && box.open && settingsScope() === openedScope && agents.includes(agent), () => box.close());
     if (proxies) settingsUpdates.push(proxies.render);
     const nodePanel = stack(nodeForm || details, allocation, proxies?.element, operations);
     nodePanel.dataset.settingsPanel = 'node'; nodePanel.setAttribute('role', 'region'); nodePanel.setAttribute('aria-label', '节点设置');
@@ -552,6 +552,7 @@ export async function nodesPage(ctx) {
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
+    if (proxies) box.addEventListener('close', proxies.dispose, { once: true });
     const nodeDirty = () => address?.dirty() || zone?.dirty() || nodeForm?.elements.name && nodeForm.elements.name.value !== savedName || nodeForm?.elements.admin_hidden && nodeForm.elements.admin_hidden.checked !== savedVisibility;
     box.onRequestClose = async () => {
       if (nodeDirty() && !await ctx.confirm('存在未保存的设置更改，确定关闭？', '放弃更改')) return;

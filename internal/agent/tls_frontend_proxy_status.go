@@ -27,11 +27,10 @@ func readProxyReports() map[string]core.ProxyStatus {
 	return result
 }
 
-// The durable report contains only component versions and aggregate counts.
-// Task diagnostics stay on the authorized task, separate from the node view.
 func (m *tlsFrontendManager) saveProxyObservation(ctx context.Context, mode string, change func(*core.ProxyStatus)) error {
 	previous := readProxyReports()[mode]
-	row := core.ProxyStatus{Latest: previous.Latest, CheckedAt: previous.CheckedAt, Outcome: previous.Outcome, ObservedAt: previous.ObservedAt, State: "unknown"}
+	row := core.ProxyStatus{Latest: previous.Latest, CheckedAt: previous.CheckedAt, Outcome: previous.Outcome, ObservedAt: previous.ObservedAt, CheckRequestAt: previous.CheckRequestAt, UpdateRequestAt: previous.UpdateRequestAt, CheckAttemptAt: previous.CheckAttemptAt, CheckError: previous.CheckError,
+		UpdateStartedAt: previous.UpdateStartedAt, UpdateAt: previous.UpdateAt, UpdateState: previous.UpdateState, UpdateError: previous.UpdateError, State: "unknown"}
 	deployments, err := m.load()
 	if err == nil {
 		ports := map[int]bool{}
@@ -55,6 +54,8 @@ func (m *tlsFrontendManager) saveProxyObservation(ctx context.Context, mode stri
 	}
 	if change != nil {
 		change(&row)
+	} else {
+		reconcileProxyAttempt(&row, time.Now().UTC())
 	}
 	if row.Installed != "" && row.Latest != "" && row.Installed != row.Latest {
 		row.NewerInstalled = m.proxyNewer(ctx, mode, row.Installed, row.Latest)
@@ -80,12 +81,15 @@ func (m *tlsFrontendManager) observeProxyProcess(ctx context.Context, mode strin
 	installed, err := os.Stat(binary)
 	if errors.Is(err, os.ErrNotExist) {
 		row.State = "missing"
-		return
+		if !row.Managed {
+			return
+		}
+	} else {
+		if err != nil || validatePrivilegedExecutable(binary) != nil {
+			return
+		}
+		row.Installed = m.proxyVersion(ctx, mode, binary)
 	}
-	if err != nil || validatePrivilegedExecutable(binary) != nil {
-		return
-	}
-	row.Installed = m.proxyVersion(ctx, mode, binary)
 	if !row.Managed {
 		row.State = "unmanaged"
 		return
@@ -96,7 +100,9 @@ func (m *tlsFrontendManager) observeProxyProcess(ctx context.Context, mode strin
 		return
 	}
 	if state != "active" {
-		row.State = state
+		if installed != nil {
+			row.State = state
+		}
 		return
 	}
 	if m.checkProxyUnit(ctx, mode) != nil {
@@ -156,9 +162,20 @@ func (m *tlsFrontendManager) proxyVersion(ctx context.Context, mode, path string
 	return v
 }
 
-func (m *tlsFrontendManager) proxyOperation(ctx context.Context, mode string, action core.Action, build string, explicit bool) error {
+func (m *tlsFrontendManager) proxyOperation(ctx context.Context, mode string, action core.Action, build string, explicit bool, requestAt time.Time) error {
 	var latest, output string
 	var err error
+	if !action.ChecksProxy() {
+		if err := m.saveProxyObservation(ctx, mode, func(row *core.ProxyStatus) {
+			now := time.Now().UTC()
+			reconcileProxyAttempt(row, now)
+			if row.Managed && row.Listeners > 0 {
+				row.UpdateStartedAt = now
+			}
+		}); err != nil {
+			return err
+		}
+	}
 	if action.ChecksProxy() {
 		if mode == "nginx" {
 			var p nginxPlatform
@@ -170,40 +187,42 @@ func (m *tlsFrontendManager) proxyOperation(ctx context.Context, mode string, ac
 			_, latest, _, err = m.caddyCandidate(ctx)
 		}
 	} else if err = m.recoverProxySwitch(ctx, mode); err != nil {
-		err = fmt.Errorf("中断的托管切换恢复失败：%w", err)
+		err = fmt.Errorf("%w：%w", issueRecovery, err)
 	} else if mode == "nginx" {
-		output, err = m.upgradeManagedNginx(ctx, build, explicit, m.upgradeNginxBinary)
+		output, err = m.upgradeManagedNginx(ctx, build, explicit, func(ctx context.Context, binary string) (string, string, error) {
+			path, revision, err := m.upgradeNginxBinary(ctx, binary)
+			latest = revision
+			return path, revision, err
+		})
 	} else {
-		output, err = m.upgradeManagedCaddy(ctx, build, explicit)
+		output, err = m.upgradeManagedCaddy(ctx, build, explicit, &latest)
 	}
 	if action.ProxyComponent() != "" && !action.ChecksProxy() && output == "" && err == nil {
-		err = errors.New("此组件没有运行中的托管监听")
+		err = issueNoListeners
 	}
-	saveErr := m.saveProxyObservation(ctx, mode, func(row *core.ProxyStatus) {
-		if !action.ChecksProxy() && err == nil && output == "" {
-			return
+	observeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	saveErr := m.saveProxyObservation(observeCtx, mode, func(row *core.ProxyStatus) {
+		if action.ChecksProxy() {
+			reconcileProxyAttempt(row, time.Now().UTC())
+		} else {
+			row.UpdateStartedAt = time.Time{}
 		}
-		if err != nil {
-			if action.ChecksProxy() {
-				row.Outcome = "检查失败"
-			} else if strings.Contains(err.Error(), "恢复失败") {
-				row.Outcome = "恢复失败"
-			} else {
-				row.Outcome = "更新失败"
+		if action.ChecksProxy() || output != "" || err != nil {
+			recordProxyResult(row, action.ChecksProxy(), latest, err, time.Now().UTC())
+			if !requestAt.IsZero() {
+				if action.ChecksProxy() {
+					row.CheckRequestAt = requestAt
+				} else {
+					row.UpdateRequestAt = requestAt
+				}
 			}
-			return
 		}
-		if latest == "" {
-			latest = row.Running
-		}
-		row.Latest = latest
-		row.CheckedAt = time.Now().UTC()
-		row.Outcome = ""
 	})
 	if output != "" {
 		fmt.Println(output)
 	}
-	if action.ChecksProxy() && latest != "" {
+	if action.ChecksProxy() && latest != "" && err == nil {
 		fmt.Printf("%s 官方最新版 %s\n", mode, latest)
 	}
 	if err != nil {
@@ -212,9 +231,9 @@ func (m *tlsFrontendManager) proxyOperation(ctx context.Context, mode string, ac
 	return saveErr
 }
 
-func (e *Executor) runProxyTask(ctx context.Context, action core.Action, build string) (string, error) {
+func (e *Executor) runProxyTask(ctx context.Context, task core.Task, build string) (string, error) {
 	services := e.serviceManager().Kind()
-	req := tlsFrontendRequest{Action: action, ProxyBuild: build, Service: DefaultSpecsForServiceManager(services)[core.EngineSingBox].Service, Kind: services, Deadline: tlsOperationDeadline(ctx)}
+	req := tlsFrontendRequest{Action: task.Action, ProxyRequestAt: task.CreatedAt, ProxyBuild: build, Service: DefaultSpecsForServiceManager(services)[core.EngineSingBox].Service, Kind: services, Deadline: tlsOperationDeadline(ctx)}
 	var log strings.Builder
 	err := e.runTLSFrontendRequest(ctx, req, &log)
 	return log.String(), err

@@ -586,6 +586,11 @@ window.fetch = async (input, options = {}) => {
     testAPI.settings = { ...body, revision: testAPI.settings.revision + 1 };
     return json(testAPI.settings);
   }
+  if (method === "GET" && /^\/agents\/[^/]+\/proxies$/.test(path)) {
+    const agent = testAPI.agents.find(item => item.id === path.split("/")[2]);
+    if (!agent || agent.can_manage === false) return json({error:"无权查看节点代理"},403);
+    return json({agent_id:agent.id,status:agent.status,supported:agent.features.includes("managed-proxies-v1"),...agent.managed_proxies,tasks:testAPI.proxyTasks});
+  }
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"}, testAPI.agentsFailure === 403 ? 403 : 503);
   if (method === "GET" && path === "/agents") {
     if (testAPI.agentsGate) await testAPI.agentsGate;

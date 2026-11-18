@@ -76,7 +76,7 @@ func (m *tlsFrontendManager) checkProxyUnit(ctx context.Context, mode string) er
 	return validateOpenRCCoreOverrides(service)
 }
 
-func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build string, explicit bool) (string, error) {
+func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build string, explicit bool, latest *string) (string, error) {
 	deployments, err := m.load()
 	if err != nil {
 		return "", err
@@ -96,8 +96,10 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 		return "", err
 	}
 	service, unit, _ := m.serviceDefinition("caddy", false)
-	if state, err := m.services.status(ctx, service); err != nil || state != "active" {
-		return "", fmt.Errorf("托管 Caddy 服务状态为 %s", state)
+	if state, err := m.services.status(ctx, service); err != nil {
+		return "", err
+	} else if state != "active" {
+		return "", fmt.Errorf("%w（%s）", issueStopped, state)
 	}
 	target := m.proxyBinary("caddy")
 	pid, err := managedServiceProcessPID(ctx, m.services, service)
@@ -124,13 +126,8 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 	if err != nil || !exists {
 		return "", errors.New("无法校验 Caddy 程序")
 	}
-	if old == managedCaddyBinary {
-		owned, err := readConfigurationFile(old + ".qch-owned")
-		if err != nil || owned != digest {
-			return "", errors.New("Caddy 来源不明或为自定义模块构建，请保留现有程序")
-		}
-	} else if !strings.HasSuffix(old, "-"+digest) {
-		return "", errors.New("Caddy 程序摘要已变更")
+	if old != managedCaddyBinary && !strings.HasSuffix(old, "-"+digest) {
+		return "", issueChangedBinary
 	}
 	marker := filepath.Join(m.root, "caddy-package-build")
 	if !explicit && target == old {
@@ -139,22 +136,41 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 			return "", nil
 		}
 	}
-	updater, tag, asset, err := m.caddyCandidate(ctx)
-	if err != nil {
-		return "", err
-	}
 	current, err := m.caddyCommand(ctx, old, "version")
 	version := firstWord(current)
 	if err != nil || !caddyStableTag.MatchString(version) {
-		return "", errors.New("无法识别 Caddy 稳定版")
+		return "", issueCaddyVersion
+	}
+	modules, err := m.caddyCommand(ctx, old, "list-modules", "--packages", "--skip-standard")
+	if err := validateCaddyModuleList(modules, err); err != nil {
+		return "", err
+	}
+	updater, tag, asset, err := m.caddyCandidate(ctx)
+	if err != nil {
+		return "", fmt.Errorf("%w：%w", issueCandidate, err)
+	}
+	*latest = tag
+	if old == managedCaddyBinary {
+		owned, err := readConfigurationFile(old + ".qch-owned")
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", issueOwnershipFile
+		}
+		if owned != digest {
+			if err := verifyHistoricalCaddy(ctx, updater, version, digest); err != nil {
+				return "", err
+			}
+		}
 	}
 	if caddyVersionNewer(version, tag) {
-		return "", errors.New("拒绝降级 Caddy")
+		if target != old {
+			return "", issueChangedBinary
+		}
+		tag = version
 	}
 	if version != tag || target != old {
 		data, err := caddyAssetBinary(ctx, updater, asset)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("%w：%w", issueCandidate, err)
 		}
 		digest = fmt.Sprintf("%x", sha256.Sum256(data))
 		candidate := filepath.Join(filepath.Dir(old), "caddy-"+tag+"-"+digest)
@@ -167,16 +183,12 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 		} else if cached != digest {
 			return "", errors.New("Caddy 候选程序摘要不一致")
 		}
-		modules, err := m.caddyCommand(ctx, old, "list-modules", "--packages", "--skip-standard")
-		if err != nil || strings.TrimSpace(modules) != "" {
-			return "", errors.New("无法确认 Caddy 自定义模块，保留现有程序")
-		}
 		out, err := m.caddyCommand(ctx, candidate, "version")
 		if err != nil || firstWord(out) != tag {
 			return "", errors.New("Caddy 候选版本不符")
 		}
 		if out, err = m.caddyCommand(ctx, candidate, "validate", "--config", filepath.Join(m.root, "caddy.conf")); err != nil {
-			return "", errors.New("Caddy 配置校验失败，请在节点核对托管配置、模块和读取权限")
+			return "", issueProxyConfig
 		}
 		info, err = os.Stat(candidate)
 		if err != nil {
@@ -192,6 +204,44 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 		return "", err
 	}
 	return "托管 Caddy 正在运行 " + tag, nil
+}
+
+func validateCaddyModuleList(output string, err error) error {
+	if err != nil {
+		return issueModuleInspection
+	}
+	if strings.TrimSpace(output) != "" {
+		return issueCaddyModules
+	}
+	return nil
+}
+
+// A legacy private path may predate the ownership marker. Prove the identity
+// of the running bytes without claiming ownership of an administrator's file.
+func verifyHistoricalCaddy(ctx context.Context, updater *CoreUpdater, version, digest string) error {
+	if !caddyStableTag.MatchString(version) {
+		return issueCaddyVersion
+	}
+	var release githubRelease
+	endpoint := strings.TrimSuffix(updater.apiBase, "/") + "/repos/caddyserver/caddy/releases/tags/" + version
+	if err := updater.getJSON(ctx, endpoint, &release); err != nil {
+		return fmt.Errorf("%w：%w", issueHistoricalRelease, err)
+	}
+	if release.TagName != version {
+		return issueHistoricalRelease
+	}
+	asset, err := caddyLinuxAsset(release, updater.goarch)
+	if err != nil {
+		return fmt.Errorf("%w：%w", issueHistoricalRelease, err)
+	}
+	data, err := caddyAssetBinary(ctx, updater, asset)
+	if err != nil {
+		return fmt.Errorf("%w：%w", issueHistoricalRelease, err)
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(data)) != digest {
+		return issueHistoricalMismatch
+	}
+	return nil
 }
 
 func caddyVersionNewer(version, tag string) bool {

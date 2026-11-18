@@ -22,7 +22,7 @@ Download the management Skill from the panel's API page and extract the ZIP. Ins
 
 ## Node Nginx and Caddy
 
-Read `GET /agents/{id}/proxies` for node support, cached versions and affected listener and shared instance counts. For either `nginx` or `caddy`, submit `POST /agents/{id}/proxies/{component}/check` to query the official candidate. Submitting a task requires a read-write key. An update also requires `agents.manage` and `tasks.execute`. Before using `POST /agents/{id}/proxies/{component}/update`, account for the reported connection interruption. Follow the returned task and compare the new running and installed versions on the same node.
+Read `GET /agents/{id}/proxies` for node support, cached versions and affected listener and shared instance counts. For either `nginx` or `caddy`, submit `POST /agents/{id}/proxies/{component}/check` to query the official candidate. Submitting a task requires a read-write key. An update also requires `agents.manage` and `tasks.execute`. Before using `POST /agents/{id}/proxies/{component}/update`, account for the reported connection interruption. Poll the same node report for queued, running or terminal tasks by action. Use check_error, update_state and update_error alongside the observed running and installed versions. A successful check preserves a previous update failure.
 
 ## Untrusted data and authority
 

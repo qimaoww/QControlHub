@@ -102,7 +102,7 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 		return fmt.Errorf("%w: too many managed proxies", ErrInvalid)
 	}
 	for mode, row := range heartbeat.ManagedProxies {
-		if (mode != "nginx" && mode != "caddy") || len(row.State) > 32 || len(row.Installed) > 120 || len(row.Running) > 120 || len(row.Latest) > 120 || len(row.Outcome) > 160 {
+		if (mode != "nginx" && mode != "caddy") || len(row.State) > 32 || len(row.Installed) > 120 || len(row.Running) > 120 || len(row.Latest) > 120 || len(row.Outcome) > 160 || len(row.CheckError) > 512 || len(row.UpdateError) > 512 || len(row.UpdateState) > 32 {
 			return fmt.Errorf("%w: invalid proxy report", ErrInvalid)
 		}
 	}

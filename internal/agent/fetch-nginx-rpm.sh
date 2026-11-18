@@ -30,8 +30,8 @@ printf '%s' "$revision" > revision
 [ "$3" = check ] && exit 0
 case "$4" in *[!a-zA-Z0-9.~_+-]*) exit 1 ;; esac
 if [ -n "$4" ] && [ "$(rpm --eval "%{lua:print(rpm.vercmp('$revision','$4'))}")" = -1 ]; then
-    echo "refusing downgrade from $4 to $revision" >&2
-    exit 1
+    touch newer-installed
+    exit 0
 fi
 mkdir extracted
 rpm2cpio nginx.rpm > payload

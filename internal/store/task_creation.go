@@ -174,6 +174,21 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if request.Action.ProxyComponent() != "" && !containsFeature(features, core.AgentFeatureManagedProxies) {
 		return core.Task{}, fmt.Errorf("%w: 需升级 QAgent", ErrConflict)
 	}
+	if mode := request.Action.ProxyComponent(); mode != "" {
+		keyID, _ := apiKeyTaskIdentity(ctx)
+		// The agent row is locked. Reuse the same submitter's identical task
+		// below, and exclude competing operations on this component.
+		var busy bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE agent_id=$1
+			AND action IN ($2,$3) AND status IN ('pending','running')
+			AND (action<>$4 OR owner_id<>$5 OR api_key_id<>$6))`, request.AgentID,
+			"check-"+mode, "update-"+mode, request.Action, scope.OwnerID, keyID).Scan(&busy); err != nil {
+			return core.Task{}, err
+		}
+		if busy {
+			return core.Task{}, fmt.Errorf("%w: 此组件已有检查或更新任务，请等待任务结束", ErrConflict)
+		}
+	}
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
 	}
