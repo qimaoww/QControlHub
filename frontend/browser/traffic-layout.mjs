@@ -34,6 +34,10 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
       box.querySelector('[aria-label="关闭"]').click();
       await waitFor(() => !box.isConnected, 'dialog did not close');
     };
+    const utcMonth = new Date().toISOString().slice(0, 7);
+    testAPI.trafficDays = Array.from({ length: 18 }, (_, index) => ({
+      day: `${utcMonth}-${String(index + 1).padStart(2, '0')}`, received_bytes: 10, sent_bytes: 20, used_bytes: 30,
+    }));
     button('统计详情').click();
     let detailDialog = await waitFor(() => active(), 'statistics dialog missing');
     assert.ok(!detailDialog.querySelector('h2').textContent.includes(':8443'), 'standalone port retains colon');
@@ -44,6 +48,16 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.ok(detailDialog.textContent.includes('仅监听端口') && !detailDialog.textContent.includes('统计异常'), 'scope limitation rendered as error');
     const policy = testAPI.trafficPolicies[0];
     const original = structuredClone(policy);
+    const nextDayPage = await waitFor(() => !button('下一页', detailDialog)?.disabled && button('下一页', detailDialog), 'daily pagination missing');
+    nextDayPage.click();
+    const previousDayPage = button('上一页', detailDialog);
+    previousDayPage.focus();
+    testAPI.trafficDays.at(-1).sent_bytes = 555;
+    testAPI.trafficDays.at(-1).used_bytes = 565;
+    policy.sent_bytes += 535;
+    policy.used_bytes += 535;
+    await waitFor(() => detailDialog.querySelector('tbody').textContent.includes('555'), 'open UTC day table did not refresh');
+    assert.ok(detailDialog.textContent.includes('第 2 / 2 页') && document.activeElement === previousDayPage, 'refresh reset pagination or focus');
     const diagnose = async (error, expected) => {
       policy.enforcement_error = error;
       await waitFor(() => detailDialog.textContent.includes(expected), `native diagnostic missing: ${expected}`);

@@ -238,8 +238,9 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			Port      int `yaml:"port"`
 			RedirPort int `yaml:"redir-port"`
 			Listeners []struct {
-				Port int    `yaml:"port"`
-				Type string `yaml:"type"`
+				Port      int    `yaml:"port"`
+				Type      string `yaml:"type"`
+				Transport string `yaml:"transport"`
 			} `yaml:"listeners"`
 		}
 		if yaml.Unmarshal([]byte(content), &root) != nil {
@@ -259,6 +260,8 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			}
 			seen[in.Port] = true
 			switch in.Type {
+			case serverconfig.ProtocolMieru:
+				result[in.Port] = serverconfig.MieruListenerProtocol(in.Transport)
 			case "vless", "vmess", "trojan", "http", "redir", "anytls":
 				result[in.Port] = core.TrafficProtocolTCP
 			case "hysteria2", "hysteria", "tuic":

@@ -131,7 +131,8 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 func trafficEntryProtocol(engine core.Engine, entry map[string]any, kind string, fallback core.TrafficProtocol) core.TrafficProtocol {
 	protocol := trafficProtocol(entry["network"], trafficProtocolForKind(kind, fallback))
 	if engine == core.EngineMihomo && kind == ProtocolMieru {
-		protocol = trafficProtocol(entry["transport"], protocol)
+		transport, _ := entry["transport"].(string)
+		return MieruListenerProtocol(transport)
 	}
 	if engine == core.EngineSingBox && stringValue(mapValue(entry["transport"])["type"]) == "quic" {
 		protocol = core.TrafficProtocolUDP
@@ -154,6 +155,19 @@ func trafficEntryProtocol(engine core.Engine, entry map[string]any, kind string,
 		}
 	}
 	return protocol
+}
+
+// MieruListenerProtocol returns a single transport only for the exact values
+// accepted by Mihomo's Mieru listener. Both denotes an unverified scope.
+func MieruListenerProtocol(transport string) core.TrafficProtocol {
+	switch transport {
+	case "TCP":
+		return core.TrafficProtocolTCP
+	case "UDP":
+		return core.TrafficProtocolUDP
+	default:
+		return core.TrafficProtocolBoth
+	}
 }
 
 func trafficEndpoint(engine core.Engine, name string, port int, protocol core.TrafficProtocol) core.PortTrafficEndpoint {

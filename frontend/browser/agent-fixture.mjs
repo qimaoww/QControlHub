@@ -408,7 +408,7 @@ window.fetch = async (input, options = {}) => {
   }
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
-    if (path === "/traffic-usage") return json({days:[]});
+    if (path === "/traffic-usage") return json({days:testAPI.trafficDays || []});
     if (path === "/traffic-policies") {
       const policies = (testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy }));
       return json(url.searchParams.get('view') === 'page' ? { policies, agents: testAPI.agents.map(agent => ({id:agent.id,name:agent.name,region_code:agent.labels?.region_code || agent.region_code || '',status:agent.status,can_manage:agent.can_manage,capabilities:agent.capabilities})) } : policies);

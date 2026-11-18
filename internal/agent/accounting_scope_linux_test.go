@@ -142,3 +142,67 @@ func TestSingleTransportMarkedAccountingIncludesBothOutboundTransports(t *testin
 		}
 	}
 }
+
+func TestMieruListenerScope(t *testing.T) {
+	protocol, _ := serverconfig.FindProtocol(core.EngineMihomo, serverconfig.ProtocolMieru)
+	input, err := serverconfig.NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Port = 443
+	generated, err := serverconfig.Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const listener = "listeners:\n  - {name: edge, type: mieru, port: 443, users: {test: test}"
+	for _, tc := range []struct {
+		name, content string
+		want          core.TrafficProtocol
+	}{
+		{"preset", generated, core.TrafficProtocolTCP},
+		{"tcp", listener + ", transport: TCP}\n", core.TrafficProtocolTCP},
+		{"udp", listener + ", transport: UDP}\n", core.TrafficProtocolUDP},
+		{"missing", listener + ", network: tcp}\n", core.TrafficProtocolBoth},
+		{"invalid", listener + ", transport: 'tcp,garbage'}\n", core.TrafficProtocolBoth},
+		{"lowercase", listener + ", transport: tcp}\n", core.TrafficProtocolBoth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ports := serverconfig.DiscoverTrafficPorts(core.EngineMihomo, tc.content)
+			plan, err := serverconfig.PrepareIndependentEgress(core.EngineMihomo, tc.content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := compileAccountingConfiguration(core.EngineMihomo, plan.Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, _, _, p := newAccuracyTrafficManager(t)
+			p.Engine, p.Protocol = core.EngineMihomo, core.TrafficProtocolTCP
+			if tc.want == core.TrafficProtocolUDP {
+				p.Protocol = tc.want
+			}
+			m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) { return snapshot, nil }
+			if err := m.SetPolicies(context.Background(), []core.PortTrafficPolicy{p}, p.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			got := m.Snapshot()[0]
+			if len(ports) != 1 || ports[0].Protocol != tc.want || snapshot.ListenerProtocols[p.Port] != tc.want || (got.Accounting != nil && got.Accounting.Source == "nft-dual") != (tc.want != core.TrafficProtocolBoth) {
+				t.Fatalf("discovery=%v verified=%s diagnostic=%q", ports, snapshot.ListenerProtocols[p.Port], got.EnforcementError)
+			}
+			if tc.want != core.TrafficProtocolBoth {
+				p.Protocol = core.TrafficProtocolUDP
+				if tc.want == p.Protocol {
+					p.Protocol = core.TrafficProtocolTCP
+				}
+				if nativeAccountingScopeAllowed(p, snapshot) {
+					t.Fatal("mismatched policy accepted")
+				}
+			}
+		})
+	}
+	for _, content := range []string{listener + ", transport: TCP}\n  - {name: other, type: http, port: 443}\n", "mixed-port: 443\n" + listener + ", transport: UDP}\n"} {
+		if _, err := serverconfig.PrepareIndependentEgress(core.EngineMihomo, content); err == nil {
+			t.Fatal("shared port acquired an outbound")
+		}
+	}
+}
