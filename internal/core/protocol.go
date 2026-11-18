@@ -3,6 +3,7 @@ package core
 import "time"
 
 type HeartbeatRequest struct {
+	ManagedProxies      map[string]ProxyStatus  `json:"managed_proxies,omitempty"`
 	Diagnostics         *DiagnosticCapabilities `json:"diagnostics,omitempty"`
 	ProxyIngressReports []ProxyIngressReport    `json:"proxy_ingress_reports,omitempty"`
 	Version             string                  `json:"version,omitempty"`

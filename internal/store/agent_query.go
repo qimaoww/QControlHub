@@ -24,7 +24,7 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	err := s.pool.QueryRow(ctx, query+` AND id=$1`+where, args...).Scan(
 		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState,
 		&agent.TimeZone.Mode, &agent.TimeZone.TimeZone, &agent.TimeZone.AppliedTimeZone, &agent.TimeZone.Status, &agent.TimeZone.Error, &agent.TimeZone.Revision, &agent.TimeZone.AutoAddressHash,
-		&agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines)
+		&agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.ManagedProxies, &agent.SharedEngines)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -80,6 +80,7 @@ func scopeAgentPresentation(ctx context.Context, agent *core.Agent) {
 		agent.Capabilities = core.IntersectEngines(agent.Capabilities, agent.SharedEngines)
 		agent.SupportedCapabilities = core.IntersectEngines(agent.SupportedCapabilities, agent.SharedEngines)
 		agent.CapabilityTransitions = nil
+		agent.ManagedProxies = nil
 		agent.Metrics.BBR = nil
 		agent.Metrics.ClockSync = nil
 		// Private interface addresses map the host's internal topology. A

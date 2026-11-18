@@ -45,6 +45,35 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 // check, not an atomic compare-and-swap of the Agent's configuration.
 const automaticConfigReadCacheTTL = 600 * time.Second
 
+func (s *Server) checkManagedProxy(w http.ResponseWriter, r *http.Request) {
+	action := core.Action("check-" + r.PathValue("component"))
+	if !action.ChecksProxy() {
+		writeError(w, http.StatusBadRequest, "未知代理")
+		return
+	}
+	id := r.PathValue("id")
+	task, err := s.store.CreateTask(r.Context(), core.TaskRequest{Action: action, AgentID: id})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !task.Reused {
+		s.recordAudit(r, "task.created", task.ID, string(action)+" "+id)
+	}
+	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (s *Server) authorizeProxyTask(w http.ResponseWriter, r *http.Request, action core.Action) bool {
+	if action.ProxyComponent() == "" {
+		return true
+	}
+	if !s.sessionAllows(r, core.PermissionAgentsRead) || (!action.ChecksProxy() && !s.sessionAllows(r, core.PermissionAgentsManage)) {
+		writeError(w, http.StatusForbidden, "无节点代理操作权限")
+		return false
+	}
+	return true
+}
+
 func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 	var input struct {
 		core.TaskRequest
@@ -56,6 +85,9 @@ func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 	}
 	if input.PreferCached && input.Action != core.ActionReadConfig && input.Action != core.ActionReadManagedConfig {
 		writeError(w, http.StatusBadRequest, "prefer_cached is only supported for configuration read tasks")
+		return
+	}
+	if !s.authorizeProxyTask(w, request, input.Action) {
 		return
 	}
 	if input.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, input.AgentID) {
@@ -134,6 +166,9 @@ func (s *Server) retryTask(w http.ResponseWriter, request *http.Request) {
 	previous, err := s.store.GetTask(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !s.authorizeProxyTask(w, request, previous.Action) {
 		return
 	}
 	if previous.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, previous.AgentID) {

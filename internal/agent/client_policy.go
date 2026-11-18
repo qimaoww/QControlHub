@@ -71,7 +71,7 @@ func (c *Client) buildHeartbeatMessage(ctx context.Context) core.WireMessage {
 		Version:     c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 		SharedInstances:     sharedInstances,
-		ProxyIngressReports: c.ingressReports(),
+		ProxyIngressReports: c.ingressReports(), ManagedProxies: readProxyReports(),
 	}
 	if metricsHaveData(metrics) || metrics.BBR != nil {
 		heartbeat.Metrics = &metrics
@@ -168,7 +168,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeaturePresetAutoInstall,
 		core.AgentFeatureCoreUninstall,
 		core.AgentFeatureCNIPSource,
-		core.AgentFeatureSystemBBR,
+		core.AgentFeatureSystemBBR, core.AgentFeatureManagedProxies,
 		core.AgentFeatureIPQuality,
 		core.AgentFeatureInstanceStatus,
 		core.AgentFeatureCompactTelemetry,

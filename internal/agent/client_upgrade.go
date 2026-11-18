@@ -49,7 +49,7 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	c.upgradeCommitted = transaction
 	output := fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size)
 	if nginxErr != nil {
-		return output + "\n托管 Nginx 更新未确认：" + core.DiagnosticText(nginxErr.Error()), nil
+		return output + "\n托管代理更新未确认：" + core.DiagnosticText(nginxErr.Error()), nil
 	}
 	if nginx != "" {
 		output += "\n" + nginx
@@ -64,7 +64,7 @@ func (c *Client) upgradeNginxOnStartup(ctx context.Context) {
 	output, err := c.executor.upgradeNginxForAgentBuild(ctx, c.config.Version, core.ActionStatus)
 	if err != nil {
 		if ctx.Err() == nil {
-			slog.Warn("托管 Nginx 更新未确认", "error", core.DiagnosticText(err.Error()))
+			slog.Warn("托管代理更新未确认", "error", core.DiagnosticText(err.Error()))
 		}
 		return
 	}

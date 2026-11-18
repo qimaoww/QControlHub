@@ -98,13 +98,21 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	if heartbeat.Metrics != nil {
 		observedPublicIP = heartbeat.Metrics.ObservedPublicIP
 	}
+	if len(heartbeat.ManagedProxies) > 2 {
+		return fmt.Errorf("%w: too many managed proxies", ErrInvalid)
+	}
+	for mode, row := range heartbeat.ManagedProxies {
+		if (mode != "nginx" && mode != "caddy") || len(row.State) > 32 || len(row.Installed) > 120 || len(row.Running) > 120 || len(row.Latest) > 120 || len(row.Outcome) > 160 {
+			return fmt.Errorf("%w: invalid proxy report", ErrInvalid)
+		}
+	}
 	command, err := s.pool.Exec(ctx, `
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
-			                  features=$4::jsonb,
+			                  features=$4::jsonb, managed_proxies=$8,
 			                  os=CASE WHEN $5='' THEN os ELSE $5 END,
 			                  arch=CASE WHEN $6='' THEN arch ELSE $6 END,
 			                  observed_public_ip=CASE WHEN $7='' THEN observed_public_ip ELSE $7 END
-			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, featuresState, heartbeat.OS, heartbeat.Arch, observedPublicIP)
+			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, featuresState, heartbeat.OS, heartbeat.Arch, observedPublicIP, heartbeat.ManagedProxies)
 	if err != nil {
 		return err
 	}

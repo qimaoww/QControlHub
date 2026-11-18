@@ -111,7 +111,37 @@ func (m *tlsFrontendManager) removeUnusedTLSService(ctx context.Context, mode st
 		if err = validateProtectedDirectoryChain(filepath.Dir(managedCaddyBinary)); err != nil {
 			return err
 		}
+		if err = removeTLSFiles(m.root, "caddy-package-build"); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(filepath.Dir(managedCaddyBinary))
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			path := filepath.Join(filepath.Dir(managedCaddyBinary), entry.Name())
+			if !caddyPrivateBinary(path) || !entry.Type().IsRegular() {
+				continue
+			}
+			digest, exists, err := protectedCoreMigrationFileDigest(path, 100<<20)
+			if err != nil {
+				return err
+			}
+			if exists && strings.HasSuffix(path, "-"+digest) {
+				if err = os.Remove(path); err != nil {
+					return err
+				}
+			}
+		}
 		if err = removeOwnedCaddyBinary(); err != nil {
+			return err
+		}
+	}
+	if mode == "nginx" && m.root == tlsFrontendRoot && m.state == tlsFrontendState {
+		if err = removeTLSFiles(m.root, "nginx-package-build"); err != nil {
+			return err
+		}
+		if err = cleanupPrivateNginx(""); err != nil {
 			return err
 		}
 	}

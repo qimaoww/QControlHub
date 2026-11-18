@@ -765,7 +765,7 @@ func (m *tlsFrontendManager) syncWithFallback(ctx context.Context, deployments t
 			if mode == "caddy" {
 				output, commandErr = m.runCaddy(ctx, nil, "reload", "--config", path, "--address", "unix/"+filepath.Join(m.state, "caddy-admin.sock"))
 			} else {
-				output, commandErr = run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", path, "-s", "reload")
+				output, commandErr = m.reloadNginx(ctx, path)
 			}
 		} else {
 			output, commandErr = m.services.command(ctx, service, core.ActionStart)
@@ -930,7 +930,7 @@ func probeFrontendTLS(ctx context.Context, f core.TLSFrontend, protocol ...bool)
 		if err == nil {
 			conn.Close()
 			if len(protocol) > 0 && protocol[0] {
-				return probeFrontendProtocol(ctx, f, config)
+				return probeFrontendProtocol(ctx, f, config, protocol[1:]...)
 			}
 			return nil
 		}

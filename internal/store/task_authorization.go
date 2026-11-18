@@ -22,6 +22,9 @@ func requireTaskPermission(ctx context.Context, executor storeExecutor, action c
 		return nil
 	}
 	permission := core.PermissionTasksExecute
+	if action.ChecksProxy() {
+		permission = core.PermissionAgentsRead
+	}
 	if transition {
 		permission = core.PermissionAgentsManage
 	}
@@ -104,6 +107,9 @@ const unauthorizedHostConfigTaskSQL = `NOT t.shared_instance AND (t.action IN ('
 				AND (state.config_uncertain OR (state.owner_id<>t.owner_id AND state.config_id<>''))))`
 
 func taskAPIKeyPermissions(action core.Action, transition bool) []core.Permission {
+	if action.ChecksProxy() {
+		return []core.Permission{core.PermissionAgentsRead}
+	}
 	result := []core.Permission{core.PermissionTasksExecute}
 	if transition || action.AgentLevel() || action == core.ActionInstall || action == core.ActionUninstall || action == core.ActionStart || action == core.ActionStop || action == core.ActionRestart {
 		result = append(result, core.PermissionAgentsManage)

@@ -32,6 +32,10 @@ const (
 	ActionReadConfig        Action = "read-config"
 	ActionReadManagedConfig Action = "read-managed-config"
 	ActionImportExisting    Action = "import-existing"
+	ActionCheckNginx        Action = "check-nginx"
+	ActionUpdateNginx       Action = "update-nginx"
+	ActionCheckCaddy        Action = "check-caddy"
+	ActionUpdateCaddy       Action = "update-caddy"
 	ActionUpgradeAgent      Action = "upgrade-agent"
 	ActionEnableBBR         Action = "enable-bbr"
 	ActionDisableBBR        Action = "disable-bbr"
@@ -42,7 +46,7 @@ const (
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionNetworkDiagnostic, ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
+	case ActionCheckNginx, ActionUpdateNginx, ActionCheckCaddy, ActionUpdateCaddy, ActionNetworkDiagnostic, ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
 		return true
 	default:
 		return false
@@ -54,10 +58,12 @@ func (a Action) SystemBBR() bool {
 }
 
 func (a Action) AgentLevel() bool {
-	return a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality || a == ActionNetworkDiagnostic
+	return a.ProxyComponent() != "" || a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality || a == ActionNetworkDiagnostic
 }
 
-func (a Action) RequiresAgentManagement() bool { return a.SystemBBR() || a == ActionIPQuality }
+func (a Action) RequiresAgentManagement() bool {
+	return (a.ProxyComponent() != "" && !a.ChecksProxy()) || a.SystemBBR() || a == ActionIPQuality
+}
 
 func (a Action) SharedInstanceOperation() bool {
 	switch a {
