@@ -878,7 +878,7 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
 }
 
 /* Node rack: one unit per node with its state, usage meters and live rate. */
-.a-rack { list-style: none; margin: 0 -1px -1px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(16.5rem, 100%), 1fr)); min-width: 0; }
+.a-rack { list-style: none; margin: 0 -1px -1px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(16.5rem, 100%), 1fr)); min-width: 0; }
 .a-rack-unit { min-width: 0; padding: 12px var(--card-gutter); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; align-content: start; gap: 8px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .a-rack-unit[data-status="offline"] { background: var(--canvas); }
 .a-rack-head, .a-rack-meter { grid-column: 1 / -1; }
