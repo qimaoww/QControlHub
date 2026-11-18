@@ -9,6 +9,154 @@ const editor = () => [...document.querySelectorAll('dialog[open] form')].at(-1);
 const ready = () => waitFor(() => editor()?.elements.tag && !document.querySelector('[aria-busy=true]'), 'actual analytics inbound editor did not load');
 const close = test => test.topDialog()?.querySelector('[aria-label="关闭"]').click();
 
+// This journey uses the production UI and authorized PostgreSQL-backed API.
+export async function testNativeInboundWorkspaceBrowser({page, mode, agent, identity, evaluate, wait, api, call, screenshot, record}) {
+  const base = `/agents/${agent}/configs/xray`;
+  const read = () => api(page, identity, 'GET', `${base}/workspace`);
+  const run = expression => evaluate(page, expression);
+  const until = expression => wait(page, expression);
+  const route = `#live-config?agent=${agent}&engine=xray`;
+  const rows = "[...document.querySelectorAll('.a-port-list tbody tr')]";
+  const row = tag => `${rows}.find(row=>row.cells[1].textContent.startsWith(${JSON.stringify(tag)}))`;
+  const dialog = "[...document.querySelectorAll('dialog[open]')].at(-1)";
+  const form = `(${dialog}?.querySelector('form'))`;
+  const click = (label, within = dialog) => run(`[...${within}.querySelectorAll('button')].find(button=>button.textContent===${JSON.stringify(label)}).click()`);
+  const dismiss = () => run(`${dialog}.querySelector('[aria-label="关闭"]').click()`);
+  const names = `${rows}.map(row=>row.cells[2].textContent).join('/')`;
+  const expectRows = labels => until(`${names}===${JSON.stringify(labels)}`);
+  const load = async () => {
+    await run("location.hash='#themes'");
+    await until("document.querySelector('.a-top h1')?.textContent==='主题' && !document.querySelector('[aria-busy=true]')");
+    await run(`location.hash=${JSON.stringify(route)}`);
+  };
+  const source = async () => {
+    await click('修改', row('native-range'));
+    await until(`!!${form}?.elements.content`);
+    return run(`${form}.elements.content.value`);
+  };
+  const editSource = value => run(`(() => {
+    const editor=${form}.elements.content;
+    editor.value=${JSON.stringify(value)};
+    editor.dispatchEvent(new Event('input',{bubbles:true}));
+  })()`);
+  const submit = async (success = true) => {
+    await run(`${form}.requestSubmit()`);
+    await until(`${dialog}?.querySelector('h2')?.textContent==='部署并重启'`);
+    await click('部署并重启');
+    if (success) {
+      await until(`${dialog}?.querySelector('h2')?.textContent==='任务详情' && !document.querySelector('[aria-busy=true]')`);
+      await dismiss();
+      try {
+        await until("!document.querySelector('dialog[open]')");
+      } catch (error) {
+        const titles = await run("[...document.querySelectorAll('dialog[open] h2')].map(title=>title.textContent)");
+        throw new Error(`${error.message}; open dialogs: ${titles.join(', ')}`);
+      }
+    }
+  };
+
+  const viewports = mode === 'mobile' ? [[390,844],[768,1024]] : [[1920,1080],[3840,2160],[960,800]];
+  const resize = ([width,height]) => call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:mode==='mobile'},page);
+  await resize(viewports[0]);
+  await run(`location.hash=${JSON.stringify(route)}`);
+  await expectRows('VMess/自定义/端口转发');
+  const initial = await read();
+  assert(await run(`${row('native-range')}.cells[0].textContent==='21101-21102' && !/访问限制|复制入站连接|出站/.test(${row('native-range')}.cells[4].textContent)`),'ranged listener inherited a fixed-port operation');
+  assert(await run(`${row('quoted-port')}.textContent.includes('复制入站连接') && !${row('forward')}.textContent.includes('复制入站连接') && !document.querySelector('.a-port-list').textContent.includes('123e4567')`),'export capability or credential visibility drifted');
+  for (const viewport of viewports) {
+    await resize(viewport);
+    assert(await run("document.documentElement.scrollWidth<=innerWidth+1"),'native inventory overflows viewport');
+    assert(await run(`(() => {
+      const cell = ${row('native-range')}.cells[0];
+      const text = document.createRange();
+      text.selectNodeContents(cell);
+      return [...text.getClientRects()].every(rect => rect.right <= cell.getBoundingClientRect().right + 1);
+    })()`),`port range overlaps the adjacent cell at ${viewport.join('x')}`);
+    assert(await run(`(() => {
+      const cell = ${row('quoted-port')}.cells[0];
+      const text = document.createRange();
+      text.selectNodeContents(cell);
+      return text.getClientRects().length === 1;
+    })()`),`fixed port breaks across lines at ${viewport.join('x')}`);
+    await screenshot(page,`native-inbounds-${viewport.join('x')}`);
+  }
+  await resize(viewports[0]);
+  if (mode === 'mobile') {
+    await run(`${row('native-range')}.scrollIntoView({block:'center'})`);
+    await screenshot(page,'native-inbounds-custom-390x844');
+  }
+  await click('修改', row('quoted-port'));
+  await until(`${form}?.elements.tag?.value==='quoted-port'`);
+  assert(await run(`${form}.elements.port.value==='21001' && ${form}.elements.username.value==='first' && ${form}.elements.tls_enabled.checked===false`),'quoted VMess form loaded incorrect values');
+  await screenshot(page,`native-preset-${viewports[0].join('x')}`);
+  await dismiss();
+  await until("!document.querySelector('dialog[open]')");
+  const original = await source();
+  assert(original.includes('21101-21102') && original.includes('9007199254740993'),'native editor opened a different source or rounded an integer');
+  await screenshot(page,`native-source-${viewports[0].join('x')}`);
+  await editSource(original+'\n ');
+  await dismiss();
+  await until(`${dialog}?.querySelector('h2')?.textContent==='放弃更改'`);
+  await click('放弃更改');
+  await until("!document.querySelector('dialog[open]')");
+  assert((await read()).config.version === initial.config.version, 'opening and canceling created a revision');
+
+  await click('修改', row('forward'));
+  await until(`${form}?.elements.target_port?.value==='80'`);
+  await run(`${form}.elements.target_port.value='8080'`);
+  await submit();
+  await expectRows('VMess/自定义/端口转发');
+  const changed = await read();
+  const beforeDoc = JSON.parse(initial.config.content), afterDoc = JSON.parse(changed.config.content);
+  beforeDoc.inbounds[2].settings.rewritePort = 8080;
+  const stableJSON = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item==='object' ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))) : item);
+  assert(stableJSON(beforeDoc)===stableJSON(afterDoc) && changed.config.content.includes('9007199254740993'),'saving C changed A, B, routing or exact numbers');
+  await until(`${row('forward')}.cells[3].textContent.includes('启用')`);
+  const portable = await source();
+  const vmess = portable.replace('"port": "21101-21102"','"port": 21101').replace('"protocol": "http"','"protocol": "vmess", "settings": {"clients": [{"id": "123e4567-e89b-42d3-a456-426614174003"}]}');
+  await editSource(vmess);
+  await submit();
+  await expectRows('VMess/VMess/端口转发');
+  await click('展开源码','document.querySelector(".a-main")');
+  await until(`!!${form}?.elements.content`);
+  await editSource(portable);
+  await submit();
+  await expectRows('VMess/自定义/端口转发');
+
+  const saveNativeDocument = async content => {
+    const {config} = await read();
+    await api(page,identity,'PUT',base,{...config,content});
+    await load();
+  };
+  const [a,b,c] = afterDoc.inbounds;
+  for (const [inbounds,labels] of [
+    [[b,a,c],'自定义/VMess/端口转发'],
+    [[a,c,b],'VMess/端口转发/自定义'],
+    [[b],'自定义'],
+    [[], ''],
+  ]) {
+    await saveNativeDocument(JSON.stringify({...afterDoc,inbounds}));
+    await expectRows(labels);
+    if (!inbounds.length) await until("document.querySelector('.a-port-list .a-empty')?.checkVisibility()");
+  }
+  await saveNativeDocument('{"inbounds":{}}');
+  await until("document.querySelector('.a-main [role=alert]')?.textContent.includes('入站数组') && !document.querySelector('.a-port-list')");
+  const invalid = await api(page,identity,'GET',base);
+  await api(page,identity,'PUT',base,{...invalid,content:portable});
+  await load();
+  await expectRows('VMess/自定义/端口转发');
+  const draft = await source();
+  await editSource(draft+'\n ');
+  const saved = (await read()).config;
+  await api(page,identity,'PUT',base,saved);
+  await submit(false);
+  await until(`${dialog}?.textContent.includes('草稿已保留')`);
+  assert(await run(`${form}.elements.content.value===${JSON.stringify(draft+'\n ')}`),'source version conflict discarded the draft');
+  const final = await read();
+  assert(final.config.version===saved.version+1 && final.config.content===saved.content,'rejected source mutation created a revision or changed source');
+  record(`${mode}: real workspace rows, quoted port, source cancel/save/reclassify, isolated edit, empty/error recovery and draft-preserving conflict; Chromium DPR 1, CSS ${viewports.map(size=>size.join('x')).join(', ')}`);
+}
+
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
     const params = new URLSearchParams(location.search);

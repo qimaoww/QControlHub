@@ -22,6 +22,13 @@ type configInboundTargetResource struct {
 	Kind string `json:"kind"`
 }
 
+type configInboundRowResource struct {
+	serverconfig.NativeInbound
+	ProjectionIndex *int `json:"projection_index,omitempty"`
+	PresetEditable  bool `json:"preset_editable,omitempty"`
+	ClientExport    bool `json:"client_export,omitempty"`
+}
+
 type agentConfigWorkspaceResource struct {
 	SourceContent    string                           `json:"source_content,omitempty"`
 	OutboundBindings map[string]string                `json:"outbound_bindings"`
@@ -37,6 +44,7 @@ type agentConfigWorkspaceResource struct {
 	Protocols        []serverconfig.Protocol          `json:"protocols"`
 	Inbounds         []serverconfig.Input             `json:"inbounds"`
 	InboundTargets   []configInboundTargetResource    `json:"inbound_targets"`
+	InboundRows      []configInboundRowResource       `json:"inbound_rows"`
 	PresentFields    map[string]bool                  `json:"present_fields"`
 }
 
@@ -126,13 +134,14 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 	result = agentConfigWorkspaceResource{
 		Agent: agent, Catalog: catalog, Protocols: serverconfig.Protocols(engine),
 		Inbounds: []serverconfig.Input{}, PresentFields: map[string]bool{},
-		InboundTargets: []configInboundTargetResource{},
+		InboundTargets: []configInboundTargetResource{}, InboundRows: []configInboundRowResource{},
 	}
 	if config.ID != "" || request.PathValue("snapshot") != "" {
+		snapshot := request.PathValue("snapshot")
 		previewChanged := false
-		if snapshot := request.PathValue("snapshot"); snapshot != "" {
+		if snapshot != "" {
 			var content string
-			content, err = s.store.ReadTaskConfigSnapshot(request.Context(), snapshot, agent.ID, engine)
+			content, err = s.store.ReadWorkspaceTaskConfigSnapshot(request.Context(), snapshot, agent.ID, engine)
 			if err != nil {
 				writeStoreError(w, err)
 				return
@@ -145,6 +154,11 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			}
 		}
 		result.Config = &config
+		inventory, err := serverconfig.DiscoverNativeInbounds(engine, config.Content)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		if config.ID != "" {
 			result.Management, err = s.store.ConfigManagementState(request.Context(), config.ID, config.Version)
 			if err != nil {
@@ -162,7 +176,10 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			result.Deployment.TaskID = ""
 			result.Deployment.TaskStatus = ""
 		}
-		source, sourceErr := s.presetAccountingSource(request.Context(), config)
+		source, sourceErr := serverconfig.PresetAccountingSource(engine, config.Content)
+		if sourceErr != nil && snapshot == "" {
+			source, sourceErr = s.presetAccountingSource(request.Context(), config)
+		}
 		if sourceErr == nil {
 			result.SourceContent = source
 		} else {
@@ -186,6 +203,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		}
 		result.OutboundBindings = serverconfig.ManagedOutboundBindings(engine, config.Content)
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
+		result.InboundRows = workspaceInboundRows(inventory, result.Inbounds)
 		// Selection for restrictions/deletion also includes native named
 		// listeners that cannot be reconstructed as a preset form.
 		for _, inbound := range serverconfig.DiscoverMainlandAccessPolicies(engine, config.Content) {
@@ -193,8 +211,8 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 				Tag: inbound.Tag, Port: inbound.Port, Kind: inbound.Kind,
 			})
 		}
-		if config.ID != "" && !previewChanged {
-			if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
+		if config.ID != "" && snapshot == "" {
+			if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds, result.InboundRows); err != nil {
 				writeInternalError(w, err)
 				return
 			}
@@ -213,6 +231,10 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 				result.Inbounds[index].BlockMainlandSource = policy.BlockMainlandSource
 			}
 		}
+		if err := s.describeInboundActions(request, agent, config, result.Inbounds, result.InboundRows, snapshot == ""); err != nil {
+			writeStoreError(w, err)
+			return
+		}
 		result.PresentFields, err = configschema.RootKeys(engine, config.Content)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -220,4 +242,26 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Link a row to an actual projection only after resolving a unique source
+// identity. An index is a response-local reference, never an operation target.
+func workspaceInboundRows(inventory []serverconfig.NativeInbound, inputs []serverconfig.Input) []configInboundRowResource {
+	type sourceLocation struct {
+		section string
+		index   int
+	}
+	projections := make(map[sourceLocation]int, len(inputs))
+	for index, input := range inputs {
+		projections[sourceLocation{input.ProjectionSection, input.ProjectionIndex}] = index
+	}
+	rows := make([]configInboundRowResource, 0, len(inventory))
+	for _, inbound := range inventory {
+		row := configInboundRowResource{NativeInbound: inbound}
+		if index, ok := projections[sourceLocation{inbound.Section, inbound.SourceIndex}]; ok && inputs[index].Port == inbound.Port {
+			row.ProjectionIndex = &index
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }

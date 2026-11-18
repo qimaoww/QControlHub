@@ -24,6 +24,17 @@ var (
 )
 
 func Generate(engine core.Engine, input Input) (string, error) {
+	return generate(engine, input, true)
+}
+
+// The server only needs the peer's public key. A native WireGuard server
+// can keep its existing peer while editing listener fields with the form.
+func GenerateNativePresetEdit(engine core.Engine, input, original Input) (string, error) {
+	samePeer := original.Protocol == ProtocolWireGuard && input.WireGuardClientPublicKey == original.WireGuardClientPublicKey
+	return generate(engine, input, !samePeer)
+}
+
+func generate(engine core.Engine, input Input, requireWireGuardClient bool) (string, error) {
 	if input.SourceOnly {
 		return "", errors.New("此配置无法安全使用预设，请使用完整入站配置")
 	}
@@ -84,14 +95,15 @@ func Generate(engine core.Engine, input Input) (string, error) {
 		}
 	} else {
 		if input.Protocol == ProtocolWireGuard {
-			if err := validateWireGuardInput(input, true); err != nil {
+			if err := validateWireGuardInput(input, requireWireGuardClient); err != nil {
 				return "", err
 			}
 			if input.BlockMainlandSource {
 				return "", errors.New("WireGuard 路由只能识别隧道内源地址，公网来源限制须在节点防火墙配置")
 			}
 		} else {
-			if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
+			optionalName := engine == core.EngineXray || engine == core.EngineSingBox && input.Protocol != ProtocolSocks
+			if !protocol.IgnoresUsername && (len(input.Username) > 64 || !optionalName && strings.TrimSpace(input.Username) == "") {
 				return "", errors.New("用户名不能为空且不能超过 64 个字符")
 			}
 			if err := validateCredential(input); err != nil {

@@ -86,6 +86,7 @@ export async function createConfigFixture(engine, options = {}) {
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
   const tasks = new Map();
   let disabled = [];
+  const inboundSection = engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds";
   const workspace = () => ({client_source:`source-${saved?.version || 0}`, agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
     deployment:{state: test.deploymentState || ([...tasks.values()].some(task=>task.action==='deploy'&&task.config_version===saved?.version) ?
       test.taskStatus==='succeeded'?'applied':test.taskStatus==='failed'?'failed':test.taskStatus==='canceled'?'canceled':'deploying' : 'pending'),
@@ -96,6 +97,9 @@ export async function createConfigFixture(engine, options = {}) {
     management:{disabled:structuredClone(disabled)},
     managed_objects:inbounds.map(item=>({section:engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds",tag:item.tag,port:item.port,inbound:true,enabled:!disabled.some(ref=>ref.tag === item.tag)})).concat((saved ? JSON.parse(saved.content).outbounds || [] : []).filter(item=>!item.tag.startsWith("qch-")).map(item=>({section:"outbounds",tag:item.tag,kind:item.protocol||item.type,inbound:false,enabled:!disabled.some(ref=>ref.tag===item.tag)}))),
     inbound_targets:inbounds.map(item=>({tag:item.tag, port:item.port, kind:options.native ? "socks" : item.protocol})),
+    inbound_rows:inbounds.map((item,index)=>({section:item.protocol==='wireguard'&&engine==='sing-box'?'endpoints':inboundSection,
+      tag:item.tag,target_tag:item.tag,port:item.port,listen:item.listen,
+      ...(!options.native?{projection_index:index,preset_editable:!item.source_only,client_export:true}:{})})),
     protocols:entries.map(entry => entry.protocol),
     catalog:{name:engine, format:engine === "mihomo" ? "YAML" : "JSON", fields, topic_groups:[]},
     present_fields:Object.fromEntries(fields.map(field=>[field.key, Object.hasOwn(root(), field.key)]))});
@@ -143,8 +147,8 @@ export async function createConfigFixture(engine, options = {}) {
       const result=workspace(), doc=JSON.parse(agentContent), entries=doc.inbounds || doc.listeners || doc.servers || [];
       const port = tag => {const item=entries.find(item=>(item.tag || item.name || item.id || item.remarks)===tag);return item?.port || item?.listen_port || item?.server_port;};
       result.config={...result.config,content:agentContent};
-      for (const list of [result.inbounds,result.inbound_targets,result.managed_objects]) for (const item of list) if (port(item.tag)) item.port=port(item.tag);
-      result.deployment={...result.deployment,state:'pending',task_id:undefined,task_status:undefined};
+      for (const list of [result.inbounds,result.inbound_targets,result.inbound_rows,result.managed_objects]) for (const item of list) if (port(item.tag)) item.port=port(item.tag);
+      if(agentContent!==saved?.content)result.deployment={...result.deployment,state:'pending',task_id:undefined,task_status:undefined};
       return result;
     }
     if (path.includes('/server-inbounds/') && (!request.method || request.method==='GET')) {

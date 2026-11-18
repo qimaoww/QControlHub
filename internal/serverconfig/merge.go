@@ -219,6 +219,17 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 		}
 		return merged, nil
 	}
+	if operation == "modify" {
+		for _, key := range []string{"mode", "timeout", "no_delay", "fast_open"} {
+			delete(generated, key)
+		}
+		if currentRoot["ipv6_first"] == nil && generated["ipv6_first"] == false {
+			delete(generated, "ipv6_first")
+		}
+		if generated["id"] == current.Tag {
+			delete(generated, "id")
+		}
+	}
 	for _, key := range []string{"dns", "outbound_bind_addr"} {
 		if _, present := generated[key]; !present {
 			if key == "dns" {
@@ -252,7 +263,9 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 		if entry == nil {
 			return "", fmt.Errorf("ss-rust 扩展服务端入站必须是 JSON 对象")
 		}
-		entry["id"] = shadowsocksRustEntryTag(entry, index)
+		if operation != "modify" {
+			entry["id"] = shadowsocksRustEntryTag(entry, index)
+		}
 	}
 	generatedEntry := shadowsocksRustGeneratedEntry(generated)
 	// The preset does not edit these fields: retain existing per-port values
@@ -290,6 +303,10 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 			return "", fmt.Errorf("ss-rust 扩展服务端入站必须是 JSON 对象")
 		}
 		delete(generatedEntry, "acl")
+		if generatedEntry["id"] == matchValue {
+			delete(generatedEntry, "id")
+		}
+		preserveShadowsocksRustAlias(currentEntry, generatedEntry)
 		entries[targetIndex] = mergeShadowsocksRustEntry(currentEntry, generatedEntry)
 	case "delete":
 		if targetIndex < 0 {
@@ -318,7 +335,7 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 			return "", fmt.Errorf("ss-rust 入站标签 %q 已存在", tag)
 		}
 		tags[tag] = true
-		port := intValue(mapValue(value)["server_port"])
+		port := intValue(shadowsocksRustPort(mapValue(value)))
 		if port != 0 && ports[port] {
 			return "", fmt.Errorf("ss-rust 端口 %d 已存在", port)
 		}
@@ -327,11 +344,13 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 	root[listKey] = entries
 	if operation != "delete" {
 		for _, key := range []string{"timeout", "mode", "fast_open", "no_delay"} {
-			if _, present := root[key]; !present {
+			if _, present := root[key]; !present && operation != "modify" {
 				root[key] = generated[key]
 			}
 		}
-		root["ipv6_first"] = generated["ipv6_first"]
+		if root["ipv6_first"] != nil || generated["ipv6_first"] != false || operation != "modify" {
+			root["ipv6_first"] = generated["ipv6_first"]
+		}
 		if dns, present := generated["dns"]; present {
 			root["dns"] = dns
 		} else if _, custom := root["dns"].(map[string]any); !custom {
@@ -343,6 +362,17 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 		return "", err
 	}
 	return string(formatted) + "\n", nil
+}
+
+func preserveShadowsocksRustAlias(current, generated map[string]any) {
+	for canonical, alias := range map[string]string{"server": "address", "server_port": "port"} {
+		if current[canonical] == nil && current[alias] != nil {
+			if value, exists := generated[canonical]; exists {
+				generated[alias] = value
+				delete(generated, canonical)
+			}
+		}
+	}
 }
 
 func shadowsocksRustGeneratedEntry(generated map[string]any) map[string]any {
@@ -364,13 +394,8 @@ func mergeShadowsocksRustEntry(current, generated map[string]any) map[string]any
 }
 
 func shadowsocksRustEntryTag(entry map[string]any, index int) string {
-	if value := strings.TrimSpace(stringValue(entry["id"])); value != "" {
+	if value := strings.TrimSpace(shadowsocksRustName(entry)); value != "" {
 		return value
-	}
-	for _, key := range []string{"remarks", "name"} {
-		if value := strings.TrimSpace(stringValue(entry[key])); value != "" {
-			return value
-		}
 	}
 	return "ss-rust-" + fmt.Sprint(index+1)
 }

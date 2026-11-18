@@ -1,7 +1,7 @@
 import { node, field, button, notice, muted, actions, list } from './ui.js';
 
 const prefix = '/etc/qcontrolhub/panel-certificates/';
-export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {}, requireManagedCertificate = false }) {
+export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {}, requireManagedCertificate = false, identifyFromPath = true }) {
   const group = ['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(protocol?.key);
   if (!form || !group && (protocol?.uses_reality || !(protocol?.supports_tls || protocol?.requires_tls)) || protocol?.uses_wireguard) return;
   const input = name => form.elements?.namedItem(name) || form.querySelector(`[name="${name}"]`);
@@ -21,8 +21,8 @@ export function bindAnalyticsCertificateSelector(ctx, { form, protocol, plan = {
   wrapper.after(feedback);
   const sniField = !input('tls_server_name') && field('TLS SNI / 证书域名', 'tls_server_name', plan.tls_server_name || '', { placeholder: '例如 edge.example.com' });
   if (sniField) feedback.append(sniField);
-  const initial = plan.panel_certificate_id || certificatePath.value.match(/^\/etc\/qcontrolhub\/panel-certificates\/([^/]+)\//)?.[1] || '';
-  const localPaths = new Map(['certificate_path', 'private_key_path'].map(name => [name, input(name)?.value.startsWith(prefix) ? '' : input(name)?.value || '']));
+  const initial = plan.panel_certificate_id || (identifyFromPath ? certificatePath.value.match(/^\/etc\/qcontrolhub\/panel-certificates\/([^/]+)\//)?.[1] : '') || '';
+  const localPaths = new Map(['certificate_path', 'private_key_path'].map(name => [name, initial && input(name)?.value.startsWith(prefix) ? '' : input(name)?.value || '']));
   let managed = Boolean(initial), items = [], loading = true, failed = false, signature = '', sequence = 0, timer;
   const live = () => ctx.current() && form.isConnected && wrapper.isConnected;
   const availability = cert => !cert ? '证书已删除或授权已撤销' : !cert.not_after || !cert.version ? '尚未签发' : !Number.isFinite(Date.parse(cert.not_after)) ? '有效期无效' : Date.parse(cert.not_before) > Date.now() ? '尚未生效' : Date.parse(cert.not_after) <= Date.now() ? '已过期' : '';

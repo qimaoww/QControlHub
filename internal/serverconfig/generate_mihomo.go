@@ -164,7 +164,7 @@ func parseMihomo(content string) (Input, bool) {
 	}
 	input := Input{
 		Protocol: protocolKey(stringValue(listener["type"])), Tag: stringValue(listener["name"]),
-		Listen: stringValue(listener["listen"]), Port: intValue(listener["port"]), Username: "default",
+		Listen: defaultPresetListen(core.EngineMihomo, stringValue(listener["listen"])), Port: trafficPortNumber(listener["port"]), Username: "default",
 		Method: stringValue(listener["cipher"]), Credential: stringValue(listener["password"]), Transport: "raw",
 		CertificatePath: stringValue(listener["certificate"]), PrivateKeyPath: stringValue(listener["private-key"]),
 	}
@@ -172,6 +172,9 @@ func parseMihomo(content string) (Input, bool) {
 	input.ListenerRule = stringValue(listener["rule"])
 	input.ListenerProxy = stringValue(listener["proxy"])
 	input.VLESSDecryption = stringValue(listener["decryption"])
+	if input.Protocol == ProtocolSS2022 && (len(mapValue(listener["users"])) > 0 || boolValue(mapValue(listener["simple-obfs"])["enable"]) || boolValue(mapValue(listener["shadow-tls"])["enable"])) {
+		input.presetUnsupported, input.clientUnsupported = true, true
+	}
 	if input.Protocol == ProtocolSnell {
 		input.presetUnsupported = unsupportedSnellNativeFields(listener)
 		input.Credential = stringValue(listener["psk"])
@@ -316,7 +319,7 @@ func parseMihomo(content string) (Input, bool) {
 		input.Credential = stringValue(user["uuid"])
 		input.Flow = stringValue(user["flow"])
 	}
-	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" {
+	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" && input.VLESSDecryption != "none" {
 		var err error
 		input.VLESSEncryption, err = vlessEncryptionFromDecryption(input.VLESSDecryption)
 		if err != nil {

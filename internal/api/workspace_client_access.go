@@ -51,6 +51,10 @@ func (s *Server) exportWorkspaceInbound(w http.ResponseWriter, r *http.Request) 
 	original := config
 	config.AgentID, config.Engine = agent.ID, engine
 	snapshot := r.URL.Query().Get("snapshot")
+	if config.ID == "" && snapshot == "" {
+		writeError(w, 409, "配置或实例已变化，请重新读取并核对入站")
+		return
+	}
 	if snapshot != "" {
 		if !s.sessionAllows(r, core.PermissionTasksRead) {
 			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
@@ -62,9 +66,15 @@ func (s *Server) exportWorkspaceInbound(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	inventory, err := serverconfig.DiscoverNativeInbounds(engine, config.Content)
+	if err != nil {
+		writeError(w, 422, err.Error())
+		return
+	}
 	inputs := serverconfig.ParseAll(engine, config.Content)
-	if config.ID != "" && config.Content == original.Content {
-		if err := s.hydrateClientMetadata(r.Context(), config, inputs); err != nil {
+	rows := workspaceInboundRows(inventory, inputs)
+	if config.ID != "" && snapshot == "" {
+		if err := s.hydrateClientMetadata(r.Context(), config, inputs, rows); err != nil {
 			writeInternalError(w, err)
 			return
 		}
@@ -74,28 +84,32 @@ func (s *Server) exportWorkspaceInbound(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	port, _ := strconv.Atoi(r.URL.Query().Get("port"))
-	var matches []serverconfig.Input
-	for _, input := range inputs {
-		if input.Tag == r.URL.Query().Get("tag") && input.Port == port && input.Protocol == r.URL.Query().Get("protocol") {
-			matches = append(matches, input)
+	key := inboundExportKey{tag: r.URL.Query().Get("tag"), protocol: r.URL.Query().Get("protocol"), port: port}
+	var selected *serverconfig.Input
+	for _, row := range rows {
+		if row.ProjectionIndex == nil {
+			continue
 		}
+		input := &inputs[*row.ProjectionIndex]
+		if inboundExportIdentity(*input) != key {
+			continue
+		}
+		if selected != nil {
+			writeError(w, 409, "无法唯一确定此入站，请重新读取并核对")
+			return
+		}
+		selected = input
 	}
-	if len(matches) != 1 {
+	if selected == nil {
 		writeError(w, 409, "无法唯一确定此入站，请重新读取并核对")
 		return
 	}
-	preferences, err := s.store.ConfigClientPreferences(r.Context(), config.ID)
+	export, err := s.workspaceExporter(r.Context(), agent, config, snapshot == "")
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	labels := cloneClientLabels(agent.Labels, preferences)
-	item, err := buildClientAccessProfile(engine, matches[0], clientAddressCandidates(agent), firstLabel(agent, "tls_server_name", "server_name"), labels)
-	if err != nil {
-		writeError(w, 422, err.Error())
-		return
-	}
-	content, format, err := workspaceClientExport(item.Profile)
+	content, format, err := export(*selected)
 	if err != nil {
 		writeError(w, 422, err.Error())
 		return
@@ -133,6 +147,67 @@ func (s *Server) exportWorkspaceInbound(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, map[string]any{"content": content, "format": format, "source": source})
+}
+
+type inboundExportKey struct {
+	tag, protocol string
+	port          int
+}
+
+func inboundExportIdentity(input serverconfig.Input) inboundExportKey {
+	return inboundExportKey{tag: input.Tag, protocol: input.Protocol, port: input.Port}
+}
+
+func (s *Server) describeInboundActions(r *http.Request, agent core.Agent, config core.Config, inputs []serverconfig.Input, rows []configInboundRowResource, includePreferences bool) error {
+	counts := make(map[inboundExportKey]int, len(inputs))
+	for _, row := range rows {
+		if row.ProjectionIndex != nil {
+			counts[inboundExportIdentity(inputs[*row.ProjectionIndex])]++
+		}
+	}
+	var export func(serverconfig.Input) (string, string, error)
+	canExport := s.sessionAllows(r, core.PermissionClientAccessRead)
+	for index, row := range rows {
+		if row.ProjectionIndex == nil {
+			continue
+		}
+		input := inputs[*row.ProjectionIndex]
+		rows[index].PresetEditable = row.TargetTag != "" && serverconfig.CanEditNativePreset(config.Engine, input)
+		if !canExport || counts[inboundExportIdentity(input)] != 1 {
+			continue
+		}
+		if export == nil {
+			var err error
+			export, err = s.workspaceExporter(r.Context(), agent, config, includePreferences)
+			if err != nil {
+				return err
+			}
+		}
+		_, _, err := export(input)
+		rows[index].ClientExport = err == nil
+	}
+	return nil
+}
+
+func (s *Server) workspaceExporter(ctx context.Context, agent core.Agent, config core.Config, includePreferences bool) (func(serverconfig.Input) (string, string, error), error) {
+	preferences := map[string]string{}
+	if includePreferences && config.ID != "" {
+		var err error
+		preferences, err = s.store.ConfigClientPreferences(ctx, config.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	labels := cloneClientLabels(agent.Labels, preferences)
+	candidates := clientAddressCandidates(agent)
+	serverName := firstLabel(agent, "tls_server_name", "server_name")
+	return func(input serverconfig.Input) (string, string, error) {
+		item, err := buildClientAccessProfile(config.Engine, input, candidates, serverName, labels)
+		if err != nil {
+			return "", "", err
+		}
+		return workspaceClientExport(item.Profile)
+	}, nil
 }
 
 // Variants are alternatives, not independent inbounds. Export every unique

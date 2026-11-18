@@ -68,6 +68,12 @@ func TestSSRustNamesPersistAndKeepPortIdentity(t *testing.T) {
 func TestSSRustSingleServerRenameAndNameValidation(t *testing.T) {
 	const original = `{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"password-one","plugin":"custom-plugin","dns":"9.9.9.9"}`
 	plan := ParseAll(core.EngineShadowsocksRust, original)[0]
+	if !plan.SourceOnly {
+		t.Fatal("plugin transport must use native editing")
+	}
+	// Construct a plain candidate for the low-level port merge. The workspace
+	// does not offer a form for this plugin-based source.
+	plan.SourceOnly = false
 	plan.Credential = "password-one-long-enough"
 	for _, name := range []string{"", " ", "bad\nname", "bad\x00name", strings.Repeat("名", 65)} {
 		plan.Tag = name

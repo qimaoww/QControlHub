@@ -14,11 +14,13 @@ import (
 // Recognize an entire graph, never a tag prefix alone. Every dependency must
 // point at the same loopback XHTTP instance before it can be edited as a group.
 func xhttpGroup(root map[string]any, primary map[string]any) (map[string]any, int) {
-	if primary["protocol"] != "vless" {
+	tag := stringValue(primary["tag"])
+	if tag == "" || primary["protocol"] != "vless" {
 		return nil, 0
 	}
 	stream := mapValue(primary["streamSettings"])
-	if stream["security"] != "reality" || stream["network"] != "raw" {
+	network := xrayStreamNetwork(stream)
+	if stream["security"] != "reality" || (network != "raw" && network != "tcp") {
 		return nil, 0
 	}
 	host, target, err := net.SplitHostPort(stringValue(mapValue(stream["realitySettings"])["target"]))
@@ -35,33 +37,46 @@ func xhttpGroup(root map[string]any, primary map[string]any) (map[string]any, in
 	if len(f) != 2 || intValue(f["xver"]) != 0 {
 		return nil, 0
 	}
+	var backend map[string]any
+	primaryCount := 0
 	entries, _ := root["inbounds"].([]any)
 	for _, raw := range entries {
-		b := mapValue(raw)
-		if b["tag"] != stringValue(primary["tag"])+".xh" || b["listen"] != "127.0.0.1" || b["protocol"] != "vless" || f["dest"] != net.JoinHostPort("127.0.0.1", strconv.Itoa(intValue(b["port"]))) {
-			continue
-		}
-		s := mapValue(b["streamSettings"])
-		if s["network"] != "xhttp" || s["security"] != "none" || mapValue(b["settings"])["decryption"] != "none" {
-			return nil, 0
-		}
-		users, _ := mapValue(b["settings"])["clients"].([]any)
-		if len(users) != 1 {
-			return nil, 0
-		}
-		user := mapValue(users[0])
-		if stringValue(user["flow"]) != "" {
-			return nil, 0
-		}
-		if len(clients) == 1 {
-			vision := mapValue(clients[0])
-			if vision["id"] != user["id"] || vision["flow"] != "xtls-rprx-vision" || vision["email"] != user["email"] || intValue(vision["level"]) != intValue(user["level"]) {
+		item := mapValue(raw)
+		switch stringValue(item["tag"]) {
+		case tag:
+			primaryCount++
+		case tag + ".xh":
+			if backend != nil {
 				return nil, 0
 			}
+			backend = item
 		}
-		return b, tlsPort
 	}
-	return nil, 0
+	port := xrayInboundPort(backend)
+	if primaryCount != 1 || port == 0 || backend["listen"] != "127.0.0.1" || backend["protocol"] != "vless" || f["dest"] != net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) {
+		return nil, 0
+	}
+	s := mapValue(backend["streamSettings"])
+	settings := mapValue(backend["settings"])
+	network = xrayStreamNetwork(s)
+	if (network != "xhttp" && network != "splithttp") || (s["security"] != "none" && s["security"] != nil && s["security"] != "") || settings["decryption"] != "none" {
+		return nil, 0
+	}
+	users, _ := settings["clients"].([]any)
+	if len(users) != 1 {
+		return nil, 0
+	}
+	user := mapValue(users[0])
+	if stringValue(user["flow"]) != "" {
+		return nil, 0
+	}
+	if len(clients) == 1 {
+		vision := mapValue(clients[0])
+		if vision["id"] != user["id"] || vision["flow"] != "xtls-rprx-vision" || vision["email"] != user["email"] || intValue(vision["level"]) != intValue(user["level"]) {
+			return nil, 0
+		}
+	}
+	return backend, tlsPort
 }
 
 func xhttpGroupOwner(root map[string]any, tag string) string {
@@ -97,7 +112,7 @@ func parseXHTTPGroup(root map[string]any, primary map[string]any) (Input, bool) 
 		}
 		input.Protocol = ProtocolXHTTPFive
 	}
-	input.XHTTPBackendPort, input.XHTTPTLSPort = intValue(backend["port"]), tlsPort
+	input.XHTTPBackendPort, input.XHTTPTLSPort = xrayInboundPort(backend), tlsPort
 	input.TLSALPN = "h2"
 	input.RealityTarget = "" // The local target is derived exclusively from the managed graph.
 	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandXrayFlags(root, input.Tag)
@@ -146,6 +161,8 @@ func mutateXHTTPGroup(current, generated, tag, operation string) (string, bool, 
 			if backend == nil {
 				return "", true, fmt.Errorf("无法还原组合入站，请使用完整源码编辑")
 			}
+			alignXrayPresetKeys(oldPrimary, primary, newPrimary)
+			alignXrayPresetKeys(oldBackend, backend, newBackend)
 			newPrimary = mapValue(presetDelta(cloneAccountingObject(oldPrimary), primary, newPrimary))
 			newBackend = mapValue(presetDelta(cloneAccountingObject(oldBackend), backend, newBackend))
 		}

@@ -26,6 +26,7 @@ type clientMetadata struct {
 	Version                   int                               `json:"version"`
 	Protocol                  string                            `json:"protocol"`
 	SnellBinding              string                            `json:"snell_binding,omitempty"`
+	NativeBinding             string                            `json:"native_binding,omitempty"`
 	SnellReuse                bool                              `json:"snell_reuse,omitempty"`
 	SnellObfsHost             string                            `json:"snell_obfs_host,omitempty"`
 	SnellClientFingerprint    string                            `json:"snell_client_fingerprint,omitempty"`
@@ -65,6 +66,9 @@ func webSocketClientIdentity(input Input) webSocketClientMetadata {
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
+	if input.Transport != "xhttp" {
+		metadata.NativeBinding = clientConnectionBinding(input)
+	}
 	clientSNI := ""
 	if names := xhttpRealityNames(input); input.RealityEnabled && len(names) > 0 && names[0] != input.RealityServerName {
 		clientSNI = input.RealityServerName
@@ -136,6 +140,9 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if metadata.Version != 1 {
 		return errors.New("unsupported client metadata version")
 	}
+	if metadata.NativeBinding != "" && metadata.NativeBinding != clientConnectionBinding(*input) {
+		return nil
+	}
 	// A source edit can reuse a tag for another protocol or rotate a peer.
 	// Stale metadata must neither overwrite source nor break the workspace.
 	if metadata.XHTTP != nil && input.Transport == "xhttp" {
@@ -166,7 +173,7 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if metadata.ExternalFrontend != nil {
 		f = metadata.ExternalFrontend
 	}
-	if f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
+	if f != nil && input.Tag == f.Tag && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
 		input.TLSMode, input.TLSPublicPort, input.TLSServerName = f.Mode, f.PublicPort, f.Domain
 		input.TLSACMEEmail, input.TLSStaticHTML = f.ACMEEmail, f.StaticHTML
 		input.CertificatePath, input.PrivateKeyPath = f.CertificatePath, f.PrivateKeyPath

@@ -50,7 +50,7 @@ func PresetAccountingSource(engine core.Engine, content string) (string, error) 
 			return "", err
 		}
 		delete(root, "outbound_fwmark")
-		entries, _ := root["servers"].([]any)
+		_, entries, _ := shadowsocksRustExtendedEntries(root)
 		for _, entry := range entries {
 			delete(mapValue(entry), "outbound_fwmark")
 		}

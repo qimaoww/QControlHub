@@ -245,12 +245,15 @@ func singBoxPresetEditError(entry map[string]any) error {
 		}
 	}
 	tls := mapValue(entry["tls"])
-	for key := range tls {
-		if !slices.Contains([]string{"enabled", "server_name", "certificate_path", "key_path", "alpn", "reality"}, key) {
-			return unsupported("tls." + key)
+	if boolValue(tls["enabled"]) {
+		for key := range tls {
+			if !slices.Contains([]string{"enabled", "server_name", "certificate_path", "key_path", "alpn", "reality"}, key) {
+				return unsupported("tls." + key)
+			}
 		}
 	}
-	if reality := mapValue(tls["reality"]); reality != nil {
+	// Inactive TLS/Reality options are retained by the native field delta.
+	if reality := mapValue(tls["reality"]); boolValue(tls["enabled"]) && boolValue(reality["enabled"]) {
 		for key := range reality {
 			if !slices.Contains([]string{"enabled", "private_key", "short_id", "handshake"}, key) {
 				return unsupported("tls.reality." + key)

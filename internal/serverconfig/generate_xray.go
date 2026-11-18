@@ -146,23 +146,22 @@ func parseXray(content string) (Input, bool) {
 	}
 	input := Input{
 		Protocol: protocolKey(stringValue(inbound["protocol"])), Tag: stringValue(inbound["tag"]),
-		Listen: stringValue(inbound["listen"]), Port: intValue(inbound["port"]), Username: "default", Transport: "raw",
+		Listen: defaultPresetListen(core.EngineXray, stringValue(inbound["listen"])), Port: xrayInboundPort(inbound), Username: "default", Transport: "raw",
 	}
 	settings := mapValue(inbound["settings"])
 	input.VLESSDecryption = stringValue(settings["decryption"])
 	input.Method, input.Credential = stringValue(settings["method"]), stringValue(settings["password"])
 	if input.Protocol == ProtocolPortForward {
-		input.Network = networkListValue(stringValue(settings["allowedNetwork"]))
-		input.TargetAddress = stringValue(settings["rewriteAddress"])
-		input.TargetPort = intValue(settings["rewritePort"])
-		if input.TargetAddress == "" || input.TargetPort == 0 {
-			input.Network = networkListValue(stringValue(settings["network"]))
-			input.TargetAddress = stringValue(settings["address"])
-			input.TargetPort = intValue(settings["port"])
+		input.TargetAddress, input.TargetPort = xrayForwardTarget(settings)
+		network := settings["allowedNetwork"]
+		if settings["network"] != nil {
+			network = settings["network"]
 		}
+		input.Network = networkListValue(network)
 		if input.Network == "" {
 			input.Network = "tcp"
 		}
+		input.presetUnsupported = boolValue(settings["followRedirect"]) || len(mapValue(settings["portMap"])) != 0
 	}
 	user := firstMap(settings["clients"])
 	if _, present := settings["clients"]; !present {
@@ -180,15 +179,26 @@ func parseXray(content string) (Input, bool) {
 		}
 	}
 	stream := mapValue(inbound["streamSettings"])
-	switch stringValue(stream["network"]) {
-	case "", "raw", "tcp":
+	security := strings.ToLower(stringValue(stream["security"]))
+	switch xrayStreamNetwork(stream) {
+	case "raw", "tcp":
+		raw := mapValue(stream["rawSettings"])
+		if raw == nil {
+			raw = mapValue(stream["tcpSettings"])
+		}
+		if header := stringValue(mapValue(raw["header"])["type"]); header != "" && header != "none" {
+			input.presetUnsupported, input.clientUnsupported = true, true
+		}
 	case "hysteria":
 		if input.Protocol != ProtocolHy2 || intValue(settings["version"]) != 2 {
 			return Input{}, false
 		}
-	case "ws":
+	case "ws", "websocket":
 		input.Transport = "websocket"
 		input.TransportPath = stringValue(mapValue(stream["wsSettings"])["path"])
+		if input.TransportPath == "" {
+			input.TransportPath = "/"
+		}
 		input.TransportHost = stringValue(mapValue(stream["wsSettings"])["host"])
 		if input.TransportHost == "" {
 			input.TransportHost = stringValue(mapValue(mapValue(stream["wsSettings"])["headers"])["Host"])
@@ -202,11 +212,17 @@ func parseXray(content string) (Input, bool) {
 	default:
 		return Input{}, false
 	}
-	if security := stringValue(stream["security"]); security != "" && security != "none" && security != "tls" && security != "reality" {
+	if security != "" && security != "none" && security != "tls" && security != "reality" {
 		return Input{}, false
 	}
 	if input.Protocol == ProtocolHy2 && intValue(settings["version"]) != 2 {
 		return Input{}, false
+	}
+	if input.Protocol == ProtocolSS2022 {
+		users, _ := settings["clients"].([]any)
+		if len(users) > 0 || input.Transport != "raw" {
+			input.presetUnsupported, input.clientUnsupported = true, true
+		}
 	}
 	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" && input.VLESSDecryption != "none" {
 		var err error
@@ -216,7 +232,7 @@ func parseXray(content string) (Input, bool) {
 		}
 		if input.Transport == "xhttp" {
 			input.Protocol = ProtocolVLESSEncXHTTP
-		} else if security := stringValue(stream["security"]); security != "tls" && security != "reality" {
+		} else if security != "tls" && security != "reality" {
 			// Xray 允许 VLESS Encryption 在裸 TCP 上运行（security: none）。
 			input.Protocol = ProtocolVLESSEncPlain
 		} else {
@@ -225,7 +241,7 @@ func parseXray(content string) (Input, bool) {
 	} else if input.Protocol == ProtocolVLESS && input.Transport == "xhttp" {
 		input.Protocol = ProtocolVLESSXHTTP
 	}
-	if stringValue(stream["security"]) == "tls" {
+	if security == "tls" {
 		input.TLSEnabled = true
 		input.TLSServerName = stringValue(mapValue(stream["tlsSettings"])["serverName"])
 		input.TLSALPN = strings.Join(stringSliceValue(mapValue(stream["tlsSettings"])["alpn"]), ",")
@@ -237,7 +253,7 @@ func parseXray(content string) (Input, bool) {
 			input.PrivateKeyPath = stringValue(certificate["keyFile"])
 		}
 	}
-	if stringValue(stream["security"]) == "reality" {
+	if security == "reality" {
 		reality := mapValue(stream["realitySettings"])
 		input.RealityEnabled = true
 		input.RealityPrivateKey = stringValue(reality["privateKey"])
@@ -260,4 +276,26 @@ func parseXray(content string) (Input, bool) {
 	}
 	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandXrayFlags(root, input.Tag)
 	return input, parsedInputValid(input)
+}
+
+func xrayStreamNetwork(stream map[string]any) string {
+	network := stream["network"]
+	if stream["method"] != nil {
+		network = stream["method"]
+	}
+	if network == nil {
+		return "raw"
+	}
+	return strings.ToLower(stringValue(network))
+}
+
+func xrayForwardTarget(settings map[string]any) (string, int) {
+	address, port := stringValue(settings["rewriteAddress"]), intValue(settings["rewritePort"])
+	if settings["address"] != nil {
+		address = stringValue(settings["address"])
+	}
+	if legacy := intValue(settings["port"]); legacy != 0 {
+		port = legacy
+	}
+	return address, port
 }
