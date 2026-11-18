@@ -77,7 +77,8 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 			record.LastKernelReceived > math.MaxInt64 || record.LastKernelSent > math.MaxInt64 {
 			return errors.New("traffic state contains an out-of-range counter")
 		}
-		if record.CounterEpoch != "" && !core.ValidTrafficCounterEpoch(record.CounterEpoch) {
+		if (record.CounterEpoch != "" && !core.ValidTrafficCounterEpoch(record.CounterEpoch)) ||
+			(record.ListenerEpoch != "" && !core.ValidTrafficCounterEpoch(record.ListenerEpoch)) {
 			return errors.New("traffic state contains an invalid counter epoch")
 		}
 		if !record.Accounting.Valid() {

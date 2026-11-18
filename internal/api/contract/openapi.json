@@ -3445,11 +3445,20 @@
             "format": "date-time",
             "type": "string"
           },
+          "month_undated_received_bytes": {
+            "type": "integer"
+          },
+          "month_undated_sent_bytes": {
+            "type": "integer"
+          },
           "name": {
             "type": "string"
           },
           "peak_receive_bps": {
             "type": "integer"
+          },
+          "peak_sampled": {
+            "type": "boolean"
           },
           "peak_send_bps": {
             "type": "integer"
@@ -3471,6 +3480,15 @@
           },
           "sent_bytes": {
             "type": "integer"
+          },
+          "undated_received_bytes": {
+            "type": "integer"
+          },
+          "undated_sent_bytes": {
+            "type": "integer"
+          },
+          "undated_since": {
+            "type": "string"
           },
           "used_bytes": {
             "type": "integer"
@@ -21076,6 +21094,7 @@
                     "agent": "example",
                     "engine": "",
                     "manage": false,
+                    "month": "example",
                     "scope": "current",
                     "search": "example",
                     "status": "",
@@ -21466,7 +21485,7 @@
                       },
                       "traffic": {
                         "additionalProperties": false,
-                        "maxProperties": 8,
+                        "maxProperties": 9,
                         "minProperties": 1,
                         "properties": {
                           "advanced": {
@@ -21489,6 +21508,11 @@
                           },
                           "manage": {
                             "type": "boolean"
+                          },
+                          "month": {
+                            "maxLength": 7,
+                            "pattern": "^\\d{4}-\\d{2}$",
+                            "type": "string"
                           },
                           "scope": {
                             "enum": [
@@ -28476,8 +28500,11 @@
                       "engine": "mihomo",
                       "first_reported_at": "2026-11-10T12:00:00Z",
                       "last_reported_at": "2026-11-10T12:00:00Z",
+                      "month_undated_received_bytes": 1,
+                      "month_undated_sent_bytes": 1,
                       "name": "example",
                       "peak_receive_bps": 1,
+                      "peak_sampled": false,
                       "peak_send_bps": 1,
                       "policy_id": "example",
                       "port": 1,
@@ -28485,6 +28512,9 @@
                       "received_bytes": 1,
                       "sample_count": 1,
                       "sent_bytes": 1,
+                      "undated_received_bytes": 1,
+                      "undated_sent_bytes": 1,
+                      "undated_since": "example",
                       "used_bytes": 1
                     }
                   ],

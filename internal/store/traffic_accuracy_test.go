@@ -73,7 +73,7 @@ func TestTrafficSampleIdentityAndLifetimeWithPostgreSQL(t *testing.T) {
 	if err := s.pool.QueryRow(ctx, `SELECT count(*),max(lifetime_received_bytes) FROM port_traffic_accounting_epochs WHERE policy_id=$1`, policy.ID).Scan(&epochs, &lifetime); err != nil || epochs != 1 || lifetime != 200 {
 		t.Fatalf("epoch metadata dedup: %d %d %v", epochs, lifetime, err)
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT received_bytes FROM port_traffic_daily_accounting WHERE policy_id=$1 AND source='core-api'`, policy.ID).Scan(&lifetime); err != nil || lifetime != 200 {
+	if err := s.pool.QueryRow(ctx, `SELECT received_bytes+undated_received_bytes FROM port_traffic_daily_accounting WHERE policy_id=$1 AND source='core-api'`, policy.ID).Scan(&lifetime); err != nil || lifetime != 200 {
 		t.Fatalf("source daily dedup: %d %v", lifetime, err)
 	}
 	conflict := usage
@@ -85,7 +85,7 @@ func TestTrafficSampleIdentityAndLifetimeWithPostgreSQL(t *testing.T) {
 		t.Fatal("accepted scope change in the same epoch")
 	}
 	daily, err := s.ListPortTrafficDailyUsage(ctx, agent.ID, policy.ID, start)
-	if err != nil || len(daily) != 1 || daily[0].SampleCount != 2 || daily[0].UsedBytes != 600 {
+	if err != nil || len(daily) != 1 || daily[0].SampleCount != 2 || daily[0].UsedBytes != 300 || daily[0].UndatedReceivedBytes != 100 || daily[0].UndatedSentBytes != 200 || !daily[0].PeakSampled {
 		t.Fatalf("duplicate daily usage: %+v, %v", daily, err)
 	}
 	// A failed sample changes health only; recovery computes from last success.
@@ -105,8 +105,12 @@ func TestTrafficSampleIdentityAndLifetimeWithPostgreSQL(t *testing.T) {
 		t.Fatalf("new period/live rate: %+v", got)
 	}
 	daily, err = s.ListPortTrafficDailyUsage(ctx, agent.ID, policy.ID, usage.PeriodStart)
-	if err != nil || len(daily) != 1 || daily[0].UsedBytes != 180 {
+	if err != nil || len(daily) != 1 || daily[0].ReceivedBytes != 10 || daily[0].SentBytes != 20 || daily[0].UsedBytes != 30 || daily[0].PeakSampled {
 		t.Fatalf("unreported period tail lost: %+v, %v", daily, err)
+	}
+	previousDays, err := s.ListPortTrafficDailyUsage(ctx, agent.ID, policy.ID, start)
+	if err != nil || len(previousDays) != 1 || previousDays[0].ReceivedBytes != 150 || previousDays[0].SentBytes != 300 || previousDays[0].SampleCount != 2 {
+		t.Fatalf("previous period tail credited to wrong day: %+v, %v", previousDays, err)
 	}
 	// A real local state loss has a different epoch. Its first total can
 	// already be larger than the previous total (not detectable by < alone).
@@ -253,5 +257,52 @@ func TestTrafficCollectionDayAndValidationWithPostgreSQL(t *testing.T) {
 	usage.LifetimeReceivedBytes, usage.LifetimeSentBytes = math.MaxInt64, math.MaxInt64
 	if err := s.UpdatePortTrafficUsage(ctx, agent.ID, []core.PortTrafficUsage{usage}, arrival.Add(time.Second)); err != nil {
 		t.Fatalf("saturated traffic rejected: %v", err)
+	}
+}
+
+func TestTrafficRestoredEpochAcrossPeriodWithPostgreSQL(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx := context.Background()
+	agent, enrollment := enrollTaskTestAgent(t, ctx, s)
+	t.Cleanup(func() { cleanupTaskTestAgent(s, agent.ID, enrollment) })
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	boundary := start.AddDate(0, 1, 0)
+	p, err := s.CreatePortTrafficPolicy(ctx, core.PortTrafficPolicyRequest{AgentID: agent.ID, Name: "late report", Engine: core.EngineMihomo, Port: 443, Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly, CycleAnchor: start})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const a, b = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	report := func(epoch string, at time.Time, lifetime, period uint64) {
+		t.Helper()
+		lo, hi, err := core.TrafficPeriodAt(start, core.TrafficCycleMonthly, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u := core.PortTrafficUsage{PolicyID: p.ID, ResetGeneration: p.ResetGeneration, CounterEpoch: epoch, CollectedAt: at, PeriodStart: lo, PeriodEnd: hi, ReceivedBytes: period, UsedBytes: period, LifetimeReceivedBytes: lifetime, EnforcementAvailable: true}
+		for _, arrival := range []time.Time{at, at.Add(time.Millisecond)} {
+			if err := s.UpdatePortTrafficUsage(ctx, agent.ID, []core.PortTrafficUsage{u}, arrival); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	report(a, boundary.Add(-48*time.Hour), 0, 0)
+	report(b, boundary, 0, 0)
+	report(a, boundary.Add(time.Second), 180, 30)
+	report(a, boundary.Add(2*time.Second), 180, 30)
+	policies, err := s.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].UsedBytes != 30 {
+		t.Fatalf("current period includes restored tail: %+v %v", policies, err)
+	}
+	aug, err := s.ListPortTrafficDailyUsage(ctx, agent.ID, p.ID, start)
+	if err != nil || len(aug) != 2 || aug[1].Day != "2026-08-31" || aug[1].UndatedSince != "2026-08-30" || aug[1].UndatedReceivedBytes != 150 || aug[1].MonthUndatedReceivedBytes != 150 || aug[1].UsedBytes != 0 || aug[1].SampleCount != 0 || aug[1].PeakSampled {
+		t.Fatalf("ambiguous days: %+v %v", aug, err)
+	}
+	sep, err := s.ListPortTrafficDailyUsage(ctx, agent.ID, p.ID, boundary)
+	if err != nil || len(sep) != 1 || sep[0].UsedBytes != 30 || sep[0].UndatedReceivedBytes != 0 || !sep[0].PeakSampled || sep[0].PeakReceiveBPS != 0 || sep[0].SampleCount != 3 {
+		t.Fatalf("new period or sampled zero: %+v %v", sep, err)
+	}
+	var rx, undated uint64
+	if err := s.pool.QueryRow(ctx, `SELECT SUM(received_bytes),SUM(undated_received_bytes) FROM port_traffic_daily_accounting WHERE policy_id=$1 AND source='listener'`, p.ID).Scan(&rx, &undated); err != nil || rx != 30 || undated != 150 {
+		t.Fatalf("source ledger: %d %d %v", rx, undated, err)
 	}
 }
