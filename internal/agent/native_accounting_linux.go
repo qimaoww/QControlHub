@@ -17,6 +17,9 @@ var errSharedAccountingTransition = errors.New("shared instance deployment is in
 type nativeAccountingSnapshot struct {
 	Plan              serverconfig.AccountingPlan
 	Counters          map[string]uint64
+	ConfigID          string
+	ConfigVersion     int
+	ScopeError        string
 	ProcessEpoch      string
 	ListenerProtocols map[int]core.TrafficProtocol
 }
@@ -149,9 +152,25 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 	return ports
 }
 
-func nativeAccountingScopeAllowed(policy core.PortTrafficPolicy, snapshot nativeAccountingSnapshot) bool {
-	return policy.Protocol == core.TrafficProtocolBoth ||
-		(snapshot.ListenerProtocols[policy.Port] == policy.Protocol && policy.Protocol != "")
+func nativeAccountingScopeIssue(policy core.PortTrafficPolicy, snapshot nativeAccountingSnapshot) string {
+	if snapshot.ScopeError != "" {
+		return snapshot.ScopeError
+	}
+	if snapshot.ConfigID != "" && policy.ConfigID != "" &&
+		(policy.ConfigID != snapshot.ConfigID || policy.ConfigVersion != snapshot.ConfigVersion) {
+		return "policy configuration does not match the active deployment"
+	}
+	if policy.Engine == core.EngineMihomo && policy.InboundTag != "" && snapshot.Plan.Source == "nft-dual" {
+		for _, port := range snapshot.Plan.Ports {
+			if port.Port == policy.Port && port.Inbound != policy.InboundTag {
+				return "policy inbound does not match the active deployment"
+			}
+		}
+	}
+	if policy.Protocol == core.TrafficProtocolBoth || policy.Protocol != "" && snapshot.ListenerProtocols[policy.Port] == policy.Protocol {
+		return ""
+	}
+	return "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
 }
 
 func accountingListenerProtocols(engine core.Engine, content string) map[int]core.TrafficProtocol {
@@ -240,7 +259,7 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			Listeners []struct {
 				Port      int    `yaml:"port"`
 				Type      string `yaml:"type"`
-				Transport string `yaml:"transport"`
+				Transport any    `yaml:"transport"`
 			} `yaml:"listeners"`
 		}
 		if yaml.Unmarshal([]byte(content), &root) != nil {
@@ -261,7 +280,8 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			seen[in.Port] = true
 			switch in.Type {
 			case serverconfig.ProtocolMieru:
-				result[in.Port] = serverconfig.MieruListenerProtocol(in.Transport)
+				transport, _ := in.Transport.(string)
+				result[in.Port] = serverconfig.MieruListenerProtocol(transport)
 			case "vless", "vmess", "trojan", "http", "redir", "anytls":
 				result[in.Port] = core.TrafficProtocolTCP
 			case "hysteria2", "hysteria", "tuic":

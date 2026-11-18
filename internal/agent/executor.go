@@ -57,6 +57,8 @@ type Executor struct {
 	sharedStateMu              sync.Mutex
 	sharedAccountingLocks      sync.Map
 	accountingConfigs          map[string]nativeAccountingConfigEntry
+	mihomoStartEpoch           string // Protected by processEpochMu.
+	mihomoStartedAt            time.Time
 	processEpochMu             sync.Mutex
 	processEpochs              map[string]cachedProcessEpochEntry
 	runtimeCacheMu             sync.Mutex

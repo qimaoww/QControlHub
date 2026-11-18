@@ -63,6 +63,11 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	if err != nil {
 		return result, err
 	}
+	if engine == core.EngineMihomo {
+		if err := e.verifyMihomoAccountingDeployment(ctx, spec, content, epoch, &configuration); err != nil {
+			return result, err
+		}
+	}
 	configuration.ProcessEpoch = epoch
 	if configuration.Plan.Source == "nft-dual" {
 		return configuration, nil
@@ -79,6 +84,43 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	}
 	configuration.Counters = counters
 	return configuration, nil
+}
+
+// A saved file can be newer than the active service. Current deployments
+// commit a digest after activation. Legacy installations use the fixed
+// managed config and must have started after its last change.
+func (e *Executor) verifyMihomoAccountingDeployment(ctx context.Context, spec EngineSpec, content, epoch string, snapshot *nativeAccountingSnapshot) error {
+	state, err := readSharedDeploymentState(spec)
+	if err == nil {
+		if state.Applying || state.Digest != configurationDigest(content) {
+			snapshot.ScopeError = "Mihomo configuration does not match the active deployment"
+		}
+		snapshot.ConfigID, snapshot.ConfigVersion = state.ConfigID, state.ConfigVersion
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect Mihomo deployment: %w", err)
+	}
+	info, err := os.Stat(spec.ConfigPath)
+	if err != nil {
+		return err
+	}
+	e.processEpochMu.Lock()
+	cachedEpoch, started := e.mihomoStartEpoch, e.mihomoStartedAt
+	e.processEpochMu.Unlock()
+	if cachedEpoch != epoch {
+		started, err = managedServiceStartTime(ctx, e.serviceManager(), spec.Service)
+		if err != nil {
+			return err
+		}
+		e.processEpochMu.Lock()
+		e.mihomoStartEpoch, e.mihomoStartedAt = epoch, started
+		e.processEpochMu.Unlock()
+	}
+	if !info.ModTime().Before(started) {
+		snapshot.ScopeError = "Mihomo configuration changed since the managed service started"
+	}
+	return nil
 }
 
 // Only the authenticated allocation selects this root-owned configuration and

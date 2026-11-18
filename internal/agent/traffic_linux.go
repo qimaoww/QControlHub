@@ -385,6 +385,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		record := manager.records[policy.ID]
 		if record == nil || record.NeedsServerQuotaSync || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
 			record.Policy.Name != policy.Name || record.Policy.Engine != policy.Engine ||
+			record.Policy.ConfigID != policy.ConfigID || record.Policy.ConfigVersion != policy.ConfigVersion || record.Policy.InboundTag != policy.InboundTag ||
 			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock ||
 			!sameSharedQuota(record.Policy.SharedQuota, policy.SharedQuota) {
 			unchanged = false

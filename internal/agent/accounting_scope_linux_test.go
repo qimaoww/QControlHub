@@ -5,6 +5,8 @@ import (
 	"errors"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -121,7 +123,7 @@ func TestSingleTransportMarkedAccountingIncludesBothOutboundTransports(t *testin
 		r := m.records[p.ID]
 		r.Policy.Protocol = protocol
 		snapshot := nativeAccountingSnapshot{Plan: serverconfig.AccountingPlan{Source: "nft-dual", Ports: []serverconfig.AccountingPort{{Port: p.Port, Inbound: "a", Mark: uint32(0x51430000) | uint32(p.Port)}}}, ProcessEpoch: "one", ListenerProtocols: map[int]core.TrafficProtocol{p.Port: protocol}}
-		if !nativeAccountingScopeAllowed(r.Policy, snapshot) {
+		if nativeAccountingScopeIssue(r.Policy, snapshot) != "" {
 			t.Fatal("exclusive listener rejected")
 		}
 		if err := prepareMarkedAccounting(r, snapshot); err != nil {
@@ -194,7 +196,7 @@ func TestMieruListenerScope(t *testing.T) {
 				if tc.want == p.Protocol {
 					p.Protocol = core.TrafficProtocolTCP
 				}
-				if nativeAccountingScopeAllowed(p, snapshot) {
+				if nativeAccountingScopeIssue(p, snapshot) == "" {
 					t.Fatal("mismatched policy accepted")
 				}
 			}
@@ -204,5 +206,89 @@ func TestMieruListenerScope(t *testing.T) {
 		if _, err := serverconfig.PrepareIndependentEgress(core.EngineMihomo, content); err == nil {
 			t.Fatal("shared port acquired an outbound")
 		}
+	}
+}
+
+func TestMarkedListenerMigrationKeepsMeasuredBoundary(t *testing.T) {
+	m, b, now, p := newAccuracyTrafficManager(t)
+	p.Engine, p.Protocol, p.InboundTag = core.EngineMihomo, core.TrafficProtocolTCP, "edge"
+	ctx := context.Background()
+	if err := m.SetPolicies(ctx, []core.PortTrafficPolicy{p}, p.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	r := m.records[p.ID]
+	bump := func(direction string, n uint64) { b.counters[trafficCounterName(r, direction, "tcp")] += n }
+	sample := func() core.PortTrafficUsage {
+		*now = now.Add(time.Second)
+		m.collect(ctx, false)
+		return m.Snapshot()[0]
+	}
+	bump("in", 50)
+	bump("out", 100)
+	if got := sample(); got.UsedBytes != 150 {
+		t.Fatal(got)
+	}
+	plan := serverconfig.AccountingPlan{Source: "nft-dual", Ports: []serverconfig.AccountingPort{{Port: p.Port, Inbound: p.InboundTag, Mark: 0x51430000 | uint32(p.Port)}}}
+	snapshot := nativeAccountingSnapshot{Plan: plan, ListenerProtocols: map[int]core.TrafficProtocol{p.Port: p.Protocol}}
+	m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) { return snapshot, nil }
+	bump("in", 3)
+	bump("out", 7)
+	if got := sample(); got.UsedBytes != 10 || got.Accounting.ClientReceived != 3 || got.Accounting.ClientSent != 7 || r.QuotaBaselineBytes != 150 {
+		t.Fatal(got)
+	}
+	bump("in", 4)
+	bump("targetout", 6)
+	if got := sample(); got.UsedBytes != 20 {
+		t.Fatal(got)
+	}
+	snapshot.ScopeError = "Mihomo configuration does not match the active deployment"
+	bump("in", 9)
+	bump("targetout", 888)
+	if got := sample(); got.ReceivedBytes != 9 || got.SentBytes != 0 || got.Accounting != nil || r.QuotaBaselineBytes != 170 || !strings.Contains(got.EnforcementError, snapshot.ScopeError) {
+		t.Fatal(got)
+	}
+	if got := sample(); got.UsedBytes != 9 {
+		t.Fatal(got)
+	}
+}
+
+func TestMihomoAccountingNeedsEffectiveConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	spec := EngineSpec{ConfigPath: filepath.Join(dir, "config.yaml"), Service: "qagent-mihomo.service"}
+	const content = "mode: rule\n"
+	if err := os.WriteFile(spec.ConfigPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	e := &Executor{mihomoStartEpoch: "legacy", mihomoStartedAt: time.Now().Add(time.Minute)}
+	ctx := context.Background()
+	check := func(p core.PortTrafficPolicy, want bool) {
+		t.Helper()
+		snapshot := nativeAccountingSnapshot{ListenerProtocols: map[int]core.TrafficProtocol{443: core.TrafficProtocolTCP}}
+		if err := e.verifyMihomoAccountingDeployment(ctx, spec, content, "legacy", &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if issue := nativeAccountingScopeIssue(p, snapshot); (issue == "") != want {
+			t.Fatalf("unexpected scope issue %q", issue)
+		}
+	}
+	p := core.PortTrafficPolicy{Engine: core.EngineMihomo, Protocol: core.TrafficProtocolTCP, Port: 443, ConfigID: "fixture", ConfigVersion: 1}
+	check(p, true)
+	e.mihomoStartedAt = time.Now().Add(-time.Minute)
+	check(p, false)
+	state := sharedDeploymentState{ConfigID: p.ConfigID, ConfigVersion: 1, Digest: configurationDigest(content)}
+	for _, tc := range []struct {
+		applying bool
+		digest   string
+		version  int
+		want     bool
+	}{
+		{false, configurationDigest(content), 1, true}, {true, configurationDigest(content), 1, false},
+		{false, configurationDigest("another config"), 1, false}, {false, configurationDigest(content), 2, false},
+	} {
+		state.Applying, state.Digest, state.ConfigVersion = tc.applying, tc.digest, tc.version
+		if err := writeSharedDeploymentState(spec, state); err != nil {
+			t.Fatal(err)
+		}
+		check(p, tc.want)
 	}
 }

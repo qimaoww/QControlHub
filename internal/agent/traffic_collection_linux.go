@@ -97,7 +97,8 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
 		}
 		hasSource := manager.nativeSource != nil && !shared || shared && manager.sharedSource != nil
-		nativeAllowed := hasSource && nativeAccountingScopeAllowed(record.Policy, snapshot)
+		scopeIssue := nativeAccountingScopeIssue(record.Policy, snapshot)
+		nativeAllowed := hasSource && scopeIssue == ""
 		// A transient source failure must freeze an established native baseline,
 		// not change its scope or substitute listener bytes.
 		if hasSource && sourceErr != nil && record.Accounting != nil && record.Accounting.Source != "listener" {
@@ -106,10 +107,16 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		// Core counters and per-port marks do not distinguish the originating
 		// listener transport. A TCP-only policy must not bill another UDP flow
 		// (nor mistake a QUIC outbound carrying TCP for a UDP listener flow).
+		var closingRX, closingTX uint64
 		if hasSource && !nativeAllowed && record.Accounting != nil && record.Accounting.Source != "listener" {
 			epoch, err := randomSuffix(16)
 			if err != nil {
 				return manager.setUnavailableLocked(err)
+			}
+			if !shared && record.Accounting.Source == "nft-dual" && !record.LastCollectedAt.IsZero() {
+				// Both sources count this same listener. Its last measured interval
+				// is still attributable even when the target scope becomes ambiguous.
+				closingRX, closingTX = collectTrafficCounterDeltas(counters, record)
 			}
 			record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
 			record.CounterEpoch, record.Accounting = epoch, nil
@@ -136,6 +143,8 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		previousRecord.KernelCounters = maps.Clone(record.KernelCounters)
 		previousRecord.Accounting = cloneTrafficAccounting(record.Accounting)
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
+		receivedDelta = saturatedTrafficAdd(receivedDelta, closingRX)
+		sentDelta = saturatedTrafficAdd(sentDelta, closingTX)
 		if hasSource && (nativeAllowed || shared) {
 			err := sourceErr
 			if err == nil {
@@ -169,6 +178,12 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 							// Target counters start at zero; no historical exit is estimated.
 							record.Accounting.ClientReceived = saturatedTrafficAdd(record.Accounting.ClientReceived, receivedDelta)
 							record.Accounting.ClientSent = saturatedTrafficAdd(record.Accounting.ClientSent, sentDelta)
+						} else if !shared && previousEpoch != record.CounterEpoch && !previousRecord.LastCollectedAt.IsZero() &&
+							(previousRecord.Accounting == nil || previousRecord.Accounting.Source == "listener") {
+							// This delta starts at an in-process sample. A restored
+							// checkpoint may overlap a report already accepted by the panel.
+							record.Accounting.ClientReceived = receivedDelta
+							record.Accounting.ClientSent = sentDelta
 						} else if record.Accounting != nil {
 							receivedDelta, sentDelta = collectMarkedAccounting(counters, record, receivedDelta, sentDelta, previousEpoch != record.CounterEpoch)
 						}
@@ -227,7 +242,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			}
 		}
 		if !shared && manager.nativeSource != nil && !nativeAllowed {
-			record.AccountingError = "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
+			record.AccountingError = scopeIssue
 			if sourceErr != nil {
 				record.AccountingError = sourceErr.Error()
 				if len(record.AccountingError) > 400 {

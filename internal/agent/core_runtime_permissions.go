@@ -144,17 +144,12 @@ func managedServicePolicyNeedsRestart(ctx context.Context, manager *ServiceManag
 	if !managed {
 		return false, nil
 	}
-	var started time.Time
+	started, err := managedServiceStartTime(ctx, manager, service)
+	if err != nil {
+		return false, err
+	}
 	paths := []string{spec.Binary}
 	if manager.Kind() == ServiceManagerSystemd {
-		stamp, err := runInDirectoryWithEnvironment(ctx, "", "TZ=UTC", manager.executable, "show", service, "--property=ExecMainStartTimestamp", "--value", "--timestamp=us")
-		if err != nil {
-			return false, err
-		}
-		started, err = time.Parse("Mon 2006-01-02 15:04:05 MST", stamp)
-		if err != nil {
-			return false, fmt.Errorf("service %s start timestamp cannot be inspected: %w", service, err)
-		}
 		for _, property := range []string{"FragmentPath", "DropInPaths"} {
 			value, err := run(ctx, manager.executable, "show", service, "--property="+property, "--value")
 			if err != nil {
@@ -163,24 +158,6 @@ func managedServicePolicyNeedsRestart(ctx context.Context, manager *ServiceManag
 			paths = append(paths, strings.Fields(value)...)
 		}
 	} else {
-		process, err := boundOpenRCServiceProcess(ctx, service)
-		if err != nil {
-			return false, err
-		}
-		ticks, err := strconv.ParseFloat(process.Child.StartTime, 64)
-		if err != nil {
-			return false, err
-		}
-		uptime, err := os.ReadFile(filepath.Join(openRCProcRoot, "uptime"))
-		if err != nil || len(strings.Fields(string(uptime))) == 0 {
-			return false, fmt.Errorf("read boot uptime for %s: %w", service, err)
-		}
-		seconds, err := strconv.ParseFloat(strings.Fields(string(uptime))[0], 64)
-		if err != nil {
-			return false, err
-		}
-		// Linux procfs reports USER_HZ (100), independent of kernel CONFIG_HZ.
-		started = time.Now().Add(time.Duration((ticks/100 - seconds) * float64(time.Second)))
 		paths = append(paths, filepath.Join(openRCInitRoot, service))
 	}
 	for _, path := range paths {
@@ -193,6 +170,38 @@ func managedServicePolicyNeedsRestart(ctx context.Context, manager *ServiceManag
 		}
 	}
 	return false, nil
+}
+
+func managedServiceStartTime(ctx context.Context, manager *ServiceManager, service string) (time.Time, error) {
+	if manager.Kind() == ServiceManagerSystemd {
+		stamp, err := runInDirectoryWithEnvironment(ctx, "", "TZ=UTC", manager.executable, "show", service, "--property=ExecMainStartTimestamp", "--value", "--timestamp=us")
+		if err != nil {
+			return time.Time{}, err
+		}
+		started, err := time.Parse("Mon 2006-01-02 15:04:05 MST", stamp)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("service %s start timestamp cannot be inspected: %w", service, err)
+		}
+		return started, nil
+	}
+	process, err := boundOpenRCServiceProcess(ctx, service)
+	if err != nil {
+		return time.Time{}, err
+	}
+	ticks, err := strconv.ParseFloat(process.Child.StartTime, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	uptime, err := os.ReadFile(filepath.Join(openRCProcRoot, "uptime"))
+	if err != nil || len(strings.Fields(string(uptime))) == 0 {
+		return time.Time{}, fmt.Errorf("read boot uptime for %s: %w", service, err)
+	}
+	seconds, err := strconv.ParseFloat(strings.Fields(string(uptime))[0], 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	// Linux procfs reports USER_HZ (100), independent of kernel CONFIG_HZ.
+	return time.Now().Add(time.Duration((ticks/100 - seconds) * float64(time.Second))), nil
 }
 
 // A service name alone does not establish ownership. Custom executors can use

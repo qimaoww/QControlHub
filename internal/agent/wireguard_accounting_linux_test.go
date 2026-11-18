@@ -79,7 +79,7 @@ func TestWireGuardUDPAccountingIncludesAllLegs(t *testing.T) {
 				}
 			}
 			policy.Protocol = core.TrafficProtocolTCP
-			if nativeAccountingScopeAllowed(policy, snapshot) {
+			if nativeAccountingScopeIssue(policy, snapshot) == "" {
 				t.Fatal("TCP-only policy must not bill UDP WireGuard traffic")
 			}
 		})
