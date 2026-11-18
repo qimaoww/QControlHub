@@ -15,6 +15,8 @@ import {
   getMapWrapSpan,
   renderPacificMapSVG,
 } from "./dashboard-map.js";
+import { readout } from "./dashboard-console.js";
+import { renderLinkMap, renderLinkTrace } from "./dashboard-linkmap.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import {
   clusterTopologyNodes,
@@ -26,7 +28,6 @@ import {
   matchesActiveSelection,
   reconcileSelectionKey,
   renderProbeHistoryChart,
-  summarizeGroupMetricLine,
   tonePalette,
 } from "./dashboard-topo-shared.js";
 
@@ -83,6 +84,100 @@ function groupKindBadgeText(group) {
   return "双节点";
 }
 
+const NBSP = String.fromCharCode(160);
+const BLANK_FIGURE = Object.freeze(["—", ""]);
+
+function latencyParts(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return BLANK_FIGURE;
+  return [ms.toFixed(ms >= 100 ? 0 : 1), `${NBSP}ms`];
+}
+
+// One probe direction as a console reading: figure, note and tone.
+function directionReading(dir, running, ready) {
+  if (!dir || !dir.available) {
+    if (running) return { parts: BLANK_FIGURE, note: "探测中", tone: "" };
+    return { parts: BLANK_FIGURE, note: ready ? "待采样" : "暂不可用", tone: "" };
+  }
+  if (dir.state === "running" || dir.state === "preparing") return { parts: BLANK_FIGURE, note: "探测中", tone: "" };
+  if (dir.state === "failed" || dir.error) return { parts: BLANK_FIGURE, note: dir.error || "探测失败", tone: "bad" };
+  if (!dir.reached || (dir.lossPercent ?? 0) >= 100) return { parts: BLANK_FIGURE, note: "不可达", tone: "bad" };
+  const tone = dir.status?.tone;
+  return { parts: latencyParts(dir.avgMS), note: `丢包 ${formatLoss(dir.lossPercent)}`, tone: tone === "bad" || tone === "warn" ? tone : "" };
+}
+
+// `rail` ties a reading to its line on the map: "is-fwd" solid, "is-rev" dashed.
+function railReadout(key, label, dir, running, ready, rail = "") {
+  const reading = directionReading(dir, running, ready);
+  return readout(key, label, reading.parts, reading.note, `${reading.tone} ${rail}`.trim());
+}
+
+const railText = (key, className, text) => node("span", { className, "data-refresh-key": key }, text);
+
+function nodeSubject(group, index) {
+  const endpoint = group.nodes[index];
+  if (!endpoint) return null;
+  const inbound = index > 0 ? group.hops[index - 1] : null;
+  const outbound = group.hops[index] || null;
+  const head = [
+    keyedBadge(endpoint.role, endpoint.issue || !endpoint.online ? "bad" : "ok", "role"),
+    railText("name", "a-con-link-name", endpoint.name),
+    endpoint.issue ? railText("issue", "a-topo-err-inline", endpoint.issue) : null,
+  ];
+  const rows = [
+    inbound ? railReadout("in", "入站", inbound.forward, group.running, inbound.ready) : null,
+    outbound ? railReadout("out", "出站", outbound.forward, group.running, outbound.ready) : null,
+  ];
+  return { head, rows };
+}
+
+function hopSubject(group, index) {
+  const hop = group.hops[index];
+  if (!hop) return null;
+  const route = `${hop.from.name} ${hop.bidirectional ? "⇄" : "→"} ${hop.to.name}`;
+  const head = [
+    keyedBadge(`跳段 ${index + 1}/${group.hopCount}`, hop.tone || "", "hop"),
+    railText("name", "a-con-link-name", route),
+    hop.unavailableReason ? railText("reason", "a-con-link-alert", hop.unavailableReason) : null,
+  ];
+  const rows = [
+    railReadout("fwd", "去程", hop.forward, group.running, hop.ready, "is-fwd"),
+    hop.bidirectional ? railReadout("rev", "回程", hop.reverse, group.running, hop.ready, "is-rev") : null,
+  ];
+  return { head, rows };
+}
+
+function groupSubject(group) {
+  const status = group.overall.statusBadge;
+  const ready = group.availability.ready;
+  const head = [
+    keyedBadge(status.label, status.tone, "status"),
+    group.autoEnabled ? null : railText("paused", "a-con-link-alert", "自动探测已暂停"),
+    !ready && group.availability.reason ? railText("reason", "a-con-link-alert", group.availability.reason) : null,
+    group.overall.error ? railText("error", "a-topo-err-inline", group.overall.error) : null,
+  ];
+  const rows = [
+    railReadout("fwd", "去程", group.overall.forward, group.running, ready, "is-fwd"),
+    group.bidirectional ? railReadout("rev", "回程", group.overall.reverse, group.running, ready, "is-rev") : null,
+  ];
+  return { head, rows };
+}
+
+// The recent trend of the link, under its readings.
+function railTrace(group) {
+  const trace = renderLinkTrace(group);
+  if (!trace) return null;
+  return node("div", { className: "a-con-link-trace", "data-refresh-key": "trace" },
+    trace.svg,
+    railText("range", "a-con-note", `近 ${trace.count} 次采样`));
+}
+
+// What the dashboard rail reads out: the focused node or hop, else the whole group.
+function railSubject(group, focusKey) {
+  if (focusKey.startsWith("node:")) return nodeSubject(group, Number(focusKey.slice(5))) || groupSubject(group);
+  if (focusKey.startsWith("hop:")) return hopSubject(group, Number(focusKey.slice(4))) || groupSubject(group);
+  return groupSubject(group);
+}
+
 
 
 export function createDashboardTopologySection(ctx, {
@@ -111,11 +206,7 @@ export function createDashboardTopologySection(ctx, {
 
   // Dashboard single-group preferences (page = "dashboard")
   let dashGroupName = "";
-  let dashShowHistory = false;
-  let dashGroupsCollapsed = null;
   let dashGroupTouched = false;
-  let dashHistoryTouched = false;
-  let dashGroupsCollapsedTouched = false;
 
   // Standalone #topology workspace preferences (page = "topology")
   let topoViewMode = "map";
@@ -189,14 +280,6 @@ export function createDashboardTopologySection(ctx, {
         focusedItemKey = "";
         changed = true;
       }
-      if (!dashHistoryTouched && typeof saved.topo_show_history === "boolean" && saved.topo_show_history !== dashShowHistory) {
-        dashShowHistory = saved.topo_show_history;
-        changed = true;
-      }
-      if (!dashGroupsCollapsedTouched && typeof saved.topo_groups_collapsed === "boolean" && saved.topo_groups_collapsed !== dashGroupsCollapsed) {
-        dashGroupsCollapsed = saved.topo_groups_collapsed;
-        changed = true;
-      }
     } else {
       const saved = ctx.preferences.get("topology") || {};
       if (!topoViewTouched && saved.view_mode !== undefined) {
@@ -255,20 +338,6 @@ export function createDashboardTopologySection(ctx, {
     void ctx.preferences.ready?.().then(() => syncSavedPreferences({ repaint: true }));
   }
 
-  const isDashGroupsCollapsed = (groups) => {
-    if (!groups || groups.length <= 1) return false;
-    if (typeof dashGroupsCollapsed === "boolean") return dashGroupsCollapsed;
-    return groups.length > 6;
-  };
-
-  const toggleDashGroupsCollapsed = (groups) => {
-    const next = !isDashGroupsCollapsed(groups);
-    dashGroupsCollapsedTouched = true;
-    dashGroupsCollapsed = next;
-    ctx.preferences?.patch?.("dashboard", { topo_groups_collapsed: next });
-    paint(true);
-  };
-
   const selectDashboardGroup = (groupName, { persist = true } = {}) => {
     const next = String(groupName || "").trim().slice(0, 40);
     dashGroupTouched = true;
@@ -284,13 +353,6 @@ export function createDashboardTopologySection(ctx, {
     mapZoomScopeSig = "";
     clearPendingZoomCommit();
     if (changed) paint(true);
-  };
-
-  const toggleDashboardHistory = () => {
-    dashHistoryTouched = true;
-    dashShowHistory = !dashShowHistory;
-    ctx.preferences?.patch?.("dashboard", { topo_show_history: dashShowHistory });
-    paint(true);
   };
 
   const setTopoViewMode = (mode, { focusGroupName = null, focusItem = "" } = {}) => {
@@ -605,6 +667,43 @@ export function createDashboardTopologySection(ctx, {
     );
   };
 
+  const railProbeButton = (group) => {
+    if (!canExecuteProbes()) return null;
+    const act = (kind) => (event) => void probeController.mutatePair(group.raw, event.currentTarget, kind);
+    if (group.running) return button("停止", act("stop"), { className: "a-topo-mini-btn", "data-refresh-key": `stop-${group.id}` });
+    return button("立即探测", act("run"), { className: "a-topo-mini-btn", disabled: !group.availability.ready, "data-refresh-key": `run-${group.id}` });
+  };
+
+  // Dashboard rail: status, the two latency readings, the sample time and one probe action.
+  const renderLinkRail = (group) => {
+    const subject = railSubject(group, focusedItemKey);
+    const sampledAt = group.overall.sampledAt;
+    const foot = [
+      sampledAt ? railText("sampled", "a-con-note", date(sampledAt)) : null,
+      focusedItemKey ? button("取消聚焦", () => toggleFocus(focusedItemKey), { className: "a-topo-mini-btn", "data-refresh-key": "topo-unfocus" }) : null,
+      focusedItemKey ? null : railProbeButton(group),
+    ];
+    return node("div", { className: "a-con-link-rail", "data-refresh-key": "topo-inspect" },
+      node("div", { className: "a-con-link-head", "data-refresh-key": "head" }, subject.head),
+      subject.rows,
+      focusedItemKey ? null : railTrace(group),
+      node("div", { className: "a-con-link-foot", "data-refresh-key": "foot" }, foot));
+  };
+
+  // A press on the map selects a hop or a node; a press on open ground clears it.
+  const pressLinkMap = (event) => {
+    const item = event.target.closest?.("[data-lm-key]");
+    if (item) toggleFocus(item.getAttribute("data-lm-key"));
+    else if (focusedItemKey) toggleFocus(focusedItemKey);
+  };
+  const keyLinkMap = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const item = event.target.closest?.("[data-lm-key]");
+    if (!item) return;
+    event.preventDefault();
+    toggleFocus(item.getAttribute("data-lm-key"));
+  };
+
   // ==================== Pacific Map Integration & Live Highlighting ====================
 
   const resolveSingleFocusKeyToMapKey = (group, focusKey, model) => {
@@ -772,7 +871,7 @@ export function createDashboardTopologySection(ctx, {
   const syncLiveMapSelection = () => {
     const svg = bodyHost.querySelector("svg.a-dash-topo-map-svg");
     if (!svg) return;
-    const isSingle = Boolean(svg.closest(".a-topo-single-stage"));
+    const isSingle = Boolean(svg.closest(".a-topo-single-stage, .a-con-link"));
     const pinnedSel = isSingle
       ? resolveSingleFocusKeyToMapKey(lastActiveGroup, focusedItemKey, lastSingleMapModel)
       : mapPinnedKey;
@@ -1361,47 +1460,30 @@ export function createDashboardTopologySection(ctx, {
     );
   };
 
-  const renderDashboardGroupSwitcher = (groups, activeGroup) => {
-    if (!groups || groups.length <= 1) return null;
-    const collapsed = isDashGroupsCollapsed(groups);
-    const toggleBtn = button(
-      collapsed ? `切换分组 (${groups.length})` : "收起",
-      () => toggleDashGroupsCollapsed(groups),
-      {
-        className: "a-button a-topo-mini-btn a-topo-switcher-toggle",
-        "aria-expanded": collapsed ? "false" : "true",
-        "data-refresh-key": "dash-groups-toggle",
-      },
-    );
-    if (collapsed && activeGroup) {
-      return node("div", {
-        className: "a-topo-switcher-box is-collapsed",
-        "data-refresh-key": "dash-switcher-box",
-      },
-        node("div", { className: "a-topo-switcher-collapsed" },
-          node("div", {
-            className: "a-topo-switcher-summary",
-            "data-group-name": activeGroup.groupName,
-            "data-refresh-key": `dash-summary-${activeGroup.id}`,
-          },
-            node("span", { className: `a-topo-dot is-${activeGroup.overall.statusBadge.tone || "idle"}`, "aria-hidden": "true" }),
-            node("span", { className: "a-topo-switcher-summary-name" }, activeGroup.groupName),
-            node("span", { className: "a-topo-pill-metric" }, summarizeGroupMetricLine(activeGroup, "both")),
-          ),
-          toggleBtn,
-        ),
-      );
-    }
-    return node("div", {
-      className: "a-topo-switcher-box",
-      "data-refresh-key": "dash-switcher-box",
+  // Dashboard group tabs: tone dot, name and the forward reading of every group.
+  const renderLinkTabs = (groups, activeGroup) => node("div", {
+    className: "a-con-tabs",
+    role: "tablist",
+    "aria-label": "监测分组",
+    "data-refresh-key": "dash-switcher",
+  }, groups.map((group) => {
+    const active = Boolean(activeGroup && group.id === activeGroup.id);
+    const status = group.overall.statusBadge;
+    const flags = { running: group.running, ready: group.availability.ready };
+    return node("button", {
+      type: "button",
+      className: "a-con-tab",
+      role: "tab",
+      "aria-selected": active ? "true" : "false",
+      title: `${group.routeText} ${status.label}`,
+      "data-group-name": group.groupName,
+      "data-refresh-key": `dash-pill-${group.id}`,
+      onclick: () => selectDashboardGroup(group.groupName),
     },
-      node("div", { className: "a-topo-switcher-row" },
-        renderGroupSwitcher(groups, activeGroup, (name) => selectDashboardGroup(name), "dash"),
-        toggleBtn,
-      ),
-    );
-  };
+    node("span", { className: `a-topo-dot is-${status.tone || "idle"}`, "aria-hidden": "true" }),
+    node("span", { className: "a-con-tab-name" }, group.groupName),
+    node("span", { className: "a-con-tab-metric" }, formatDirBadgeMetric(group.overall.forward, flags)));
+  }));
 
   const renderGroupHeaderBar = (group, {
     includeFocusBtn = false,
@@ -1462,6 +1544,21 @@ export function createDashboardTopologySection(ctx, {
       renderInspectStrip(group, metricDir),
       showHistory ? renderHistorySection(group, metricDir, gradPrefix) : null,
     );
+  };
+
+  // Dashboard workspace: the map with the reading rail beside it.
+  const renderLinkDeck = (group, renderWidth) => {
+    // The rail takes 12rem once the card is 64rem wide; the map is drawn at the width left.
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const mapWidth = renderWidth >= 64 * rem ? renderWidth - 12 * rem : renderWidth;
+    const map = renderLinkMap(group, { width: mapWidth, focusKey: focusedItemKey });
+    listen(map, "click", pressLinkMap);
+    listen(map, "keydown", keyLinkMap);
+    return node("div", {
+      className: "a-con-link",
+      "data-refresh-key": `single-stage-${group.id}`,
+      "data-group-name": group.groupName,
+    }, node("div", { className: "a-lm-stage", "data-refresh-key": "lm-stage" }, map), renderLinkRail(group));
   };
 
   const renderFocusDetails = (group) => {
@@ -1751,7 +1848,7 @@ export function createDashboardTopologySection(ctx, {
       ? buildProbeTopologyModel({ groups: filteredGroups, metricDir: topoMetricDir })
       : null;
     lastFleetModel = fleetMapModel;
-    const precomputedSingleMapModel = (!fleetMapModel && activeGroup)
+    const precomputedSingleMapModel = (isStandalonePage && !fleetMapModel && activeGroup)
       ? buildSingleGroupTopologyModel(activeGroup, { metricDir: isStandalonePage ? topoMetricDir : "both" })
       : null;
     const mapScopeExtra = `${effectiveDomain}:${topoStatusFilter}:${filteredGroups.length}`;
@@ -1787,14 +1884,12 @@ export function createDashboardTopologySection(ctx, {
     const sig = JSON.stringify([
       isStandalonePage,
       chartWidth,
-      isMobile ? renderWidth : "desk",
+      isMobile || !isStandalonePage ? renderWidth : "desk",
       isMobile,
       mapZoom,
       nextStatus,
       probesState,
       dashGroupName,
-      dashShowHistory,
-      isDashGroupsCollapsed(groups),
       topoViewMode,
       topoMapShowAll,
       effectiveDomain,
@@ -1826,35 +1921,19 @@ export function createDashboardTopologySection(ctx, {
     if (statusNode.textContent !== nextStatus) statusNode.textContent = nextStatus;
 
     // Header badges & top actions (strict single entry per action)
+    const alertCount = stats.bad + stats.warn;
     const topBadges = [];
-    if (!isStandalonePage && groups.length) {
-      topBadges.push(keyedBadge(`${groups.length} 组`, "", "head-group-count"));
-      if (stats.bad + stats.warn > 0) topBadges.push(keyedBadge(`告警 ${stats.bad + stats.warn}`, "bad", "head-alert"));
-      else if (stats.healthy > 0) topBadges.push(keyedBadge("正常", "ok", "head-ok"));
-    }
+    if (!isStandalonePage && alertCount > 0) topBadges.push(keyedBadge(`告警 ${alertCount}`, "bad", "head-alert"));
     patchChildren(headerBadges, topBadges);
 
     const topActionNodes = [];
-    if (!isStandalonePage && activeGroup) {
-      topActionNodes.push(button("历史趋势", toggleDashboardHistory, {
-        className: "a-button a-topo-mini-btn",
-        "aria-pressed": dashShowHistory ? "true" : "false",
-        "data-refresh-key": "dash-toggle-history",
-      }));
-    }
     if (!isStandalonePage && canViewSurface()) {
-      topActionNodes.push(node("a", {
-        className: "a-button a-topo-mini-btn",
-        href: "#topology",
-        "data-refresh-key": "open-topology-page",
-      }, "拓扑详情"));
+      topActionNodes.push(node("a", { className: "a-con-jump", href: "#topology", "data-refresh-key": "open-topology-page" }, "拓扑详情"));
     }
-    if (canExecuteProbes()) {
-      topActionNodes.push(button("+ 新建监测组", () => probeController.openCreate(), {
-        className: "a-button a-topo-mini-btn",
-        tone: "primary",
-        "data-refresh-key": "add-probe-group",
-      }));
+    // The dashboard offers creation only while no group exists; groups are managed on the topology page.
+    const blank = !groups.length && !waiting && !failed && !denied;
+    if (canExecuteProbes() && (isStandalonePage || blank)) {
+      topActionNodes.push(button("+ 新建监测组", () => probeController.openCreate(), { className: "a-button a-topo-mini-btn", tone: "primary", "data-refresh-key": "add-probe-group" }));
     }
     topActionNodes.push(keyed("head-status", statusNode));
     patchChildren(headerActions, topActionNodes);
@@ -1881,21 +1960,10 @@ export function createDashboardTopologySection(ctx, {
     }
 
     if (!isStandalonePage) {
-      // Homepage: strictly ONE selected group on Pacific map at a time, with collapsible switcher
-      bodyChildren.push(renderDashboardGroupSwitcher(groups, activeGroup));
-      if (activeGroup) {
-        bodyChildren.push(renderSingleGroupWorkspace(activeGroup, {
-          metricDir: "both",
-          showHistory: dashShowHistory,
-          includeDelete: false,
-          gradPrefix: "dash",
-          renderWidth,
-          isMobile,
-          precomputedMapModel: precomputedSingleMapModel,
-        }));
-      }
+      // Dashboard: one selected group on the map at a time, picked with flat tabs.
+      bodyChildren.push(renderLinkTabs(groups, activeGroup));
+      if (activeGroup) bodyChildren.push(renderLinkDeck(activeGroup, renderWidth));
       patchChildren(bodyHost, bodyChildren);
-      syncLiveMapSelection();
       return;
     }
 
@@ -2093,13 +2161,13 @@ export function createDashboardTopologySection(ctx, {
   };
 
   const card = canViewSurface() && section(
-    "网络延迟监测拓扑",
+    isStandalonePage ? "网络延迟监测拓扑" : "链路延迟",
     bodyHost,
     node("div", { className: "a-actions a-dash-topo-tools" }, headerBadges, headerActions),
   );
   cardEl = card || null;
   card?.classList?.add("a-dash-topo-card");
-  if (isStandalonePage && card) card.classList.add("is-standalone");
+  if (card) card.classList.add(isStandalonePage ? "is-standalone" : "a-con-link-card");
 
   return {
     visible: Boolean(card),
