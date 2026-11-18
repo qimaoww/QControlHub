@@ -7,7 +7,7 @@ export async function run() {
     let now = Date.parse("2026-09-21T08:00:00Z");
     const filters = defaultConnectionFilters(now);
     const first = { id: 1, agent_id: "alpha", agent_name: "Alpha", engine: "xray", client_ip: "8.8.8.8", endpoints: [{ local_port: 443 }], location: { country_code: "CN", province: "广东" } };
-    const cache = createConnectionCache({ now: () => now, maxEntries: 2, maxBytes: 1500 });
+    const cache = createConnectionCache({ now: () => now, maxEntries: 2, maxBytes: 3000 });
     first.first_seen = first.last_seen = new Date(now).toISOString();
     const result = { records: [first], sources: [], timeline: [], ips: 1, flows: 1 };
     cache.set("a", result); cache.set("b", result); cache.get("a"); cache.set("c", result);

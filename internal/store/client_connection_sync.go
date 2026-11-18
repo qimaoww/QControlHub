@@ -38,7 +38,7 @@ const (
 type connectionGroup struct {
 	Record   core.ClientConnectionRecord
 	Flows    int64
-	Revision int64
+	Revision int64 `json:"-"`
 	addr     netip.Addr
 }
 
@@ -67,9 +67,7 @@ type connectionSnapshotData struct {
 	byIP                        map[string][]string
 	bytes                       int64
 	created                     time.Time
-	projectionMu                sync.Mutex
-	projectionKey               string
-	projection                  *connectionProjection
+	projection                  *connectionProjectionCache
 }
 
 func connectionGroupKey(r core.ClientConnectionRecord) string {
@@ -208,14 +206,14 @@ func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectio
 	}
 	defer tx.Rollback(ctx)
 
-	position, sources, err := connectionSyncPosition(ctx, tx, q, recordsOnly)
-	if err != nil {
-		return nil, nil, err
-	}
 	now := time.Now()
 	durable := persistConnectionQuery(q, now)
 	if previous != nil && now.Sub(previous.created) >= connectionSyncTTL {
 		previous = nil
+	}
+	position, sources, unchanged, err := connectionSyncPosition(ctx, tx, q, recordsOnly, previous)
+	if err != nil {
+		return nil, nil, err
 	}
 	if previous == nil && durable {
 		previous, err = restoreConnectionSnapshot(ctx, tx, key, now)
@@ -229,7 +227,7 @@ func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectio
 	if previous != nil {
 		generation = previous.generation
 		complete = true
-		if position != previous.position {
+		if !unchanged && position != previous.position {
 			complete, changeKeys, err = connectionDirtyGroups(ctx, tx, q, previous)
 			if err != nil {
 				return nil, nil, err
@@ -292,12 +290,9 @@ func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectio
 	if data == previous && position != data.position {
 		// Advance the in-memory read position without rewriting any stored
 		// rows. Reuse the projection even during unrelated telemetry writes.
-		data.projectionMu.Lock()
-		advanced := &connectionSnapshotData{epoch: data.epoch, position: position, generation: data.generation,
+		data = &connectionSnapshotData{epoch: data.epoch, position: position, generation: data.generation,
 			revision: data.revision, groups: data.groups, byIP: data.byIP, bytes: data.bytes, created: data.created,
-			projectionKey: data.projectionKey, projection: data.projection}
-		data.projectionMu.Unlock()
-		data = advanced
+			projection: data.projection}
 	}
 	return data, sources, nil
 }
@@ -319,6 +314,7 @@ func newConnectionSnapshot(groups map[string]connectionGroup, position, generati
 }
 
 func (data *connectionSnapshotData) index() {
+	data.projection = &connectionProjectionCache{}
 	data.byIP = make(map[string][]string)
 	for key, group := range data.groups {
 		data.byIP[group.Record.ClientIP] = append(data.byIP[group.Record.ClientIP], key)
@@ -403,10 +399,29 @@ func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientCon
 	return groups, rows.Err()
 }
 
+type connectionProjectionCache struct {
+	sync.Mutex
+	orderID string
+	view    *connectionProjection
+}
+
 type connectionProjection struct {
+	countries []string
+	pages     map[string]*connectionProjectionRows
+}
+
+type connectionProjectionRows struct {
 	groups     []connectionGroup
-	countries  []string
 	ips, flows int64
+}
+
+func (p *connectionProjectionRows) add(group connectionGroup, ips map[string]bool) {
+	p.groups = append(p.groups, group)
+	p.flows += group.Flows
+	if !ips[group.Record.ClientIP] {
+		ips[group.Record.ClientIP] = true
+		p.ips++
+	}
 }
 
 type connectionOrderKey struct {
@@ -461,33 +476,43 @@ func connectionSnapshotPage(entry *connectionSnapshotData, q ClientConnectionQue
 	cursorKey := func(r core.ClientConnectionRecord) connectionIPCursor {
 		return connectionIPCursor{Scope: "node_engine_ip", Rank: getRank(r.AgentID), Endpoint: []string{r.AgentName, r.AgentID, string(r.Engine)}, IP: r.ClientIP}
 	}
-	entry.projectionMu.Lock()
-	projection := entry.projection
-	if projection == nil || entry.projectionKey != projectionID {
+	orderID := connectionDigest(q.NodeOrder)
+	cache := entry.projection
+	cache.Lock()
+	projection := cache.view
+	if projection == nil || cache.orderID != orderID {
 		ips, countries := map[string]bool{}, map[string]bool{}
-		projection = &connectionProjection{countries: []string{}}
+		all := &connectionProjectionRows{}
 		for _, g := range entry.groups {
 			r := g.Record
 			if !r.Location.NonPublic && r.Location.CountryCode != "" {
 				countries[r.Location.CountryCode] = true
 			}
-			if q.CountryCode != "" && (r.Location.NonPublic || r.Location.CountryCode != q.CountryCode) {
-				continue
-			}
-			projection.flows += g.Flows
-			ips[r.ClientIP] = true
-			projection.groups = append(projection.groups, g)
+			all.add(g, ips)
 		}
-		projection.ips = int64(len(ips))
-		projection.countries = append(projection.countries, slices.Sorted(maps.Keys(countries))...)
-		sort.Slice(projection.groups, func(i, j int) bool {
-			return compareConnectionOrder(orderKey(projection.groups[i]), orderKey(projection.groups[j])) < 0
+		sort.Slice(all.groups, func(i, j int) bool {
+			return compareConnectionOrder(orderKey(all.groups[i]), orderKey(all.groups[j])) < 0
 		})
-		entry.projection, entry.projectionKey = projection, projectionID
+		projection = &connectionProjection{countries: append([]string{}, slices.Sorted(maps.Keys(countries))...),
+			pages: map[string]*connectionProjectionRows{"": all}}
+		cache.view, cache.orderID = projection, orderID
 	}
-	entry.projectionMu.Unlock()
-	result.IPs, result.Flows, result.CountryCodes = projection.ips, projection.flows, projection.countries
-	groups := projection.groups
+	rows := projection.pages[q.CountryCode]
+	if rows == nil {
+		rows = &connectionProjectionRows{}
+		ips := map[string]bool{}
+		for _, g := range projection.pages[""].groups {
+			r := g.Record
+			if !r.Location.NonPublic && r.Location.CountryCode == q.CountryCode {
+				rows.add(g, ips)
+			}
+		}
+		projection.pages[q.CountryCode] = rows
+	}
+	cache.Unlock()
+	result.IPs, result.Flows, result.CountryCodes = rows.ips, rows.flows, projection.countries
+	groups := rows.groups
+
 	if q.Cursor != "" {
 		cursor, err := decodeConnectionIPCursor(q.Cursor)
 		if err != nil {
@@ -519,29 +544,42 @@ func connectionSnapshotPage(entry *connectionSnapshotData, q ClientConnectionQue
 	return result, nil
 }
 
-func connectionSyncPosition(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, recordsOnly bool) (string, []core.ClientConnectionSource, error) {
+func connectionSyncPosition(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, recordsOnly bool, previous *connectionSnapshotData) (string, []core.ClientConnectionSource, bool, error) {
 	var position string
+	var unchanged bool
 	sources := []core.ClientConnectionSource{}
-	if recordsOnly {
-		err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text`).Scan(&position)
-		return position, sources, err
-	}
 	args := []any{}
-	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
-	if q.AgentID != "" {
-		args = append(args, q.AgentID)
-		where += fmt.Sprintf(` AND a.id=$%d`, len(args))
+	sourceResponse := `'[]'::jsonb`
+	if !recordsOnly {
+		where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
+		if q.AgentID != "" {
+			args = append(args, q.AgentID)
+			where += fmt.Sprintf(` AND a.id=$%d`, len(args))
+		}
+		// Sources are independently mutable (even batches with no connections).
+		sourceResponse = `COALESCE((
+		  SELECT jsonb_agg(source ORDER BY agent_name,agent_id) FROM (
+			SELECT a.id agent_id,a.name agent_name,s.updated_at,COALESCE(s.status,'no_logs') status,
+			  COALESCE(s.detail,'') detail,COALESCE(s.truncated,false) truncated
+			FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'` + where + `
+		  ) source
+		),'[]'::jsonb)`
 	}
-	// Sources are independently mutable (even batches with no connections).
-	// Fetch them in the same round trip that establishes the MVCC position.
-	err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text,COALESCE((
-	  SELECT jsonb_agg(source ORDER BY agent_name,agent_id) FROM (
-		SELECT a.id agent_id,a.name agent_name,s.updated_at,COALESCE(s.status,'no_logs') status,
-		  COALESCE(s.detail,'') detail,COALESCE(s.truncated,false) truncated
-		FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+where+`
-	  ) source
-	),'[]'::jsonb)`, args...).Scan(&position, &sources)
-	return position, sources, err
+	journalQuiet := "false"
+	if previous != nil {
+		args = append(args, previous.position)
+		old := fmt.Sprintf("$%d::text::pg_snapshot", len(args))
+		// Check for new journal entries in the same round trip as the read
+		// position. Commits to unrelated tables need no dirty-group scan.
+		journalQuiet = `pg_current_snapshot()::text = ` + fmt.Sprintf("$%d", len(args)) + ` OR (
+		  (SELECT xid < pg_snapshot_xmin(` + old + `) FROM client_connection_journal_floor WHERE id=1)
+		  AND NOT EXISTS(SELECT 1 FROM client_connection_journal WHERE xid >= pg_snapshot_xmax(` + old + `))
+		  AND NOT EXISTS(SELECT 1 FROM pg_snapshot_xip(` + old + `) active(xid)
+		    WHERE EXISTS(SELECT 1 FROM client_connection_journal WHERE xid=active.xid OFFSET 0))
+		)`
+	}
+	err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text,`+sourceResponse+`,`+journalQuiet, args...).Scan(&position, &sources, &unchanged)
+	return position, sources, unchanged, err
 }
 
 func connectionGroupsSQL(where string, limitArg int) string {

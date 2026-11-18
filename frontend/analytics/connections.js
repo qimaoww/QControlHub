@@ -186,7 +186,7 @@ export async function connectionsPage(ctx) {
         }
       }
       if (!current()) return;
-      const previousResult = cached?.result?.cache_scope === response.cache_scope ? cached.result : null;
+      const previousResult = cached && cached.result.cache_scope === response.cache_scope ? cached.result : null;
       let fresh = mergeConnectionUpdate(previousResult, response);
       // Deferred geography is extra data for the exact record. Preserve its
       // retry time only while the server's geography still agrees.
@@ -216,12 +216,10 @@ export async function connectionsPage(ctx) {
       else sources = sources.length ? sources.map(source => result.sources?.find(value => value.agent_id === source.agent_id) || source) : result.sources || [];
       cache.select({ filters: { ...filters }, cursor, cursors, nodeOrder, sources: sources.map(source => ({ agent_id: source.agent_id, agent_name: source.agent_name })) }, observedAt);
       status.textContent = "已读取";
+      for (const [ip, retryAt] of absentLocations) if (retryAt <= Date.now()) absentLocations.delete(ip);
       const missing = result.records.filter(record => !record.location?.non_public && (!record.location?.country_code || record.location.country_code === "CN" && !record.location.province)
         && Date.now() >= Math.max(Date.parse(record.location_retry_at) || 0, absentLocations.get(record.client_ip) || 0));
       if (missing.length) {
-        // Avoid overlapping confirmation/lookup while the database or provider
-        // is still processing this page. A returned per-IP retry time takes over.
-        for (const record of missing) absentLocations.set(record.client_ip, Date.now() + connectionPollDelay);
         const locationQuery = new URLSearchParams(params);
         locationQuery.set("sync", "true");
         if (result.page_cursor) locationQuery.set("cursor", result.page_cursor);
@@ -249,6 +247,8 @@ export async function connectionsPage(ctx) {
           if (!current() || failure.name === "AbortError") return;
           if ([401, 403, 404, 409].includes(failure.status)) {
             cache.clear(); result = null; sources = []; nextCursor = ""; updateSources(); paint();
+          } else {
+            for (const record of missing) absentLocations.set(record.client_ip, Date.now() + connectionPollDelay);
           }
           error.textContent = `属地更新失败：${redactDiagnostic(failure.message)}`;
         });

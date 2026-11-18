@@ -25,6 +25,7 @@ function openConnectionDatabase() {
     request.onupgradeneeded = () => {
       const store = request.result.createObjectStore(storeName, { keyPath: ["scope", "kind", "key"] });
       store.createIndex("at", "at");
+      store.createIndex("position", ["scope", "kind", "key", "observedAt"]);
     };
     request.onsuccess = () => {
       request.result.onversionchange = () => request.result.close();
@@ -84,11 +85,20 @@ const validSelection = saved => saved?.filters && typeof saved.filters.date === 
 
 export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl = 24 * 60 * 60_000, maxEntries = 24, maxBytes = 4 * 1024 * 1024, database = openConnectionDatabase() } = {}) {
   const entries = new Map(), pending = new Set();
-  let scope = "", selection = null, selectionTime = 0, generation = 0;
+  let scope = "", selection = null, selectionTime = 0, generation = 0, bytes = 0;
   const withinLifetime = at => Number.isFinite(at) && now() >= at && now() - at < historyTtl;
+  const remove = key => {
+    bytes -= entries.get(key)?.bytes || 0;
+    entries.delete(key);
+  };
+  const retain = entry => {
+    remove(entry.key);
+    entries.set(entry.key, entry);
+    bytes += entry.bytes;
+  };
   const prune = () => {
-    for (const [key, entry] of entries) if (!withinLifetime(entry.at)) entries.delete(key);
-    while (entries.size > maxEntries) entries.delete(entries.keys().next().value);
+    for (const [key, entry] of entries) if (!withinLifetime(entry.at)) remove(key);
+    while (entries.size > maxEntries || bytes > maxBytes) remove(entries.keys().next().value);
   };
   const run = operation => {
     const task = Promise.resolve(database).then(db => db && operation(db)).catch(() => {});
@@ -96,16 +106,18 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
     return task;
   };
   const write = entry => {
-    if (!scope || estimatedSize(entry) > maxBytes / maxEntries) return;
+    if (!scope || entry.bytes > maxBytes / maxEntries) return;
     const version = generation;
     void run(db => {
       if (version !== generation) return;
       return transaction(db, "readwrite", store => {
-        const read = store.get([entry.scope, entry.kind, entry.key]);
+        const prefix = [entry.scope, entry.kind, entry.key];
+        const versions = IDBKeyRange.bound(prefix, [...prefix, []]);
+        const read = store.index("position").openKeyCursor(versions);
         read.onsuccess = () => {
           // A request started in another tab can finish later. Never publish
           // its older view over a newer read of the same authorized page.
-          if (read.result && read.result.observedAt >= entry.observedAt) return;
+          if (read.result && read.result.key[3] >= entry.observedAt) return;
           store.put(entry);
           trimPersistent(store, maxEntries, now() - historyTtl);
         };
@@ -113,7 +125,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
     });
   };
   const reset = verifiedScope => {
-    ++generation; scope = verifiedScope; entries.clear(); selection = null; selectionTime = 0;
+    ++generation; scope = verifiedScope; entries.clear(); selection = null; selectionTime = 0; bytes = 0;
   };
   return {
     get scope() { return scope; },
@@ -126,9 +138,9 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
       const saved = await run(db => transaction(db, "readonly", store => store.getAll(scopeRange(verifiedScope), maxEntries)));
       if (generation !== version || !current()) return;
       for (const entry of (saved || []).sort((a, b) => a.at - b.at)) {
-        if (!withinLifetime(entry.at) || entry.scope !== scope || !Number.isFinite(entry.observedAt)) continue;
+        if (!withinLifetime(entry.at) || entry.scope !== scope || !Number.isFinite(entry.observedAt) || !Number.isFinite(entry.bytes) || entry.bytes <= 0) continue;
         if (entry.kind === "page" && validResult(entry.result) && entry.result.cache_scope === scope
-          && (entries.get(entry.key)?.observedAt ?? -Infinity) < entry.observedAt) entries.set(entry.key, entry);
+          && (entries.get(entry.key)?.observedAt ?? -Infinity) < entry.observedAt) retain(entry);
         if (entry.kind === "position" && entry.observedAt > selectionTime && validSelection(entry.value)) {
           selection = entry.value; selectionTime = entry.observedAt;
         }
@@ -141,7 +153,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
     select(value, observedAt = now()) {
       if (observedAt < selectionTime || sameConnectionValue(selection, value)) return;
       selection = value; selectionTime = observedAt;
-      write({ scope, kind: "position", key: "", at: now(), observedAt, value });
+      write({ scope, kind: "position", key: "", at: now(), observedAt, value, bytes: estimatedSize(value) });
     },
     get(key) {
       prune();
@@ -152,13 +164,14 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
       return { ...entry, historical, fresh: now() - entry.at < (historical ? historyTtl : ttl) };
     },
     set(key, result, at = now(), { observedAt = at, etag = "", unchanged = false } = {}) {
-      if (!unchanged && estimatedSize(result) > maxBytes) return;
       const previous = entries.get(key);
       if (previous && observedAt < previous.observedAt) return;
       // In-memory confirmation may advance the token/time; only a changed
       // data page earns a structured clone and a durable write.
       const entry = { scope, kind: "page", key, result, at, observedAt, etag };
-      entries.delete(key); entries.set(key, entry);
+      entry.bytes = unchanged && previous ? previous.bytes : estimatedSize(entry);
+      if (entry.bytes > maxBytes) { remove(key); return; }
+      retain(entry);
       prune();
       if (!unchanged) write(entry);
     },

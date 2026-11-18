@@ -490,7 +490,7 @@ func measureConnectionCacheReads(t *testing.T, db *Store, ctx context.Context, q
 				t.Error(err)
 			}
 		}
-		t.Logf("historical %dd groups=%d: baseline=%s independent-store=%s page=%s country=%s unchanged=%s concurrent-%d=%s",
+		t.Logf("historical %dd IPs=%d: baseline=%s independent-store=%s page=%s country=%s unchanged=%s concurrent-%d=%s",
 			days, baseline.IPs, cold, process, page, country, unchanged, requests, time.Since(start))
 	}
 }

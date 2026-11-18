@@ -77,14 +77,22 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 
 func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	initialSession, hadSession := s.sessionForRequest(request)
+	if bearerToken(request) == "" && !hadSession {
+		writeError(w, http.StatusUnauthorized, "session expired")
+		return
+	}
 	if value := request.URL.Query().Get("scope_only"); value != "" {
 		if value != "true" {
 			writeError(w, http.StatusBadRequest, "invalid scope_only")
 			return
 		}
-		scope, _, err := s.clientConnectionScope(request)
+		scope, revision, err := s.clientConnectionScope(request, initialSession, hadSession)
 		if err != nil {
 			writeCoreLogReadError(w, request, err)
+			return
+		}
+		if !s.validateClientConnectionAuthority(w, request, initialSession, hadSession, revision) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"scope": scope})
@@ -107,7 +115,7 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 	query.RecordsOnly = locationMode == "only"
 	// Bind a snapshot to the authority that produced it. A concurrent node
 	// revocation must not stamp old rows with the new, narrower authority.
-	scope, authorityRevision, err := s.clientConnectionScope(request)
+	scope, authorityRevision, err := s.clientConnectionScope(request, initialSession, hadSession)
 	if err != nil {
 		writeCoreLogReadError(w, request, err)
 		return
@@ -146,27 +154,7 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 			}
 		}
 	}
-	// User disablement, role/permission changes and session expiry can happen
-	// while the history or deferred geography read is in progress.
-	// Drop the middleware's per-request session snapshot before revalidating.
-	initialSession, browser := s.sessionForRequest(request)
-	request = request.WithContext(context.WithValue(request.Context(), validatedSessionKey{}, nil))
-	request, valid := s.validateSession(w, request)
-	if !valid {
-		return
-	}
-	latestSession, present := s.sessionForRequest(request)
-	if browser && (!present || connectionSessionAuthority(initialSession) != connectionSessionAuthority(latestSession)) {
-		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
-		return
-	}
-	latest, err := s.store.ClientConnectionAuthorityRevision(request.Context())
-	if err != nil {
-		writeCoreLogReadError(w, request, err)
-		return
-	}
-	if latest != authorityRevision {
-		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
+	if !s.validateClientConnectionAuthority(w, request, initialSession, hadSession, authorityRevision) {
 		return
 	}
 	if history.SyncToken != "" {
@@ -187,9 +175,35 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 	}{history, scope})
 }
 
-func (s *Server) clientConnectionScope(request *http.Request) (string, int64, error) {
+func (s *Server) validateClientConnectionAuthority(w http.ResponseWriter, request *http.Request, initialSession apiSession, hadSession bool, authorityRevision int64) bool {
+	// User disablement, role/permission changes and session expiry can happen
+	// while the history or deferred geography read is in progress.
+	// Drop the middleware's per-request session snapshot before revalidating.
+	request = request.WithContext(context.WithValue(request.Context(), validatedSessionKey{}, nil))
+	request, valid := s.validateSession(w, request)
+	if !valid {
+		return false
+	}
+	latestSession, present := s.sessionForRequest(request)
+	if hadSession && (!present || connectionSessionAuthority(initialSession) != connectionSessionAuthority(latestSession)) {
+		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
+		return false
+	}
+	latest, err := s.store.ClientConnectionAuthorityRevision(request.Context())
+	if err != nil {
+		writeCoreLogReadError(w, request, err)
+		return false
+	}
+	if latest != authorityRevision {
+		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
+		return false
+	}
+	return true
+}
+
+func (s *Server) clientConnectionScope(request *http.Request, session apiSession, hasSession bool) (string, int64, error) {
 	// Bearer clients remain supported without a restorable browser scope.
-	if session, ok := s.sessionForRequest(request); ok && bearerToken(request) == "" {
+	if hasSession && bearerToken(request) == "" {
 		nodes, revision, err := s.store.ClientConnectionAuthority(request.Context())
 		if err != nil {
 			return "", 0, err

@@ -17,7 +17,7 @@ import (
 )
 
 func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
-	for _, action := range []string{"hide-node", "disable-user", "logout"} {
+	for _, action := range []string{"hide-node", "disable-user", "logout", "environment-logout"} {
 		t.Run(action, func(t *testing.T) {
 			db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "scope-race", core.EngineMihomo)
@@ -38,7 +38,7 @@ func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"country_code":"US"}`)), Header: make(http.Header)}, nil
 			})}}).Handler()
 			username, secret := "alice", "config scope password fixture"
-			if action == "hide-node" {
+			if action == "hide-node" || action == "environment-logout" {
 				username, secret = "admin", admin.token
 			}
 			client, _ := managementLogin(t, handler, username, secret, http.StatusOK)
@@ -64,7 +64,7 @@ func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
 				if _, err := db.SetUserDisabled(ctx, alice.userID, true); err != nil {
 					t.Error(err)
 				}
-			case "logout":
+			case "logout", "environment-logout":
 				client.call("POST", "/auth/logout", nil, http.StatusNoContent, nil)
 			}
 			close(release)
