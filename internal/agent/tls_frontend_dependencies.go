@@ -179,9 +179,6 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 		switch name {
 		case "apt-get":
 			args = []string{"-o", "DPkg::Lock::Timeout=30", "-o", "Acquire::Retries=2", "install", "-y", "--no-install-recommends"}
-		// Debian maintainer scripts must not launch an unmanaged default server.
-		// A pre-existing policy is respected; otherwise install a temporary deny
-		// policy and remove only the exact file created by this helper.
 		case "apk":
 			args = []string{"--wait", "30", "add", "--no-cache"}
 		case "dnf", "yum":
@@ -193,28 +190,15 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 			if output, err := runIPQualityCommand(ctx, binary, []string{"-o", "Acquire::Retries=2", "update"}); err != nil {
 				return fmt.Errorf("更新软件包索引失败：%w：%s", err, output)
 			}
-			policy := "/usr/sbin/policy-rc.d"
-			file, createErr := os.OpenFile(policy, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
-			if createErr == nil {
-				if _, err = file.WriteString("#!/bin/sh\nexit 101\n"); err != nil {
-					file.Close()
-					os.Remove(policy)
-					return err
-				}
-				file.Close()
-				defer os.Remove(policy)
-			} else if !errors.Is(createErr, os.ErrExist) {
-				return createErr
-			} else if nginx {
-				if err := validatePrivilegedExecutable(policy); err != nil {
-					return err
-				}
-				_, policyErr := run(ctx, policy, "nginx", "start")
-				var exit *exec.ExitError
-				if !errors.As(policyErr, &exit) || exit.ExitCode() != 101 {
-					return errors.New("现有 policy-rc.d 未禁止默认服务启动；请先安装 Nginx，面板将创建独立服务")
-				}
+			var actions []string
+			if nginx {
+				actions = []string{"start"}
 			}
+			cleanup, err := protectAptServices(ctx, actions...)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 		}
 		break
 	}
@@ -227,6 +211,45 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 		return fmt.Errorf("自动安装 Nginx 失败：%w：%s；检查软件源及包管理器锁后重试", err, output)
 	}
 	return nil
+}
+
+// Debian maintainer scripts must leave the independent system service alone.
+// Preserve administrator policy and remove only the temporary file we own.
+func protectAptServices(ctx context.Context, actions ...string) (func(), error) {
+	const policy = "/usr/sbin/policy-rc.d"
+	file, err := os.OpenFile(policy, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	if errors.Is(err, os.ErrExist) {
+		if len(actions) > 0 {
+			if err := validatePrivilegedExecutable(policy); err != nil {
+				return nil, err
+			}
+		}
+		for _, action := range actions {
+			for _, service := range []string{"nginx", "nginx.service"} {
+				_, policyErr := run(ctx, policy, service, action)
+				var exit *exec.ExitError
+				if !errors.As(policyErr, &exit) || exit.ExitCode() != 101 {
+					return nil, errors.New("现有 policy-rc.d 允许 Nginx 服务操作，请在维护窗口手动更新")
+				}
+			}
+		}
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	created, statErr := file.Stat()
+	cleanup := func() {
+		if current, err := os.Lstat(policy); err == nil && statErr == nil && os.SameFile(created, current) {
+			_ = os.Remove(policy)
+		}
+	}
+	_, writeErr := file.WriteString("#!/bin/sh\nexit 101\n")
+	if err := errors.Join(statErr, writeErr, file.Close()); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return cleanup, nil
 }
 
 func (m *tlsFrontendManager) serviceDefinition(mode string, legacy bool) (string, string, string) {

@@ -236,12 +236,13 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	if installAge < age {
 		installAge = age
 	}
-	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout), intervalString(core.ManagedTLSLeaseTimeout)}
+	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout), intervalString(core.ManagedTLSLeaseTimeout), intervalString(core.AgentUpgradeLeaseTimeout)}
 	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
  WITH stale AS (SELECT id,attempt FROM tasks
  WHERE action<>'network-diagnostic' AND status='running' AND started_at < now() - CASE
  WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
+ WHEN action='upgrade-agent' THEN GREATEST($1::interval,$6::interval)
  WHEN install_if_missing AND engine IN ('sing-box','xray') THEN GREATEST($2::interval,$5::interval)
  WHEN action='install' OR install_if_missing THEN $2::interval
  WHEN engine IN ('sing-box','xray') AND action IN ('validate','deploy','start','restart')

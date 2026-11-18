@@ -15,6 +15,7 @@ import (
 )
 
 type tlsFrontendRequest struct {
+	NginxUpgrade  string                         `json:"nginx_upgrade,omitempty"`
 	DeferCleanup  bool                           `json:"defer_cleanup,omitempty"`
 	NativeHandoff string                         `json:"native_handoff,omitempty"`
 	Service       string                         `json:"service"`
@@ -90,6 +91,11 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		_, err = atomicDeploy(filepath.Join(directory, name+".result"), string(encoded))
 		return err
 	}
+	if !request.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, request.Deadline)
+		defer cancel()
+	}
 	lock, err := acquireIPQualityDependencyLock(ctx, "/run/qagent-managed-tls")
 	if err != nil {
 		return err
@@ -103,10 +109,15 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	if !request.Deadline.IsZero() {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, request.Deadline)
-		defer cancel()
+	if request.NginxUpgrade != "" {
+		if (request.Action != core.ActionStatus && request.Action != core.ActionUpgradeAgent) || request.Stage || request.Certificates || request.NativeHandoff != "" || len(request.Frontends) != 0 {
+			return errors.New("invalid managed Nginx upgrade request")
+		}
+		output, err := manager.upgradeManagedNginx(ctx, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent, manager.upgradeSystemNginxPackage)
+		if output != "" {
+			fmt.Println(output)
+		}
+		return err
 	}
 	if request.NativeHandoff != "" {
 		return manager.nativeHandoff(ctx, request.Service, request.ConfigContent, request.NativeHandoff, request.Frontends)
