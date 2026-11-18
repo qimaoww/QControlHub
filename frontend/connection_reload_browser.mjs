@@ -170,7 +170,7 @@ try {
       store.openCursor().onsuccess = event => {
         const cursor = event.target.result;
         if (!cursor) return;
-        if (cursor.value.kind === "page" && cursor.value.scope.endsWith(":3")) cursor.update({ ...cursor.value, result: { records: "corrupt" } });
+        if (cursor.value.kind === "page" && cursor.value.scope.endsWith(":3")) cursor.update({ ...cursor.value, result: { ...cursor.value.result, records: [null] } });
         cursor.continue();
       };
       tx.oncomplete = () => { open.result.close(); resolve(true); };
