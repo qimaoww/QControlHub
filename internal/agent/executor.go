@@ -57,6 +57,7 @@ type Executor struct {
 	sharedStateMu              sync.Mutex
 	sharedAccountingLocks      sync.Map
 	accountingConfigs          map[string]nativeAccountingConfigEntry
+	serviceStarts              map[string]cachedServiceStart // Protected by processEpochMu.
 	processEpochMu             sync.Mutex
 	processEpochs              map[string]cachedProcessEpochEntry
 	runtimeCacheMu             sync.Mutex
@@ -64,6 +65,11 @@ type Executor struct {
 	binaryVersions             map[string]cachedBinaryVersion
 	completedMigrations        map[core.Engine]completedCoreMigration
 	verifyCompletedMigration   func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
+}
+
+type cachedServiceStart struct {
+	epoch   string
+	started time.Time
 }
 
 type cachedProcessEpochEntry struct {

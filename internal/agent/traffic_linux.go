@@ -44,6 +44,7 @@ type trafficRecord struct {
 	ReceiveBPS            uint64                  `json:"-"`
 	SendBPS               uint64                  `json:"-"`
 	LastCollectedAt       time.Time               `json:"-"`
+	ListenerEpoch         string                  `json:"listener_epoch,omitempty"`
 	CounterEpoch          string                  `json:"counter_epoch,omitempty"`
 	LifetimeReceivedBytes uint64                  `json:"lifetime_received_bytes,omitempty"`
 	LifetimeSentBytes     uint64                  `json:"lifetime_sent_bytes,omitempty"`
@@ -97,6 +98,7 @@ func rotateLostTrafficEpoch(record *trafficRecord) error {
 	}
 	record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
 	record.CounterEpoch = epoch
+	record.ListenerEpoch = ""
 	record.ReceivedBytes, record.SentBytes = 0, 0
 	record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0
 	record.LastKernelReceived, record.LastKernelSent = 0, 0
@@ -385,6 +387,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		record := manager.records[policy.ID]
 		if record == nil || record.NeedsServerQuotaSync || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
 			record.Policy.Name != policy.Name || record.Policy.Engine != policy.Engine ||
+			record.Policy.ConfigID != policy.ConfigID || record.Policy.ConfigVersion != policy.ConfigVersion || record.Policy.InboundTag != policy.InboundTag ||
 			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock ||
 			!sameSharedQuota(record.Policy.SharedQuota, policy.SharedQuota) {
 			unchanged = false

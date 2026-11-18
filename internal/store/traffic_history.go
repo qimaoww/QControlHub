@@ -37,6 +37,12 @@ func (s *Store) ListPortTrafficDailyUsage(ctx context.Context, agentID, policyID
 			       LEAST(9223372036854775807::numeric,SUM(received_bytes) OVER day)::bigint AS received_bytes,
 			       LEAST(9223372036854775807::numeric,SUM(sent_bytes) OVER day)::bigint AS sent_bytes,
 			       LEAST(9223372036854775807::numeric,SUM(used_bytes) OVER day)::bigint AS used_bytes,
+			       COALESCE(to_char(MIN(undated_since) OVER day,'YYYY-MM-DD'),'') AS undated_since,
+			       LEAST(9223372036854775807::numeric,SUM(undated_received_bytes) OVER day)::bigint,
+			       LEAST(9223372036854775807::numeric,SUM(undated_sent_bytes) OVER day)::bigint,
+			       LEAST(9223372036854775807::numeric,SUM(month_undated_received_bytes) OVER day)::bigint,
+			       LEAST(9223372036854775807::numeric,SUM(month_undated_sent_bytes) OVER day)::bigint,
+			       BOOL_OR(peak_sampled OR peak_receive_bps>0 OR peak_send_bps>0) OVER day,
 			       MAX(peak_receive_bps) OVER day AS peak_receive_bps,MAX(peak_send_bps) OVER day AS peak_send_bps,
 			       LEAST(9223372036854775807::numeric,SUM(sample_count) OVER day)::bigint AS sample_count,
 			       MIN(first_reported_at) OVER day AS first_reported_at,MAX(last_reported_at) OVER day AS last_reported_at
@@ -55,7 +61,7 @@ func (s *Store) ListPortTrafficDailyUsage(ctx context.Context, agentID, policyID
 		var day time.Time
 		if err := rows.Scan(
 			&item.PolicyID, &item.AgentID, &item.Name, &item.Engine, &item.Port, &item.Protocol, &day,
-			&item.ReceivedBytes, &item.SentBytes, &item.UsedBytes, &item.PeakReceiveBPS, &item.PeakSendBPS,
+			&item.ReceivedBytes, &item.SentBytes, &item.UsedBytes, &item.UndatedSince, &item.UndatedReceivedBytes, &item.UndatedSentBytes, &item.MonthUndatedReceivedBytes, &item.MonthUndatedSentBytes, &item.PeakSampled, &item.PeakReceiveBPS, &item.PeakSendBPS,
 			&item.SampleCount, &item.FirstReportedAt, &item.LastReportedAt,
 		); err != nil {
 			return nil, err

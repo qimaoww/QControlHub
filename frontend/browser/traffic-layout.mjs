@@ -34,6 +34,12 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
       box.querySelector('[aria-label="关闭"]').click();
       await waitFor(() => !box.isConnected, 'dialog did not close');
     };
+    const utcMonth = new Date().toISOString().slice(0, 7);
+    testAPI.trafficDays = Array.from({ length: 18 }, (_, index) => ({
+      day: `${utcMonth}-${String(index + 1).padStart(2, '0')}`, received_bytes: 10, sent_bytes: 20, used_bytes: 30,
+    }));
+    Object.assign(testAPI.trafficDays[0], { peak_sampled: true, peak_receive_bps: 0, peak_send_bps: 321 });
+    Object.assign(testAPI.trafficDays[1], { undated_since: testAPI.trafficDays[0].day, undated_received_bytes: 42, undated_sent_bytes: 5 });
     button('统计详情').click();
     let detailDialog = await waitFor(() => active(), 'statistics dialog missing');
     assert.ok(!detailDialog.querySelector('h2').textContent.includes(':8443'), 'standalone port retains colon');
@@ -44,6 +50,20 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     assert.ok(detailDialog.textContent.includes('仅监听端口') && !detailDialog.textContent.includes('统计异常'), 'scope limitation rendered as error');
     const policy = testAPI.trafficPolicies[0];
     const original = structuredClone(policy);
+    const nextDayPage = await waitFor(() => !button('下一页', detailDialog)?.disabled && button('下一页', detailDialog), 'daily pagination missing');
+    const dailyCells = [...detailDialog.querySelectorAll('tbody tr')].map(row => [...row.cells].map(cell => cell.textContent.replaceAll('\u00a0', ' ')));
+    assert.ok(dailyCells.some(row => row[4] === '0 B/s' && row[5] === '321 B/s'), 'sampled zero or nonzero peak missing');
+    assert.ok(dailyCells.some(row => row[0].includes('日期待定') && row[3] === '47 B' && row[4] === '—'), 'undated amount was shown as a dated peak');
+    assert.ok(dailyCells.some(row => row[0] === testAPI.trafficDays[1].day && row[4] === '—'), 'missing peak shown as measured zero');
+    nextDayPage.click();
+    const previousDayPage = button('上一页', detailDialog);
+    previousDayPage.focus();
+    testAPI.trafficDays.at(-1).sent_bytes = 555;
+    testAPI.trafficDays.at(-1).used_bytes = 565;
+    policy.sent_bytes += 535;
+    policy.used_bytes += 535;
+    await waitFor(() => detailDialog.querySelector('tbody').textContent.includes('555'), 'open UTC day table did not refresh');
+    assert.ok(detailDialog.textContent.includes('第 2 / 2 页') && document.activeElement === previousDayPage, 'refresh reset pagination or focus');
     const diagnose = async (error, expected) => {
       policy.enforcement_error = error;
       await waitFor(() => detailDialog.textContent.includes(expected), `native diagnostic missing: ${expected}`);
