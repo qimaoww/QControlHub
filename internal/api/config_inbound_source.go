@@ -26,7 +26,7 @@ func (s *Server) getInboundSource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
 			return
 		}
-		config.Content, err = s.store.ReadTaskConfigSnapshot(r.Context(), snapshot, agent.ID, engine)
+		config.Content, err = s.store.ReadWorkspaceTaskConfigSnapshot(r.Context(), snapshot, agent.ID, engine)
 		if err != nil {
 			writeStoreError(w, err)
 			return

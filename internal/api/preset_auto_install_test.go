@@ -125,6 +125,10 @@ func TestConfigWorkspaceNativeInboundTargets(t *testing.T) {
 		workspace.InboundTargets[0].Tag != "native-socks" || workspace.InboundTargets[0].Port != 21001 {
 		t.Fatalf("non-preset inbound is not safely selectable: %+v", workspace)
 	}
+	if len(workspace.InboundRows) != 1 || workspace.InboundRows[0].Tag != "native-socks" || workspace.InboundRows[0].PresetEditable ||
+		workspace.InboundRows[0].TargetTag != "native-socks" || workspace.InboundRows[0].ClientExport {
+		t.Fatal("native SOCKS row lost its independent presentation and operation identity")
+	}
 	var result configMutationResult
 	admin.call(http.MethodPost, base+"/server-inbounds", map[string]any{
 		"operation": "delete", "original_tag": "native-socks", "expected_version": saved.Version,

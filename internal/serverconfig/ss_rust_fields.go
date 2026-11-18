@@ -23,8 +23,23 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 	if err := json.Unmarshal([]byte(current), &original); err != nil || original == nil {
 		return "", errors.New("SS Rust 配置必须是 JSON 对象")
 	}
+	var incoming map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(generated), &incoming); err != nil {
+		return "", err
+	}
+	if _, ok := parseShadowsocksRust(generated); !ok && operation != "delete" {
+		return "", errors.New("生成配置缺少完整服务端字段")
+	}
 	if original["server_port"] != nil {
-		parsed, _ := parseShadowsocksRust(current)
+		parsed, valid := parseShadowsocksRust(current)
+		if operation == "modify" && original["servers"] == nil && original["shadowsocks"] == nil {
+			if !valid || parsed.Tag != tag {
+				return "", errors.New("SS Rust 端口标识不存在")
+			}
+			updateSSRustPresetPort(original, incoming, tag)
+			encoded, err := json.MarshalIndent(original, "", "  ")
+			return string(encoded) + "\n", err
+		}
 		root, entry, commit, err := ssRustFieldTarget(current, parsed.Tag, "server")
 		if err != nil {
 			return "", err
@@ -52,20 +67,16 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 			return "", errors.New("SS Rust 服务端列表必须是对象数组")
 		}
 	}
-	// Pin positional legacy names before insertion/deletion can shift indices.
+	// A modification keeps the native identities and order of other entries.
+	// Pin legacy names only when the list membership changes.
 	for index, entry := range entries {
 		if entry == nil {
 			return "", errors.New("SS Rust 服务端条目必须是对象")
 		}
-		identity, _ := json.Marshal(ssRustRawEntryTag(entry, index))
-		entry["id"] = identity
-	}
-	var incoming map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(generated), &incoming); err != nil {
-		return "", err
-	}
-	if _, ok := parseShadowsocksRust(generated); !ok && operation != "delete" {
-		return "", errors.New("生成配置缺少完整服务端字段")
+		if operation != "modify" {
+			identity, _ := json.Marshal(ssRustRawEntryTag(entry, index))
+			entry["id"] = identity
+		}
 	}
 	if operation == "add" {
 		if tag != "" {
@@ -90,7 +101,7 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 		}
 		index := -1
 		for i, entry := range entries {
-			if string(entry["server_port"]) == string(selected["server_port"]) && ssRustRawEntryTag(entry, i) == tag {
+			if string(shadowsocksRustRawPort(entry)) == string(shadowsocksRustRawPort(selected)) && ssRustRawEntryTag(entry, i) == tag {
 				index = i
 				break
 			}
@@ -101,15 +112,7 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 		if operation == "delete" {
 			entries = append(entries[:index], entries[index+1:]...)
 		} else {
-			for _, key := range []string{"id", "server", "server_port", "method", "password", "outbound_bind_addr"} {
-				if key == "id" && incoming[key] == nil {
-					continue
-				}
-				delete(entries[index], key)
-				if value, exists := incoming[key]; exists {
-					entries[index][key] = value
-				}
-			}
+			updateSSRustPresetPort(entries[index], incoming, tag)
 		}
 	}
 	ports := make(map[int]bool)
@@ -124,7 +127,7 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 		}
 		tags[identity] = true
 		var port int
-		if err := json.Unmarshal(entry["server_port"], &port); err == nil && port != 0 {
+		if err := json.Unmarshal(shadowsocksRustRawPort(entry), &port); err == nil && port != 0 {
 			if ports[port] {
 				return "", fmt.Errorf("SS Rust 端口 %d 已存在", port)
 			}
@@ -136,6 +139,41 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 	return string(encoded) + "\n", err
 }
 
+func shadowsocksRustRawPort(entry map[string]json.RawMessage) json.RawMessage {
+	if entry["server_port"] != nil {
+		return entry["server_port"]
+	}
+	return entry["port"]
+}
+
+func updateSSRustPresetPort(entry, incoming map[string]json.RawMessage, originalTag string) {
+	for _, key := range []string{"id", "server", "server_port", "method", "password", "outbound_bind_addr"} {
+		if key == "id" {
+			var newTag string
+			if json.Unmarshal(incoming[key], &newTag) != nil || newTag == originalTag {
+				continue
+			}
+		}
+		target := ssRustNativeField(entry, key)
+		delete(entry, target)
+		if value, exists := incoming[key]; exists {
+			entry[target] = value
+		}
+	}
+}
+
+func ssRustNativeField(entry map[string]json.RawMessage, key string) string {
+	if entry[key] == nil {
+		switch {
+		case key == "server" && entry["address"] != nil:
+			return "address"
+		case key == "server_port" && entry["port"] != nil:
+			return "port"
+		}
+	}
+	return key
+}
+
 // SSRustInboundField returns only the selected port's explicit value. Global
 // defaults are returned separately so removing an override is not confused
 // with disabling the option.
@@ -145,7 +183,7 @@ func SSRustInboundField(content, tag, key string) (fragment string, present bool
 		return "", false, "", err
 	}
 	encoded, _ := json.Marshal(entry)
-	fragment, present, err = configschema.Fragment(core.EngineShadowsocksRust, string(encoded), key)
+	fragment, present, err = configschema.Fragment(core.EngineShadowsocksRust, string(encoded), ssRustNativeField(entry, key))
 	if ssRustFieldScope(key) == "override" {
 		encoded, _ = json.Marshal(root)
 		inherited, _, _ = configschema.Fragment(core.EngineShadowsocksRust, string(encoded), key)
@@ -168,7 +206,7 @@ func MergeSSRustInboundField(content, tag, key, fragment string, remove bool) (s
 		return "", err
 	}
 	encoded, _ := json.Marshal(entry)
-	merged, err := configschema.MergeFragment(core.EngineShadowsocksRust, string(encoded), key, fragment, remove)
+	merged, err := configschema.MergeFragment(core.EngineShadowsocksRust, string(encoded), ssRustNativeField(entry, key), fragment, remove)
 	if err != nil {
 		return "", err
 	}
@@ -188,7 +226,7 @@ func MergeSSRustInboundField(content, tag, key, fragment string, remove bool) (s
 			ports := make(map[int]bool)
 			for _, item := range entries {
 				var port int
-				if err := json.Unmarshal(item["server_port"], &port); err != nil {
+				if err := json.Unmarshal(shadowsocksRustRawPort(item), &port); err != nil {
 					continue
 				}
 				if ports[port] {

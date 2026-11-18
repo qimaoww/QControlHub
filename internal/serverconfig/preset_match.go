@@ -6,6 +6,17 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// CanEditNativePreset shares the form's validation, including the available
+// client-only fields after hydration. ParseAll may still return a projection
+// for export or certificate lookups when the form cannot be used.
+func CanEditNativePreset(engine core.Engine, input Input) bool {
+	if input.SourceOnly || !matchesParsedPreset(engine, input) {
+		return false
+	}
+	_, err := GenerateNativePresetEdit(engine, input, input)
+	return err == nil
+}
+
 // A native protocol name is only a parsing hint. The catalog describes concrete
 // transport/security combinations, including the flow of the represented user.
 // Keep unmatched projections for bound TLS metadata, but never use them as forms

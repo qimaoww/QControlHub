@@ -53,8 +53,8 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 		if root["plugin"] != nil {
 			return plan, fmt.Errorf("SS Rust plugin transport requires explicit accounting review")
 		}
-		entries, _ := root["servers"].([]any)
-		if root["servers"] != nil && root["server_port"] != nil {
+		_, entries, extended := shadowsocksRustExtendedEntries(root)
+		if root["servers"] != nil && root["shadowsocks"] != nil || extended && (root["server"] != nil || root["server_port"] != nil) {
 			return plan, fmt.Errorf("SS Rust accounting cannot combine root and server-array listeners")
 		}
 		for _, key := range []string{"manager_address", "local_address", "local_port"} {
@@ -71,7 +71,7 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 			if entry["plugin"] != nil {
 				return plan, fmt.Errorf("SS Rust plugin transport requires explicit accounting review")
 			}
-			port := trafficPortNumber(entry["server_port"])
+			port := trafficPortNumber(shadowsocksRustPort(entry))
 			if port == 0 || seen[port] {
 				return plan, fmt.Errorf("SS Rust accounting requires explicit server_port")
 			}

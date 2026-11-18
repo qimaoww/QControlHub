@@ -20,6 +20,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 	var input struct {
 		core.Config
 		Intent             string  `json:"intent"`
+		SnapshotTaskID     string  `json:"snapshot_task_id,omitempty"`
 		InstallIfMissing   bool    `json:"install_if_missing"`
 		ExpectedInstanceID *string `json:"expected_instance_id,omitempty"`
 	}
@@ -40,6 +41,16 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		writeStoreError(w, store.ErrConflict)
 		return
 	}
+	if input.SnapshotTaskID != "" {
+		if !s.sessionAllows(request, core.PermissionTasksRead) {
+			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
+			return
+		}
+		if _, err := s.store.ReadWorkspaceTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine); err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
 	content := input.Content
 	managed := strings.Contains(current.Content, "qch-trf-") || strings.Contains(content, "qch-trf-")
 	if engine == core.EngineShadowsocksRust {
@@ -52,12 +63,10 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 			return
 		}
 	}
-	plan, err := serverconfig.PlanPresetAccounting(engine, content)
-	if err != nil {
+	if _, err := serverconfig.PlanPresetAccounting(engine, content); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	content = plan.Content
 	candidate := input.Config
 	candidate.AgentID, candidate.Engine, candidate.Content = agent.ID, engine, content
 	candidate.Version++
@@ -66,8 +75,12 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
+	var metadataMutation *store.ConfigClientMetadataMutation
+	if input.SnapshotTaskID != "" {
+		metadataMutation = &store.ConfigClientMetadataMutation{Delete: true, ReplaceAll: true}
+	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.Version,
-		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID, InstallIfMissing: input.InstallIfMissing})
+		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID, InstallIfMissing: input.InstallIfMissing, ClientMetadata: metadataMutation})
 	if err != nil {
 		writeStoreError(w, err)
 		return

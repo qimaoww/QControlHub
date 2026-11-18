@@ -121,11 +121,108 @@ func TestPublishedPresetsRemainEditableAfterBoundMetadata(t *testing.T) {
 				if err := ApplyClientMetadata(&parsed, metadata); err != nil {
 					t.Fatal(err)
 				}
-				if parsed.SourceOnly {
+				if parsed.SourceOnly || !CanEditNativePreset(engine, parsed) {
 					t.Fatalf("published preset became source-only: %s", protocol.Key)
 				}
 			})
 		}
+	}
+}
+
+func TestHandwrittenNativePresetRecognition(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		engine   core.Engine
+		source   string
+		protocol string
+		listen   string
+	}{
+		{"Xray quoted port and implicit listen", core.EngineXray,
+			`{"inbounds":[{"tag":"edge","port":"21001","protocol":"vmess","settings":{"clients":[{"id":"123e4567-e89b-42d3-a456-426614174001"}]}}]}`,
+			ProtocolVMess, "0.0.0.0"},
+		{"sing-box explicitly disabled TLS", core.EngineSingBox,
+			`{"inbounds":[{"tag":"edge","listen":"::1","listen_port":21001,"type":"vmess","users":[{"uuid":"123e4567-e89b-42d3-a456-426614174001"}],"transport":{"type":"ws","path":"/native"},"tls":{"enabled":false,"min_version":"1.3","reality":{"enabled":false}}}]}`,
+			"vmess-ws", "::1"},
+		{"Mihomo Snell v6 unshaped", core.EngineMihomo,
+			"listeners:\n  - {type: snell, name: edge, port: 21001, version: 6, mode: unshaped, psk: fixture-snell-v6, udp: false}\n",
+			ProtocolSnellV6Unshaped, "0.0.0.0"},
+		{"SS Rust singleton", core.EngineShadowsocksRust,
+			`{"server":"::","server_port":21001,"method":"aes-128-gcm","password":"only-for-this-test","no_delay":false}`,
+			ProtocolShadowsocks, "::"},
+		{"SS Rust server array", core.EngineShadowsocksRust,
+			`{"shadowsocks":[{"name":"edge","address":"127.0.0.1","port":21001,"method":"chacha20-ietf-poly1305","password":"only-for-this-test","no_delay":false}]}`,
+			ProtocolShadowsocks, "127.0.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := Parse(tc.engine, tc.source)
+			if !ok || !CanEditNativePreset(tc.engine, got) || got.Protocol != tc.protocol || got.Port != 21001 || got.Listen != tc.listen {
+				t.Fatal("native parameters did not match the existing preset")
+			}
+			if (tc.engine == core.EngineSingBox || tc.engine == core.EngineXray) && got.Username != "" {
+				t.Fatal("empty native username was replaced")
+			}
+			if got.TLSEnabled || got.RealityEnabled || got.SnellUDP {
+				t.Fatal("inactive features were enabled")
+			}
+		})
+	}
+}
+
+func TestNativeInboundInventoryDoesNotRequireProjectionOrPolicy(t *testing.T) {
+	const source = `{"api":{"tag":"stats","services":["StatsService"]},
+		"routing":{"rules":[{"type":"field","inboundTag":["internal"],"outboundTag":"stats"}]},
+		"inbounds":[
+			{"tag":"dup","protocol":"http","listen":"127.0.0.1","port":21001},
+			{"tag":"dup","protocol":"socks","listen":"::1","port":21001},
+			{"protocol":"http","listen":"127.0.0.1","port":21002},
+			{"tag":"range","protocol":"http","port":"21020-21021"},
+			{"tag":"socket","protocol":"vmess","listen":"/tmp/example.sock"},
+			{"tag":"internal","protocol":"dokodemo-door","listen":"127.0.0.1","port":10085},
+			{"tag":"qch-stat-api","protocol":"dokodemo-door","port":10086},
+			{"tag":"qch-trf-aux","protocol":"http","port":21004}
+		],"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
+	rows, err := DiscoverNativeInbounds(core.EngineXray, source)
+	if err != nil || len(rows) != 5 {
+		t.Fatalf("native row enumeration: %d, %v", len(rows), err)
+	}
+	if rows[0].TargetTag != "" || rows[1].TargetTag != "" || rows[0].Listen != "127.0.0.1" || rows[1].Listen != "::1" ||
+		rows[2].Tag != "" || rows[2].Port != 21002 || rows[2].TargetTag != "" || rows[3].Port != 0 || rows[4].Port != 0 || rows[4].Listen != "/tmp/example.sock" {
+		t.Fatal("native rows lost display identity or acquired an ambiguous target")
+	}
+	for _, tc := range []struct {
+		engine core.Engine
+		source string
+	}{
+		{core.EngineXray, `{"inbounds":[`},
+		{core.EngineXray, `{"inbounds":[]} false`},
+		{core.EngineMihomo, "listeners: [\n"},
+		{core.EngineMihomo, "listeners: []\n---\ninvalid: [\n"},
+	} {
+		if rows, err := DiscoverNativeInbounds(tc.engine, tc.source); err == nil || rows != nil {
+			t.Fatal("damaged document was rendered as empty or custom")
+		}
+	}
+}
+
+func TestNativeXrayInventoryRecognizesCompositeXHTTPWithoutGuessingTLS(t *testing.T) {
+	source := `{"inbounds":[
+		{"protocol":"vless","tag":"edge","listen":"127.0.0.1","port":21001,"settings":{
+			"clients":[{"id":"123e4567-e89b-42d3-a456-426614174001","flow":"xtls-rprx-vision"}],"decryption":"none","fallbacks":[{"dest":"127.0.0.1:21002","xver":0}]},
+			"streamSettings":{"network":"tcp","security":"reality","realitySettings":{"target":"127.0.0.1:21003","serverNames":["reality.example.test"],"shortIds":["ab"],"privateKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE"}}},
+		{"protocol":"vless","tag":"edge.xh","listen":"127.0.0.1","port":"21002","settings":{"decryption":"none","clients":[{"id":"123e4567-e89b-42d3-a456-426614174001"}]},
+			"streamSettings":{"network":"splithttp","splithttpSettings":{"path":"/native","mode":"stream-up"}}},
+		{"protocol":"vmess","tag":"other","port":21004,"settings":{"clients":[{"id":"123e4567-e89b-42d3-a456-426614174002"}]},"streamSettings":{"network":"kcp"}}
+	]}`
+	rows, err := DiscoverNativeInbounds(core.EngineXray, source)
+	if err != nil || len(rows) != 2 || rows[0].Tag != "edge" || rows[1].Tag != "other" {
+		t.Fatal("XHTTP children or unsupported native transport are incorrectly inventoried")
+	}
+	inputs := ParseAll(core.EngineXray, source)
+	if len(inputs) != 1 || inputs[0].Protocol != ProtocolXHTTPFive || inputs[0].XHTTPBackendPort != 21002 || inputs[0].TransportPath != "/native" {
+		t.Fatal("native XHTTP group was not restored")
+	}
+	if CanEditNativePreset(core.EngineXray, inputs[0]) {
+		t.Fatal("composite preset invented missing TLS frontend identity")
 	}
 }
 

@@ -67,10 +67,14 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 			}
 		}
 	case core.EngineShadowsocksRust:
-		allowed = "server server_port password method mode timeout no_delay fast_open keep_alive dns ipv6_first ipv6_only servers acl workers outbound_bind_addr outbound_bind_interface outbound_fwmark nofile tcp_keep_alive tcp_nodelay udp_timeout udp_max_associations udp_mtu manager_address local_address local_port name id"
+		allowed = "server server_port password method mode timeout no_delay fast_open keep_alive dns ipv6_first ipv6_only servers shadowsocks acl workers outbound_bind_addr outbound_bind_interface outbound_fwmark nofile tcp_keep_alive tcp_nodelay udp_timeout udp_max_associations udp_mtu manager_address local_address local_port name id remarks"
 		listKey, portKey, nameKey = "servers", "server_port", "name"
-		if root["servers"] != nil && root["server_port"] != nil {
+		_, _, extended := shadowsocksRustExtendedEntries(root)
+		if root["servers"] != nil && root["shadowsocks"] != nil || extended && (root["server"] != nil || root["server_port"] != nil) {
 			return nil, fmt.Errorf("shared SS Rust configurations cannot combine a root listener with servers")
+		}
+		if root["shadowsocks"] != nil {
+			listKey = "shadowsocks"
 		}
 		// A manager can add arbitrary ports after deployment; local mode can
 		// expose a second, unmetered ingress.
@@ -115,6 +119,10 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		if entry == nil {
 			return nil, fmt.Errorf("shared listener must be an object")
 		}
+		if engine == core.EngineShadowsocksRust &&
+			(entry["server"] != nil && entry["address"] != nil || entry["server_port"] != nil && entry["port"] != nil) {
+			return nil, fmt.Errorf("shared listener contains duplicate server or port aliases")
+		}
 		// Go's JSON decoders accept case-insensitive struct fields; never
 		// allow another spelling to override the port checked here.
 		for key := range entry {
@@ -132,7 +140,11 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		if engine == core.EngineXray && xhttpGroupOwner(root, stringValue(entry[nameKey])) != "" {
 			continue
 		}
-		port := trafficPortNumber(entry[portKey])
+		portValue := entry[portKey]
+		if engine == core.EngineShadowsocksRust {
+			portValue = shadowsocksRustPort(entry)
+		}
+		port := trafficPortNumber(portValue)
 		if port == 0 {
 			return nil, fmt.Errorf("shared listeners require a single fixed numeric port")
 		}

@@ -312,6 +312,12 @@
           "deployment": {
             "$ref": "#/components/schemas/store_ConfigManagementDeployment"
           },
+          "inbound_rows": {
+            "items": {
+              "$ref": "#/components/schemas/api_configInboundRowResource"
+            },
+            "type": "array"
+          },
           "inbound_targets": {
             "items": {
               "$ref": "#/components/schemas/api_configInboundTargetResource"
@@ -560,6 +566,49 @@
             "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
             "minimum": 1,
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "api_configInboundRowResource": {
+        "additionalProperties": false,
+        "properties": {
+          "client_export": {
+            "type": "boolean"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "port_spec": {
+            "type": "string"
+          },
+          "preset_editable": {
+            "type": "boolean"
+          },
+          "projection_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "section": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "target_tag": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -5658,6 +5707,33 @@
         },
         "type": "object"
       },
+      "serverconfig_NativeInbound": {
+        "additionalProperties": false,
+        "properties": {
+          "listen": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "port_spec": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "target_tag": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "serverconfig_Protocol": {
         "additionalProperties": false,
         "properties": {
@@ -7891,17 +7967,13 @@
               "application/json": {
                 "example": {
                   "content": "mixed-port: 21001",
-                  "format": "example",
+                  "format": null,
                   "source": null
                 },
                 "schema": {
                   "properties": {
-                    "content": {
-                      "type": "string"
-                    },
-                    "format": {
-                      "type": "string"
-                    },
+                    "content": {},
+                    "format": {},
                     "source": {}
                   },
                   "type": "object"
@@ -10530,6 +10602,7 @@
                 "intent": "example",
                 "name": "example",
                 "owner_id": "example",
+                "snapshot_task_id": "example",
                 "updated_at": "2026-11-10T12:00:00Z",
                 "version": 1
               },
@@ -10580,6 +10653,9 @@
                   },
                   "owner_id": {
                     "description": "身份与资源归属由服务端决定；API Key 不得修改账户身份或指定其他所有者。",
+                    "type": "string"
+                  },
+                  "snapshot_task_id": {
                     "type": "string"
                   },
                   "updated_at": {
@@ -11108,6 +11184,20 @@
                     "task_id": "example",
                     "task_status": "example"
                   },
+                  "inbound_rows": [
+                    {
+                      "client_export": false,
+                      "listen": "example",
+                      "network": "example",
+                      "port": 1,
+                      "port_spec": "example",
+                      "preset_editable": false,
+                      "projection_index": 1,
+                      "section": "example",
+                      "tag": "example",
+                      "target_tag": "example"
+                    }
+                  ],
                   "inbound_targets": [
                     {
                       "kind": "example",
@@ -11510,6 +11600,20 @@
                     "task_id": "example",
                     "task_status": "example"
                   },
+                  "inbound_rows": [
+                    {
+                      "client_export": false,
+                      "listen": "example",
+                      "network": "example",
+                      "port": 1,
+                      "port_spec": "example",
+                      "preset_editable": false,
+                      "projection_index": 1,
+                      "section": "example",
+                      "tag": "example",
+                      "target_tag": "example"
+                    }
+                  ],
                   "inbound_targets": [
                     {
                       "kind": "example",
