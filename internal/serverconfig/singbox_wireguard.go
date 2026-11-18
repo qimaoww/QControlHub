@@ -9,7 +9,7 @@ import (
 )
 
 func generateSingBoxEndpoint(input Input) (string, error) {
-	if err := validateWireGuardInput(input, true); err != nil {
+	if err := validateWireGuardInput(input, false); err != nil {
 		return "", err
 	}
 	if err := validateSingBoxWireGuardAddress(input); err != nil {

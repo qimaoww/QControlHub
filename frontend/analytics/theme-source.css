@@ -452,7 +452,7 @@ strong, b { font-weight: 600; }
 
 /* Port identity remains readable with all actions in reach on narrow screens. */
 .a-port-list table { table-layout: fixed; }
-.a-port-list td:first-child:not([data-column="节点"]) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.a-port-list td:first-child:not([data-column="节点"]) { font-variant-numeric: tabular-nums; }
 .a-port-list td:last-child > .a-actions { min-width: 0; }
 @media (max-width: 48rem) {
   .a-port-list .a-table-scroll { overflow: visible; }
@@ -491,6 +491,10 @@ strong, b { font-weight: 600; }
 @media (max-width: 56rem) {
   .a-port-list .a-table-scroll :is(th,td) { min-width: 0; }
   .a-port-list .a-table-scroll td > .a-actions { flex-wrap: wrap; }
+}
+@media (min-width: 48.01rem) {
+  .a-port-list .a-table-scroll :is(th,td)[data-column="端口"] { width: 88px; min-width: 88px; }
+  .a-port-list .a-table-scroll td[data-column="端口"] { overflow-wrap: normal; word-break: normal; }
 }
 
 .a-top-inner > .a-actions { flex-wrap: nowrap; gap: 8px; }

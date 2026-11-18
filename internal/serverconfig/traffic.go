@@ -63,21 +63,22 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 		}
 	case core.EngineShadowsocksRust:
 		mode := trafficProtocol(root["mode"], core.TrafficProtocolBoth)
-		if entries, ok := root["servers"].([]any); ok {
+		_, entries, ok := shadowsocksRustExtendedEntries(root)
+		if ok {
 			for index, value := range entries {
 				entry, _ := value.(map[string]any)
 				if entry == nil {
 					continue
 				}
-				port := trafficPortNumber(entry["server_port"])
+				port := trafficPortNumber(shadowsocksRustPort(entry))
 				if port == 0 {
 					continue
 				}
 				name := trafficEndpointName(entry["name"], entry["method"], "Shadowsocks "+strconv.Itoa(index+1))
 				result = append(result, trafficEndpoint(engine, name, port, trafficProtocol(entry["mode"], mode)))
 			}
-		} else if port := trafficPortNumber(root["server_port"]); port > 0 {
-			result = append(result, trafficEndpoint(engine, trafficEndpointName(root["name"], root["method"], "Shadowsocks"), port, mode))
+		} else if port := trafficPortNumber(shadowsocksRustPort(root)); port > 0 {
+			result = append(result, trafficEndpoint(engine, trafficEndpointName(root["name"], root["remarks"], root["method"], "Shadowsocks"), port, mode))
 		}
 	}
 	return normalizeTrafficEndpoints(result)

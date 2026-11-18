@@ -20,6 +20,9 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if input.clientUnsupported {
+		return ClientProfile{}, errors.New("此入站需要原生客户端参数，暂不支持导出")
+	}
 	if isSnellProtocol(input.Protocol) && input.presetUnsupported {
 		return ClientProfile{}, errors.New("此 Snell 配置包含预设无法完整表达的原生参数，暂不支持客户端导出")
 	}

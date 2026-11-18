@@ -69,11 +69,14 @@ type Protocol struct {
 }
 
 type Input struct {
+	ProjectionSection string `json:"-"`
+	ProjectionIndex   int    `json:"-"`
 	// SourceOnly marks a native projection that has no safe catalog preset.
 	// Protocol remains the internal protocol key for bound client metadata.
 	SourceOnly                   bool `json:"source_only,omitempty"`
 	parsedEngine                 core.Engine
 	presetUnsupported            bool
+	clientUnsupported            bool
 	BlockUDP443                  *bool  `json:"block_udp_443,omitempty"`
 	PanelCertificateID           string `json:"panel_certificate_id,omitempty"`
 	XHTTPMode                    string `json:"xhttp_mode,omitempty"`

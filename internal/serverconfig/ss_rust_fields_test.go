@@ -130,6 +130,32 @@ func TestSSRustPortFieldsRejectUnsupportedOrAmbiguousScope(t *testing.T) {
 	}
 }
 
+func TestSSRustCanDeleteLastNativeServiceWithoutPreset(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, tag string
+	}{
+		{"single", `{"server":"127.0.0.1","server_port":20001,"method":"none","no_delay":false}`, "ss-rust"},
+		{"extended alias", `{"shadowsocks":[{"name":"native","address":"127.0.0.1","port":20001,"method":"none"}],"no_delay":false}`, "native"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, ok := Parse(core.EngineShadowsocksRust, tc.source); ok {
+				t.Fatal("cipherless service should have no preset projection")
+			}
+			deleted, err := DeletePresetInbound(core.EngineShadowsocksRust, tc.source, tc.tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := PlanPresetAccounting(core.EngineShadowsocksRust, deleted); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := DiscoverNativeInbounds(core.EngineShadowsocksRust, deleted)
+			if err != nil || len(rows) != 0 || !strings.Contains(deleted, `"no_delay": false`) {
+				t.Fatal("deletion left an inbound or changed the global setting")
+			}
+		})
+	}
+}
+
 func TestSSRustFieldEditsRejectInvalidValuesBeforeSaving(t *testing.T) {
 	for key, values := range map[string][]string{
 		"mode": {`"invalid"`, `true`, `null`}, "outbound_bind_addr": {`"eth0"`, `123`},

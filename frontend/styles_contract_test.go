@@ -63,8 +63,9 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// and responsive notification records with wrapped dates and reachable actions,
 	// and source indentation, line numbers and JSON syntax highlighting, and
 	// the approved open tools layout, metric strips and readable route columns,
-	// plus wrapped record endpoints with independently centered direction markers.
-	const expected = "fd5d30691180cb32be8c679774dc7ca290564e30d4aaadcde0c9d7f9400426a4"
+	// plus wrapped record endpoints with independently centered direction markers,
+	// and readable inbound port values at narrow desktop widths.
+	const expected = "0e7d9e83a488e7c1d44e54249b4920039b5fcb3552327e94a3d58adf801d0761"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

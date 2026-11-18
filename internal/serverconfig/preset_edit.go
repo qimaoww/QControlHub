@@ -26,7 +26,7 @@ func mutatePresetFields(engine core.Engine, source, generated, original string) 
 		}
 	}
 	after, ok := Parse(engine, generated)
-	if !found || !ok || before.Protocol != after.Protocol || engine == core.EngineShadowsocksRust || isXHTTPGroup(before.Protocol) || before.Protocol == ProtocolWireGuard {
+	if !found || !ok || before.Protocol != after.Protocol || engine == core.EngineShadowsocksRust || isXHTTPGroup(before.Protocol) {
 		return "", false, nil
 	}
 	canonical, err := Generate(engine, before)
@@ -79,6 +79,7 @@ func mutatePresetFields(engine core.Engine, source, generated, original string) 
 			settings["clients"] = settings["users"]
 			delete(settings, "users")
 		}
+		alignXrayPresetKeys(current, oldObject, newObject)
 	}
 	keys := make([]string, 0, len(current))
 	for k := range current {
@@ -100,6 +101,43 @@ func mutatePresetFields(engine core.Engine, source, generated, original string) 
 	}
 	result, err := configschema.MutateListItem(engine, source, string(encoded), section, key, original, "modify", keys...)
 	return result, true, err
+}
+
+// Apply field changes at the spelling the kernel actually reads. Adding a
+// partial canonical object can mask the native alias or leave a new value
+// behind a legacy key that takes precedence.
+func alignXrayPresetKeys(current, before, after map[string]any) {
+	stream := mapValue(current["streamSettings"])
+	oldStream, newStream := mapValue(before["streamSettings"]), mapValue(after["streamSettings"])
+	if stream["method"] != nil {
+		alignPresetKey(oldStream, newStream, "network", "method")
+	}
+	if stream["xhttpSettings"] == nil && stream["splithttpSettings"] != nil {
+		alignPresetKey(oldStream, newStream, "xhttpSettings", "splithttpSettings")
+	}
+	if current["protocol"] != "tunnel" && current["protocol"] != "dokodemo-door" {
+		return
+	}
+	settings := mapValue(current["settings"])
+	oldSettings, newSettings := mapValue(before["settings"]), mapValue(after["settings"])
+	if settings["address"] != nil {
+		alignPresetKey(oldSettings, newSettings, "rewriteAddress", "address")
+	}
+	if intValue(settings["port"]) != 0 {
+		alignPresetKey(oldSettings, newSettings, "rewritePort", "port")
+	}
+	if settings["network"] != nil {
+		alignPresetKey(oldSettings, newSettings, "allowedNetwork", "network")
+	}
+}
+
+func alignPresetKey(before, after map[string]any, canonical, native string) {
+	for _, object := range []map[string]any{before, after} {
+		if value, ok := object[canonical]; ok {
+			object[native] = value
+			delete(object, canonical)
+		}
+	}
 }
 
 func presetDelta(current, before, after any) any {

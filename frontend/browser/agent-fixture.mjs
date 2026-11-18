@@ -444,6 +444,7 @@ window.fetch = async (input, options = {}) => {
       if (!testAPI.layoutConfigs.has(key)) testAPI.layoutConfigs.set(key, {id:`cfg-layout-${key}`,agent_id:agentID,engine,version:8,name:"节点实际配置",description:"",updated_at:"2026-11-05T10:00:00Z",content:layoutConfig(engine)});
       return json({agent:testAPI.agents.find(agent=>agent.id===agentID),config:testAPI.layoutConfigs.get(key),
         catalog:{fields:[{key:"dns",label:"DNS",scope:"global"}]},present_fields:{dns:true},
+        inbound_rows:["socks-in","http-in"].map((tag,i)=>({tag,target_tag:tag,port:i?8080:1080})),
         inbound_targets:["socks-in","http-in"].map((tag,i)=>({tag,port:i?8080:1080,kind:i?"http":"socks"}))});
     }
     if (path.endsWith("/fields/dns")) return json({key:"dns",version:8,present:true,fragment:'{"servers":["1.1.1.1","8.8.8.8"]}'});

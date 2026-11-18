@@ -20,6 +20,16 @@ const record = message => { report.push(message); console.log(message); };
 let socket;
 const timer = setTimeout(() => child.kill("SIGKILL"), 120000);
 try {
+  await runSessions();
+} finally {
+  clearTimeout(timer);
+  socket?.close();
+  child.kill("SIGKILL");
+  await new Promise(resolve => child.exitCode !== null || child.signalCode !== null ? resolve() : child.once("exit", resolve));
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+async function runSessions() {
   let stderr = "";
   const endpoint = await new Promise((resolve, reject) => {
     child.stderr.on("data", chunk => {
@@ -154,7 +164,8 @@ try {
       window.__evidenceFields = [];
       for (const field of document.querySelectorAll('textarea,input')) {
         const value = field.value;
-        const clean = value.replace(/((?:["']?(?:password|private_key|token|credential|secret)["']?)\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,}]+)/gi, '$1[测试凭据已隐藏]');
+        const clean = value.replace(/((?:["']?(?:password|private_key|token|credential|secret)["']?)\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,}]+)/gi, '$1[测试凭据已隐藏]')
+          .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, '[测试凭据已隐藏]');
         if (clean !== value) { window.__evidenceFields.push([field,value]); field.value = clean; }
       }
     };
@@ -166,6 +177,14 @@ try {
       await evaluate(page, `window.__evidenceFields.forEach(([field,value])=>{field.value=value});delete window.__evidenceFields`);
     }
   };
+
+  if (fixture.nativeInboundAgent) {
+    const { testNativeInboundWorkspaceBrowser } = await import("./browser/config-inbounds.mjs");
+    const page = await createPage();
+    const identity = await login(page, "alice");
+    await testNativeInboundWorkspaceBrowser({page, mode, agent:fixture.nativeInboundAgent, identity, evaluate, wait, api, call, screenshot, record});
+    return;
+  }
 
   // No preference row: use the production entry without a preview hint.
   const defaultPage = await createPage(`${base}/?theme=classic#themes`, true);
@@ -373,10 +392,4 @@ try {
   assert.deepEqual((await api(a, switched, "GET", "/configs")).map(config => config.id), [cb.id]);
   record(`${mode}: A share revocation canceled queued work; B session/task stayed valid; disabled A session denied; same-context switch to B isolated`);
   if (artifacts) await writeFile(join(resolve(artifacts), `${mode}-record.txt`), report.join("\n") + "\n");
-} finally {
-  clearTimeout(timer);
-  socket?.close();
-  child.kill("SIGKILL");
-  await new Promise(resolve => child.exitCode !== null || child.signalCode !== null ? resolve() : child.once("exit", resolve));
-  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
