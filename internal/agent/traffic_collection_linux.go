@@ -113,7 +113,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			if err != nil {
 				return manager.setUnavailableLocked(err)
 			}
-			if !shared && record.Accounting.Source == "nft-dual" && !record.LastCollectedAt.IsZero() {
+			retainListener := !shared && record.Policy.Engine == core.EngineMihomo && record.Accounting.Source == "nft-dual"
+			oldEpoch := record.CounterEpoch
+			if retainListener && !record.LastCollectedAt.IsZero() {
 				// Both sources count this same listener. Its last measured interval
 				// is still attributable even when the target scope becomes ambiguous.
 				closingRX, closingTX = collectTrafficCounterDeltas(counters, record)
@@ -121,6 +123,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
 			record.CounterEpoch, record.Accounting = epoch, nil
 			record.KernelCounters = make(map[string]uint64)
+			if retainListener {
+				retainListenerCounters(record, oldEpoch, counters)
+			}
 			record.ReceivedBytes, record.SentBytes, record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0, 0, 0
 			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
 		}
@@ -152,6 +157,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				if snapshot.Plan.Source == "nft-dual" {
 					err = prepareMarkedAccounting(record, snapshot)
 					if err == nil {
+						if !shared && record.Policy.Engine == core.EngineMihomo && previousEpoch != record.CounterEpoch {
+							retainListenerCounters(record, previousEpoch, counters)
+						}
 						if shared && (record.Accounting == nil || record.Accounting.Source != "nft-dual") {
 							// A reserved future listener is only firewall protection.
 							// Its bytes cannot be attributed to the deployed instance.
@@ -178,7 +186,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 							// Target counters start at zero; no historical exit is estimated.
 							record.Accounting.ClientReceived = saturatedTrafficAdd(record.Accounting.ClientReceived, receivedDelta)
 							record.Accounting.ClientSent = saturatedTrafficAdd(record.Accounting.ClientSent, sentDelta)
-						} else if !shared && previousEpoch != record.CounterEpoch && !previousRecord.LastCollectedAt.IsZero() &&
+						} else if !shared && record.Policy.Engine == core.EngineMihomo && previousEpoch != record.CounterEpoch && !previousRecord.LastCollectedAt.IsZero() &&
 							(previousRecord.Accounting == nil || previousRecord.Accounting.Source == "listener") {
 							// This delta starts at an in-process sample. A restored
 							// checkpoint may overlap a report already accepted by the panel.

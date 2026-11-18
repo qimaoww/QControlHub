@@ -13,7 +13,25 @@ import (
 )
 
 func trafficCounterName(record *trafficRecord, direction, protocol string) string {
-	return "qch_" + record.Policy.ID + "_" + record.CounterEpoch + "_" + direction + "_" + protocol
+	epoch := record.CounterEpoch
+	if record.ListenerEpoch != "" && (direction == "in" || direction == "out") {
+		epoch = record.ListenerEpoch
+	}
+	return trafficEpochCounterName(record.Policy.ID, epoch, direction, protocol)
+}
+
+func trafficEpochCounterName(id, epoch, direction, protocol string) string {
+	return "qch_" + id + "_" + epoch + "_" + direction + "_" + protocol
+}
+
+// Source changes rotate the reporting epoch and target conntrack mark. Keep
+// the listener objects alive across the atomic rule replacement so packets
+// arriving after the sampling read are visible in the next sample.
+func retainListenerCounters(record *trafficRecord, previousEpoch string, counters map[string]uint64) {
+	if record.ListenerEpoch == "" {
+		record.ListenerEpoch = previousEpoch
+	}
+	collectTrafficCounterDeltas(counters, record) // Seed the new epoch at the exact cut.
 }
 
 func hasNamedTrafficCounters(counters map[string]uint64, record *trafficRecord) bool {
@@ -44,13 +62,15 @@ func collectTrafficCounterDeltas(counters map[string]uint64, record *trafficReco
 		for _, direction := range []string{"in", "out"} {
 			key := trafficCounterName(record, direction, protocol)
 			value, exists := counters[key]
+			handle := counters["handle:"+key]
+			// Keep checkpoint keys in the reporting epoch for older readers.
+			key = trafficEpochCounterName(record.Policy.ID, record.CounterEpoch, direction, protocol)
 			if !exists {
 				delete(record.KernelCounters, key)
 				delete(record.KernelCounters, "handle:"+key)
 				continue
 			}
 			previous := record.KernelCounters[key]
-			handle := counters["handle:"+key]
 			if handle != record.KernelCounters["handle:"+key] {
 				previous = 0
 			}

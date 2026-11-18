@@ -231,20 +231,23 @@ func TestMarkedListenerMigrationKeepsMeasuredBoundary(t *testing.T) {
 	plan := serverconfig.AccountingPlan{Source: "nft-dual", Ports: []serverconfig.AccountingPort{{Port: p.Port, Inbound: p.InboundTag, Mark: 0x51430000 | uint32(p.Port)}}}
 	snapshot := nativeAccountingSnapshot{Plan: plan, ListenerProtocols: map[int]core.TrafficProtocol{p.Port: p.Protocol}}
 	m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) { return snapshot, nil }
+	oldName := trafficCounterName(r, "in", "tcp")
+	b.onReplace = func() { b.counters[oldName] += 5 }
 	bump("in", 3)
 	bump("out", 7)
 	if got := sample(); got.UsedBytes != 10 || got.Accounting.ClientReceived != 3 || got.Accounting.ClientSent != 7 || r.QuotaBaselineBytes != 150 {
 		t.Fatal(got)
 	}
+	b.onReplace = nil
 	bump("in", 4)
 	bump("targetout", 6)
-	if got := sample(); got.UsedBytes != 20 {
+	if got := sample(); got.UsedBytes != 25 {
 		t.Fatal(got)
 	}
 	snapshot.ScopeError = "Mihomo configuration does not match the active deployment"
 	bump("in", 9)
 	bump("targetout", 888)
-	if got := sample(); got.ReceivedBytes != 9 || got.SentBytes != 0 || got.Accounting != nil || r.QuotaBaselineBytes != 170 || !strings.Contains(got.EnforcementError, snapshot.ScopeError) {
+	if got := sample(); got.ReceivedBytes != 9 || got.SentBytes != 0 || got.Accounting != nil || r.QuotaBaselineBytes != 175 || !strings.Contains(got.EnforcementError, snapshot.ScopeError) {
 		t.Fatal(got)
 	}
 	if got := sample(); got.UsedBytes != 9 {
