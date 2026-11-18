@@ -2045,6 +2045,17 @@
           "location": {
             "$ref": "#/components/schemas/core_ClientIPLocation"
           },
+          "location_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "protocol": {
             "type": "string"
           },
@@ -16328,6 +16339,15 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "与同一查询的 sync_token 一起提交上次响应的 ETag。",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -16375,6 +16395,7 @@
                         "non_public": false,
                         "province": "example"
                       },
+                      "location_retry_at": "2026-11-10T12:00:00Z",
                       "protocol": "example",
                       "transport": "example"
                     }
@@ -16460,7 +16481,26 @@
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "业务结果；异步受理须继续查询任务或资源状态。",
+            "headers": {
+              "ETag": {
+                "description": "当前授权分页结果的验证值。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "已核验权限，分页结果未变。",
+            "headers": {
+              "ETag": {
+                "description": "当前授权分页结果的验证值。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/error400"

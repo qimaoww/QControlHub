@@ -1,12 +1,13 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -115,70 +116,51 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 }
 
 func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, records []core.ClientConnectionRecord, where string, args []any) error {
-	type groupKey struct {
-		AgentID string      `json:"agent_id"`
-		Engine  core.Engine `json:"engine"`
-		IP      string      `json:"client_ip"`
-	}
-	groups := make([]groupKey, len(records))
-	index := map[groupKey]int{}
+	groups := make([]connectionLookupKey, len(records))
+	index := make(map[connectionLookupKey]int, len(records))
 	for i, r := range records {
-		groups[i] = groupKey{r.AgentID, r.Engine, r.ClientIP}
+		groups[i] = connectionLookup(r)
 		index[groups[i]] = i
 	}
 	payload, err := json.Marshal(groups)
 	if err != nil {
 		return err
 	}
-	params := append(append([]any{}, args...), payload)
-	// Listener ports were captured when observations entered the database.
-	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),c.agent_id,a.name,c.engine,COALESCE(c.inbound_port,c.local_port)
+	params := append(append([]any{}, args...), payload, clientConnectionPageBudget/connectionEndpointEstimate+1)
+	// DISTINCT already removes duplicate ports. Stream the bounded result
+	// directly into the page without a second copy of all observations.
+	rows, err := tx.Query(ctx, `SELECT DISTINCT host(c.client_ip),c.agent_id,c.engine,COALESCE(c.inbound_port,c.local_port)
  FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+fmt.Sprintf(`
  AND (c.agent_id,c.engine,c.client_ip) IN (
   SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text)
- ) GROUP BY c.client_ip,c.agent_id,a.name,c.engine,COALESCE(c.inbound_port,c.local_port)`, len(params)), params...)
+ ) LIMIT $%d`, len(params)-1, len(params)), params...)
 	if err != nil {
 		return err
 	}
-	observations := []core.ClientConnectionRecord{}
+	defer rows.Close()
+	remaining := int64(clientConnectionPageBudget)
+	for _, r := range records {
+		remaining -= connectionRecordBytes(r)
+	}
 	for rows.Next() {
-		var r core.ClientConnectionRecord
-		if err := rows.Scan(&r.ID, &r.ClientIP, &r.AgentID, &r.AgentName, &r.Engine, &r.LocalPort); err != nil {
-			rows.Close()
+		var key connectionLookupKey
+		var port int
+		if err := rows.Scan(&key.ClientIP, &key.AgentID, &key.Engine, &port); err != nil {
 			return err
 		}
-		observations = append(observations, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	seen := make([]map[core.ClientConnectionEndpoint]bool, len(records))
-	for _, r := range observations {
-		i := index[groupKey{r.AgentID, r.Engine, r.ClientIP}]
-		endpoint := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: r.LocalPort}
-		if seen[i] == nil {
-			seen[i] = map[core.ClientConnectionEndpoint]bool{}
+		i := index[key]
+		r := &records[i]
+		endpoint := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: port}
+		remaining -= connectionEndpointBytes(endpoint)
+		if remaining < 0 {
+			return errClientConnectionPageBudget
 		}
-		if !seen[i][endpoint] {
-			records[i].Endpoints = append(records[i].Endpoints, endpoint)
-			seen[i][endpoint] = true
-		}
+		r.Endpoints = append(r.Endpoints, endpoint)
 	}
 	for i := range records {
-		sort.Slice(records[i].Endpoints, func(a, b int) bool {
-			x, y := records[i].Endpoints[a], records[i].Endpoints[b]
-			if x.Engine != y.Engine {
-				return x.Engine < y.Engine
-			}
-			if x.AgentName != y.AgentName {
-				return x.AgentName < y.AgentName
-			}
-			if x.AgentID != y.AgentID {
-				return x.AgentID < y.AgentID
-			}
-			return x.LocalPort < y.LocalPort
+		slices.SortFunc(records[i].Endpoints, func(a, b core.ClientConnectionEndpoint) int {
+			return cmp.Compare(a.LocalPort, b.LocalPort)
 		})
 	}
-	return nil
+	return rows.Err()
 }

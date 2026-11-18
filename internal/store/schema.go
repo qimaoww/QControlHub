@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 102
+const currentSchemaVersion = 103
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -982,38 +982,77 @@ CREATE TABLE IF NOT EXISTS client_connection_locations (
  retry_after timestamptz NOT NULL
 );
 
--- A committed counter and coalesced dirty keys, independent of observation IDs
--- and event time. Statement triggers cover updates, late uploads and pruning.
-CREATE TABLE IF NOT EXISTS client_connection_revision (
- id integer PRIMARY KEY CHECK(id=1), revision bigint NOT NULL
+-- Journal rows are visible atomically with their observations. Use the
+-- top-level transaction ID with pg_visible_in_snapshot, since sequence order
+-- by itself cannot tell whether an earlier transaction has committed.
+CREATE TABLE IF NOT EXISTS client_connection_journal (
+ xid xid8 NOT NULL, agent_id text NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
+ day date NOT NULL, changed_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(xid,agent_id,engine,client_ip,day)
 );
-INSERT INTO client_connection_revision VALUES(1,1) ON CONFLICT DO NOTHING;
-CREATE TABLE IF NOT EXISTS client_connection_changes (
- agent_id text NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
- revision bigint NOT NULL, changed_at timestamptz NOT NULL DEFAULT now(),
- PRIMARY KEY(agent_id,engine,client_ip)
+CREATE INDEX IF NOT EXISTS client_connection_journal_expiry_idx ON client_connection_journal(changed_at);
+CREATE TABLE IF NOT EXISTS client_connection_journal_floor (
+ id integer PRIMARY KEY CHECK(id=1), xid xid8 NOT NULL
 );
-CREATE INDEX IF NOT EXISTS client_connection_changes_revision_idx ON client_connection_changes(revision);
+INSERT INTO client_connection_journal_floor VALUES(1,'0') ON CONFLICT DO NOTHING;
 CREATE INDEX IF NOT EXISTS client_connections_group_time_idx ON client_connections(agent_id,engine,client_ip,bucket);
+
+-- Only authority changes update this guard; heartbeats and log ingestion
+-- never take the revision row lock. Detect changes across the response read.
+CREATE TABLE IF NOT EXISTS client_connection_authority (
+ id integer PRIMARY KEY CHECK(id=1), revision bigint NOT NULL, installation uuid NOT NULL
+);
+INSERT INTO client_connection_authority VALUES(1,1,gen_random_uuid()) ON CONFLICT DO NOTHING;
+CREATE OR REPLACE FUNCTION track_client_connection_authority() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ UPDATE client_connection_authority SET revision=revision+1 WHERE id=1;
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS client_connection_agent_added_or_removed ON agents;
+CREATE TRIGGER client_connection_agent_added_or_removed AFTER INSERT OR DELETE ON agents
+ FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_authority();
+DROP TRIGGER IF EXISTS client_connection_agent_authority ON agents;
+CREATE TRIGGER client_connection_agent_authority AFTER UPDATE OF name,owner_id,admin_hidden,revoked_at ON agents
+ FOR EACH ROW WHEN ((OLD.name,OLD.owner_id,OLD.admin_hidden,OLD.revoked_at)
+   IS DISTINCT FROM (NEW.name,NEW.owner_id,NEW.admin_hidden,NEW.revoked_at))
+ EXECUTE FUNCTION track_client_connection_authority();
+
+CREATE TABLE IF NOT EXISTS client_connection_history_cache (
+ key text PRIMARY KEY, snapshot pg_snapshot NOT NULL, generation text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS client_connection_history_cache_expiry_idx ON client_connection_history_cache(updated_at);
+CREATE TABLE IF NOT EXISTS client_connection_history_groups (
+ cache_key text NOT NULL REFERENCES client_connection_history_cache(key) ON DELETE CASCADE,
+ group_key text NOT NULL, data jsonb NOT NULL, PRIMARY KEY(cache_key,group_key)
+);
 CREATE OR REPLACE FUNCTION track_client_connection_changes() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE keys_sql text;
 BEGIN
  IF TG_TABLE_NAME='client_connection_locations' THEN
   IF TG_OP='UPDATE' THEN
-   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,n.client_ip FROM changed_new n JOIN changed_old o USING(client_ip) WHERE (n.country_code,n.country,n.province) IS DISTINCT FROM (o.country_code,o.country,o.province)';
+   keys_sql := 'SELECT n.client_ip FROM changed_new n JOIN changed_old o USING(client_ip) WHERE (n.country_code,n.country,n.province) IS DISTINCT FROM (o.country_code,o.country,o.province)';
   ELSIF TG_OP='INSERT' THEN
-   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,client_ip FROM changed_new';
+   keys_sql := 'SELECT client_ip FROM changed_new WHERE country_code<>''''';
   ELSE
-   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,client_ip FROM changed_old';
+   keys_sql := 'SELECT client_ip FROM changed_old WHERE country_code<>''''';
   END IF;
- ELSIF TG_OP='UPDATE' THEN
-  keys_sql := 'SELECT n.agent_id,n.engine,n.client_ip FROM changed_new n JOIN changed_old o USING(id) WHERE n IS DISTINCT FROM o UNION SELECT o.agent_id,o.engine,o.client_ip FROM changed_old o JOIN changed_new n USING(id) WHERE n IS DISTINCT FROM o';
- ELSIF TG_OP='INSERT' THEN
-  keys_sql := 'SELECT DISTINCT agent_id,engine,client_ip FROM changed_new';
- ELSE
-  keys_sql := 'SELECT DISTINCT agent_id,engine,client_ip FROM changed_old';
+  EXECUTE 'INSERT INTO client_connection_journal (xid,agent_id,engine,client_ip,day)
+   SELECT pg_current_xact_id(),'''','''',client_ip,''-infinity''::date FROM ('||keys_sql||') keys ON CONFLICT DO NOTHING';
+  RETURN NULL;
  END IF;
- EXECUTE 'WITH keys AS ('||keys_sql||'), bumped AS (UPDATE client_connection_revision SET revision=revision+1 WHERE id=1 AND EXISTS(SELECT 1 FROM keys) RETURNING revision) INSERT INTO client_connection_changes(agent_id,engine,client_ip,revision) SELECT DISTINCT agent_id,engine,client_ip,revision FROM keys CROSS JOIN bumped ON CONFLICT(agent_id,engine,client_ip) DO UPDATE SET revision=EXCLUDED.revision,changed_at=now()';
+ IF TG_OP='UPDATE' THEN
+  keys_sql := 'SELECT n.agent_id,n.engine,n.client_ip,n.bucket FROM changed_new n JOIN changed_old o USING(id) WHERE n.source=''core_logs'' AND n IS DISTINCT FROM o
+   UNION ALL SELECT o.agent_id,o.engine,o.client_ip,o.bucket FROM changed_old o JOIN changed_new n USING(id)
+   WHERE o.source=''core_logs'' AND n IS DISTINCT FROM o AND (n.agent_id,n.engine,n.client_ip,n.bucket,n.source) IS DISTINCT FROM (o.agent_id,o.engine,o.client_ip,o.bucket,o.source)';
+ ELSIF TG_OP='INSERT' THEN
+  keys_sql := 'SELECT agent_id,engine,client_ip,bucket FROM changed_new WHERE source=''core_logs''';
+ ELSE
+  keys_sql := 'SELECT agent_id,engine,client_ip,bucket FROM changed_old WHERE source=''core_logs''';
+ END IF;
+ EXECUTE 'INSERT INTO client_connection_journal(xid,agent_id,engine,client_ip,day)
+  SELECT pg_current_xact_id(),agent_id,engine,client_ip,day FROM
+   (SELECT DISTINCT agent_id,engine,client_ip,(bucket AT TIME ZONE ''UTC'')::date AS day FROM ('||keys_sql||') keys) grouped
+   ON CONFLICT DO NOTHING';
  RETURN NULL;
 END $$;
 DROP TRIGGER IF EXISTS client_connection_insert_changes ON client_connections;

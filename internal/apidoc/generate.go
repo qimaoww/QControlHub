@@ -364,6 +364,16 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 	}
 	inspect(handler, 0)
 	g.annotate(op, handler, method, path)
+	if handler == "listClientConnections" {
+		params = append(params, object{"name": "If-None-Match", "in": "header", "required": false, "schema": object{"type": "string"},
+			"description": "与同一查询的 sync_token 一起提交上次响应的 ETag。"})
+		headers := object{"ETag": object{"description": "当前授权分页结果的验证值。", "schema": object{"type": "string"}}}
+		if ok, found := response["200"].(object); found {
+			ok["headers"] = headers
+		}
+		response["304"] = object{"description": "已核验权限，分页结果未变。", "headers": headers}
+	}
+
 	if len(params) > 0 {
 		op["parameters"] = params
 	}

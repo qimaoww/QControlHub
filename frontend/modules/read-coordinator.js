@@ -21,7 +21,7 @@ export function createReadCoordinator(transport, { capacity = 128, timeout = 150
     // Never share writes, conditional entities, response callbacks or domain
     // readers with independent preview, pagination and incremental contracts.
     const share = method === 'GET' && !options.conditional && !options.onResponse && !options.headers
-      && options.body === undefined && !/^\/(core-logs|client-connections)(?:[/?]|$)/.test(path)
+      && options.body === undefined && !/^\/core-logs(?:[/?]|$)/.test(path)
       && Object.keys(options).every(key => ['signal', 'method', 'fresh'].includes(key));
     if (method !== 'GET') return transport(path, options);
     const signal = options.signal;

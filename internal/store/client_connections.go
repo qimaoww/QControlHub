@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,24 +20,54 @@ import (
 // ClientConnectionScope only reads node metadata, using the same host telemetry
 // authority as history. Shared kernel grants deliberately do not enter it.
 func (s *Store) ClientConnectionScope(ctx context.Context) (string, error) {
+	scope, _, err := s.ClientConnectionAuthority(ctx)
+	return scope, err
+}
+
+func (s *Store) ClientConnectionAuthority(ctx context.Context) (string, int64, error) {
 	args := []any{}
 	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
-	rows, err := s.pool.Query(ctx, `SELECT a.id,a.name,COALESCE(a.owner_id,'') FROM agents a`+where+` ORDER BY a.id`, args...)
+	rows, err := s.pool.Query(ctx, `SELECT ca.revision,ca.installation::text,node.id,node.name,node.owner_id
+	  FROM client_connection_authority ca
+	  LEFT JOIN LATERAL (SELECT a.id,a.name,a.owner_id FROM agents a`+where+`) node ON true
+	  WHERE ca.id=1 ORDER BY node.id`, args...)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer rows.Close()
 	hash := sha256.New()
+	encoder := json.NewEncoder(hash)
+	var revision int64
+	first := true
 	for rows.Next() {
-		var id, name, owner string
-		if err := rows.Scan(&id, &name, &owner); err != nil {
-			return "", err
+		var installation string
+		var id, name, owner *string
+		if err := rows.Scan(&revision, &installation, &id, &name, &owner); err != nil {
+			return "", 0, err
 		}
-		if err := json.NewEncoder(hash).Encode([]string{id, name, owner}); err != nil {
-			return "", err
+		if first {
+			_, _ = hash.Write([]byte(installation))
+			first = false
+		}
+		if id != nil {
+			if err := encoder.Encode([]*string{id, name, owner}); err != nil {
+				return "", 0, err
+			}
 		}
 	}
-	return hex.EncodeToString(hash.Sum(nil)), rows.Err()
+	if err := rows.Err(); err != nil {
+		return "", 0, err
+	}
+	if first {
+		return "", 0, pgx.ErrNoRows
+	}
+	return hex.EncodeToString(hash.Sum(nil)), revision, nil
+}
+
+func (s *Store) ClientConnectionAuthorityRevision(ctx context.Context) (int64, error) {
+	var revision int64
+	err := s.pool.QueryRow(ctx, `SELECT revision FROM client_connection_authority WHERE id=1`).Scan(&revision)
+	return revision, err
 }
 
 type ClientConnectionQuery struct {
@@ -96,9 +127,9 @@ func (q ClientConnectionQuery) Validate() error {
 	return nil
 }
 
-func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
+func connectionHistoryFilters(q ClientConnectionQuery) (string, []any) {
 	args := []any{q.Since.UTC().Truncate(time.Minute), q.Until.UTC(), q.Since.UTC()}
-	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND a.revoked_at IS NULL AND c.source='core_logs'`
+	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND c.source='core_logs'`
 	if !q.IncludeNonPublic || q.CountryCode != "" {
 		args = append(args, netpolicy.NonPublicPrefixes())
 		where += fmt.Sprintf(" AND NOT (c.client_ip <<= ANY($%d::inet[]))", len(args))
@@ -133,10 +164,20 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 	if q.Port > 0 {
 		add("COALESCE(c.inbound_port,c.local_port)", q.Port)
 	}
+	return where, args
+}
+
+func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
+	where, args := connectionHistoryFilters(q)
 	// Client IPs are host telemetry. Shared-engine recipients must not gain
 	// access to another owner's client addresses through their engine grants.
-	where += agentAdministrationClause(ctx, "c.agent_id", &args)
-	return where, args
+	return where + " AND a.revoked_at IS NULL" + agentAdministrationClause(ctx, "a.id", &args), args
+}
+
+func connectionGroupWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
+	where, args := connectionHistoryFilters(q)
+	nodes := `SELECT ARRAY(SELECT a.id FROM agents a WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args) + `)`
+	return where + ` AND c.agent_id=ANY((` + nodes + `)::text[])`, args
 }
 
 func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQuery) (core.ClientConnectionHistory, error) {
@@ -153,41 +194,28 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	where, args := connectionHistoryWhere(ctx, q)
 	from := ` FROM client_connections c JOIN agents a ON a.id=c.agent_id`
 	if !q.RecordsOnly {
-		// Offer countries across the entire authorized result, independently of
-		// pagination and the current country choice. Other filters still apply.
-		countries := q
-		countries.CountryCode = ""
-		countries.IncludeNonPublic = false
-		countryWhere, countryArgs := connectionHistoryWhere(ctx, countries)
-		rows, err := tx.Query(ctx, `SELECT DISTINCT location.country_code`+from+` JOIN client_connection_locations location ON location.client_ip=c.client_ip`+countryWhere+` AND location.country_code<>'' ORDER BY location.country_code`, countryArgs...)
-		if err != nil {
+		// Use one authorized window for both the country list and totals. Group
+		// scalar flows before joining geography, once per IP rather than per row.
+		base := q
+		base.CountryCode = ""
+		base.IncludeNonPublic = q.IncludeNonPublic && q.CountryCode == ""
+		summaryWhere, summaryArgs := connectionGroupWhere(ctx, base)
+		summaryArgs = append(summaryArgs, q.CountryCode, netpolicy.NonPublicPrefixes())
+		country := fmt.Sprintf("($%d='' OR l.country_code=$%d)", len(summaryArgs)-1, len(summaryArgs)-1)
+		public := fmt.Sprintf("NOT (ip.client_ip <<= ANY($%d::inet[]))", len(summaryArgs))
+		if err := tx.QueryRow(ctx, `WITH flow AS (
+		  SELECT DISTINCT c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port
+		  FROM client_connections c`+summaryWhere+`
+		), ip AS (SELECT client_ip,count(*) flows FROM flow GROUP BY client_ip)
+		SELECT COALESCE(sum(ip.flows) FILTER (WHERE `+country+`),0), count(*) FILTER (WHERE `+country+`),
+		  COALESCE(array_agg(DISTINCT l.country_code ORDER BY l.country_code)
+		    FILTER (WHERE l.country_code<>'' AND `+public+`), ARRAY[]::varchar[])
+		FROM ip LEFT JOIN client_connection_locations l ON l.client_ip=ip.client_ip`, summaryArgs...).Scan(&result.Flows, &result.IPs, &result.CountryCodes); err != nil {
 			return result, err
 		}
-		for rows.Next() {
-			var code string
-			if err := rows.Scan(&code); err != nil {
-				rows.Close()
-				return result, err
-			}
-			if geoip.ValidRegionCode(code) {
-				result.CountryCodes = append(result.CountryCodes, code)
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return result, err
-		}
-		// Summary is independent of pagination and counts distinct observed tuples,
-		// not the number of minute rows or inferred authenticated sessions.
+		result.CountryCodes = slices.DeleteFunc(result.CountryCodes, func(code string) bool { return !geoip.ValidRegionCode(code) })
 		tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`
-		// Deduplicate scalar columns before counting. A DISTINCT composite row
-		// forces expensive record comparisons and a sort over every minute row;
-		// this form also lets PostgreSQL use partial hash aggregation. IPs remain
-		// distinct across the complete scope, independently of the page groups.
-		columns := `c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port`
-		if err := tx.QueryRow(ctx, `SELECT count(*),count(DISTINCT client_ip) FROM (SELECT DISTINCT `+columns+from+where+`) AS flows`, args...).Scan(&result.Flows, &result.IPs); err != nil {
-			return result, err
-		}
+
 		if !q.SkipTimeline {
 			timelineArgs := append(append([]any{}, args...), q.Bucket)
 			rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT date_trunc($%d::text,c.bucket,'UTC') AS time,count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where+` GROUP BY time ORDER BY time`, len(timelineArgs)), timelineArgs...)
@@ -251,29 +279,14 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)
 	}
-	sourceArgs := []any{}
-	sourceWhere := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &sourceArgs)
-	if q.AgentID != "" {
-		sourceArgs = append(sourceArgs, q.AgentID)
-		sourceWhere += fmt.Sprintf(" AND a.id=$%d", len(sourceArgs))
-	}
-	rows, err := tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'no_logs'),COALESCE(s.detail,''),COALESCE(s.truncated,false)
- FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+sourceWhere+` ORDER BY a.name,a.id`, sourceArgs...)
-	if err != nil {
+	sources, sourceArgs := connectionSourceResponse(ctx, q, nil)
+	if err := tx.QueryRow(ctx, `SELECT `+sources, sourceArgs...).Scan(&result.Sources); err != nil {
 		return result, err
 	}
-	for rows.Next() {
-		var source core.ClientConnectionSource
-		if err := rows.Scan(&source.AgentID, &source.AgentName, &source.UpdatedAt, &source.Status, &source.Detail, &source.Truncated); err != nil {
-			rows.Close()
-			return result, err
-		}
-		result.Sources = append(result.Sources, source)
+	if result.Sources == nil {
+		return result, errClientConnectionPageBudget
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return result, err
-	}
+
 	return result, tx.Commit(ctx)
 }
 
