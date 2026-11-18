@@ -223,21 +223,28 @@ func ValidTrafficCounterEpoch(value string) bool {
 // port. It keeps a policy metadata snapshot so history remains meaningful
 // after a policy is edited or removed.
 type PortTrafficDailyUsage struct {
-	PolicyID        string          `json:"policy_id"`
-	AgentID         string          `json:"agent_id"`
-	Name            string          `json:"name"`
-	Engine          Engine          `json:"engine"`
-	Port            int             `json:"port"`
-	Protocol        TrafficProtocol `json:"protocol"`
-	Day             string          `json:"day"`
-	ReceivedBytes   uint64          `json:"received_bytes"`
-	SentBytes       uint64          `json:"sent_bytes"`
-	UsedBytes       uint64          `json:"used_bytes"`
-	PeakReceiveBPS  uint64          `json:"peak_receive_bps"`
-	PeakSendBPS     uint64          `json:"peak_send_bps"`
-	SampleCount     uint64          `json:"sample_count"`
-	FirstReportedAt time.Time       `json:"first_reported_at"`
-	LastReportedAt  time.Time       `json:"last_reported_at"`
+	PolicyID             string          `json:"policy_id"`
+	AgentID              string          `json:"agent_id"`
+	Name                 string          `json:"name"`
+	Engine               Engine          `json:"engine"`
+	Port                 int             `json:"port"`
+	Protocol             TrafficProtocol `json:"protocol"`
+	Day                  string          `json:"day"`
+	ReceivedBytes        uint64          `json:"received_bytes"`
+	SentBytes            uint64          `json:"sent_bytes"`
+	UsedBytes            uint64          `json:"used_bytes"`
+	UndatedSince         string          `json:"undated_since,omitempty"`
+	UndatedReceivedBytes uint64          `json:"undated_received_bytes,omitempty"`
+	UndatedSentBytes     uint64          `json:"undated_sent_bytes,omitempty"`
+	// Subset of the undated bytes whose bounds prove the calendar month.
+	MonthUndatedReceivedBytes uint64    `json:"month_undated_received_bytes,omitempty"`
+	MonthUndatedSentBytes     uint64    `json:"month_undated_sent_bytes,omitempty"`
+	PeakSampled               bool      `json:"peak_sampled"`
+	PeakReceiveBPS            uint64    `json:"peak_receive_bps"`
+	PeakSendBPS               uint64    `json:"peak_send_bps"`
+	SampleCount               uint64    `json:"sample_count"`
+	FirstReportedAt           time.Time `json:"first_reported_at"`
+	LastReportedAt            time.Time `json:"last_reported_at"`
 }
 
 func ValidPortTrafficPolicyID(value string) bool {

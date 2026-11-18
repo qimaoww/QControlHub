@@ -85,7 +85,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	rows, err := tx.Query(ctx, `
 		SELECT id,reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
 		       traffic_history_initialized,period_start,period_end,last_reported_at,last_collected_at,counter_epoch,
-		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,accounting,COALESCE(share_id,''),port,
+		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,created_at,accounting,COALESCE(share_id,''),port,
                (share_id IS NULL OR EXISTS(SELECT 1 FROM agent_shares sh JOIN agent_share_ports sp ON sp.share_id=sh.id
                  WHERE sh.id=port_traffic_policies.share_id AND sh.agent_id=port_traffic_policies.agent_id
                  AND sp.agent_id=sh.agent_id AND sp.port=port_traffic_policies.port)
@@ -112,7 +112,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		epoch                          string
 		lifetimeReceived, lifetimeSent uint64
 		cycle                          core.TrafficCycle
-		anchor                         time.Time
+		anchor, created                time.Time
 	}
 	baselines := make(map[string]trafficBaseline, len(ids))
 	for rows.Next() {
@@ -122,7 +122,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			&current.generation, &current.received, &current.sent, &current.reportedReceived, &current.reportedSent,
 			&current.historyInitialized,
 			&current.periodStart, &current.periodEnd, &current.lastReported,
-			&current.lastCollected, &current.epoch, &current.lifetimeReceived, &current.lifetimeSent, &current.cycle, &current.anchor,
+			&current.lastCollected, &current.epoch, &current.lifetimeReceived, &current.lifetimeSent, &current.cycle, &current.anchor, &current.created,
 			&current.accounting, &current.shareID, &current.port, &current.bindingValid,
 		); err != nil {
 			rows.Close()
@@ -143,6 +143,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		epoch      string
 	}
 	type epochBaseline struct {
+		collectedAt    time.Time
 		received, sent uint64
 		accounting     *core.TrafficAccounting
 	}
@@ -157,7 +158,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		}
 	}
 	if len(historyIDs) > 0 {
-		rows, err := tx.Query(ctx, `SELECT e.policy_id,e.reset_generation,e.counter_epoch,e.lifetime_received_bytes,e.lifetime_sent_bytes,e.accounting
+		rows, err := tx.Query(ctx, `SELECT e.policy_id,e.reset_generation,e.counter_epoch,e.lifetime_received_bytes,e.lifetime_sent_bytes,e.accounting,e.last_collected_at
 			FROM port_traffic_accounting_epochs e JOIN unnest($1::text[],$2::bigint[],$3::text[]) AS wanted(id,generation,epoch)
 			ON e.policy_id=wanted.id AND e.reset_generation=wanted.generation AND e.counter_epoch=wanted.epoch`, historyIDs, historyGenerations, historyEpochs)
 		if err != nil {
@@ -166,7 +167,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		for rows.Next() {
 			var key epochKey
 			var value epochBaseline
-			if err := rows.Scan(&key.id, &key.generation, &key.epoch, &value.received, &value.sent, &value.accounting); err != nil {
+			if err := rows.Scan(&key.id, &key.generation, &key.epoch, &value.received, &value.sent, &value.accounting, &value.collectedAt); err != nil {
 				rows.Close()
 				return err
 			}
@@ -261,6 +262,11 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			// report is both the new total and the first daily increment.
 			receivedDelta, sentDelta = usage.ReceivedBytes, usage.SentBytes
 		}
+		dayBaseline := previousSample
+		if usage.CounterEpoch != "" && dayBaseline == nil && !current.created.After(sampledAt) {
+			dayBaseline = &current.created
+		}
+		rateBaseline := previousSample
 		if usage.CounterEpoch != "" {
 			if current.epoch == usage.CounterEpoch {
 				// Within one epoch lifetime totals cannot decrease. An older
@@ -271,6 +277,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 				receivedDelta = usage.LifetimeReceivedBytes - current.lifetimeReceived
 				sentDelta = usage.LifetimeSentBytes - current.lifetimeSent
 			} else if prior, known := history[epochKey{usage.PolicyID, usage.ResetGeneration, usage.CounterEpoch}]; known {
+				dayBaseline, rateBaseline = &prior.collectedAt, &prior.collectedAt
 				accounting := usage.Accounting
 				if accounting == nil {
 					accounting = &core.TrafficAccounting{Source: "listener"}
@@ -283,16 +290,22 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 				}
 				receivedDelta, sentDelta = usage.LifetimeReceivedBytes-prior.received, usage.LifetimeSentBytes-prior.sent
 			} else if current.epoch != "" || (current.periodStart == nil && !periodUnknownAfterUpgrade) {
+				rateBaseline = nil
+				dayBaseline = &current.created
+				if current.created.After(sampledAt) {
+					dayBaseline = nil
+				}
 				receivedDelta, sentDelta = usage.LifetimeReceivedBytes, usage.LifetimeSentBytes
 			}
 			if samePeriod || periodUnknownAfterUpgrade {
-				newReceived = saturatedStoredTrafficAdd(current.received, receivedDelta)
-				newSent = saturatedStoredTrafficAdd(current.sent, sentDelta)
+				// A returning epoch may still contain bytes from an earlier period.
+				newReceived = saturatedStoredTrafficAdd(current.received, min(receivedDelta, usage.ReceivedBytes))
+				newSent = saturatedStoredTrafficAdd(current.sent, min(sentDelta, usage.SentBytes))
 			}
 		}
-		if previousSample != nil {
-			receiveBPS = trafficAverageRate(receivedDelta, *previousSample, sampledAt)
-			sendBPS = trafficAverageRate(sentDelta, *previousSample, sampledAt)
+		if rateBaseline != nil {
+			receiveBPS = trafficAverageRate(receivedDelta, *rateBaseline, sampledAt)
+			sendBPS = trafficAverageRate(sentDelta, *rateBaseline, sampledAt)
 		}
 		usedDelta := saturatedStoredTrafficAdd(receivedDelta, sentDelta)
 		newUsed := saturatedStoredTrafficAdd(newReceived, newSent)
@@ -303,7 +316,8 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			Blocked: usage.Blocked, EnforcementAvailable: usage.EnforcementAvailable,
 			EnforcementError: strings.TrimSpace(usage.EnforcementError),
 			ReportedReceived: usage.ReceivedBytes, ReportedSent: usage.SentBytes,
-			ReceivedDelta: receivedDelta, SentDelta: sentDelta, UsedDelta: usedDelta,
+			Days: trafficSampleDays(usage, dayBaseline, sampledAt, receivedDelta, sentDelta), UsedDelta: usedDelta,
+			PeakSampled:  rateBaseline != nil && validTrafficRateInterval(*rateBaseline, sampledAt) && core.UTCDate(*rateBaseline).Equal(core.UTCDate(sampledAt)),
 			RecordSample: true, SampledAt: sampledAt, CollectedAt: nilIfZeroTime(usage.CollectedAt), CounterEpoch: usage.CounterEpoch,
 			LifetimeReceived: usage.LifetimeReceivedBytes, LifetimeSent: usage.LifetimeSentBytes, Accounting: usage.Accounting,
 		})
@@ -345,8 +359,8 @@ type trafficUsageWrite struct {
 	EnforcementError     string                  `json:"enforcement_error"`
 	ReportedReceived     uint64                  `json:"reported_received"`
 	ReportedSent         uint64                  `json:"reported_sent"`
-	ReceivedDelta        uint64                  `json:"received_delta"`
-	SentDelta            uint64                  `json:"sent_delta"`
+	Days                 []trafficDayAllocation  `json:"days"`
+	PeakSampled          bool                    `json:"peak_sampled"`
 	UsedDelta            uint64                  `json:"used_delta"`
 }
 
@@ -356,7 +370,7 @@ const applyTrafficUsageSQL = `
 			id text,generation bigint,received bigint,sent bigint,used bigint,receive_bps bigint,send_bps bigint,
 			period_start timestamptz,period_end timestamptz,blocked boolean,enforcement_available boolean,
 			enforcement_error text,reported_received bigint,reported_sent bigint,
-			received_delta bigint,sent_delta bigint,used_delta bigint,record_sample boolean,sampled_at timestamptz,
+			days jsonb,peak_sampled boolean,used_delta bigint,record_sample boolean,sampled_at timestamptz,
 			collected_at timestamptz,counter_epoch text,lifetime_received bigint,lifetime_sent bigint,accounting jsonb)
 	), updated AS (
 		UPDATE port_traffic_policies policy SET
@@ -388,13 +402,21 @@ const applyTrafficUsageSQL = `
     ), shares_written AS (
         UPDATE agent_shares sh SET used_bytes=LEAST(9223372036854775807::numeric,sh.used_bytes::numeric+t.delta)::bigint,
             updated_at=now() FROM share_totals t WHERE sh.id=t.share_id
+	), allocations AS (
+		SELECT updated.*,input.generation,input.accounting,input.receive_bps,input.send_bps,input.peak_sampled,
+			part.*,part.day=(input.sampled_at AT TIME ZONE 'UTC')::date AS sampled_today
+		FROM updated JOIN input ON input.id=updated.id
+		CROSS JOIN LATERAL jsonb_to_recordset(input.days) AS part(day date,since date,received bigint,sent bigint,undated_received bigint,undated_sent bigint)
+		WHERE input.record_sample
 	), scoped_daily AS (
-		INSERT INTO port_traffic_daily_accounting (policy_id,agent_id,reset_generation,usage_date,source,received_bytes,sent_bytes)
-		SELECT updated.id,updated.agent_id,input.generation,(input.sampled_at AT TIME ZONE 'UTC')::date,
-			COALESCE(input.accounting->>'source','listener'),input.received_delta,input.sent_delta
-		FROM updated JOIN input ON input.id=updated.id WHERE input.record_sample
+		INSERT INTO port_traffic_daily_accounting (policy_id,agent_id,reset_generation,usage_date,source,received_bytes,sent_bytes,undated_since,undated_received_bytes,undated_sent_bytes)
+		SELECT id,agent_id,generation,day,COALESCE(accounting->>'source','listener'),received,sent,since,undated_received,undated_sent
+		FROM allocations
 		ON CONFLICT (policy_id,reset_generation,usage_date,source) DO UPDATE SET
-			received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.received_bytes::numeric+EXCLUDED.received_bytes)::bigint,
+			undated_since=LEAST(port_traffic_daily_accounting.undated_since,EXCLUDED.undated_since),
+		undated_received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.undated_received_bytes::numeric+EXCLUDED.undated_received_bytes)::bigint,
+		undated_sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.undated_sent_bytes::numeric+EXCLUDED.undated_sent_bytes)::bigint,
+		received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.received_bytes::numeric+EXCLUDED.received_bytes)::bigint,
 			sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.sent_bytes::numeric+EXCLUDED.sent_bytes)::bigint
 	), epochs AS (
 		INSERT INTO port_traffic_accounting_epochs (policy_id,agent_id,reset_generation,counter_epoch,accounting,
@@ -409,19 +431,29 @@ const applyTrafficUsageSQL = `
 	)
 	INSERT INTO port_traffic_daily_usage (
 		policy_id,reset_generation,usage_date,agent_id,name,engine,port,protocol,
-		received_bytes,sent_bytes,used_bytes,peak_receive_bps,peak_send_bps,sample_count,first_reported_at,last_reported_at)
-	SELECT updated.id,input.generation,(input.sampled_at AT TIME ZONE 'UTC')::date,updated.agent_id,
-		updated.name,updated.engine,updated.port,updated.protocol,input.received_delta,input.sent_delta,input.used_delta,
-		input.receive_bps,input.send_bps,1,$2,$2
-	FROM updated JOIN input ON input.id=updated.id WHERE input.record_sample
+		received_bytes,sent_bytes,used_bytes,undated_since,undated_received_bytes,undated_sent_bytes,month_undated_received_bytes,month_undated_sent_bytes,peak_sampled,
+		peak_receive_bps,peak_send_bps,sample_count,first_reported_at,last_reported_at)
+	SELECT id,generation,day,agent_id,name,engine,port,protocol,received,sent,LEAST(9223372036854775807::numeric,received::numeric+sent)::bigint,
+		since,undated_received,undated_sent,
+		CASE WHEN since>=date_trunc('month', day::timestamp) THEN undated_received ELSE 0 END,
+		CASE WHEN since>=date_trunc('month', day::timestamp) THEN undated_sent ELSE 0 END, peak_sampled AND sampled_today,
+		CASE WHEN peak_sampled AND sampled_today THEN receive_bps ELSE 0 END,
+		CASE WHEN peak_sampled AND sampled_today THEN send_bps ELSE 0 END,sampled_today::int,$2,$2
+	FROM allocations
 	ON CONFLICT (policy_id,reset_generation,usage_date) DO UPDATE SET
 		agent_id=EXCLUDED.agent_id,name=EXCLUDED.name,engine=EXCLUDED.engine,port=EXCLUDED.port,protocol=EXCLUDED.protocol,
+		month_undated_received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.month_undated_received_bytes::numeric+EXCLUDED.month_undated_received_bytes)::bigint,
+		month_undated_sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.month_undated_sent_bytes::numeric+EXCLUDED.month_undated_sent_bytes)::bigint,
+		undated_since=LEAST(port_traffic_daily_usage.undated_since,EXCLUDED.undated_since),
+		undated_received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.undated_received_bytes::numeric+EXCLUDED.undated_received_bytes)::bigint,
+		undated_sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.undated_sent_bytes::numeric+EXCLUDED.undated_sent_bytes)::bigint,
 		received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.received_bytes::numeric+EXCLUDED.received_bytes)::bigint,
 		sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.sent_bytes::numeric+EXCLUDED.sent_bytes)::bigint,
 		used_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.used_bytes::numeric+EXCLUDED.used_bytes)::bigint,
 		peak_receive_bps=GREATEST(port_traffic_daily_usage.peak_receive_bps,EXCLUDED.peak_receive_bps),
 		peak_send_bps=GREATEST(port_traffic_daily_usage.peak_send_bps,EXCLUDED.peak_send_bps),
-		sample_count=port_traffic_daily_usage.sample_count+1,last_reported_at=EXCLUDED.last_reported_at`
+		peak_sampled=port_traffic_daily_usage.peak_sampled OR EXCLUDED.peak_sampled,
+		sample_count=port_traffic_daily_usage.sample_count+EXCLUDED.sample_count,last_reported_at=EXCLUDED.last_reported_at`
 
 func saturatedStoredTrafficAdd(left, right uint64) uint64 {
 	if left >= math.MaxInt64 || right > uint64(math.MaxInt64)-left {
@@ -445,9 +477,14 @@ func nilIfZeroTime(value time.Time) *time.Time {
 	return &value
 }
 
+func validTrafficRateInterval(previous, current time.Time) bool {
+	elapsed := current.Sub(previous)
+	return elapsed > 0 && elapsed <= 2*time.Minute
+}
+
 func trafficAverageRate(delta uint64, previous, current time.Time) uint64 {
 	elapsed := current.Sub(previous)
-	if delta == 0 || elapsed <= 0 || elapsed > 2*time.Minute {
+	if delta == 0 || !validTrafficRateInterval(previous, current) {
 		return 0
 	}
 	rate := math.Round(float64(delta) / elapsed.Seconds())

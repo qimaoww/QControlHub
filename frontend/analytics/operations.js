@@ -9,7 +9,7 @@ import { formatDate } from "./appearance.js";
 import { bindSourceEditorTools } from "./source-editor.js";
 import { readableConfigSource } from '../modules/code-format.js';
 import { editAgentSharing } from "./sharing.js";
-import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, summarizeDashboardNodes, rankDashboardTraffic, utcMonth, panelMetricUsage } from "../modules/dashboard-model.js";
+import { aggregateDashboardTrafficDays, dashboardMonthBytes, summarizeDashboardTraffic, summarizeDashboardNodes, rankDashboardTraffic, utcMonth, panelMetricUsage } from "../modules/dashboard-model.js";
 import { metricTrack } from './metric-track.js';
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
@@ -22,6 +22,22 @@ export const bytes = value => {
   const exponent = amount ? Math.max(0, Math.min(4, Math.floor(Math.log(amount) / Math.log(1024)))) : 0;
   return `${byteFormatters[exponent ? 1 : 0].format(amount / 1024 ** exponent)}\u00a0${["B", "KB", "MB", "GB", "TB"][exponent]}`;
 };
+export const trafficDayColumns = ['日期（UTC）', '接收', '发送', '合计', '接收采样峰值', '发送采样峰值'];
+
+export function trafficDayRows(days) {
+  return days.flatMap(day => {
+    const sampled = day.peak_sampled || day.peak_receive_bps > 0 || day.peak_send_bps > 0;
+    const peak = value => sampled ? `${bytes(value)}/s` : '—';
+    const rows = [[day.day, bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.used_bytes), peak(day.peak_receive_bps), peak(day.peak_send_bps)]];
+    if (day.undated_since) {
+      const rx = day.undated_received_bytes || 0, tx = day.undated_sent_bytes || 0;
+      const start = day.undated_since === '0001-01-01' ? '起始未知' : day.undated_since;
+      rows.push([`${start} 至 ${day.day}（日期待定）`, bytes(rx), bytes(tx), bytes(rx + tx), '—', '—']);
+    }
+    return rows;
+  });
+}
+
 export const date = formatDate;
 export const status = value => badge(({ online: "在线", offline: "离线", active: "运行中", inactive: "已停止", unknown: "未知", activating: "启动中", deactivating: "停止中", pending: "准备中", running: "执行中", succeeded: "成功", failed: "失败", canceled: "已取消", accepted: "已接受", rejected: "已拒绝" })[value] || value || "未知",
   ["online", "active", "succeeded", "accepted"].includes(value) ? "ok" : ["pending", "running"].includes(value) ? "warn" : ["offline", "failed"].includes(value) ? "bad" : "");
@@ -190,8 +206,8 @@ export async function dashboardPage(ctx) {
   const nodeTable = table(["节点", "运行内核"], [], { label: "节点运行状态", columnWidths: ['72%', '28%'], emptyText: "尚未添加可访问的节点", paginate: 4, rowKey: row => row[0].querySelector("a").getAttribute("href") });
   const nodes = can("agents.read") && section("节点运行状态", stack(node("div", { className: "a-card-body" }, nodeSummary), nodeTable), link("管理节点", "#node-settings"));
   const plot = responsiveChart([], ctx.signal);
-  const trafficSummary = (receive, sent) => node('div', { className: 'a-stat', 'data-refresh-key': '月累计流量' },
-    node('div', { className: 'a-stat-heading' }, muted('月累计流量')), node('strong', {}, receive == null ? '—' : bytes(receive + sent)), muted('接收与发送合计'),
+  const trafficSummary = (receive, sent, caption = '接收与发送合计') => node('div', { className: 'a-stat', 'data-refresh-key': '月累计流量' },
+    node('div', { className: 'a-stat-heading' }, muted('月累计流量')), node('strong', {}, receive == null ? '—' : bytes(receive + sent)), muted(caption),
     node('div', { className: 'a-probe-network' }, stack(muted('累计接收'), node('b', {}, receive == null ? '—' : bytes(receive))), stack(muted('累计发送'), node('b', {}, sent == null ? '—' : bytes(sent)))));
   const trafficTotals = trafficSummary();
   const trafficState = muted("正在读取流量记录");
@@ -211,7 +227,7 @@ export async function dashboardPage(ctx) {
     month = monthInput.value; ctx.state.data.dashboardMonth = month;
     void read('traffic', query('/traffic-usage', { month }), true);
   } });
-  const detailTable = table(["日期", "接收", "发送", "合计", "接收峰值", "发送峰值"], [], { label: "每日流量明细", paginate: 10, rowKey: row => row[0] });
+  const detailTable = table(trafficDayColumns, [], { label: "每日流量明细", paginate: 10, rowKey: row => row[0] });
   const detailPeriod = muted("");
   let trafficDialog;
   const detailsButton = button("流量明细", () => {
@@ -267,12 +283,14 @@ export async function dashboardPage(ctx) {
       const summary = summarizeDashboardTraffic(days, traffic.month);
       trafficPeriod.textContent = `${traffic.month} · UTC`;
       detailPeriod.textContent = `${traffic.month} · UTC`;
-      const receive = days.reduce((sum, day) => sum + day.received_bytes, 0), sent = days.reduce((sum, day) => sum + day.sent_bytes, 0);
-      patch(trafficTotals, trafficSummary(receive, sent));
+      const totals = (direction) => list(traffic.days).reduce((sum, row) => sum + dashboardMonthBytes(row, traffic.month, direction), 0);
+      const receive = totals('received'), sent = totals('sent');
+      const crossesMonth = days.some(day => day.undated_since && !day.undated_since.startsWith(traffic.month));
+      patch(trafficTotals, trafficSummary(receive, sent, crossesMonth ? '仅含可归属本月的流量' : undefined));
       patch(trafficTrends, actions(muted(summary.isCurrentMonth ? `UTC 今日 ${bytes(summary.todayBytes)}` : "历史月份"),
-        muted(`日均 ${summary.averageBytes == null ? "—" : bytes(summary.averageBytes)} · ${summary.elapsedDays} 天`),
+        muted(`${days.some(day => day.undated_since) ? '已归日均值' : '日均'} ${summary.averageBytes == null ? "—" : bytes(summary.averageBytes)} · ${summary.elapsedDays} 天`),
         muted(`峰值日 ${summary.peakDay || "—"} · ${bytes(summary.peakBytes)}`)));
-      detailTable.updateRows(days.map(day => [day.day, bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.received_bytes + day.sent_bytes), `${bytes(day.peak_receive_bps)}/s`, `${bytes(day.peak_send_bps)}/s`]));
+      detailTable.updateRows(trafficDayRows(days));
       plot.updateDays(days);
       paintRanking();
     } else if (states.get("traffic") === "denied") {

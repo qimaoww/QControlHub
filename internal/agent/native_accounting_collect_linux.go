@@ -63,10 +63,8 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	if err != nil {
 		return result, err
 	}
-	if engine == core.EngineMihomo {
-		if err := e.verifyMihomoAccountingDeployment(ctx, spec, content, epoch, &configuration); err != nil {
-			return result, err
-		}
+	if err := e.verifyAccountingDeployment(ctx, spec, content, epoch, &configuration); err != nil {
+		return result, err
 	}
 	configuration.ProcessEpoch = epoch
 	if configuration.Plan.Source == "nft-dual" {
@@ -89,36 +87,40 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 // A saved file can be newer than the active service. Current deployments
 // commit a digest after activation. Legacy installations use the fixed
 // managed config and must have started after its last change.
-func (e *Executor) verifyMihomoAccountingDeployment(ctx context.Context, spec EngineSpec, content, epoch string, snapshot *nativeAccountingSnapshot) error {
+func (e *Executor) verifyAccountingDeployment(ctx context.Context, spec EngineSpec, content, epoch string, snapshot *nativeAccountingSnapshot) error {
 	state, err := readSharedDeploymentState(spec)
 	if err == nil {
 		if state.Applying || state.Digest != configurationDigest(content) {
-			snapshot.ScopeError = "Mihomo configuration does not match the active deployment"
+			snapshot.ScopeError = "managed configuration does not match the active deployment"
 		}
 		snapshot.ConfigID, snapshot.ConfigVersion = state.ConfigID, state.ConfigVersion
 		return nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect Mihomo deployment: %w", err)
+		return fmt.Errorf("inspect managed deployment: %w", err)
 	}
 	info, err := os.Stat(spec.ConfigPath)
 	if err != nil {
 		return err
 	}
 	e.processEpochMu.Lock()
-	cachedEpoch, started := e.mihomoStartEpoch, e.mihomoStartedAt
+	cached := e.serviceStarts[spec.Service]
 	e.processEpochMu.Unlock()
-	if cachedEpoch != epoch {
-		started, err = managedServiceStartTime(ctx, e.serviceManager(), spec.Service)
+	if cached.epoch != epoch {
+		started, err := managedServiceStartTime(ctx, e.serviceManager(), spec.Service)
 		if err != nil {
 			return err
 		}
 		e.processEpochMu.Lock()
-		e.mihomoStartEpoch, e.mihomoStartedAt = epoch, started
+		if e.serviceStarts == nil {
+			e.serviceStarts = make(map[string]cachedServiceStart)
+		}
+		cached = cachedServiceStart{epoch: epoch, started: started}
+		e.serviceStarts[spec.Service] = cached
 		e.processEpochMu.Unlock()
 	}
-	if !info.ModTime().Before(started) {
-		snapshot.ScopeError = "Mihomo configuration changed since the managed service started"
+	if !info.ModTime().Before(cached.started) {
+		snapshot.ScopeError = "managed configuration changed since the managed service started"
 	}
 	return nil
 }

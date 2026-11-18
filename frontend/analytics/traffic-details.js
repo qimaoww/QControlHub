@@ -1,18 +1,21 @@
 import { bindPreferenceFields } from './preferences.js';
 import { dialogContext, loadingTable } from "./loading.js";
 import { node, button, actions, stack, field, query, list, notice } from './ui.js';
-import { bytes, date } from './operations.js';
+import { bytes, date, trafficDayColumns, trafficDayRows } from './operations.js';
 import { protocolName, cycleName, dateInputValue, trafficAccountingState } from '../modules/traffic-model.js';
 import { patch } from './live-dom.js';
 
 export function trafficDetails(ctx, policy, agent, options = {}) {
   const summary = stack(), management = actions();
-  let historyKey;
+  let historyKey, lastSample, awaitingPeak = false;
   function update(nextPolicy = policy, nextAgent = agent) {
     // The page reconciles policies in place, so retain scalar values across polls.
     const nextKey = JSON.stringify([nextPolicy.received_bytes, nextPolicy.sent_bytes, nextPolicy.reset_generation,
       (nextPolicy.last_collected_at || nextPolicy.last_reported_at || '').slice(0, 10)]);
-    const changed = historyKey !== undefined && historyKey !== nextKey;
+    const sampled = nextPolicy.last_collected_at || nextPolicy.last_reported_at;
+    const peakMayHaveArrived = awaitingPeak && sampled && lastSample && sampled !== lastSample;
+    const changed = historyKey !== undefined && (historyKey !== nextKey || peakMayHaveArrived);
+    lastSample = sampled;
     historyKey = nextKey;
     policy = nextPolicy; agent = nextAgent;
     patch(management, actions(...(options.canManage?.(policy) ? [
@@ -22,7 +25,7 @@ export function trafficDetails(ctx, policy, agent, options = {}) {
     ].filter(Boolean) : [])));
     const { accounting, dual, raw, title, hint, partialEgress } = trafficAccountingState(policy);
     const shared = policy.shared_quota;
-    const source = { 'core-api': '内核计数', 'nft-dual': '网络层双链路', 'nft-listener': '监听端口' }[accounting?.source] || accounting?.source || '监听端口';
+    const source = { 'core-api': '内核计数', 'nft-dual': '网络层双链路', 'listener': '监听端口', 'nft-listener': '监听端口' }[accounting?.source] || accounting?.source || '监听端口';
     const facts = [
       ['节点', agent?.name || policy.agent_id], ['内核 / 协议', `${policy.engine} / ${protocolName(policy.protocol)}`],
       ['监听端口', String(policy.port)], ['所属用户', policy.owner_name || '当前用户'],
@@ -45,14 +48,14 @@ export function trafficDetails(ctx, policy, agent, options = {}) {
     const error = node('details', { hidden: !raw }, node('summary', {}, 'Agent 诊断'), node('pre', { className: 'a-code' }, raw));
     patch(summary, stack(node('dl', { className: 'a-traffic-facts' }, facts.map(([label, value]) => node('div', { 'data-refresh-key': label }, node('dt', {}, label), node('dd', {}, value)))), error));
     if (changed && input.value === new Date().toISOString().slice(0, 7)) {
+      awaitingPeak = false;
       if (request) pending = true;
       else void read();
     }
   }
   const month = field('月份（UTC）', 'month', new Date().toISOString().slice(0, 7), { type: 'month', required: true });
   const input = month.querySelector('input');
-  const columns = ['日期（UTC）', '接收', '发送', '合计', '接收峰值', '发送峰值'];
-  const days = loadingTable(columns, '每日流量', { emptyText: '此月暂无流量记录', rowKey: row => row[0] });
+  const days = loadingTable(trafficDayColumns, '每日流量', { emptyText: '此月暂无流量记录', rowKey: row => row[0] });
   const feedback = node('div', { hidden: true });
   const box = ctx.dialog(`${policy.name || '端口流量'} · ${policy.port}`, stack(summary, month, days, feedback, management), { wide: true });
   box.setAttribute('data-traffic-details', policy.id);
@@ -74,7 +77,12 @@ export function trafficDetails(ctx, policy, agent, options = {}) {
     try {
       const result = await local.api(query('/traffic-usage', { policy_id: policy.id, agent_id: policy.agent_id, month: input.value }), { signal });
       if (signal.aborted || !local.current()) return;
-      days.updateRows(list(result.days).map(day => [String(day.day || '').slice(0, 10), bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.used_bytes), `${bytes(day.peak_receive_bps)}/s`, `${bytes(day.peak_send_bps)}/s`]));
+      const rows = list(result.days);
+      const latestDay = lastSample?.slice(0, 10);
+      const today = rows.find(row => row.day === latestDay);
+      // Read the first valid zero interval too. Silence changes no byte totals.
+      awaitingPeak = today?.peak_sampled === false && latestDay === new Date().toISOString().slice(0, 10);
+      days.updateRows(trafficDayRows(rows));
       feedback.hidden = true;
     } catch (error) {
       if (signal.aborted || !local.current()) return;

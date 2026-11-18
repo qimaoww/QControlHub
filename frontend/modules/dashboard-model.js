@@ -36,11 +36,17 @@ export function summarizeDashboardNodes(agents, now = Date.now()) {
   return result;
 }
 
+export function dashboardMonthBytes(row, month, direction) {
+  if (!row.day?.startsWith(`${month}-`)) return 0;
+  const dated = Number(row[`${direction}_bytes`] || 0);
+  return dated + Number(row[`month_undated_${direction}_bytes`] || 0);
+}
+
 export function rankDashboardTraffic(rows, month, today = new Date().toISOString().slice(0, 10), agentIDs = []) {
   const totals = new Map(agentIDs.filter(Boolean).map(id => [id, 0]));
   for (const row of rows || []) {
     if (!row.agent_id || !row.day?.startsWith(`${month}-`) || row.day > today) continue;
-    const amount = Number(row.received_bytes || 0) + Number(row.sent_bytes || 0);
+    const amount = dashboardMonthBytes(row, month, 'received') + dashboardMonthBytes(row, month, 'sent');
     if (!Number.isFinite(amount) || amount < 0) continue;
     totals.set(row.agent_id, (totals.get(row.agent_id) || 0) + amount);
   }
@@ -71,6 +77,12 @@ export function aggregateDashboardTrafficDays(rows, month) {
     current.received_bytes += Number(row.received_bytes || 0);
     current.sent_bytes += Number(row.sent_bytes || 0);
     current.used_bytes += Number(row.used_bytes || 0);
+    if (row.peak_sampled) current.peak_sampled = true;
+    if (row.undated_since) {
+      if (!current.undated_since || row.undated_since < current.undated_since) current.undated_since = row.undated_since;
+      current.undated_received_bytes = (current.undated_received_bytes || 0) + (row.undated_received_bytes || 0);
+      current.undated_sent_bytes = (current.undated_sent_bytes || 0) + (row.undated_sent_bytes || 0);
+    }
     current.peak_receive_bps = Math.max(current.peak_receive_bps, Number(row.peak_receive_bps || 0));
     current.peak_send_bps = Math.max(current.peak_send_bps, Number(row.peak_send_bps || 0));
   });

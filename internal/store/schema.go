@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 103
+const currentSchemaVersion = 104
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -725,6 +725,9 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_accounting (
   sent_bytes bigint NOT NULL CHECK (sent_bytes >= 0),
   PRIMARY KEY (policy_id,reset_generation,usage_date,source)
 );
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS undated_since date;
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS undated_received_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_received_bytes >= 0);
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS undated_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_sent_bytes >= 0);
 CREATE TABLE IF NOT EXISTS port_traffic_accounting_epochs (
   policy_id text NOT NULL REFERENCES port_traffic_policies(id) ON DELETE CASCADE,
   reset_generation bigint NOT NULL,
@@ -810,6 +813,12 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 	last_reported_at timestamptz NOT NULL,
 	PRIMARY KEY (policy_id,reset_generation,usage_date)
 );
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS undated_since date;
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS undated_received_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_received_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS undated_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_sent_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS month_undated_received_bytes bigint NOT NULL DEFAULT 0 CHECK (month_undated_received_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS month_undated_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (month_undated_sent_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS peak_sampled boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_date_idx ON port_traffic_daily_usage(usage_date,agent_id);

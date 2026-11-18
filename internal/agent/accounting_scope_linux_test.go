@@ -44,6 +44,43 @@ func TestVerifiedListenerProtocols(t *testing.T) {
 	}
 }
 
+func TestExplicitSingleTransportScope(t *testing.T) {
+	for _, tc := range []struct {
+		engine core.Engine
+		config string
+		want   core.TrafficProtocol
+	}{
+		{core.EngineSingBox, `{"outbounds":[{"tag":"out","type":"direct"}],"inbounds":[{"tag":"edge","type":"vmess","listen_port":443,"transport":{"type":"quic"}}]}`, core.TrafficProtocolUDP},
+		{core.EngineMihomo, "listeners: [{name: edge, type: shadowsocks, port: 443, udp: false}]", core.TrafficProtocolTCP},
+		{core.EngineMihomo, "listeners: [{name: edge, type: shadowsocks, port: 443, udp: true}]", core.TrafficProtocolBoth},
+		{core.EngineMihomo, "listeners: [{name: edge, type: shadowsocks, port: 443, network: tcp}]", core.TrafficProtocolBoth},
+		{core.EngineMihomo, "listeners: [{name: edge, type: shadowsocks, port: 443, udp: 'false'}]", core.TrafficProtocolBoth},
+		{core.EngineXray, `{"outbounds":[{"tag":"out","protocol":"freedom"}],"inbounds":[{"tag":"edge","protocol":"socks","port":443,"settings":{"udp":false}}]}`, core.TrafficProtocolTCP},
+		{core.EngineXray, `{"outbounds":[{"tag":"out","protocol":"freedom"}],"inbounds":[{"tag":"edge","protocol":"socks","port":443,"settings":{"udp":true}}]}`, core.TrafficProtocolBoth},
+		{core.EngineXray, `{"outbounds":[{"tag":"out","protocol":"freedom"}],"inbounds":[{"tag":"edge","protocol":"socks","port":443,"settings":{"udp":false},"streamSettings":{"network":"kcp"}}]}`, core.TrafficProtocolBoth},
+	} {
+		endpoints := serverconfig.DiscoverTrafficPorts(tc.engine, tc.config)
+		if len(endpoints) != 1 || endpoints[0].Protocol != tc.want {
+			t.Fatalf("discovery %s: %+v", tc.config, endpoints)
+		}
+		plan, err := serverconfig.PrepareIndependentEgress(tc.engine, tc.config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		protocols := accountingListenerProtocols(tc.engine, plan.Content)
+		if protocols[443] != tc.want {
+			t.Fatalf("accounting %s: %v", tc.config, protocols)
+		}
+		for _, proto := range []core.TrafficProtocol{core.TrafficProtocolTCP, core.TrafficProtocolUDP} {
+			policy := core.PortTrafficPolicy{Engine: tc.engine, Port: 443, InboundTag: "edge", Protocol: proto}
+			issue := nativeAccountingScopeIssue(policy, nativeAccountingSnapshot{Plan: plan, ListenerProtocols: protocols})
+			if (issue == "") != (proto == tc.want) {
+				t.Fatalf("%s %s: %q", tc.config, proto, issue)
+			}
+		}
+	}
+}
+
 func TestSingleTransportInitialFailurePreservesDiagnostic(t *testing.T) {
 	for _, protocol := range []core.TrafficProtocol{core.TrafficProtocolTCP, core.TrafficProtocolUDP} {
 		m, _, _, p := newAccuracyTrafficManager(t)
@@ -262,12 +299,12 @@ func TestMihomoAccountingNeedsEffectiveConfiguration(t *testing.T) {
 	if err := os.WriteFile(spec.ConfigPath, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	e := &Executor{mihomoStartEpoch: "legacy", mihomoStartedAt: time.Now().Add(time.Minute)}
+	e := &Executor{serviceStarts: map[string]cachedServiceStart{spec.Service: {epoch: "legacy", started: time.Now().Add(time.Minute)}}}
 	ctx := context.Background()
 	check := func(p core.PortTrafficPolicy, want bool) {
 		t.Helper()
 		snapshot := nativeAccountingSnapshot{ListenerProtocols: map[int]core.TrafficProtocol{443: core.TrafficProtocolTCP}}
-		if err := e.verifyMihomoAccountingDeployment(ctx, spec, content, "legacy", &snapshot); err != nil {
+		if err := e.verifyAccountingDeployment(ctx, spec, content, "legacy", &snapshot); err != nil {
 			t.Fatal(err)
 		}
 		if issue := nativeAccountingScopeIssue(p, snapshot); (issue == "") != want {
@@ -276,7 +313,7 @@ func TestMihomoAccountingNeedsEffectiveConfiguration(t *testing.T) {
 	}
 	p := core.PortTrafficPolicy{Engine: core.EngineMihomo, Protocol: core.TrafficProtocolTCP, Port: 443, ConfigID: "fixture", ConfigVersion: 1}
 	check(p, true)
-	e.mihomoStartedAt = time.Now().Add(-time.Minute)
+	e.serviceStarts[spec.Service] = cachedServiceStart{epoch: "legacy", started: time.Now().Add(-time.Minute)}
 	check(p, false)
 	state := sharedDeploymentState{ConfigID: p.ConfigID, ConfigVersion: 1, Digest: configurationDigest(content)}
 	for _, tc := range []struct {

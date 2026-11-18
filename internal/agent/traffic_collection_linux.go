@@ -113,7 +113,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			if err != nil {
 				return manager.setUnavailableLocked(err)
 			}
-			retainListener := !shared && record.Policy.Engine == core.EngineMihomo && record.Accounting.Source == "nft-dual"
+			retainListener := !shared && record.Accounting.Source == "nft-dual"
 			oldEpoch := record.CounterEpoch
 			if retainListener && !record.LastCollectedAt.IsZero() {
 				// Both sources count this same listener. Its last measured interval
@@ -157,7 +157,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				if snapshot.Plan.Source == "nft-dual" {
 					err = prepareMarkedAccounting(record, snapshot)
 					if err == nil {
-						if !shared && record.Policy.Engine == core.EngineMihomo && previousEpoch != record.CounterEpoch {
+						if !shared && previousEpoch != record.CounterEpoch {
 							retainListenerCounters(record, previousEpoch, counters)
 						}
 						if shared && (record.Accounting == nil || record.Accounting.Source != "nft-dual") {
@@ -186,7 +186,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 							// Target counters start at zero; no historical exit is estimated.
 							record.Accounting.ClientReceived = saturatedTrafficAdd(record.Accounting.ClientReceived, receivedDelta)
 							record.Accounting.ClientSent = saturatedTrafficAdd(record.Accounting.ClientSent, sentDelta)
-						} else if !shared && record.Policy.Engine == core.EngineMihomo && previousEpoch != record.CounterEpoch && !previousRecord.LastCollectedAt.IsZero() &&
+						} else if !shared && previousEpoch != record.CounterEpoch && !previousRecord.LastCollectedAt.IsZero() &&
 							(previousRecord.Accounting == nil || previousRecord.Accounting.Source == "listener") {
 							// This delta starts at an in-process sample. A restored
 							// checkpoint may overlap a report already accepted by the panel.
