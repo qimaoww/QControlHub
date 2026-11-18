@@ -400,6 +400,22 @@ func verifyManagedNginxPackageUpgrade(t *testing.T, m *tlsFrontendManager, deplo
 		}
 	}
 	build := "upgrade-fixture"
+	t.Run("independent-nginx-pid-file", func(t *testing.T) {
+		// An upstream APT package can invoke binary upgrade directly when
+		// the separate service's PID file exists.
+		const path = "/run/nginx.pid"
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(path) })
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.checkIndependentNginx(ctx); err == nil {
+			t.Fatal("independent PID file allowed unattended package installation")
+		}
+	})
 	unavailable := errors.New("repository unavailable")
 	failed := func(context.Context, string) (string, error) { return "", unavailable }
 	if _, err := m.upgradeManagedNginx(ctx, build, false, failed); !errors.Is(err, unavailable) {

@@ -113,7 +113,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		if (request.Action != core.ActionStatus && request.Action != core.ActionUpgradeAgent) || request.Stage || request.Certificates || request.NativeHandoff != "" || len(request.Frontends) != 0 {
 			return errors.New("invalid managed Nginx upgrade request")
 		}
-		output, err := manager.upgradeManagedNginx(ctx, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent, upgradeSystemNginxPackage)
+		output, err := manager.upgradeManagedNginx(ctx, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent, manager.upgradeSystemNginxPackage)
 		if output != "" {
 			fmt.Println(output)
 		}

@@ -162,7 +162,7 @@ func (m *tlsFrontendManager) nginxMasterExecutable(ctx context.Context, service,
 var nginxDebPackage = regexp.MustCompile(`^nginx(-(core|full|light|extras))?(:[a-z0-9-]+)?$`)
 var nginxAPKRevision = regexp.MustCompile(`^nginx-[0-9][a-zA-Z0-9._+~-]*-r[0-9]+$`)
 
-func upgradeSystemNginxPackage(ctx context.Context, binary string) (string, error) {
+func (m *tlsFrontendManager) upgradeSystemNginxPackage(ctx context.Context, binary string) (string, error) {
 	path, err := filepath.EvalSymlinks(binary)
 	if err != nil {
 		return "", err
@@ -172,7 +172,7 @@ func upgradeSystemNginxPackage(ctx context.Context, binary string) (string, erro
 		return "", err
 	}
 	if apt != "" {
-		return upgradeAptNginx(ctx, apt, path)
+		return m.upgradeAptNginx(ctx, apt, path)
 	}
 	apk, err := findIPQualityExecutable("apk")
 	if err != nil {
@@ -184,7 +184,7 @@ func upgradeSystemNginxPackage(ctx context.Context, binary string) (string, erro
 	return "", errors.New("此软件源需由管理员更新 Nginx 软件包并重启托管服务")
 }
 
-func upgradeAptNginx(ctx context.Context, apt, binary string) (string, error) {
+func (m *tlsFrontendManager) upgradeAptNginx(ctx context.Context, apt, binary string) (string, error) {
 	query, err := findIPQualityExecutable("dpkg-query")
 	if err != nil || query == "" {
 		return "", errors.New("无法核对 Nginx 的 Debian 软件包归属")
@@ -196,6 +196,11 @@ func upgradeAptNginx(ctx context.Context, apt, binary string) (string, error) {
 	}
 	if _, err := runIPQualityCommandWithRestartMode(ctx, apt, []string{"-o", "Acquire::Retries=2", "--error-on=any", "update"}, "l"); err != nil {
 		return "", fmt.Errorf("更新 APT 软件包索引失败：%w", err)
+	}
+	// The upstream package can call the SysV binary upgrade directly when
+	// /run/nginx.pid exists, bypassing policy-rc.d.
+	if err := m.checkIndependentNginx(ctx); err != nil {
+		return "", err
 	}
 	cleanup, err := protectAptServices(ctx, "start", "stop", "restart", "try-restart", "reload", "force-reload", "upgrade")
 	if err != nil {
@@ -212,6 +217,26 @@ func upgradeAptNginx(ctx context.Context, apt, binary string) (string, error) {
 		return "", errors.New("无法核对已安装的 Nginx 软件包修订号")
 	}
 	return name + " " + strings.TrimSpace(revision), nil
+}
+
+func (m *tlsFrontendManager) checkIndependentNginx(ctx context.Context) error {
+	if _, err := os.Lstat("/run/nginx.pid"); !errors.Is(err, os.ErrNotExist) {
+		return errors.New("检测到独立 Nginx 进程文件或无法核对，请在维护窗口手动更新系统包")
+	}
+	service := "nginx"
+	if m.services.Kind() == ServiceManagerSystemd {
+		service += ".service"
+	}
+	status, err := m.services.status(ctx, service)
+	if err != nil {
+		return fmt.Errorf("无法核对独立 Nginx 服务状态：%w", err)
+	}
+	switch status {
+	case "inactive", "failed":
+		return nil
+	default:
+		return errors.New("独立 Nginx 服务正在使用系统包，请在维护窗口手动更新")
+	}
 }
 
 func upgradeAPKNginx(ctx context.Context, apk, binary string) (string, error) {
