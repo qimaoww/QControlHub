@@ -16,7 +16,7 @@ import {
   renderPacificMapSVG,
 } from "./dashboard-map.js";
 import { readout } from "./dashboard-console.js";
-import { renderLinkMap, renderLinkTrace } from "./dashboard-linkmap.js";
+import { blendLinkCamera, linkMapCamera, openingLinkCamera, renderLinkMap, renderLinkTrace, sameLinkCamera } from "./dashboard-linkmap.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import {
   clusterTopologyNodes,
@@ -248,6 +248,11 @@ export function createDashboardTopologySection(ctx, {
     dims: { width: 1160, mapHeight: 560 },
     svgEl: null,
   };
+  // Dashboard link map camera: where it is, where it is heading and the glide between.
+  let linkCamera = null;
+  let linkGoal = null;
+  let linkWidth = 0;
+  let linkGlide = 0;
   let lastActiveGroup = null;
   let lastGroups = [];
   let lastFleetModel = null;
@@ -263,6 +268,7 @@ export function createDashboardTopologySection(ctx, {
   ctx.signal.addEventListener("abort", () => {
     disposed = true;
     paintScheduled = false;
+    cancelAnimationFrame(linkGlide);
     clearPendingZoomCommit();
     lastActiveGroup = null;
     lastFleetModel = null;
@@ -1546,12 +1552,53 @@ export function createDashboardTopologySection(ctx, {
     );
   };
 
+  // A camera in flight draws a lighter draft of the globe.
+  const drawLinkMap = (group) => renderLinkMap(group, { width: linkWidth, focusKey: focusedItemKey, camera: linkCamera, draft: linkGlide !== 0 });
+
+  // Flies the camera to its goal, redrawing the live map on every frame.
+  const glideLinkMap = (from, duration) => {
+    cancelAnimationFrame(linkGlide);
+    const goal = linkGoal;
+    let started = 0;
+    const step = (now) => {
+      if (disposed || goal !== linkGoal) return;
+      if (!started) started = now;
+      const t = Math.min(1, (now - started) / duration);
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(2 - 2 * t, 3) / 2;
+      linkCamera = t < 1 ? blendLinkCamera(from, goal, eased) : goal;
+      linkGlide = t < 1 ? requestAnimationFrame(step) : 0;
+      const live = bodyHost.querySelector("svg.a-lm");
+      if (live && lastActiveGroup) patch(live, drawLinkMap(lastActiveGroup));
+    };
+    linkGlide = requestAnimationFrame(step);
+  };
+
+  // Points the camera at a group. The first view flies in and a change of
+  // group glides across; a resize, or motion switched off, cuts straight there.
+  const aimLinkMap = (group, width) => {
+    const goal = linkMapCamera(group, width);
+    const resized = width !== linkWidth;
+    linkWidth = width;
+    if (!resized && sameLinkCamera(goal, linkGoal)) return;
+    const from = linkCamera;
+    linkGoal = goal;
+    if (!allowMotion() || (from && resized)) {
+      cancelAnimationFrame(linkGlide);
+      linkGlide = 0;
+      linkCamera = goal;
+      return;
+    }
+    linkCamera = from || openingLinkCamera(goal);
+    glideLinkMap(linkCamera, from ? 900 : 1200);
+  };
+
   // Dashboard workspace: the map with the reading rail beside it.
   const renderLinkDeck = (group, renderWidth) => {
     // The rail takes 12rem once the card is 64rem wide; the map is drawn at the width left.
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const mapWidth = renderWidth >= 64 * rem ? renderWidth - 12 * rem : renderWidth;
-    const map = renderLinkMap(group, { width: mapWidth, focusKey: focusedItemKey });
+    aimLinkMap(group, mapWidth);
+    const map = drawLinkMap(group);
     listen(map, "click", pressLinkMap);
     listen(map, "keydown", keyLinkMap);
     return node("div", {
