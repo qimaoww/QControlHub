@@ -452,7 +452,7 @@ strong, b { font-weight: 600; }
 
 /* Port identity remains readable with all actions in reach on narrow screens. */
 .a-port-list table { table-layout: fixed; }
-.a-port-list td:first-child:not([data-column="节点"]) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.a-port-list td:first-child:not([data-column="节点"]) { font-variant-numeric: tabular-nums; }
 .a-port-list td:last-child > .a-actions { min-width: 0; }
 @media (max-width: 48rem) {
   .a-port-list .a-table-scroll { overflow: visible; }

@@ -66,6 +66,12 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
   for (const viewport of viewports) {
     await resize(viewport);
     assert(await run("document.documentElement.scrollWidth<=innerWidth+1"),'native inventory overflows viewport');
+    assert(await run(`(() => {
+      const cell = ${row('native-range')}.cells[0];
+      const text = document.createRange();
+      text.selectNodeContents(cell);
+      return [...text.getClientRects()].every(rect => rect.right <= cell.getBoundingClientRect().right + 1);
+    })()`),`port range overlaps the adjacent cell at ${viewport.join('x')}`);
     await screenshot(page,`native-inbounds-${viewport.join('x')}`);
   }
   await resize(viewports[0]);
