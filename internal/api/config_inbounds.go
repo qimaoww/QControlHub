@@ -162,7 +162,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				return
 			}
 		}
-		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID, input.InstallIfMissing)
+		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID, input.InstallIfMissing, snapshotMetadataReset(input.SnapshotTaskID))
 		return
 	}
 	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {

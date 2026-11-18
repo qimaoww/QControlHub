@@ -27,6 +27,29 @@ const mixedNativeXraySource = `{
   "routing":{"rules":[{"type":"field","inboundTag":["native-range"],"outboundTag":"direct"}]}
 }`
 
+func TestWorkspaceInboundRowsDistinguishSSRustRootFromFirstArrayEntry(t *testing.T) {
+	const engine = core.EngineShadowsocksRust
+	const source = `{"id":"root","server":"127.0.0.1","server_port":21001,"method":"aes-128-gcm","password":"fixture-only","servers":[{"id":"first","server":"::1","server_port":21001,"method":"aes-128-gcm","password":"fixture-only-v6"}]}`
+	for _, tc := range []struct {
+		name, source string
+		projectedRow int
+	}{
+		{"root projection", source, 0},
+		{"array projection", strings.Replace(source, `"method":"aes-128-gcm","password":"fixture-only"`, `"method":"none"`, 1), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inventory, err := serverconfig.DiscoverNativeInbounds(engine, tc.source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := workspaceInboundRows(inventory, serverconfig.ParseAll(engine, tc.source))
+			if len(rows) != 2 || rows[tc.projectedRow].ProjectionIndex == nil || rows[1-tc.projectedRow].ProjectionIndex != nil {
+				t.Fatal("root and array identities shared a projection")
+			}
+		})
+	}
+}
+
 func TestNativeInboundInventoryAcrossKernels(t *testing.T) {
 	for _, tc := range []struct {
 		engine core.Engine
@@ -225,14 +248,23 @@ func TestWorkspaceRecognitionDoesNotReuseMetadataAcrossSources(t *testing.T) {
 	}, 400, nil)
 }
 
-func TestPresetSnapshotEditDoesNotCopySavedClientMetadata(t *testing.T) {
+func TestSnapshotEditsDoNotCopySavedClientMetadata(t *testing.T) {
+	for _, operation := range []string{"preset", "native fragment", "outbound binding"} {
+		t.Run(operation, func(t *testing.T) {
+			testSnapshotEditMetadata(t, operation)
+		})
+	}
+}
+
+func testSnapshotEditMetadata(t *testing.T, operation string) {
+	t.Helper()
 	db, ctx, _, owner, _ := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "snapshot-with-detached-client-host", core.EngineXray)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	base := "/agents/" + agent.ID + "/configs/xray"
-	content := `{"inbounds":[{"tag":"ws","listen":"127.0.0.1","port":21001,"protocol":"vmess","settings":{"clients":[{"id":"123e4567-e89b-42d3-a456-426614174001"}]},"streamSettings":{"network":"ws","wsSettings":{"path":"/native"}}}],"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
+	content := `{"inbounds":[{"tag":"ws","listen":"127.0.0.1","port":21001,"protocol":"vmess","settings":{"clients":[{"id":"123e4567-e89b-42d3-a456-426614174001"}]},"streamSettings":{"network":"ws","wsSettings":{"path":"/native"}}}],"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"backup","protocol":"freedom"}]}`
 	parsed, ok := serverconfig.Parse(core.EngineXray, content)
 	if !ok || !serverconfig.CanEditNativePreset(core.EngineXray, parsed) {
 		t.Fatal("plaintext WebSocket preset did not parse")
@@ -262,20 +294,39 @@ func TestPresetSnapshotEditDoesNotCopySavedClientMetadata(t *testing.T) {
 	if snapshot.Inbounds[0].TransportHost != "" || !snapshot.InboundRows[0].PresetEditable {
 		t.Fatal("snapshot read reused detached host metadata")
 	}
-	input := snapshot.Inbounds[0]
-	input.Port = 21002
+	port, metadataCount := 21001, 0
 	var result configMutationResult
-	owner.call("POST", base+"/server-inbounds", map[string]any{
-		"operation": "modify", "original_tag": "ws", "expected_version": saved.Version,
-		"snapshot_task_id": read.ID, "intent": "validate", "input": input,
-	}, 200, &result)
+	switch operation {
+	case "preset":
+		port, metadataCount = 21002, 1
+		input := snapshot.Inbounds[0]
+		input.Port = port
+		owner.call("POST", base+"/server-inbounds", map[string]any{
+			"operation": "modify", "original_tag": "ws", "expected_version": saved.Version,
+			"snapshot_task_id": read.ID, "intent": "validate", "input": input,
+		}, 200, &result)
+	case "native fragment":
+		fragment, _, err := serverconfig.InboundSource(core.EngineXray, content, parsed.Tag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner.call("POST", base+"/server-inbounds", map[string]any{
+			"operation": "modify", "original_tag": "ws", "expected_version": saved.Version,
+			"snapshot_task_id": read.ID, "intent": "validate", "fragment": fragment,
+		}, 200, &result)
+	case "outbound binding":
+		owner.call("POST", base+"/outbounds", map[string]any{
+			"operation": "bind", "section": "outbounds", "tag": "backup", "inbound_tag": "ws", "inbound_port": port,
+			"snapshot_task_id": read.ID, "intent": "validate", "version": saved.Version,
+		}, 200, &result)
+	}
 	values, err := db.ConfigClientMetadata(store.WithConfigScope(ctx, owner.userID, false), result.Config.ID, result.Config.Version)
-	if err != nil || len(values) != 1 || strings.Contains(values["ws"], "saved.example.test") {
+	if err != nil || len(values) != metadataCount || strings.Contains(values["ws"], "saved.example.test") {
 		t.Fatalf("saved snapshot edit inherited unrelated client metadata: %v", err)
 	}
 	var reopened agentConfigWorkspaceResource
 	owner.call("GET", base+"/workspace", nil, 200, &reopened)
-	if reopened.Inbounds[0].TransportHost != "" || reopened.Inbounds[0].Port != 21002 {
+	if reopened.Inbounds[0].TransportHost != "" || reopened.Inbounds[0].Port != port {
 		t.Fatal("snapshot save restored the previous detached client host")
 	}
 }

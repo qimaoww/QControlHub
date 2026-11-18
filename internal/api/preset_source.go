@@ -75,12 +75,8 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
-	var metadataMutation *store.ConfigClientMetadataMutation
-	if input.SnapshotTaskID != "" {
-		metadataMutation = &store.ConfigClientMetadataMutation{Delete: true, ReplaceAll: true}
-	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.Version,
-		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID, InstallIfMissing: input.InstallIfMissing, ClientMetadata: metadataMutation})
+		store.ConfigMutationOptions{TaskID: request.Header.Get("X-Config-Task-ID"), Action: core.Action(input.Intent), MainlandPolicies: policies, ExpectedInstanceID: input.ExpectedInstanceID, InstallIfMissing: input.InstallIfMissing, ClientMetadata: snapshotMetadataReset(input.SnapshotTaskID)})
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -89,4 +85,11 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 	s.refreshSavedAgentTrafficMonitoring(request.Context(), agent.ID)
 	s.recordAudit(request, "agent_config.source_saved", saved.ID, string(engine)+" "+agent.ID)
 	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
+}
+
+func snapshotMetadataReset(snapshot string) *store.ConfigClientMetadataMutation {
+	if snapshot == "" {
+		return nil
+	}
+	return &store.ConfigClientMetadataMutation{Delete: true, ReplaceAll: true}
 }

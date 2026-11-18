@@ -160,7 +160,11 @@ func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
 			return false
 		}
 	case core.EngineShadowsocksRust:
-		listKey, allowed = "servers", "servers mode timeout no_delay fast_open keep_alive dns ipv6_first ipv6_only acl workers outbound_bind_addr outbound_bind_interface nofile tcp_keep_alive tcp_nodelay udp_timeout udp_max_associations udp_mtu"
+		listKey = "servers"
+		if _, alias := root["shadowsocks"]; alias {
+			listKey = "shadowsocks"
+		}
+		allowed = listKey + " mode timeout no_delay fast_open keep_alive dns ipv6_first ipv6_only acl workers outbound_bind_addr outbound_bind_interface nofile tcp_keep_alive tcp_nodelay udp_timeout udp_max_associations udp_mtu"
 	default:
 		return false
 	}

@@ -49,7 +49,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 		}
 		if input, ok := parseShadowsocksRustEntry(root, shadowsocksRustSingleTag(root)); ok {
 			input.parsedEngine = engine
-			input.ProjectionSection, input.ProjectionIndex = "servers", 0
+			input.ProjectionSection, input.ProjectionIndex = "servers", ssRustRootSourceIndex
 			return []Input{input}
 		}
 		section, entries, ok := shadowsocksRustExtendedEntries(root)

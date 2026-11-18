@@ -271,7 +271,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     const native = input && operation === 'modify' && button('完整入站配置',async event=>{
       const control = event.currentTarget;
       if (!ctx.current()) return;
-      await ctx.mutate(control,()=>inboundSource(input,box,()=>ctx.setDirty(JSON.stringify(read())!==JSON.stringify(baseline))));
+      await ctx.mutate(control,()=>inboundSource(input,box,chosen,()=>ctx.setDirty(JSON.stringify(read())!==JSON.stringify(baseline))));
     });
     const form = ctx.form([protocolSelect,area,actions(regenerate,native),protocolHint,intents(),feedback],'保存并部署',async values=>{
       if(!protocol || !baseline || protocol.key !== form.elements.protocol.value) throw new Error('请等待方案加载');
@@ -423,13 +423,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     box=ctx.dialog(title,form,{wide:true});
     track(form,box); await choose();
   }
-  function inboundSource(target,parent,restoreDirty) {
-    return preparedDialog(ctx, `${target.tag} · 入站源码`, ['入站源码'], local => inboundSourceLoaded(local, target, parent, restoreDirty));
+  function inboundSource(target,parent,selection,restoreDirty) {
+    return preparedDialog(ctx, `${target.tag} · 入站源码`, ['入站源码'], local => inboundSourceLoaded(local, target, parent, selection, restoreDirty));
   }
-  async function inboundSourceLoaded(ctx, target,parent,restoreDirty) {
-    if (!await latest(ctx) || !current.config) return;
-    const config=current.config, draft=getDraft();
-    const child = await editInboundSource(ctx,{target,agent,engine,base,workspace:current,preparing,write,committed:async(result,editor)=>{parent?.close();await committed(result,editor);},track,isCurrent:()=>ctx.current()&&current.config===config&&getDraft()===draft});
+  async function inboundSourceLoaded(ctx,target,parent,selection,restoreDirty) {
+    if (!await latest(ctx, selection) || !current.config) return;
+    const chosen = current, draft = getDraft();
+    const child = await editInboundSource(ctx,{target,agent,engine,base,workspace:chosen,preparing,write,committed:async(result,editor)=>{parent?.close();await committed(result,editor);},track,isCurrent:()=>ctx.current()&&sameSelection(current,chosen)&&getDraft()===draft});
     child?.addEventListener('close',()=>{if(parent?.isConnected&&parent.open)restoreDirty?.();},{once:true});
   }
   function files(selection) {
@@ -523,13 +523,16 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     box.addEventListener('close',()=>preset?.dispose(),{once:true});
     try {
       if(!loaded&&!await latest(ctx)||!ctx.current()||!box.isConnected||!current.config&&operation!=='add')return;
-      const config=current.config||{version:0}, selecting=operation==='bind', deleting=operation==='delete';
+      const selection = current, config = selection.config || {version:0};
+      const snapshot = selection.snapshot_task_id, snapshotQuery = snapshot ? `?snapshot=${pathID(snapshot)}` : '';
+      const selecting=operation==='bind', deleting=operation==='delete';
       const sections=engine==='mihomo'?[['proxies','代理'],['proxy-groups','代理组']]:[['outbounds','出站']];
       const sectionName=object?.section||sections[0][0];
       let initialObject, content=engine==='mihomo'?`name: ${inbound?`exit-${inbound.port}`:'new-exit'}\ntype: direct\n`:JSON.stringify({tag:inbound?`exit-${inbound.port}`:'new-exit',[engine==='xray'?'protocol':'type']:engine==='xray'?'freedom':'direct'},null,2);
       if(object&&!selecting){
-        const selected=await ctx.api(`${base}/outbounds/${pathID(object.section)}/${pathID(object.tag)}${current.snapshot_task_id?`?snapshot=${pathID(current.snapshot_task_id)}`:''}`);
+        const selected=await ctx.api(`${base}/outbounds/${pathID(object.section)}/${pathID(object.tag)}${snapshotQuery}`);
         if(!ctx.current()||!box.isConnected)return;
+        requireSelection(selection);
         if(selected.version!==config.version)throw new Error('配置已变化，请重新读取');
         content=selected.fragment; initialObject=selected.object?JSON.parse(selected.object):undefined;
       }
@@ -544,7 +547,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         if(!selecting&&!deleting&&engine!=='mihomo'){try{JSON.parse(raw);}catch(error){throw new Error('出站 JSON 格式无效，请检查后重试。',{cause:error});}}
         if(object&&operation==='modify'&&!await ctx.confirm(`更新“${object.tag}”及其所有引用？`,'更新出站'))return;
         if(!await preparing(values.intent))return;
-        const result=await write(`${base}/outbounds`,{version:config.version,snapshot_task_id:current.snapshot_task_id,intent:values.intent,section:object?.section||values.section||sectionName,tag:selecting?values.tag:object?.tag||'',fragment:deleting||selecting?'':raw,preset_base:operation==='modify'&&activePreset()?preset.baseline():'',replacement_tag:values.replacement_tag||'',operation,
+        requireSelection(selection);
+        const result=await write(`${base}/outbounds`,{version:config.version,snapshot_task_id:snapshot,intent:values.intent,section:object?.section||values.section||sectionName,tag:selecting?values.tag:object?.tag||'',fragment:deleting||selecting?'':raw,preset_base:operation==='modify'&&activePreset()?preset.baseline():'',replacement_tag:values.replacement_tag||'',operation,
           ...(['add','bind'].includes(operation)&&inbound?{inbound_tag:inbound.tag,inbound_port:inbound.port}:{})},box);
         await committed(result,box);
       });
@@ -559,8 +563,8 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
           const tag=form.elements.tag.value, selected=entries.find(item=>item.tag===tag), request=++epoch;
           form.elements.fragment.value='';if(!selected)return;
           try {
-            const result=await ctx.api(`${base}/outbounds/${pathID(selected.section)}/${pathID(tag)}${current.snapshot_task_id?`?snapshot=${pathID(current.snapshot_task_id)}`:''}`);
-            if(!ctx.current()||!box.isConnected||request!==epoch)return;
+            const result=await ctx.api(`${base}/outbounds/${pathID(selected.section)}/${pathID(tag)}${snapshotQuery}`);
+            if(!ctx.current()||!box.isConnected||request!==epoch||!sameSelection(current,selection))return;
             if(result.version!==config.version)throw new Error('配置已变化，请重新读取');
             form.elements.fragment.value=result.fragment;
           }catch(error){if(ctx.current()&&box.isConnected&&request===epoch)ctx.announce(error.message,'error');}

@@ -179,15 +179,19 @@ func TestNativeInboundInventoryDoesNotRequireProjectionOrPolicy(t *testing.T) {
 			{"tag":"socket","protocol":"vmess","listen":"/tmp/example.sock"},
 			{"tag":"internal","protocol":"dokodemo-door","listen":"127.0.0.1","port":10085},
 			{"tag":"qch-stat-api","protocol":"dokodemo-door","port":10086},
-			{"tag":"qch-trf-aux","protocol":"http","port":21004}
+			{"tag":"qch-trf-custom","protocol":"http","port":21004},
+			{"tag":"qch-stat-custom","protocol":"http","port":21005}
 		],"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
 	rows, err := DiscoverNativeInbounds(core.EngineXray, source)
-	if err != nil || len(rows) != 5 {
+	if err != nil || len(rows) != 7 {
 		t.Fatalf("native row enumeration: %d, %v", len(rows), err)
 	}
 	if rows[0].TargetTag != "" || rows[1].TargetTag != "" || rows[0].Listen != "127.0.0.1" || rows[1].Listen != "::1" ||
 		rows[2].Tag != "" || rows[2].Port != 21002 || rows[2].TargetTag != "" || rows[3].Port != 0 || rows[4].Port != 0 || rows[4].Listen != "/tmp/example.sock" {
 		t.Fatal("native rows lost display identity or acquired an ambiguous target")
+	}
+	if rows[5].Tag != "qch-trf-custom" || rows[6].Tag != "qch-stat-custom" {
+		t.Fatal("user inbounds were mistaken for generated outbounds")
 	}
 	for _, tc := range []struct {
 		engine core.Engine

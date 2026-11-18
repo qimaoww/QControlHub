@@ -11,6 +11,8 @@ import (
 
 var xrayPortSpec = regexp.MustCompile(`^(env:[A-Za-z_][A-Za-z0-9_]*|[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*)$`)
 
+const ssRustRootSourceIndex = -1
+
 // NativeInbound describes a source row even when there is no preset or
 // routable access-policy target. TargetTag is present only for an unambiguous
 // native identity. A legacy SS Rust singleton has an implicit identity, but
@@ -59,7 +61,7 @@ func DiscoverNativeInbounds(engine core.Engine, content string) ([]NativeInbound
 		(root["servers"] != nil && root["shadowsocks"] != nil || single && (root["servers"] != nil || root["shadowsocks"] != nil))
 	if single {
 		row := describeNativeInbound(engine, "servers", root, root)
-		row.SourceIndex = 0
+		row.SourceIndex = ssRustRootSourceIndex
 		if !ssRustMixed {
 			row.TargetTag = shadowsocksRustSingleTag(root)
 		}
@@ -104,8 +106,8 @@ func DiscoverNativeInbounds(engine core.Engine, content string) ([]NativeInbound
 }
 
 func hiddenNativeInbound(engine core.Engine, root, entry map[string]any, tag string) bool {
-	return strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-") ||
-		engine == core.EngineXray && (xrayInternalAPIInbound(root, entry) || strings.HasSuffix(tag, ".xh") && xhttpGroupOwner(root, tag) != "")
+	return engine == core.EngineXray && (tag == "qch-stat-api" || xrayInternalAPIInbound(root, entry) ||
+		strings.HasSuffix(tag, ".xh") && xhttpGroupOwner(root, tag) != "")
 }
 
 func describeNativeInbound(engine core.Engine, section string, root, entry map[string]any) NativeInbound {

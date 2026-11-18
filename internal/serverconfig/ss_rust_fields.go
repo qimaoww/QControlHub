@@ -30,7 +30,7 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 	if _, ok := parseShadowsocksRust(generated); !ok && operation != "delete" {
 		return "", errors.New("生成配置缺少完整服务端字段")
 	}
-	if original["server_port"] != nil {
+	if original["server_port"] != nil || original["server"] != nil {
 		parsed, valid := parseShadowsocksRust(current)
 		if operation == "modify" && original["servers"] == nil && original["shadowsocks"] == nil {
 			if !valid || parsed.Tag != tag {
@@ -40,7 +40,11 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 			encoded, err := json.MarshalIndent(original, "", "  ")
 			return string(encoded) + "\n", err
 		}
-		root, entry, commit, err := ssRustFieldTarget(current, parsed.Tag, "server")
+		selectedTag := parsed.Tag
+		if operation == "delete" {
+			selectedTag = tag
+		}
+		root, entry, commit, err := ssRustFieldTarget(current, selectedTag, "server")
 		if err != nil {
 			return "", err
 		}
@@ -339,7 +343,7 @@ func ssRustFieldTarget(content, tag, key string) (map[string]json.RawMessage, ma
 		}
 	}
 	if listKey == "" {
-		if parsed, ok := parseShadowsocksRust(content); !ok || tag != parsed.Tag {
+		if (root["server"] == nil && root["server_port"] == nil) || tag != shadowsocksRustSingleTag(ssRustRawIdentity(root)) {
 			return fail(fmt.Errorf("SS Rust 端口 %q 不存在", tag))
 		}
 		entry := make(map[string]json.RawMessage)
@@ -390,11 +394,15 @@ func ssRustFieldTarget(content, tag, key string) (map[string]json.RawMessage, ma
 }
 
 func ssRustRawEntryTag(entry map[string]json.RawMessage, index int) string {
+	return shadowsocksRustEntryTag(ssRustRawIdentity(entry), index)
+}
+
+func ssRustRawIdentity(entry map[string]json.RawMessage) map[string]any {
 	identity := make(map[string]any)
 	for _, name := range []string{"id", "remarks", "name"} {
 		var value string
 		_ = json.Unmarshal(entry[name], &value)
 		identity[name] = value
 	}
-	return shadowsocksRustEntryTag(identity, index)
+	return identity
 }
