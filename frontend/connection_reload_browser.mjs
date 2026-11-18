@@ -179,6 +179,27 @@ try {
   })`);
   const beforeCorruption = await counts(); await reload(); await wait(ready);
   assert.equal((await counts()).reads, beforeCorruption.reads + 1, "corrupt pages must use an authoritative read");
+  // A valid-looking entry can lie about its stored weight. Reject it
+  // before retaining the payload, then reload the authorized page normally.
+  await evaluate(`new Promise((resolve, reject) => {
+    const open = indexedDB.open("qcontrolhub:connections", 1);
+    open.onerror = reject;
+    open.onsuccess = () => {
+      const tx = open.result.transaction("pages", "readwrite"), store = tx.objectStore("pages");
+      store.openCursor().onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) return;
+        if (cursor.value.kind === "page" && cursor.value.scope.endsWith(":3")) {
+          cursor.update({ ...cursor.value, result: { ...cursor.value.result, metadata: "x".repeat(256 * 1024) }, bytes: 1 });
+        }
+        cursor.continue();
+      };
+      tx.oncomplete = () => { open.result.close(); resolve(true); };
+      tx.onabort = reject;
+    };
+  })`);
+  const beforeOversize = await counts(); await reload(); await wait(ready);
+  assert.equal((await counts()).reads, beforeOversize.reads + 1, "oversized stored page ignored its actual size");
   for (const storage of ['quota', 'disabled']) {
     await configure({ storage }); await reload(); await wait(ready);
     await refresh(); await wait(ready); assert.ok(await evaluate(rows) > 0, 'storage failure prevented API fallback');

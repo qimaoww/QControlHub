@@ -61,10 +61,29 @@ function trimPersistent(store, capacity, expired) {
 
 // Avoid serializing result payloads just to estimate their size. Each page
 // counts toward both the memory limit and a fixed share of the disk budget.
-function estimatedSize(value) {
-  if (typeof value === "string") return value.length * 2 + 16;
-  if (!value || typeof value !== "object") return 16;
-  return Object.entries(value).reduce((size, [key, item]) => size + 16 + key.length * 2 + estimatedSize(item), 32);
+function estimatedSize(value, limit) {
+  let remaining = limit;
+  // Connection pages contain shallow JSON. Stop at the budget even for an
+  // exceptionally wide array or an unexpected nested/cyclic stored entry.
+  function visit(item, depth) {
+    if (typeof item === "string") remaining -= item.length * 2 + 16;
+    else if (!item || typeof item !== "object") remaining -= 16;
+    else if (depth === 0) remaining = -1;
+    else if (Array.isArray(item)) {
+      remaining -= 32 + item.length * 16;
+      for (let i = 0; i < item.length && remaining >= 0; i++) visit(item[i], depth - 1);
+    } else {
+      remaining -= 32;
+      for (const key in item) {
+        if (remaining < 0) break;
+        if (!Object.hasOwn(item, key)) continue;
+        remaining -= 16 + key.length * 2;
+        visit(item[key], depth - 1);
+      }
+    }
+  }
+  visit(value, 12);
+  return remaining < 0 ? Infinity : limit - remaining;
 }
 
 const validResult = result => result && Array.isArray(result.records) && Array.isArray(result.sources)
@@ -85,7 +104,8 @@ const validSelection = saved => saved?.filters && typeof saved.filters.date === 
 
 export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl = 24 * 60 * 60_000, maxEntries = 24, maxBytes = 4 * 1024 * 1024, database = openConnectionDatabase() } = {}) {
   const entries = new Map(), pending = new Set();
-  let scope = "", selection = null, selectionTime = 0, generation = 0, bytes = 0;
+  let scope = "", selection = null, selectionTime = 0, generation = 0, bytes = 0, queuedBytes = 0;
+  const diskPageBudget = Math.floor(maxBytes / maxEntries);
   const withinLifetime = at => Number.isFinite(at) && now() >= at && now() - at < historyTtl;
   const remove = key => {
     bytes -= entries.get(key)?.bytes || 0;
@@ -106,8 +126,9 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
     return task;
   };
   const write = entry => {
-    if (!scope || entry.bytes > maxBytes / maxEntries) return;
+    if (!scope || entry.bytes > diskPageBudget || queuedBytes + entry.bytes > maxBytes || pending.size >= maxEntries) return;
     const version = generation;
+    queuedBytes += entry.bytes;
     void run(db => {
       if (version !== generation) return;
       return transaction(db, "readwrite", store => {
@@ -122,7 +143,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
           trimPersistent(store, maxEntries, now() - historyTtl);
         };
       });
-    });
+    }).finally(() => { queuedBytes -= entry.bytes; });
   };
   const reset = verifiedScope => {
     ++generation; scope = verifiedScope; entries.clear(); selection = null; selectionTime = 0; bytes = 0;
@@ -135,25 +156,43 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
       if (!verifiedScope) { reset(""); return; }
       if (scope !== verifiedScope) reset(verifiedScope);
       const version = generation;
-      const saved = await run(db => transaction(db, "readonly", store => store.getAll(scopeRange(verifiedScope), maxEntries)));
-      if (generation !== version || !current()) return;
-      for (const entry of (saved || []).sort((a, b) => a.at - b.at)) {
-        if (!withinLifetime(entry.at) || entry.scope !== scope || !Number.isFinite(entry.observedAt) || !Number.isFinite(entry.bytes) || entry.bytes <= 0) continue;
-        if (entry.kind === "page" && validResult(entry.result) && entry.result.cache_scope === scope
-          && (entries.get(entry.key)?.observedAt ?? -Infinity) < entry.observedAt) retain(entry);
-        if (entry.kind === "position" && entry.observedAt > selectionTime && validSelection(entry.value)) {
-          selection = entry.value; selectionTime = entry.observedAt;
-        }
-      }
-      prune();
+      // IndexedDB clones each value before JavaScript can validate it. Walk
+      // one page at a time instead of cloning the whole account's cache.
+      await run(db => transaction(db, "readonly", store => {
+        const request = store.openCursor(scopeRange(verifiedScope));
+        let visited = 0;
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor || generation !== version || !current()) return;
+          const entry = cursor.value;
+          if (entry.scope === scope && withinLifetime(entry.at) && Number.isFinite(entry.observedAt)
+            && Number.isFinite(entry.bytes) && entry.bytes > 0 && entry.bytes <= diskPageBudget) {
+            // Recount values rather than trusting persisted size metadata.
+            const size = estimatedSize(entry, diskPageBudget);
+            if (Number.isFinite(size)) {
+              if (entry.kind === "page" && validResult(entry.result) && entry.result.cache_scope === scope
+                && (entries.get(entry.key)?.observedAt ?? -Infinity) < entry.observedAt) {
+                retain({ ...entry, bytes: size }); prune();
+              }
+              if (entry.kind === "position" && entry.observedAt > selectionTime && validSelection(entry.value)) {
+                selection = entry.value; selectionTime = entry.observedAt;
+              }
+            }
+          }
+          if (++visited < maxEntries) cursor.continue();
+        };
+      }));
     },
     bind(verifiedScope) {
       if (verifiedScope && scope !== verifiedScope) reset(verifiedScope);
     },
     select(value, observedAt = now()) {
-      if (observedAt < selectionTime || sameConnectionValue(selection, value)) return;
+      if (observedAt < selectionTime) return;
+      const entry = { scope, kind: "position", key: "", at: now(), observedAt, value, bytes: 0 };
+      entry.bytes = estimatedSize(entry, diskPageBudget);
+      if (!Number.isFinite(entry.bytes) || sameConnectionValue(selection, value)) return;
       selection = value; selectionTime = observedAt;
-      write({ scope, kind: "position", key: "", at: now(), observedAt, value, bytes: estimatedSize(value) });
+      write(entry);
     },
     get(key) {
       prune();
@@ -168,8 +207,8 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, historyTtl
       if (previous && observedAt < previous.observedAt) return;
       // In-memory confirmation may advance the token/time; only a changed
       // data page earns a structured clone and a durable write.
-      const entry = { scope, kind: "page", key, result, at, observedAt, etag };
-      entry.bytes = unchanged && previous ? previous.bytes : estimatedSize(entry);
+      const entry = { scope, kind: "page", key, result, at, observedAt, etag, bytes: 0 };
+      entry.bytes = unchanged && previous ? previous.bytes : estimatedSize(entry, maxBytes);
       if (entry.bytes > maxBytes) { remove(key); return; }
       retain(entry);
       prune();

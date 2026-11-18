@@ -110,3 +110,66 @@ func TestClientConnectionConditionalReadChecksCurrentAuthority(t *testing.T) {
 		t.Fatalf("revoked history used previous entity: %+v", restricted)
 	}
 }
+
+type heldConnectionWriter struct {
+	*httptest.ResponseRecorder
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (w heldConnectionWriter) Write(body []byte) (int, error) {
+	w.entered <- struct{}{}
+	<-w.release
+	return w.ResponseRecorder.Write(body)
+}
+
+func TestClientConnectionReadSlotsCoverResponseAndRecover(t *testing.T) {
+	db, _, admin, _, _ := newConfigScopeAPIFixture(t)
+	h := New(db, Config{AdminToken: admin.token}).Handler()
+	request := func() *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/client-connections?scope_only=true", nil)
+		r.Header.Set("Authorization", "Bearer "+admin.token)
+		return r
+	}
+	entered := make(chan struct{}, clientConnectionConcurrentReads)
+	release := make(chan struct{})
+	defer func() {
+		if release != nil {
+			close(release)
+		}
+	}()
+	completed := make(chan int, clientConnectionConcurrentReads)
+	for range clientConnectionConcurrentReads {
+		w := heldConnectionWriter{httptest.NewRecorder(), entered, release}
+		go func() {
+			h.ServeHTTP(w, request())
+			completed <- w.Code
+		}()
+	}
+	deadline := time.NewTimer(coreLogReadTimeout)
+	defer deadline.Stop()
+	for range clientConnectionConcurrentReads {
+		select {
+		case <-entered:
+		case <-deadline.C:
+			t.Fatal("authorized requests did not reach the response writer")
+		}
+	}
+	extra := httptest.NewRecorder()
+	h.ServeHTTP(extra, request())
+	if extra.Code != http.StatusTooManyRequests {
+		t.Fatalf("saturated reads returned %d: %s", extra.Code, extra.Body)
+	}
+	close(release)
+	release = nil
+	for range clientConnectionConcurrentReads {
+		if code := <-completed; code != http.StatusOK {
+			t.Fatalf("admitted read returned %d", code)
+		}
+	}
+	recovered := httptest.NewRecorder()
+	h.ServeHTTP(recovered, request())
+	if recovered.Code != http.StatusOK {
+		t.Fatalf("released slots did not admit a new request: %d %s", recovered.Code, recovered.Body)
+	}
+}

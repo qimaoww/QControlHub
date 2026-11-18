@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"net/netip"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -28,12 +30,53 @@ import (
 // distinct windows. Durable entries share the journal's retention boundary.
 const (
 	connectionSyncBudget       = 32 << 20
+	connectionSnapshotEntries  = 64
+	connectionSnapshotBackoff  = time.Minute
+	clientConnectionPageBudget = 1 << 20
+	connectionLookupEstimate   = 256
+	connectionSourceEstimate   = 192
 	connectionSyncGroups       = 40000
 	connectionSyncTTL          = 24 * time.Hour
 	connectionJournalTTL       = 2 * connectionSyncTTL
 	connectionRecordEstimate   = 512
 	connectionEndpointEstimate = 128
 )
+
+var (
+	errConnectionSnapshotBudget   = errors.New("client connection snapshot exceeded its budget")
+	errConnectionSnapshotBusy     = errors.New("client connection snapshot builder busy")
+	errClientConnectionPageBudget = fmt.Errorf("查询结果过大，请缩小时间范围、筛选条件或减少每页条数：%w", ErrInvalid)
+)
+
+func connectionCacheBudget() int64 {
+	// Leave headroom for the previous view, new projection, page encoding
+	// and the rest of the panel when Go has a configured soft heap limit.
+	return min(connectionSyncBudget, debug.SetMemoryLimit(-1)/8)
+}
+
+func connectionEndpointBytes(ep core.ClientConnectionEndpoint) int64 {
+	return int64(connectionEndpointEstimate + len(ep.AgentID) + len(ep.AgentName) + len(ep.Engine))
+}
+
+func connectionRecordBytes(r core.ClientConnectionRecord) int64 {
+	size := int64(connectionRecordEstimate + len(r.AgentID) + len(r.AgentName) + len(r.Engine) +
+		len(r.ClientIP) + len(r.Protocol) + len(r.Inbound) + len(r.Transport) + len(r.LocalIP) +
+		len(r.Location.CountryCode) + len(r.Location.Country) + len(r.Location.Province))
+	for _, ep := range r.Endpoints {
+		size += connectionEndpointBytes(ep)
+	}
+	return size
+}
+
+type connectionLookupKey struct {
+	AgentID  string      `json:"agent_id"`
+	Engine   core.Engine `json:"engine"`
+	ClientIP string      `json:"client_ip"`
+}
+
+func connectionLookup(r core.ClientConnectionRecord) connectionLookupKey {
+	return connectionLookupKey{r.AgentID, r.Engine, r.ClientIP}
+}
 
 type connectionGroup struct {
 	Record   core.ClientConnectionRecord
@@ -45,6 +88,7 @@ type connectionGroup struct {
 type connectionSnapshot struct {
 	mu      sync.Mutex
 	pending *connectionSyncFlight
+	backoff time.Time
 	data    *connectionSnapshotData
 	touched atomic.Int64
 	bytes   atomic.Int64
@@ -109,7 +153,7 @@ func (s *Store) trimConnectionSnapshots() {
 				oldest, at = k, v.touched.Load()
 			}
 		}
-		if size <= connectionSyncBudget && time.Since(time.Unix(0, at)) < connectionSyncTTL {
+		if len(s.connectionSync) == 0 || size <= connectionCacheBudget() && len(s.connectionSync) <= connectionSnapshotEntries && time.Since(time.Unix(0, at)) < connectionSyncTTL {
 			return
 		}
 		delete(s.connectionSync, oldest)
@@ -167,13 +211,27 @@ func (s *Store) SyncClientConnections(ctx context.Context, q ClientConnectionQue
 				return active.page(q, token)
 			}
 		}
+		if time.Now().Before(entry.backoff) {
+			entry.mu.Unlock()
+			return core.ClientConnectionHistory{}, false, nil
+		}
 		flight := &connectionSyncFlight{done: make(chan struct{}), recordsOnly: q.RecordsOnly}
 		previous := entry.data
 		entry.pending = flight
 		entry.mu.Unlock()
 		flight.data, flight.sources, flight.err = s.refreshConnectionSnapshot(ctx, base, key, previous, q.RecordsOnly)
 		entry.mu.Lock()
-		if flight.err == nil {
+		switch {
+		case errors.Is(flight.err, errConnectionSnapshotBusy):
+			// An unrelated builder is using the work budget. Leave any
+			// existing snapshot available to future requests.
+			flight.err = nil
+		case errors.Is(flight.err, errConnectionSnapshotBudget):
+			flight.err = nil
+			entry.data = nil
+			entry.bytes.Store(0)
+			entry.backoff = time.Now().Add(connectionSnapshotBackoff)
+		case flight.err == nil:
 			entry.data = flight.data
 			if flight.data != nil {
 				entry.bytes.Store(flight.data.bytes)
@@ -200,35 +258,57 @@ func (f *connectionSyncFlight) page(q ClientConnectionQuery, token string) (core
 }
 
 func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectionQuery, key string, previous *connectionSnapshotData, recordsOnly bool) (*connectionSnapshotData, []core.ClientConnectionSource, error) {
+	budget := connectionCacheBudget() / 2
+	if budget < connectionRecordEstimate {
+		return nil, nil, errConnectionSnapshotBudget
+	}
+	now := time.Now()
+	if previous != nil && (now.Sub(previous.created) >= connectionSyncTTL || previous.bytes > budget) {
+		previous = nil
+	}
+	building := false
+	acquire := func() bool {
+		if !building {
+			building = s.connectionSyncWork.TryLock()
+		}
+		return building
+	}
+	defer func() {
+		if building {
+			s.connectionSyncWork.Unlock()
+		}
+	}()
+	if previous == nil && !acquire() {
+		return nil, nil, errConnectionSnapshotBusy
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback(ctx)
 
-	now := time.Now()
 	durable := persistConnectionQuery(q, now)
-	if previous != nil && now.Sub(previous.created) >= connectionSyncTTL {
-		previous = nil
-	}
 	position, sources, unchanged, err := connectionSyncPosition(ctx, tx, q, recordsOnly, previous)
 	if err != nil {
 		return nil, nil, err
 	}
 	if previous == nil && durable {
-		previous, err = restoreConnectionSnapshot(ctx, tx, key, now)
+		previous, err = restoreConnectionSnapshot(ctx, tx, key, now, budget)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
-	changeKeys := map[string]core.ClientConnectionRecord{}
+	var changeKeys map[string]connectionLookupKey
 	complete := false
 	generation := ""
 	if previous != nil {
 		generation = previous.generation
 		complete = true
 		if !unchanged && position != previous.position {
-			complete, changeKeys, err = connectionDirtyGroups(ctx, tx, q, previous)
+			if !acquire() {
+				return nil, nil, errConnectionSnapshotBusy
+			}
+			complete, changeKeys, err = connectionDirtyGroups(ctx, tx, q, previous, budget)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -237,7 +317,7 @@ func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectio
 	var data *connectionSnapshotData
 	var upserts map[string]connectionGroup
 	if !complete {
-		upserts, err = s.readConnectionGroups(ctx, tx, q, nil, 1)
+		upserts, err = s.readConnectionGroups(ctx, tx, q, nil, 1, budget)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -245,37 +325,45 @@ func (s *Store) refreshConnectionSnapshot(ctx context.Context, q ClientConnectio
 	} else if len(changeKeys) == 0 {
 		data = previous
 	} else {
-		upserts, err = s.readConnectionGroups(ctx, tx, q, slices.Collect(maps.Values(changeKeys)), previous.revision+1)
+		upserts, err = s.readConnectionGroups(ctx, tx, q, slices.Collect(maps.Values(changeKeys)), previous.revision+1, budget)
 		if err != nil {
 			return nil, nil, err
 		}
-		groups := maps.Clone(previous.groups)
+		size, count := previous.bytes, len(previous.groups)
 		for key := range changeKeys {
 			next, exists := upserts[key]
-			old, had := groups[key]
+			old, had := previous.groups[key]
 			if exists && had && equalConnectionGroup(next, old) || !exists && !had {
 				delete(changeKeys, key)
 				delete(upserts, key)
 				continue
 			}
-			if exists {
-				groups[key] = next
-			} else {
-				delete(groups, key)
+			if had {
+				size -= connectionSnapshotGroupBytes(key, old)
+				count--
 			}
+			if exists {
+				size += connectionSnapshotGroupBytes(key, next)
+				count++
+			}
+		}
+		if size > budget || count > connectionSyncGroups {
+			return nil, nil, errConnectionSnapshotBudget
 		}
 		if len(changeKeys) == 0 {
 			data = previous
 		} else {
+			groups := maps.Clone(previous.groups)
+			for key := range changeKeys {
+				delete(groups, key)
+			}
+			maps.Copy(groups, upserts)
 			data = &connectionSnapshotData{epoch: previous.epoch, position: position, generation: generation,
 				revision: previous.revision + 1, groups: groups, created: previous.created}
 			data.index()
 		}
 	}
 
-	if len(data.groups) > connectionSyncGroups || data.bytes > connectionSyncBudget {
-		return nil, nil, nil
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, err
 	}
@@ -313,16 +401,22 @@ func newConnectionSnapshot(groups map[string]connectionGroup, position, generati
 	return data
 }
 
+// The base allowance includes the record, its map/index entries and two
+// projection copies. Charge variable strings and endpoints independently.
+func connectionSnapshotGroupBytes(key string, group connectionGroup) int64 {
+	return connectionRecordBytes(group.Record) + int64(len(key)) + connectionRecordEstimate
+}
+
 func (data *connectionSnapshotData) index() {
 	data.projection = &connectionProjectionCache{}
 	data.byIP = make(map[string][]string)
 	for key, group := range data.groups {
 		data.byIP[group.Record.ClientIP] = append(data.byIP[group.Record.ClientIP], key)
-		data.bytes += int64(connectionRecordEstimate + len(key) + len(group.Record.AgentName)*2 + len(group.Record.Endpoints)*connectionEndpointEstimate)
+		data.bytes += connectionSnapshotGroupBytes(key, group)
 	}
 }
 
-func connectionDirtyGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, old *connectionSnapshotData) (bool, map[string]core.ClientConnectionRecord, error) {
+func connectionDirtyGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, old *connectionSnapshotData, budget int64) (bool, map[string]connectionLookupKey, error) {
 	var complete bool
 	err := tx.QueryRow(ctx, `SELECT xid < pg_snapshot_xmin($1::text::pg_snapshot) FROM client_connection_journal_floor WHERE id=1`, old.position).Scan(&complete)
 	if err != nil || !complete {
@@ -330,6 +424,8 @@ func connectionDirtyGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQue
 	}
 	args := []any{old.position, q.Since.Truncate(time.Minute), q.Until.Add(-time.Microsecond), q.AgentID, string(q.Engine), q.ClientIP}
 	agentClause := agentAdministrationClause(ctx, "a.id", &args)
+	limit := min(connectionSyncGroups, int(budget/4/connectionLookupEstimate))
+	args = append(args, limit+1)
 	// Snapshot visibility is the high-water range plus transactions active
 	// at the last read. Probe those IDs directly so an unrelated long writer
 	// cannot make every confirmation scan the entire intervening journal.
@@ -345,56 +441,79 @@ func connectionDirtyGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQue
 	 LEFT JOIN agents a ON a.id=ch.agent_id
 	 WHERE ($6='' OR ch.client_ip=NULLIF($6,'')::inet)
 	 AND (ch.agent_id='' OR (ch.day BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date AND ($3::timestamptz AT TIME ZONE 'UTC')::date
-	   AND ($4='' OR ch.agent_id=$4) AND ($5='' OR ch.engine=$5) AND (a.id IS NULL OR (a.revoked_at IS NULL`+agentClause+`))))`, args...)
+	   AND ($4='' OR ch.agent_id=$4) AND ($5='' OR ch.engine=$5) AND (a.id IS NULL OR (a.revoked_at IS NULL`+agentClause+fmt.Sprintf(`)))) LIMIT $%d`, len(args)), args...)
 	if err != nil {
 		return false, nil, err
 	}
 	defer rows.Close()
-	keys := map[string]core.ClientConnectionRecord{}
+	keys := map[string]connectionLookupKey{}
+	seen := 0
 	for rows.Next() {
+		seen++
+		if seen > limit {
+			return false, nil, nil
+		}
 		var r core.ClientConnectionRecord
 		if err := rows.Scan(&r.AgentID, &r.Engine, &r.ClientIP); err != nil {
 			return false, nil, err
 		}
 		if r.AgentID == "" {
 			for _, key := range old.byIP[r.ClientIP] {
-				keys[key] = old.groups[key].Record
+				keys[key] = connectionLookup(old.groups[key].Record)
+				if len(keys) > limit {
+					return false, nil, nil
+				}
 			}
 		} else {
-			keys[connectionGroupKey(r)] = r
+			keys[connectionGroupKey(r)] = connectionLookup(r)
+			if len(keys) > limit {
+				return false, nil, nil
+			}
 		}
 	}
 	return true, keys, rows.Err()
 }
 
-func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, wanted []core.ClientConnectionRecord, revision int64) (map[string]connectionGroup, error) {
+func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, wanted []connectionLookupKey, revision int64, budget int64) (map[string]connectionGroup, error) {
 	where, args := connectionGroupWhere(ctx, q)
 	if wanted != nil {
 		data, _ := json.Marshal(wanted)
 		args = append(args, data)
 		where += fmt.Sprintf(` AND (c.agent_id,c.engine,c.client_ip) IN (SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text))`, len(args))
 	}
-	rows, err := tx.Query(ctx, connectionGroupsSQL(where, len(args)+1), append(args, connectionSyncGroups+1)...)
+	limit := min(connectionSyncGroups, int(budget/(2*connectionRecordEstimate)))
+	rows, err := tx.Query(ctx, connectionGroupsSQL(where, len(args)+1), append(args, limit+1)...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	groups := map[string]connectionGroup{}
+	var remaining = budget
 	for rows.Next() {
+		if len(groups) >= limit {
+			return nil, errConnectionSnapshotBudget
+		}
 		var g connectionGroup
 		var ports []int32
 		r := &g.Record
 		if err = rows.Scan(&r.ID, &r.AgentID, &r.AgentName, &r.Engine, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &g.Flows, &ports, &r.Location.CountryCode, &r.Location.Country, &r.Location.Province); err != nil {
 			return nil, err
 		}
+		key := connectionGroupKey(*r)
+		cost := connectionSnapshotGroupBytes(key, g) + int64(len(ports))*connectionEndpointBytes(core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine})
+		if cost > remaining {
+			return nil, errConnectionSnapshotBudget
+		}
+		remaining -= cost
 		g.addr, _ = netip.ParseAddr(r.ClientIP)
 		r.Location.NonPublic = !netpolicy.IsPublicAddress(g.addr)
-		sort.Slice(ports, func(i, j int) bool { return ports[i] < ports[j] })
+		slices.Sort(ports)
+		r.Endpoints = make([]core.ClientConnectionEndpoint, 0, len(ports))
 		for _, port := range ports {
 			r.Endpoints = append(r.Endpoints, core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: int(port)})
 		}
 		g.Revision = revision
-		groups[connectionGroupKey(*r)] = g
+		groups[key] = g
 	}
 	return groups, rows.Err()
 }
@@ -482,7 +601,7 @@ func connectionSnapshotPage(entry *connectionSnapshotData, q ClientConnectionQue
 	projection := cache.view
 	if projection == nil || cache.orderID != orderID {
 		ips, countries := map[string]bool{}, map[string]bool{}
-		all := &connectionProjectionRows{}
+		all := &connectionProjectionRows{groups: make([]connectionGroup, 0, len(entry.groups))}
 		for _, g := range entry.groups {
 			r := g.Record
 			if !r.Location.NonPublic && r.Location.CountryCode != "" {
@@ -535,7 +654,16 @@ func connectionSnapshotPage(entry *connectionSnapshotData, q ClientConnectionQue
 		first.Inclusive = true
 		result.PageCursor = first.encode()
 	}
+	remaining := int64(clientConnectionPageBudget)
 	for _, g := range groups {
+		if !q.RecordsOnly {
+			remaining -= connectionRecordBytes(g.Record)
+			if remaining < 0 {
+				return core.ClientConnectionHistory{}, errClientConnectionPageBudget
+			}
+		} else {
+			g.Record.Endpoints = nil
+		}
 		result.RecordKeys = append(result.RecordKeys, connectionGroupKey(g.Record))
 		if g.Revision > since {
 			result.Records = append(result.Records, g.Record)
@@ -547,24 +675,10 @@ func connectionSnapshotPage(entry *connectionSnapshotData, q ClientConnectionQue
 func connectionSyncPosition(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, recordsOnly bool, previous *connectionSnapshotData) (string, []core.ClientConnectionSource, bool, error) {
 	var position string
 	var unchanged bool
-	sources := []core.ClientConnectionSource{}
-	args := []any{}
-	sourceResponse := `'[]'::jsonb`
-	if !recordsOnly {
-		where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
-		if q.AgentID != "" {
-			args = append(args, q.AgentID)
-			where += fmt.Sprintf(` AND a.id=$%d`, len(args))
-		}
-		// Sources are independently mutable (even batches with no connections).
-		sourceResponse = `COALESCE((
-		  SELECT jsonb_agg(source ORDER BY agent_name,agent_id) FROM (
-			SELECT a.id agent_id,a.name agent_name,s.updated_at,COALESCE(s.status,'no_logs') status,
-			  COALESCE(s.detail,'') detail,COALESCE(s.truncated,false) truncated
-			FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'` + where + `
-		  ) source
-		),'[]'::jsonb)`
-	}
+	var sources []core.ClientConnectionSource
+	q.RecordsOnly = recordsOnly
+	sourceResponse, args := connectionSourceResponse(ctx, q, nil)
+
 	journalQuiet := "false"
 	if previous != nil {
 		args = append(args, previous.position)
@@ -579,7 +693,33 @@ func connectionSyncPosition(ctx context.Context, tx pgx.Tx, q ClientConnectionQu
 		)`
 	}
 	err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text,`+sourceResponse+`,`+journalQuiet, args...).Scan(&position, &sources, &unchanged)
+	if err == nil && sources == nil {
+		err = errClientConnectionPageBudget
+	}
 	return position, sources, unchanged, err
+}
+
+// Bound source metadata before materializing it in either the SQL or Go
+// response. NULL signals overflow; an empty authorized result is still [].
+func connectionSourceResponse(ctx context.Context, q ClientConnectionQuery, args []any) (string, []any) {
+	if q.RecordsOnly {
+		return `'[]'::jsonb`, args
+	}
+	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
+	if q.AgentID != "" {
+		args = append(args, q.AgentID)
+		where += fmt.Sprintf(` AND a.id=$%d`, len(args))
+	}
+	args = append(args, clientConnectionPageBudget/connectionSourceEstimate+1, clientConnectionPageBudget, connectionSourceEstimate)
+	return fmt.Sprintf(`(WITH present AS MATERIALIZED (
+		SELECT a.id agent_id,a.name agent_name,s.updated_at,COALESCE(s.status,'no_logs') status,
+		  COALESCE(s.detail,'') detail,COALESCE(s.truncated,false) truncated
+		FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+where+`
+		LIMIT $%d
+	  )
+	  SELECT CASE WHEN COALESCE(sum(octet_length(agent_id)+octet_length(agent_name)+octet_length(status)+octet_length(detail)+$%d::bigint),0)<=$%d
+	    THEN COALESCE((SELECT jsonb_agg(p ORDER BY agent_name,agent_id) FROM present p),'[]'::jsonb)
+	  END FROM present)`, len(args)-2, len(args), len(args)-1), args
 }
 
 func connectionGroupsSQL(where string, limitArg int) string {

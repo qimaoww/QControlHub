@@ -2,17 +2,17 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"iter"
+	"maps"
 	"net/netip"
 	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func restoreConnectionSnapshot(ctx context.Context, tx pgx.Tx, key string, now time.Time) (*connectionSnapshotData, error) {
+func restoreConnectionSnapshot(ctx context.Context, tx pgx.Tx, key string, now time.Time, budget int64) (*connectionSnapshotData, error) {
 	var position, generation string
 	err := tx.QueryRow(ctx, `SELECT snapshot::text,generation FROM client_connection_history_cache WHERE key=$1`, key).Scan(&position, &generation)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -21,21 +21,35 @@ func restoreConnectionSnapshot(ctx context.Context, tx pgx.Tx, key string, now t
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT group_key,data FROM client_connection_history_groups WHERE cache_key=$1`, key)
+	limit := min(connectionSyncGroups, int(budget/(2*connectionRecordEstimate)))
+	// Reject oversized durable rows before decoding their JSON in Go.
+	rows, err := tx.Query(ctx, `SELECT group_key,CASE WHEN octet_length(data::text)<=$2 THEN data END
+	  FROM client_connection_history_groups WHERE cache_key=$1 LIMIT $3`, key, min(budget, clientConnectionPageBudget), limit+1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	groups := map[string]connectionGroup{}
+	remaining := budget
 	for rows.Next() {
+		if len(groups) >= limit {
+			return nil, errConnectionSnapshotBudget
+		}
 		var key string
-		var group connectionGroup
+		var group *connectionGroup
 		if err := rows.Scan(&key, &group); err != nil {
 			return nil, err
 		}
+		if group == nil {
+			return nil, errConnectionSnapshotBudget
+		}
+		remaining -= connectionSnapshotGroupBytes(key, *group)
+		if remaining < 0 {
+			return nil, errConnectionSnapshotBudget
+		}
 		group.addr, _ = netip.ParseAddr(group.Record.ClientIP)
 		group.Revision = 1
-		groups[key] = group
+		groups[key] = *group
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -43,16 +57,7 @@ func restoreConnectionSnapshot(ctx context.Context, tx pgx.Tx, key string, now t
 	return newConnectionSnapshot(groups, position, generation, now), nil
 }
 
-func (s *Store) saveConnectionSnapshot(ctx context.Context, key string, data *connectionSnapshotData, replace bool, dirty map[string]core.ClientConnectionRecord, groups map[string]connectionGroup) error {
-	rows := make([][]any, 0, len(groups))
-	for groupKey, group := range groups {
-		payload, err := json.Marshal(group)
-		if err != nil {
-			return err
-		}
-		rows = append(rows, []any{key, groupKey, payload})
-	}
-
+func (s *Store) saveConnectionSnapshot(ctx context.Context, key string, data *connectionSnapshotData, replace bool, dirty map[string]connectionLookupKey, groups map[string]connectionGroup) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -85,8 +90,17 @@ func (s *Store) saveConnectionSnapshot(ctx context.Context, key string, data *co
 			return err
 		}
 	}
-	if len(rows) != 0 {
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"client_connection_history_groups"}, []string{"cache_key", "group_key", "data"}, pgx.CopyFromRows(rows)); err != nil {
+	if len(groups) != 0 {
+		nextGroup, stop := iter.Pull2(maps.All(groups))
+		defer stop()
+		rows := pgx.CopyFromFunc(func() ([]any, error) {
+			groupKey, group, ok := nextGroup()
+			if !ok {
+				return nil, nil
+			}
+			return []any{key, groupKey, group}, nil
+		})
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"client_connection_history_groups"}, []string{"cache_key", "group_key", "data"}, rows); err != nil {
 			return err
 		}
 	}

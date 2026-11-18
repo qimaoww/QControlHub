@@ -7,7 +7,7 @@ export async function run() {
     let now = Date.parse("2026-09-21T08:00:00Z");
     const filters = defaultConnectionFilters(now);
     const first = { id: 1, agent_id: "alpha", agent_name: "Alpha", engine: "xray", client_ip: "8.8.8.8", endpoints: [{ local_port: 443 }], location: { country_code: "CN", province: "广东" } };
-    const cache = createConnectionCache({ now: () => now, maxEntries: 2, maxBytes: 3000 });
+    const cache = createConnectionCache({ now: () => now, maxEntries: 2, maxBytes: 3800 });
     first.first_seen = first.last_seen = new Date(now).toISOString();
     const result = { records: [first], sources: [], timeline: [], ips: 1, flows: 1 };
     cache.set("a", result); cache.set("b", result); cache.get("a"); cache.set("c", result);
@@ -15,6 +15,9 @@ export async function run() {
     assert.ok(cache.get("a"));
     cache.set("large", { text: "x".repeat(2000) });
     assert.equal(cache.get("large"), null, "oversized payload is not retained");
+    const oversizedArray = new Array(100_000);
+    cache.set("wide", { records: oversizedArray });
+    assert.equal(cache.get("wide"), null, "wide page must be declined without flattening the array");
     now += 301_000;
     assert.ok(cache.get("a"), "five-minute age does not expire same-day snapshots");
     now += 86400_000;

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -26,16 +27,41 @@ func (s *Store) ClientConnectionScope(ctx context.Context) (string, error) {
 func (s *Store) ClientConnectionAuthority(ctx context.Context) (string, int64, error) {
 	args := []any{}
 	where := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
-	var revision int64
-	var payload string
-	err := s.pool.QueryRow(ctx, `SELECT revision, installation::text || COALESCE((
-	  SELECT jsonb_agg(jsonb_build_array(a.id,a.name,a.owner_id) ORDER BY a.id)::text FROM agents a`+where+`
-	 ),'[]') FROM client_connection_authority WHERE id=1`, args...).Scan(&revision, &payload)
+	rows, err := s.pool.Query(ctx, `SELECT ca.revision,ca.installation::text,node.id,node.name,node.owner_id
+	  FROM client_connection_authority ca
+	  LEFT JOIN LATERAL (SELECT a.id,a.name,a.owner_id FROM agents a`+where+`) node ON true
+	  WHERE ca.id=1 ORDER BY node.id`, args...)
 	if err != nil {
 		return "", 0, err
 	}
-	hash := sha256.Sum256([]byte(payload))
-	return hex.EncodeToString(hash[:]), revision, nil
+	defer rows.Close()
+	hash := sha256.New()
+	encoder := json.NewEncoder(hash)
+	var revision int64
+	first := true
+	for rows.Next() {
+		var installation string
+		var id, name, owner *string
+		if err := rows.Scan(&revision, &installation, &id, &name, &owner); err != nil {
+			return "", 0, err
+		}
+		if first {
+			_, _ = hash.Write([]byte(installation))
+			first = false
+		}
+		if id != nil {
+			if err := encoder.Encode([]*string{id, name, owner}); err != nil {
+				return "", 0, err
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, err
+	}
+	if first {
+		return "", 0, pgx.ErrNoRows
+	}
+	return hex.EncodeToString(hash.Sum(nil)), revision, nil
 }
 
 func (s *Store) ClientConnectionAuthorityRevision(ctx context.Context) (int64, error) {
@@ -253,29 +279,14 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)
 	}
-	sourceArgs := []any{}
-	sourceWhere := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &sourceArgs)
-	if q.AgentID != "" {
-		sourceArgs = append(sourceArgs, q.AgentID)
-		sourceWhere += fmt.Sprintf(" AND a.id=$%d", len(sourceArgs))
-	}
-	rows, err := tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'no_logs'),COALESCE(s.detail,''),COALESCE(s.truncated,false)
- FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+sourceWhere+` ORDER BY a.name,a.id`, sourceArgs...)
-	if err != nil {
+	sources, sourceArgs := connectionSourceResponse(ctx, q, nil)
+	if err := tx.QueryRow(ctx, `SELECT `+sources, sourceArgs...).Scan(&result.Sources); err != nil {
 		return result, err
 	}
-	for rows.Next() {
-		var source core.ClientConnectionSource
-		if err := rows.Scan(&source.AgentID, &source.AgentName, &source.UpdatedAt, &source.Status, &source.Detail, &source.Truncated); err != nil {
-			rows.Close()
-			return result, err
-		}
-		result.Sources = append(result.Sources, source)
+	if result.Sources == nil {
+		return result, errClientConnectionPageBudget
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return result, err
-	}
+
 	return result, tx.Commit(ctx)
 }
 

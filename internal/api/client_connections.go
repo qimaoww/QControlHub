@@ -75,8 +75,18 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 	return q, q.Validate()
 }
 
+// Hold the slot until the response has been encoded and written, so slow
+// receivers cannot keep arbitrarily many bounded pages alive in the panel.
+const clientConnectionConcurrentReads = 4
+
 func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if s.clientConnectionReads.Add(1) > clientConnectionConcurrentReads {
+		s.clientConnectionReads.Add(-1)
+		writeError(w, http.StatusTooManyRequests, "客户端连接查询繁忙，请稍后重试。")
+		return
+	}
+	defer s.clientConnectionReads.Add(-1)
 	initialSession, hadSession := s.sessionForRequest(request)
 	if bearerToken(request) == "" && !hadSession {
 		writeError(w, http.StatusUnauthorized, "session expired")
