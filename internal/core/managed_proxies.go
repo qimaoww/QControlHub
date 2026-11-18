@@ -5,6 +5,8 @@ import "time"
 const AgentFeatureManagedProxies = "managed-proxies-v1"
 
 type ProxyStatus struct {
+	ObservedAt      time.Time `json:"observed_at,omitzero"`
+	NewerInstalled  bool      `json:"newer_installed,omitempty"`
 	State           string    `json:"state"`
 	Managed         bool      `json:"managed"`
 	Installed       string    `json:"installed,omitempty"`

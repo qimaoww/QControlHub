@@ -77,6 +77,31 @@ func verifyDebianNginxMigration(t *testing.T, m *tlsFrontendManager, deployments
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Interrupt after unit replacement but before try-restart. Recovery must
+	// keep the still-healthy master and restore its on-disk unit.
+	managedPID, err := managedServiceProcessPID(ctx, m.services, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, exists, err := protectedCoreMigrationFileDigest(private, 100<<20)
+	if err != nil || !exists {
+		t.Fatal("old executable unavailable", err)
+	}
+	if err = m.writeConfig(filepath.Join(m.root, "nginx-switch.pending"), private+"\n"+system+"\n"+digest, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.selectProxyUnit(ctx, "nginx", unit, system); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.recoverProxySwitch(ctx, "nginx"); err != nil || m.nginxBinary() != private {
+		t.Fatal("interrupted unit switch", err)
+	}
+	if _, err = m.upgradeManagedNginx(ctx, build, true, m.upgradeNginxBinary); err != nil {
+		t.Fatal("same-version retry", err)
+	}
+	if current, err := managedServiceProcessPID(ctx, m.services, service); err != nil || current != managedPID {
+		t.Fatal("healthy managed process restarted on retry", err)
+	}
 	t.Logf("system nginx %s retained PID %d; managed nginx %s", version, pid, privateNginxRevision(private))
 
 	// A service that fails after the candidate was installed must restore

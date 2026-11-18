@@ -171,7 +171,7 @@ func (c *Client) Run(ctx context.Context) error {
 	c.creds = loaded
 	// An older Agent can install this binary using the existing upgrade
 	// protocol. Run the package check in the new process in that case too.
-	go c.upgradeNginxOnStartup(ctx)
+	go c.upgradeProxiesOnStartup(ctx)
 	go c.observeProxies(ctx)
 	if err := c.pruneDiagnosticSpool(); err != nil {
 		slog.Warn("reclaim orphan task diagnostic cache", "error", core.DiagnosticText(err.Error()))

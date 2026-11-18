@@ -331,8 +331,8 @@ func (m *tlsFrontendManager) ensureService(ctx context.Context, mode string) err
 	return m.ensureServiceForBinary(ctx, mode, m.proxyBinary(mode))
 }
 
-func (m *tlsFrontendManager) ensureServiceForBinary(ctx context.Context, mode, nginx string) error {
-	name, path, content := m.serviceDefinitionForBinary(mode, false, nginx)
+func (m *tlsFrontendManager) ensureServiceForBinary(ctx context.Context, mode, binary string) error {
+	name, path, content := m.serviceDefinitionForBinary(mode, false, binary)
 	if m.services.Kind() == ServiceManagerSystemd {
 		if err := validateManagedUnitDropIns(ctx, name); err != nil {
 			return err

@@ -8,7 +8,7 @@ function presentation(agent, row) {
   if (!agent.features?.includes('managed-proxies-v1')) return '需升级 QAgent';
   if (!row) return '未知';
   if (row.outcome) return row.outcome;
-  if (row.state === 'active' && row.latest && row.running) return row.running === row.latest ? '已最新' : '版本不同';
+  if (row.state === 'active' && row.latest && row.running) return row.running === row.latest ? '已最新' : row.newer_installed ? '已装版本较新' : '可更新';
   return states[row.state] || '未知';
 }
 
@@ -56,10 +56,10 @@ export function nodeProxyManager(ctx, agent, current, refresh) {
       const last = row?.checked_at ? date(row.checked_at) : '未知';
       return [
         stack(node('strong', {}, label), muted(nginx ? 'nginx.org 主线' : 'Caddy 官方稳定版')),
-        stack(pending.get(mode) || presentation(agent, row), row && muted(row.managed ? '已托管' : '未托管'),
-          agent.status !== 'online' && muted(`离线 · ${date(agent.last_seen)}`)),
-        stack(`已装　${row?.installed || '未知'}`, `运行　${row?.running || '未知'}`,
-          `官方　${row?.latest || '未知'}`, muted(`${row?.outcome === '检查失败' ? '上次成功 · 已过期' : '上次成功检查'}　${last}`)),
+        stack(node('span', {}, pending.get(mode) || presentation(agent, row)), row && row.state !== 'unmanaged' && muted(row.managed ? '已托管' : '未托管'),
+          agent.status !== 'online' && muted(`离线 · ${date(row?.observed_at || agent.last_seen)}`)),
+        stack(...[['已装', row?.installed], ['运行', row?.running], ['官方', row?.latest]].map(([title, value]) =>
+          node('div', { className: 'a-proxy-version' }, muted(title), node('span', {}, value || '未知'))), muted(`${row?.outcome === '检查失败' ? '上次成功 · 已过期' : '上次成功检查'}　${last}`)),
         stack(actions(ctx.can('agents.read') && button('检查更新', () => act(mode, label, false), { disabled: !online() || pending.has(mode), 'aria-label': `检查 ${label} 更新` }),
           ctx.can('host.manage', agent) && ctx.can('agents.manage', agent) && button('更新', () => act(mode, label, true), { disabled: !online() || pending.has(mode) || !row?.managed || !['pending','active'].includes(row.state), 'aria-label': `更新 ${label}` })),
           feedback.has(mode) && node('span', { role: 'status' }, feedback.get(mode))),
@@ -68,5 +68,7 @@ export function nodeProxyManager(ctx, agent, current, refresh) {
   }
   const body = content();
   function render() { patch(body, content()); }
-  return { element: section('Nginx/Caddy 管理器', body), render };
+  const element = section('Nginx/Caddy 管理器', body);
+  element.classList.add('a-node-proxies');
+  return { element, render };
 }

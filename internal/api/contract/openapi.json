@@ -3819,6 +3819,13 @@
           "managed": {
             "type": "boolean"
           },
+          "newer_installed": {
+            "type": "boolean"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "outcome": {
             "type": "string"
           },

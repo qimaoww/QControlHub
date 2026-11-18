@@ -14,7 +14,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func (e *Executor) upgradeNginxForAgentBuild(ctx context.Context, build string, action core.Action) (string, error) {
+func (e *Executor) upgradeProxiesForAgentBuild(ctx context.Context, build string, action core.Action) (string, error) {
 	if build == "" || !managedTLSStateExists() {
 		return "", nil
 	}
@@ -117,8 +117,8 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 		return "", err
 	}
 	if !os.SameFile(running, installed) || candidate != binary {
-		if output, err := m.validateNginxBinary(ctx, filepath.Join(m.root, "nginx.conf"), candidate); err != nil {
-			return "", fmt.Errorf("候选 Nginx 配置校验失败：%w：%s", err, output)
+		if _, err := m.validateNginxBinary(ctx, filepath.Join(m.root, "nginx.conf"), candidate); err != nil {
+			return "", errors.New("候选 Nginx 配置校验失败，请在节点核对托管配置和读取权限")
 		}
 		if err := m.switchNginx(ctx, service, unit, runningBinary, candidate, installed); err != nil {
 			return "", err
@@ -149,7 +149,7 @@ func (m *tlsFrontendManager) switchNginx(ctx context.Context, service, unit, old
 
 func (m *tlsFrontendManager) switchProxy(ctx context.Context, mode, service, unit, old, candidate string, installed os.FileInfo) error {
 	if status, err := m.services.status(ctx, service); err != nil || status != "active" {
-		return fmt.Errorf("托管 Nginx 已停止切换，服务状态 %s：%v", status, err)
+		return fmt.Errorf("托管 %s 已停止切换，服务状态 %s：%v", mode, status, err)
 	}
 	if err := m.checkProxyUnit(ctx, mode); err != nil {
 		return err
@@ -157,20 +157,15 @@ func (m *tlsFrontendManager) switchProxy(ctx context.Context, mode, service, uni
 	if _, err := m.proxyMasterExecutable(ctx, mode, service, old); err != nil {
 		return err
 	}
-	reload := func(ctx context.Context) error {
-		if m.services.Kind() == ServiceManagerSystemd {
-			_, err := run(ctx, m.services.executable, "daemon-reload")
+	pending := filepath.Join(m.root, mode+"-switch.pending")
+	if old != candidate {
+		digest, exists, err := protectedCoreMigrationFileDigest(old, 100<<20)
+		if err != nil || !exists {
+			return errors.New("无法保留原托管程序")
+		}
+		if err = m.writeConfig(pending, old+"\n"+candidate+"\n"+digest, true); err != nil {
 			return err
 		}
-		return nil
-	}
-	writeUnit := func(binary string) error {
-		_, _, content := m.serviceDefinitionForBinary(mode, false, binary)
-		backup, err := atomicDeployWithDefaultMetadata(unit, content, fileMetadata{mode: 0644})
-		if backup != "" {
-			_ = os.Remove(backup)
-		}
-		return err
 	}
 	// Use try-restart so an independently stopped service stays stopped.
 	restart := []string{"try-restart", service}
@@ -179,10 +174,7 @@ func (m *tlsFrontendManager) switchProxy(ctx context.Context, mode, service, uni
 	}
 	activate := func() error {
 		if old != candidate {
-			if err := writeUnit(candidate); err != nil {
-				return err
-			}
-			if err := reload(ctx); err != nil {
+			if err := m.selectProxyUnit(ctx, mode, unit, candidate); err != nil {
 				return err
 			}
 		}
@@ -192,38 +184,15 @@ func (m *tlsFrontendManager) switchProxy(ctx context.Context, mode, service, uni
 		return m.verifyRunningProxy(ctx, mode, service, candidate, installed)
 	}
 	err := activate()
-	if err == nil || old == candidate {
+	if old == candidate {
 		return err
+	}
+	if err == nil {
+		return os.Remove(pending)
 	}
 	recoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	restore := func() error {
-		if err := writeUnit(old); err != nil {
-			return err
-		}
-		if err := reload(recoverCtx); err != nil {
-			return err
-		}
-		status, err := m.services.status(recoverCtx, service)
-		if status == "inactive" {
-			return errors.New("服务已停止，已恢复原单元")
-		}
-		if err != nil {
-			return err
-		}
-		original, err := os.Stat(old)
-		if err != nil {
-			return err
-		}
-		if running, err := m.proxyMasterExecutable(recoverCtx, mode, service, old); err == nil && os.SameFile(running, original) {
-			return m.verifyRunningProxy(recoverCtx, mode, service, old, original)
-		}
-		if _, err := m.services.command(recoverCtx, service, core.ActionRestart); err != nil {
-			return err
-		}
-		return m.verifyRunningProxy(recoverCtx, mode, service, old, original)
-	}
-	if restoreErr := restore(); restoreErr != nil {
+	if restoreErr := m.recoverProxySwitch(recoverCtx, mode); restoreErr != nil {
 		return fmt.Errorf("%s 切换失败（%v），恢复失败：%w", mode, err, restoreErr)
 	}
 	return fmt.Errorf("%s 切换失败，已恢复 %s：%w", mode, m.proxyVersion(recoverCtx, mode, old), err)
@@ -256,7 +225,7 @@ func (m *tlsFrontendManager) verifyRunningProxy(ctx context.Context, mode, servi
 	for _, f := range routes {
 		if f.Mode == mode {
 			if err := probeFrontendTLS(check, f, true, true); err != nil {
-				return err
+				return errors.New("托管监听的 TLS 或业务请求校验失败")
 			}
 		}
 	}
@@ -326,6 +295,10 @@ func systemNginxRevision(ctx context.Context, p nginxPlatform, binary string) (s
 		if err != nil || !ok || !nginxOfficialRevision.MatchString(v) {
 			return "", errors.New("无法核对 Nginx APK 文件归属")
 		}
+		audit, err := run(ctx, apk, "--no-network", "audit", "--system", binary)
+		if err != nil || audit != "" {
+			return "", errors.New("Nginx APK 文件已变更或无法核实")
+		}
 		return v, nil
 	}
 	rpm, err := findIPQualityExecutable("rpm")
@@ -336,6 +309,15 @@ func systemNginxRevision(ctx context.Context, p nginxPlatform, binary string) (s
 	v, ok := strings.CutPrefix(out, "nginx ")
 	if err != nil || !ok || !nginxOfficialRevision.MatchString(v) {
 		return "", errors.New("无法核对 Nginx RPM 文件归属")
+	}
+	verify, err := run(ctx, rpm, "-Vf", "--noscripts", binary)
+	if err != nil && verify == "" {
+		return "", err
+	}
+	for line := range strings.SplitSeq(verify, "\n") {
+		if strings.HasSuffix(line, " "+binary) {
+			return "", errors.New("Nginx RPM 文件已变更")
+		}
 	}
 	return v, nil
 }
@@ -353,6 +335,9 @@ func nginxDebianOwner(ctx context.Context, binary string) (string, string, error
 	revision, err := run(ctx, query, "--show", "--showformat=${Version}", name)
 	if fields := strings.Fields(revision); err != nil || len(fields) != 1 {
 		return "", "", errors.New("无法核对已安装的 Nginx 软件包修订号")
+	}
+	if err = verifyDebianNginxFile(ctx, query, name, binary); err != nil {
+		return "", "", err
 	}
 	return name, strings.TrimSpace(revision), nil
 }

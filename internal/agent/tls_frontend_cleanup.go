@@ -102,7 +102,7 @@ func (m *tlsFrontendManager) removeUnusedTLSService(ctx context.Context, mode st
 			return err
 		}
 	}
-	if err = removeTLSFiles(m.root, mode+".conf", mode+".staged.conf", mode+"-runtime.pending"); err != nil {
+	if err = removeTLSFiles(m.root, mode+".conf", mode+".staged.conf", mode+"-runtime.pending", mode+"-switch.pending"); err != nil {
 		return err
 	}
 	// Caddy's dedicated project binary is independent of system packages.

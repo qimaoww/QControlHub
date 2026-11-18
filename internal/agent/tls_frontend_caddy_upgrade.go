@@ -148,15 +148,8 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 	if err != nil || !caddyStableTag.MatchString(version) {
 		return "", errors.New("无法识别 Caddy 稳定版")
 	}
-	for i, v := range strings.Split(version[1:], ".") {
-		a, _ := strconv.Atoi(v)
-		b, _ := strconv.Atoi(strings.Split(tag[1:], ".")[i])
-		if a > b {
-			return "", errors.New("拒绝降级 Caddy")
-		}
-		if a < b {
-			break
-		}
+	if caddyVersionNewer(version, tag) {
+		return "", errors.New("拒绝降级 Caddy")
 	}
 	if version != tag || target != old {
 		data, err := caddyAssetBinary(ctx, updater, asset)
@@ -183,7 +176,7 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 			return "", errors.New("Caddy 候选版本不符")
 		}
 		if out, err = m.caddyCommand(ctx, candidate, "validate", "--config", filepath.Join(m.root, "caddy.conf")); err != nil {
-			return "", fmt.Errorf("Caddy 配置校验失败：%s", out)
+			return "", errors.New("Caddy 配置校验失败，请在节点核对托管配置、模块和读取权限")
 		}
 		info, err = os.Stat(candidate)
 		if err != nil {
@@ -199,4 +192,19 @@ func (m *tlsFrontendManager) upgradeManagedCaddy(ctx context.Context, build stri
 		return "", err
 	}
 	return "托管 Caddy 正在运行 " + tag, nil
+}
+
+func caddyVersionNewer(version, tag string) bool {
+	if !caddyStableTag.MatchString(version) || !caddyStableTag.MatchString(tag) {
+		return false
+	}
+	parts := strings.Split(tag[1:], ".")
+	for i, v := range strings.Split(version[1:], ".") {
+		a, _ := strconv.Atoi(v)
+		b, _ := strconv.Atoi(parts[i])
+		if a != b {
+			return a > b
+		}
+	}
+	return false
 }

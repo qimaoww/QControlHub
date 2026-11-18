@@ -31,7 +31,7 @@ func readProxyReports() map[string]core.ProxyStatus {
 // Task diagnostics stay on the authorized task, separate from the node view.
 func (m *tlsFrontendManager) saveProxyObservation(ctx context.Context, mode string, change func(*core.ProxyStatus)) error {
 	previous := readProxyReports()[mode]
-	row := core.ProxyStatus{Latest: previous.Latest, CheckedAt: previous.CheckedAt, Outcome: previous.Outcome, State: "unknown"}
+	row := core.ProxyStatus{Latest: previous.Latest, CheckedAt: previous.CheckedAt, Outcome: previous.Outcome, ObservedAt: previous.ObservedAt, State: "unknown"}
 	deployments, err := m.load()
 	if err == nil {
 		ports := map[int]bool{}
@@ -56,10 +56,14 @@ func (m *tlsFrontendManager) saveProxyObservation(ctx context.Context, mode stri
 	if change != nil {
 		change(&row)
 	}
-	if previous == row {
+	if row.Installed != "" && row.Latest != "" && row.Installed != row.Latest {
+		row.NewerInstalled = m.proxyNewer(ctx, mode, row.Installed, row.Latest)
+	}
+	if previous == row && time.Since(row.ObservedAt) < 5*time.Minute {
 		return nil
 	}
 	path := filepath.Join(tlsFrontendRequests, mode+"-status.json")
+	row.ObservedAt = time.Now().UTC()
 	data, err := json.Marshal(row)
 	if err != nil {
 		return err
@@ -165,6 +169,8 @@ func (m *tlsFrontendManager) proxyOperation(ctx context.Context, mode string, ac
 		} else {
 			_, latest, _, err = m.caddyCandidate(ctx)
 		}
+	} else if err = m.recoverProxySwitch(ctx, mode); err != nil {
+		err = fmt.Errorf("中断的托管切换恢复失败：%w", err)
 	} else if mode == "nginx" {
 		output, err = m.upgradeManagedNginx(ctx, build, explicit, m.upgradeNginxBinary)
 	} else {
@@ -228,5 +234,31 @@ func (c *Client) observeProxies(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (m *tlsFrontendManager) proxyNewer(ctx context.Context, mode, installed, latest string) bool {
+	if mode == "caddy" {
+		return caddyVersionNewer(installed, latest)
+	}
+	p, err := nginxHostPlatform()
+	if err != nil {
+		return false
+	}
+	switch p.family {
+	case "debian", "ubuntu":
+		_, err = run(ctx, "/usr/bin/dpkg", "--compare-versions", installed, "gt", latest)
+		return err == nil
+	case "alpine":
+		apk, _ := findIPQualityExecutable("apk")
+		v, err := run(ctx, apk, "version", "-t", installed, latest)
+		return err == nil && v == ">"
+	default:
+		if !nginxOfficialRevision.MatchString(installed) || !nginxOfficialRevision.MatchString(latest) {
+			return false
+		}
+		rpm, _ := findIPQualityExecutable("rpm")
+		v, err := run(ctx, rpm, "--eval", "%{lua:print(rpm.vercmp('"+installed+"','"+latest+"'))}")
+		return err == nil && v == "1"
 	}
 }

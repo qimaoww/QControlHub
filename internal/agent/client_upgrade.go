@@ -42,7 +42,7 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	nginx, nginxErr := c.executor.upgradeNginxForAgentBuild(ctx, version, core.ActionUpgradeAgent)
+	nginx, nginxErr := c.executor.upgradeProxiesForAgentBuild(ctx, version, core.ActionUpgradeAgent)
 	if err := transaction.commit(); err != nil {
 		return "", err
 	}
@@ -57,11 +57,11 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	return output, nil
 }
 
-func (c *Client) upgradeNginxOnStartup(ctx context.Context) {
+func (c *Client) upgradeProxiesOnStartup(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	output, err := c.executor.upgradeNginxForAgentBuild(ctx, c.config.Version, core.ActionStatus)
+	output, err := c.executor.upgradeProxiesForAgentBuild(ctx, c.config.Version, core.ActionStatus)
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("托管代理更新未确认", "error", core.DiagnosticText(err.Error()))
