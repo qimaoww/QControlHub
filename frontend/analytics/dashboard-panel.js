@@ -1,5 +1,5 @@
 import { patch } from "./live-dom.js";
-import { actions, badge, muted, node, section } from "./ui.js";
+import { badge, node, section } from "./ui.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -77,149 +77,49 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, num));
 }
 
-function polarPoint(cx, cy, r, deg) {
-  const rad = ((deg - 90) * Math.PI) / 180;
-  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
-}
-
-function arcSegmentPath(cx, cy, r, startDeg, endDeg) {
-  const [x1, y1] = polarPoint(cx, cy, r, startDeg);
-  const [x2, y2] = polarPoint(cx, cy, r, endDeg);
-  const large = endDeg - startDeg > 180 ? 1 : 0;
-  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
-}
-
-const DIAL_TICKS = [-120, -90, -60, -30, 0, 30, 60, 90, 120].map((deg) => {
-  const [x1, y1] = polarPoint(54, 48, 39, deg);
-  const [x2, y2] = polarPoint(54, 48, 43, deg);
-  return { x1: x1.toFixed(2), y1: y1.toFixed(2), x2: x2.toFixed(2), y2: y2.toFixed(2) };
-});
-
-function createDialSlot(label, key) {
-  const valEl = node("strong", {}, "—");
-  const metaEl = node("span", { className: "a-dash-dial-meta a-muted" }, "\u00a0");
-  const r = 34;
-  const sweep = 240;
-  const arcLen = (2 * Math.PI * r * sweep) / 360;
-  const trackD = arcSegmentPath(54, 48, r, -120, 120);
-  const arcEl = createSVGEl("path", {
-    class: "a-dash-dial-arc",
-    d: trackD,
-    "stroke-dasharray": `0.001 ${arcLen.toFixed(2)}`,
-    opacity: "0",
-  });
-  const svgEl = createSVGEl("svg", {
-    class: "a-dash-dial-svg",
-    viewBox: "0 0 108 80",
-    "aria-hidden": "true",
-  });
-  for (const tick of DIAL_TICKS) {
-    svgEl.append(createSVGEl("line", { class: "a-dash-dial-tick", x1: tick.x1, y1: tick.y1, x2: tick.x2, y2: tick.y2 }));
+// Linear gauge of one usage percentage. The segment count follows the real
+// pixel width, so every segment keeps the same size at any breakpoint.
+function drawSegmentMeter({ width, height }, data) {
+  const pct = clampPercent(data?.pct);
+  const gap = 2;
+  const count = Math.max(12, Math.floor((width + gap) / 6));
+  const segW = (width - gap * (count - 1)) / count;
+  const lit = pct == null || pct <= 0 ? 0 : Math.max(1, Math.round((pct / 100) * count));
+  const tone = pct == null ? "" : pct >= 90 ? " is-bad" : pct >= 75 ? " is-warn" : "";
+  const svg = createSVGEl("svg", { class: "a-con-gauge-svg", viewBox: `0 0 ${width} ${height}`, "aria-hidden": "true" });
+  for (let i = 0; i < count; i++) {
+    const x = (i * (segW + gap)).toFixed(1);
+    svg.append(createSVGEl("rect", { x, y: 0, width: segW.toFixed(1), height, class: i < lit ? `a-con-seg is-on${tone}` : "a-con-seg" }));
   }
-  svgEl.append(createSVGEl("path", { class: "a-dash-dial-track", d: trackD }), arcEl);
+  return svg;
+}
 
+const NO_SAMPLE = Object.freeze(Object.create(null));
+const NO_HISTORY = Object.freeze(Array.of());
+const NBSP = String.fromCharCode(160);
+
+// One usage gauge: label, the used and total amounts where the metric has
+// them, the percentage, and a segment meter below.
+function createGaugeSlot(ctx, label, key) {
+  const valEl = node("strong", { "data-refresh-key": "value" }, "—");
+  const metaEl = node("span", { className: "a-con-token", "data-refresh-key": "amount" }, "");
+  const meter = createResponsiveSVG("a-con-gauge-track", ctx.signal, { height: 10, fallbackWidth: 280, draw: drawSegmentMeter });
+  const element = node("div", { className: "a-con-gauge", "data-refresh-key": key },
+    node("div", { className: "a-con-gauge-head" }, node("span", { className: "a-con-label" }, label), metaEl, valEl),
+    meter.element);
   return {
-    valEl,
-    metaEl,
-    wrap: node("div", { className: "a-dash-dial-wrap" }, svgEl, node("div", { className: "a-dash-dial-value" }, valEl)),
+    element,
     setPercent(pct, detail) {
       valEl.textContent = pct == null ? "—" : `${pct.toFixed(1)}%`;
       metaEl.textContent = detail;
-      const ratio = pct == null ? 0 : Math.max(0, Math.min(100, pct)) / 100;
-      const filled = ratio > 0 ? Math.max(2, ratio * arcLen) : 0.001;
-      arcEl.setAttribute("stroke-dasharray", `${filled.toFixed(2)} ${arcLen.toFixed(2)}`);
-      arcEl.setAttribute("opacity", pct == null ? "0" : "1");
-      const toneClass = pct == null ? "" : pct >= 90 ? " is-bad" : pct >= 75 ? " is-warn" : "";
-      arcEl.setAttribute("class", `a-dash-dial-arc${toneClass}`);
-    },
-    buildCell(bottomEl) {
-      return node("div", { className: "a-dash-dial-cell", "data-refresh-key": key },
-        node("span", { className: "a-dash-dial-label a-muted" }, label),
-        this.wrap,
-        metaEl,
-        bottomEl,
-      );
+      meter.update({ pct });
     },
   };
-}
-
-function drawMiniSpark({ width, height }, data) {
-  const values = (data?.values || []).filter((v) => v != null && Number.isFinite(v));
-  const padX = 2;
-  const padY = 3;
-  const usableW = Math.max(10, width - padX * 2);
-  const usableH = Math.max(4, height - padY * 2);
-  const svg = createSVGEl("svg", {
-    class: "a-dash-spark",
-    viewBox: `0 0 ${width} ${height}`,
-    "aria-hidden": "true",
-  });
-  const baseY = (padY + usableH).toFixed(1);
-  svg.append(createSVGEl("line", { x1: padX, y1: baseY, x2: width - padX, y2: baseY, class: "a-dash-spark-baseline" }));
-
-  if (values.length < 2) {
-    return svg;
-  }
-
-  const gradID = data?.gradID || "a-spark-grad";
-  const defs = createSVGEl("defs");
-  const grad = createSVGEl("linearGradient", { id: gradID, x1: "0", y1: "0", x2: "0", y2: "1" });
-  grad.append(
-    createSVGEl("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.14" }),
-    createSVGEl("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.01" }),
-  );
-  defs.append(grad);
-  svg.append(defs);
-
-  const pts = values.map((val, idx) => {
-    const x = padX + (idx / (values.length - 1)) * usableW;
-    const y = padY + usableH - (Math.max(0, Math.min(100, val)) / 100) * usableH;
-    return [x, y];
-  });
-  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  const last = pts.at(-1);
-  svg.append(
-    createSVGEl("path", { d: `${line} L${last[0].toFixed(1)} ${height} L${pts[0][0].toFixed(1)} ${height} Z`, fill: `url(#${gradID})` }),
-    createSVGEl("path", { d: line, class: "a-dash-spark-line" }),
-    createSVGEl("circle", { cx: last[0].toFixed(1), cy: last[1].toFixed(1), r: "2.2", class: "a-dash-spark-dot" }),
-  );
-  return svg;
-}
-
-function drawDiskSegments({ width, height }, data) {
-  const pct = clampPercent(data?.pct);
-  const segCount = Math.max(12, Math.min(20, Math.floor(width / 10)));
-  const gap = 2;
-  const padY = 6;
-  const segH = Math.max(6, height - padY * 2);
-  const segW = Math.max(2, (width - gap * (segCount - 1)) / segCount);
-  const active = pct == null ? 0 : Math.round((pct / 100) * segCount);
-  const tone = pct == null ? "" : pct >= 90 ? " is-bad" : pct >= 75 ? " is-warn" : "";
-
-  const svg = createSVGEl("svg", {
-    class: "a-dash-disk-svg",
-    viewBox: `0 0 ${width} ${height}`,
-    "aria-hidden": "true",
-  });
-  for (let i = 0; i < segCount; i++) {
-    const x = (i * (segW + gap)).toFixed(1);
-    const filled = pct != null && (i < active || (pct > 0 && i === 0));
-    svg.append(createSVGEl("rect", {
-      x,
-      y: padY,
-      width: segW.toFixed(1),
-      height: segH,
-      rx: "1.5",
-      class: filled ? `a-dash-disk-seg is-on${tone}` : "a-dash-disk-seg",
-    }));
-  }
-  return svg;
 }
 
 function drawDualOscilloscope({ width, height }, data) {
   const rxSeries = data?.rx || [];
   const txSeries = data?.tx || [];
-  const bytes = data?.bytes || ((v) => String(v));
   const padL = 4;
   const padR = 4;
   const padT = 8;
@@ -299,30 +199,28 @@ function drawDualOscilloscope({ width, height }, data) {
   return svg;
 }
 
-function readSampleSeries(history, bytes) {
-  const cpuSeries = [];
-  const memSeries = [];
+function readSampleSeries(history) {
   const rxSeries = [];
   const txSeries = [];
-  for (const sample of history || []) {
-    cpuSeries.push(sample?.cpu_available ? clampPercent(sample.cpu_percent) : null);
-    const memTotal = finiteNonNegative(sample?.memory_total_bytes);
-    const memUsed = finiteNonNegative(sample?.memory_used_bytes);
-    const memVal = clampPercent(sample?.memory_percent) ?? (memTotal > 0 && memUsed != null ? clampPercent((memUsed / memTotal) * 100) : null);
-    memSeries.push(sample?.memory_available ? memVal : null);
-    const netRateOK = sample?.network_rate_valid !== undefined
-      ? Boolean(sample.network_rate_valid)
-      : Boolean(sample?.network_available) && (sample?.network_rate_available === undefined || Boolean(sample.network_rate_available));
-    rxSeries.push(netRateOK ? finiteNonNegative(sample?.network_rx_bps) : null);
-    txSeries.push(netRateOK ? finiteNonNegative(sample?.network_tx_bps) : null);
+  for (const sample of history) {
+    let rateOK = Boolean(sample?.network_available) && (sample?.network_rate_available === undefined || Boolean(sample.network_rate_available));
+    if (sample?.network_rate_valid !== undefined) rateOK = Boolean(sample.network_rate_valid);
+    rxSeries.push(rateOK ? finiteNonNegative(sample?.network_rx_bps) : null);
+    txSeries.push(rateOK ? finiteNonNegative(sample?.network_tx_bps) : null);
   }
-  return { cpuSeries, memSeries, rxSeries, txSeries, bytes };
+  return { rxSeries, txSeries };
+}
+
+// "3.5 / 8 GB" when both amounts share a unit, else both in full.
+function usageNote(used, total) {
+  const cut = used.lastIndexOf(NBSP);
+  const unit = cut > 0 ? used.slice(cut) : "";
+  return unit && total.endsWith(unit) ? `${used.slice(0, cut)} / ${total}` : `${used} / ${total}`;
 }
 
 export function createPanelHostController(ctx, { bytes, date }) {
   const headBadges = node("div", { className: "a-actions", role: "status" });
-  const subTime = node("span", { className: "a-dash-subbar-text a-muted" }, "读取中…");
-  const subbar = node("div", { className: "a-dash-subbar" }, subTime);
+  const subTime = node("span", { className: "a-muted" }, "读取中…");
   let lastRenderSignature = "";
 
   const keyedBadge = (key, label, tone = "") => {
@@ -331,58 +229,32 @@ export function createPanelHostController(ctx, { bytes, date }) {
     return el;
   };
 
-  const cpuSpark = createResponsiveSVG("a-dash-dial-spark", ctx.signal, { height: 22, fallbackWidth: 120, draw: drawMiniSpark });
-  const memSpark = createResponsiveSVG("a-dash-dial-spark", ctx.signal, { height: 22, fallbackWidth: 120, draw: drawMiniSpark });
-  const diskMeter = createResponsiveSVG("a-dash-dial-spark", ctx.signal, { height: 22, fallbackWidth: 120, draw: drawDiskSegments });
-  const netOsc = createResponsiveSVG("a-dash-osc-wrap", ctx.signal, { height: 112, fallbackWidth: 420, draw: drawDualOscilloscope });
+  const netOsc = createResponsiveSVG("a-dash-osc-wrap", ctx.signal, { height: 96, fallbackWidth: 320, draw: drawDualOscilloscope });
+  const cpuGauge = createGaugeSlot(ctx, "CPU", "CPU 使用率");
+  const memGauge = createGaugeSlot(ctx, "内存", "内存使用率");
+  const diskGauge = createGaugeSlot(ctx, "磁盘", "根目录磁盘");
+  const rxValEl = node("strong", { "data-refresh-key": "value" }, "—");
+  const txValEl = node("strong", { "data-refresh-key": "value" }, "—");
+  const oscSummaryEl = node("span", { className: "a-muted" }, "");
 
-  const cpuDial = createDialSlot("CPU 使用率", "CPU 使用率");
-  const memDial = createDialSlot("内存使用率", "内存使用率");
-  const diskDial = createDialSlot("根目录磁盘", "根目录磁盘");
+  // The line key beside each label doubles as the legend of the trace.
+  const rateReadout = (key, keyClass, label, valueEl) => node("div", { className: "a-con-readout", "data-refresh-key": key },
+    node("span", { className: "a-con-label" }, node("span", { className: keyClass }), label),
+    node("span", { className: "a-con-fig" }, valueEl));
+  const body = node("div", { className: "a-con-host" },
+    cpuGauge.element, memGauge.element, diskGauge.element,
+    node("div", { className: "a-con-host-rates" },
+      rateReadout("网络接收速率", "a-chart-key-rx", "接收", rxValEl),
+      rateReadout("网络发送速率", "a-chart-key-tx", "发送", txValEl)),
+    node("div", { className: "a-con-host-net" }, netOsc.element,
+      node("div", { className: "a-con-host-foot" }, subTime, oscSummaryEl)));
 
-  const rxValEl = node("strong", {}, "—");
-  const rxCumEl = node("span", { className: "a-muted" }, "累计 —");
-  const txValEl = node("strong", {}, "—");
-  const txCumEl = node("span", { className: "a-muted" }, "累计 —");
-  const oscSummaryEl = node("span", { className: "a-muted" }, "—");
-
-  const body = node("div", { className: "a-dash-host-wrap" },
-    subbar,
-    node("div", { className: "a-dash-dial-grid" },
-      cpuDial.buildCell(cpuSpark.element),
-      memDial.buildCell(memSpark.element),
-      diskDial.buildCell(diskMeter.element),
-    ),
-    node("div", { className: "a-dash-host-io" },
-      node("div", { className: "a-dash-io-readouts" },
-        node("div", { className: "a-dash-io-item", "data-refresh-key": "网络接收速率" },
-          node("div", { className: "a-dash-io-head" }, node("span", { className: "a-dash-rx" }, "↓ 接收速率"), rxCumEl),
-          rxValEl,
-        ),
-        node("div", { className: "a-dash-io-item", "data-refresh-key": "网络发送速率" },
-          node("div", { className: "a-dash-io-head" }, node("span", { className: "a-dash-tx" }, "↑ 发送速率"), txCumEl),
-          txValEl,
-        ),
-      ),
-      node("div", { className: "a-dash-host-net-spark" },
-        node("div", { className: "a-dash-io-head" },
-          node("span", { className: "a-dash-osc-legend a-muted" },
-            node("span", { className: "a-chart-key-rx" }),
-            " 接收",
-            node("span", { className: "a-chart-key-tx" }),
-            " 发送",
-          ),
-          oscSummaryEl,
-        ),
-        netOsc.element,
-      ),
-    ),
-  );
-
-  const element = section("面板运行资源", body, headBadges);
+  const element = section("面板主机", body, headBadges);
   element.classList.add("a-dash-host-card");
 
-  function paint({ m = {}, history = [], runtime = null, status = "" }) {
+  function paint(sample) {
+    const m = sample.m || NO_SAMPLE;
+    const status = sample.status || "";
     const cpuPct = m.cpu_available ? clampPercent(m.cpu_percent) : null;
     const memTotal = finiteNonNegative(m.memory_total_bytes);
     const memUsed = finiteNonNegative(m.memory_used_bytes);
@@ -396,21 +268,13 @@ export function createPanelHostController(ctx, { bytes, date }) {
     const netRateOK = Boolean(m.network_available) && (m.network_rate_available === undefined || Boolean(m.network_rate_available));
     const rxBps = netRateOK ? finiteNonNegative(m.network_rx_bps) : null;
     const txBps = netRateOK ? finiteNonNegative(m.network_tx_bps) : null;
-    const rxTotal = m.network_available ? finiteNonNegative(m.network_rx_bytes) : null;
-    const txTotal = m.network_available ? finiteNonNegative(m.network_tx_bytes) : null;
 
-    const series = readSampleSeries(history, bytes);
+    const series = readSampleSeries(sample.history || NO_HISTORY);
     const time = Date.parse(m.collected_at);
     const collected = Number.isFinite(time) && time > 0;
     const stale = collected && Date.now() - time > 15000;
     let subTimeText = "";
-    if (status === "denied") {
-      subTimeText = "面板资源无读取权限";
-    } else if (status === "failed" && !collected) {
-      subTimeText = "资源读取失败";
-    } else if (!collected) {
-      subTimeText = "尚无有效采样";
-    } else {
+    if (collected) {
       const formattedTime = date(m.collected_at);
       subTimeText = status === "failed" ? `${formattedTime} · 保留上次采样` : formattedTime;
     }
@@ -418,40 +282,29 @@ export function createPanelHostController(ctx, { bytes, date }) {
     const renderSignature = JSON.stringify([
       status, collected, stale, subTimeText,
       cpuPct, memPct, memUsed, memTotal, diskPct, diskUsed, diskTotal,
-      rxBps, txBps, rxTotal, txTotal,
-      series.cpuSeries, series.memSeries, series.rxSeries, series.txSeries,
-      Boolean(m.cpu_available), memOK, diskOK, Boolean(m.network_available), netRateOK,
+      rxBps, txBps, series.rxSeries, series.txSeries,
     ]);
     if (renderSignature === lastRenderSignature) return;
     lastRenderSignature = renderSignature;
 
-    cpuDial.setPercent(cpuPct, "\u00a0");
-    memDial.setPercent(memPct, memOK ? `${bytes(memUsed)} / ${bytes(memTotal)}` : "\u00a0");
-    diskDial.setPercent(diskPct, diskOK ? `${bytes(diskUsed)} / ${bytes(diskTotal)}` : "\u00a0");
-
-    cpuSpark.update({ values: series.cpuSeries, gradID: "a-spark-grad-cpu" });
-    memSpark.update({ values: series.memSeries, gradID: "a-spark-grad-mem" });
-    diskMeter.update({ pct: diskPct });
+    cpuGauge.setPercent(cpuPct, "");
+    memGauge.setPercent(memPct, memOK ? usageNote(bytes(memUsed), bytes(memTotal)) : "");
+    diskGauge.setPercent(diskPct, diskOK ? usageNote(bytes(diskUsed), bytes(diskTotal)) : "");
 
     rxValEl.textContent = rxBps == null ? "—" : `${bytes(rxBps)}/s`;
     txValEl.textContent = txBps == null ? "—" : `${bytes(txBps)}/s`;
-    rxCumEl.textContent = rxTotal == null ? "累计 —" : `累计 ${bytes(rxTotal)}`;
-    txCumEl.textContent = txTotal == null ? "累计 —" : `累计 ${bytes(txTotal)}`;
 
     const finiteRates = [...series.rxSeries, ...series.txSeries].filter((v) => v != null && Number.isFinite(v));
-    oscSummaryEl.textContent = finiteRates.length >= 2 ? `峰值 ${bytes(Math.max(...finiteRates))}/s` : "—";
-    netOsc.update({ rx: series.rxSeries, tx: series.txSeries, bytes, gradID: "a-osc-grad-panel-net" });
+    oscSummaryEl.textContent = finiteRates.length >= 2 ? `峰值 ${bytes(Math.max(...finiteRates))}/s` : "";
+    netOsc.update({ rx: series.rxSeries, tx: series.txSeries, gradID: "a-osc-grad-panel-net" });
 
+    let stateBadge = keyedBadge("state", "尚无有效采样", "warn");
+    if (status === "denied") stateBadge = keyedBadge("state", "无读取权限", "bad");
+    else if (status === "failed") stateBadge = keyedBadge("state", collected ? "刷新失败" : "资源读取失败", "warn");
+    else if (collected) stateBadge = keyedBadge("state", stale ? "采样已过期" : "实时", stale ? "warn" : "");
     patch(headBadges, node("div", { className: "a-actions", role: "status" },
       collected ? keyedBadge("scope", "容器可见") : null,
-      status === "denied"
-        ? keyedBadge("state", "无读取权限", "bad")
-        : status === "failed"
-          ? keyedBadge("state", collected ? "刷新失败" : "资源读取失败", "warn")
-          : collected
-            ? keyedBadge("state", stale ? "采样已过期" : "实时", stale ? "warn" : "ok")
-            : keyedBadge("state", "尚无有效采样", "warn"),
-    ));
+      stateBadge));
 
     if (subTime.textContent !== subTimeText) subTime.textContent = subTimeText;
   }

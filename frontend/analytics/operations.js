@@ -1,14 +1,12 @@
 import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable, dialogContext, preparedDialog } from "./loading.js";
 import { quotaInvitations } from "./invitations.js";
-import { listen, patch, poll } from "./live-dom.js";
-import { currentTheme } from '../modules/theme-lifecycle.js';
+import { patch, poll } from "./live-dom.js";
 import { formatDate } from "./appearance.js";
 import { bindSourceEditorTools } from "./source-editor.js";
 import { readableConfigSource } from '../modules/code-format.js';
 import { editAgentSharing } from "./sharing.js";
-import { aggregateDashboardTrafficDays, isProbeRunning, mergePanelMetricsHistory, niceTrafficScaleMax, summarizeDashboardNodes, summarizeDashboardTraffic, summarizeDashboardTrafficBreakdown, summarizeDashboardTrafficPeaks, utcMonth } from "../modules/dashboard-model.js";
-import { metricTrack } from './metric-track.js';
+import { dashboardTrafficPeriodMonths, isProbeRunning, mergePanelMetricsHistory, summarizeDashboardNodes, utcMonth } from "../modules/dashboard-model.js";
 import { orderNodesBySavedOrder, readOrderedNodes } from "../modules/node-order.js";
 import { diagnosticError, redactDiagnostic } from "../modules/errors.js";
 import { coreSourceLabel, taskRetryState, taskTiming } from "../modules/task-model.js";
@@ -30,172 +28,12 @@ export const actionName = value => ({
   "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
 })[value] || value;
 
-function responsiveChart(days, signal, onInspect) {
-  const container = node("div", { className: "a-chart-container" });
-  let currentDays = days, selectedDay = '', previous = "", width = Math.max(280, innerWidth - (innerWidth > 896 ? 256 : 0) - 96);
-  const render = () => {
-    const plotWidth = Math.max(280, Math.round(width));
-    const signature = JSON.stringify([plotWidth, currentDays]);
-    if (signature === previous) return;
-    previous = signature;
-    if (!currentDays.some(day => day.day === selectedDay)) selectedDay = '';
-    const fresh = chart(currentDays, plotWidth, selectedDay, day => { selectedDay = day; }, onInspect);
-    if (container.firstChild) patch(container.firstChild, fresh); else container.append(fresh);
-    const active = selectedDay ? currentDays.find(day => day.day === selectedDay) : null;
-    onInspect?.(active || null, currentDays);
-  };
-  render();
-  container.updateDays = value => { currentDays = value; render(); };
-  container.refreshInspect = () => {
-    const active = selectedDay ? currentDays.find(day => day.day === selectedDay) : null;
-    onInspect?.(active || null, currentDays);
-  };
-  const observer = new ResizeObserver(entries => {
-    const nextWidth = Math.max(280, Math.round(entries[0].contentRect.width));
-    if (nextWidth === Math.round(width)) return;
-    width = nextWidth;
-    render();
-  });
-  observer.observe(container);
-  signal.addEventListener("abort", () => observer.disconnect(), { once: true });
-  return container;
-}
-
-function chart(days, width, selectedDay, selectDay, onInspect) {
-  const height = 208, left = width < 420 ? 52 : 58, right = 24, top = 16, bottom = 26;
-  const rawMax = Math.max(0, ...days.flatMap(day => [day.received_bytes, day.sent_bytes]));
-  const max = niceTrafficScaleMax(rawMax);
-  const points = key => days.map((day, index) => [left + index / Math.max(1, days.length - 1) * (width - left - right),
-    height - bottom - day[key] / max * (height - top - bottom)]);
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("class", "a-chart");
-  svg.setAttribute("role", "group");
-  svg.setAttribute("aria-label", "所选月份每日流量：实线为接收，虚线为发送");
-  const add = (tag, attrs, text, parent = svg) => {
-    const element = document.createElementNS(svg.namespaceURI, tag);
-    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
-    if (text) element.textContent = text;
-    parent.append(element);
-    return element;
-  };
-  for (let i = 0; i < 4; i++) {
-    const y = top + i / 3 * (height - top - bottom);
-    add("path", { d: `M${left} ${y}H${width - right}`, stroke: i === 3 ? "#d4d4d8" : "#e4e4e7", "stroke-dasharray": i === 3 ? "" : "3 4" });
-    add("text", { x: left - 8, y: y + 4, "text-anchor": "end" }, bytes(max * (1 - i / 3)));
-  }
-  if (days.length) {
-    const rxPoints = points('received_bytes');
-    const txPoints = points('sent_bytes');
-    const stride = width < 420 ? 7 : 5;
-    days.forEach((day, index) => {
-      if (index === 0 || (index % stride === 0 && index <= days.length - 4) || index === days.length - 1) {
-        const vx = rxPoints[index][0].toFixed(1);
-        add("line", { x1: vx, y1: top, x2: vx, y2: height - bottom, stroke: "#efeff1", "stroke-dasharray": "2 3" });
-        add("text", { x: vx, y: height - 6, "text-anchor": "middle" }, day.day.slice(5));
-      }
-    });
-    const defs = add("defs", {});
-    const grad = add("linearGradient", { id: "a-chart-rx-grad", x1: "0", y1: "0", x2: "0", y2: "1" }, "", defs);
-    add("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.14" }, "", grad);
-    add("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.01" }, "", grad);
-    for (const [key, label, stroke, dash] of [['received_bytes', '接收', '#18181b', ''], ['sent_bytes', '发送', '#52525b', '5 4']]) {
-      const series = points(key);
-      const line = series.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-      if (!dash) add("path", { d: `${line}L${series.at(-1)[0]} ${height - bottom}H${left}Z`, fill: "url(#a-chart-rx-grad)" });
-      add("path", { d: line, stroke, "stroke-width": dash ? "1.6" : "2", 'stroke-dasharray': dash, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: "none", 'data-series': key, 'aria-label': label });
-      if (days.length === 1) add('circle', { cx: series[0][0], cy: series[0][1], r: 3, fill: stroke });
-    }
-    let peakIdx = 0;
-    days.forEach((d, idx) => {
-      if ((d.received_bytes + d.sent_bytes) > (days[peakIdx].received_bytes + days[peakIdx].sent_bytes)) peakIdx = idx;
-    });
-    if (days[peakIdx] && (days[peakIdx].received_bytes + days[peakIdx].sent_bytes) > 0) {
-      const px = rxPoints[peakIdx][0].toFixed(1);
-      add("line", { class: "a-chart-peak-guide", x1: px, y1: top, x2: px, y2: height - bottom });
-      add("circle", { cx: px, cy: txPoints[peakIdx][1].toFixed(1), r: 2.75, fill: "#fff", stroke: "#52525b", "stroke-width": "1.5" });
-      add("circle", { cx: px, cy: rxPoints[peakIdx][1].toFixed(1), r: 3.25, fill: "#18181b", stroke: "#fff", "stroke-width": "1.5" });
-    } else {
-      add("text", {
-        class: "a-chart-empty-hint",
-        x: ((left + width - right) / 2).toFixed(1),
-        y: ((top + height - bottom) / 2 + 4).toFixed(1),
-        "text-anchor": "middle",
-      }, "暂无流量采样");
-    }
-    const crosshair = add("line", { class: "a-chart-crosshair", x1: 0, x2: 0, y1: top, y2: height - bottom, opacity: "0" });
-    const rxDot = add("circle", { class: "a-chart-dot-rx", cx: 0, cy: 0, r: 3.5, opacity: "0" });
-    const txDot = add("circle", { class: "a-chart-dot-tx", cx: 0, cy: 0, r: 3.5, opacity: "0" });
-    const updateCrosshair = (idx) => {
-      if (idx == null || idx < 0 || idx >= days.length) {
-        crosshair.setAttribute("opacity", "0");
-        rxDot.setAttribute("opacity", "0");
-        txDot.setAttribute("opacity", "0");
-        return;
-      }
-      const x = rxPoints[idx][0].toFixed(1);
-      crosshair.setAttribute("x1", x);
-      crosshair.setAttribute("x2", x);
-      crosshair.setAttribute("opacity", "1");
-      rxDot.setAttribute("cx", x);
-      rxDot.setAttribute("cy", rxPoints[idx][1].toFixed(1));
-      rxDot.setAttribute("opacity", "1");
-      txDot.setAttribute("cx", x);
-      txDot.setAttribute("cy", txPoints[idx][1].toFixed(1));
-      txDot.setAttribute("opacity", "1");
-    };
-    const initialIdx = selectedDay ? days.findIndex(d => d.day === selectedDay) : -1;
-    updateCrosshair(initialIdx);
-
-    const xValues = rxPoints.map(([x]) => x);
-    days.forEach((day, index) => {
-      const start = index ? (xValues[index - 1] + xValues[index]) / 2 : left;
-      const end = index === days.length - 1 ? width - right : (xValues[index] + xValues[index + 1]) / 2;
-      const label = `${day.day} · UTC · 接收 ${bytes(day.received_bytes)} · 发送 ${bytes(day.sent_bytes)} · 合计 ${bytes(day.received_bytes + day.sent_bytes)}`;
-      const band = add('rect', { x: start, y: top, width: end - start, height: height - top - bottom,
-        fill: 'currentColor', 'fill-opacity': selectedDay === day.day ? '.05' : '0', 'pointer-events': 'all',
-        'data-chart-day': day.day, 'data-refresh-key': `chart-day-${day.day}`, title: label, role: 'button',
-        'aria-label': label, tabindex: selectedDay === day.day || !selectedDay && index === 0 ? '0' : '-1' });
-      const select = owner => {
-        selectDay(owner.dataset.chartDay);
-        updateCrosshair(index);
-        onInspect?.(day, days);
-        owner.closest('svg').querySelectorAll('[data-chart-day]').forEach(item => {
-          item.setAttribute('fill-opacity', item === owner ? '.05' : '0'); item.setAttribute('tabindex', item === owner ? '0' : '-1');
-        });
-      };
-      listen(band, 'pointerover', event => {
-        if (event.pointerType === 'touch') return;
-        select(event.currentTarget);
-      });
-      listen(band, 'focus', event => select(event.currentTarget));
-      listen(band, 'pointerleave', event => {
-        if (document.activeElement === event.currentTarget) return;
-        selectDay(''); updateCrosshair(-1); event.currentTarget.setAttribute('fill-opacity', '0');
-        onInspect?.(null, days);
-      });
-      listen(band, 'pointerup', event => {
-        event.currentTarget.focus({ preventScroll: true });
-        currentTheme('analytics')?.motion?.tooltip?.(event.currentTarget);
-      });
-      listen(band, 'keydown', event => {
-        const items = [...event.currentTarget.closest('svg').querySelectorAll('[data-chart-day]')], current = items.indexOf(event.currentTarget);
-        const next = ({ ArrowLeft: Math.max(0, current - 1), ArrowRight: Math.min(items.length - 1, current + 1), Home: 0, End: items.length - 1 })[event.key];
-        if (next != null) {
-          event.preventDefault(); items[next].focus({ preventScroll: true });
-          currentTheme('analytics')?.motion?.tooltip?.(items[next]);
-        } else if (['Enter', ' '].includes(event.key)) { event.preventDefault(); currentTheme('analytics')?.motion?.tooltip?.(event.currentTarget); }
-      });
-    });
-  }
-  return svg;
-}
-
+import { createLiveCells, createStatusLine, quantityParts } from "./dashboard-console.js";
 import { createPanelHostController } from "./dashboard-panel.js";
-import { createTrafficRankingCard, trafficSplitBar } from "./dashboard-ranking.js";
 import { createDashboardProbeController } from "./dashboard-probes.js";
 import { createDashboardTopologySection } from "./dashboard-topology.js";
-import { createEdgeTelemetryController, paintNodeTelemetryMatrix } from "./dashboard-telemetry.js";
+import { createEdgeTelemetryController, paintNodeRack } from "./dashboard-telemetry.js";
+import { createTrafficStage } from "./dashboard-traffic.js";
 
 /** Shared telemetry resource loader/poller used by both the dashboard and standalone topology pages. */
 function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, onSettled } = {}) {
@@ -218,6 +56,7 @@ function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, 
       const value = await ctx.api(path, { signal: AbortSignal.any([ctx.signal, controller.signal]) });
       if (!ctx.current() || requests.get(key) !== controller) return;
       if (key === "traffic" && value.month !== requestedMonth) throw new Error("流量月份不匹配");
+      if (key.startsWith("usage:") && value.month !== key.slice(6)) throw new Error("流量月份不匹配");
       readings.set(key, value);
       states.set(key, "ready");
       onSuccess?.(key, value);
@@ -257,194 +96,104 @@ function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, 
   };
 }
 
+const BLANK_FIGURE = ["—", ""];
+const NO_SUBS = Object.freeze([]);
+const CORE_KEYS = new Set(["overview", "agents", "order"]);
+const EDGE_KEYS = new Set(["connections", "certificates", "ipQuality"]);
+const blankCell = (key, label) => ({ key, label, token: "", tone: "", state: "ready", figure: BLANK_FIGURE, subs: NO_SUBS, viz: null });
+const twoDigits = (value) => String(value).padStart(2, "0");
+// Current UTC time to the minute. The traffic periods are cut on UTC days,
+// so the clock shows where the current day stands.
+const utcClock = (now = new Date()) =>
+  `UTC ${twoDigits(now.getUTCMonth() + 1)}-${twoDigits(now.getUTCDate())} ${twoDigits(now.getUTCHours())}:${twoDigits(now.getUTCMinutes())}`;
+const taskNumbers = (overview) => ({
+  pending: Number(overview.tasks_pending || 0) + Number(overview.tasks_queued || 0),
+  running: Number(overview.tasks_running || 0),
+  failed: Number(overview.tasks_failed || 0),
+});
+
 export async function dashboardPage(ctx) {
   let month = ctx.state.data.dashboardMonth || utcMonth();
   const can = permission => ctx.can(permission);
   let panelHistory = [];
-  let panelRuntime = null;
   let edgeLastFetch = 0;
+  let stage = null;
   const store = createTelemetryStore(ctx, {
     getMonth: () => month,
-    onLoading: (key) => { if (key === "traffic") paintTraffic(); },
+    onLoading: (key) => { if (key === "traffic") stage?.paint(); },
     onSuccess: (key, value) => {
-      if (key === "metrics") {
-        panelHistory = mergePanelMetricsHistory(value, panelHistory, 60);
-        panelRuntime = value?.panel_runtime || null;
-      }
+      if (key === "metrics") panelHistory = mergePanelMetricsHistory(value, panelHistory, 60);
+      if (key === "agents") sampleRate(value);
     },
     onSettled: async (key) => {
-      if (key === "metrics") { paintMetrics(); }
-      else if (key === "traffic") { paintTraffic(); }
-      else if (key === "trafficPolicies") { rankingCard?.paint(); }
-      else if (key === "probes") { topologySection.schedulePaint(); }
-      else if (key === "connections" || key === "certificates" || key === "ipQuality") {
-        edgeTelemetry.paint();
-      } else {
-        await queueBusiness();
-      }
+      if (key === "metrics") paintMetrics();
+      else if (key === "traffic" || key === "trafficPolicies" || key.startsWith("usage:")) stage?.paint();
+      else if (key === "probes") topologySection.schedulePaint();
+      else if (EDGE_KEYS.has(key)) edgeTelemetry.paint();
+      else await queueBusiness();
     },
   });
   const { readings, states, read, shouldPoll, probePollInterval } = store;
 
-  const cmdCell = (title, valueEl, bodyEl, dotClass = "") => node("div", { className: "a-dash-cmd-cell", "data-refresh-key": title },
-    node("div", { className: "a-dash-cmd-head" },
-      dotClass ? node("span", { className: `a-dash-dot ${dotClass}`, "data-refresh-key": "dot" }) : null,
-      node("span", { className: "a-muted", "data-refresh-key": "label" }, title)),
-    node("div", { className: "a-dash-cmd-metric", "data-refresh-key": "metric" }, valueEl),
-    node("div", { className: "a-dash-cmd-foot", "data-refresh-key": "foot" }, bodyEl));
-  const overviewGrid = node("div", { className: "a-dash-cmd-grid" });
+  const statusLine = createStatusLine();
+  const liveCells = createLiveCells();
+  const rateTrace = [];
+  const usageKey = (monthKey) => `usage:${monthKey}`;
+  const orderedAgents = () => orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids);
+  // Fleet rate samples behind the live trace, oldest first. A refresh
+  // without a valid sample leaves a gap instead of a zero.
+  function sampleRate(agents) {
+    const fleet = summarizeDashboardNodes(list(agents));
+    rateTrace.push(fleet.sampled ? fleet.receiveBPS + fleet.sendBPS : null);
+    if (rateTrace.length > 40) rateTrace.shift();
+  }
+  // Keeps the outgoing month for the natural periods when the selected
+  // month moves away from a month they still need.
+  function keepPeriodUsage() {
+    const outgoing = readings.get("traffic");
+    if (!outgoing || !dashboardTrafficPeriodMonths().includes(outgoing.month)) return;
+    readings.set(usageKey(outgoing.month), outgoing);
+    states.set(usageKey(outgoing.month), states.get("traffic") === "failed" ? "failed" : "ready");
+  }
+  // Persisted rows of one UTC month with their read state. The selected
+  // month's reading doubles as a period source whenever it holds a month
+  // the natural periods need.
+  function trafficSource(monthKey) {
+    const selected = readings.get("traffic");
+    if (selected?.month === monthKey) return { value: selected, state: states.get("traffic") || "ready" };
+    const key = usageKey(monthKey), value = readings.get(key);
+    const state = states.get(key) || (month === monthKey ? states.get("traffic") : "") || "loading";
+    return { value, state: !value && state === "ready" ? "loading" : state };
+  }
+  function selectMonth(value) {
+    if (value === month) return;
+    keepPeriodUsage();
+    month = value;
+    ctx.state.data.dashboardMonth = month;
+    void read("traffic", query("/traffic-usage", { month }), true);
+  }
 
   const hostController = can("panel-metrics.read") ? createPanelHostController(ctx, { bytes, date }) : null;
   function paintMetrics() {
     const m = readings.get("metrics") || {};
     const status = states.get("metrics");
     if (status === "denied") panelHistory = [];
-    hostController?.paint({ m, history: panelHistory, runtime: panelRuntime, status });
+    hostController?.paint({ m, history: panelHistory, status });
   }
 
-  const host = hostController?.element || false;
-  const businessState = muted("读取中…");
-  businessState.setAttribute("role", "status");
-  const overviewCard = section("运行概况", overviewGrid, businessState);
-  const nodeSummary = actions();
-  const nodeMatrix = node("div", { className: "a-dash-matrix", "aria-label": "节点运行状态" });
-  const nodes = can("agents.read") && section("节点运行状态", nodeMatrix, nodeSummary);
+  const rackSummary = node("div", { className: "a-actions a-con-tools" });
+  const rackHost = node("ol", { className: "a-rack", "aria-label": "节点运行状态" });
+  const nodes = can("agents.read") ? section("节点", rackHost, rackSummary) : null;
 
-  const inspectPrimary = node("span", { className: "a-dash-inspect-primary" }, "每日收发趋势");
-  const inspectDetail = node("span", { className: "a-muted a-dash-inspect-detail" }, "");
-  let currentBreakdown = {};
-  const setInspectText = (day) => {
-    let primaryText = "每日收发趋势";
-    let detailText = "";
-    if (day) {
-      const total = Number(day.received_bytes || 0) + Number(day.sent_bytes || 0);
-      primaryText = `${day.day} · 合计 ${bytes(total)}`;
-      const peakBPS = Math.max(Number(day.peak_receive_bps || 0), Number(day.peak_send_bps || 0));
-      detailText = `↓ ${bytes(day.received_bytes)} · ↑ ${bytes(day.sent_bytes)}${peakBPS > 0 ? ` · 峰值 ↓ ${bytes(day.peak_receive_bps || 0)}/s` : ""}`;
-    } else if (currentBreakdown.peakDay) {
-      const total = (currentBreakdown.peakReceiveBytes || 0) + (currentBreakdown.peakSentBytes || 0);
-      primaryText = `峰值 ${currentBreakdown.peakDay.slice(5)} · ${bytes(total)}`;
-      detailText = `↓ ${bytes(currentBreakdown.peakReceiveBytes || 0)} · ↑ ${bytes(currentBreakdown.peakSentBytes || 0)}`;
-    } else {
-      detailText = "暂无采样";
-    }
-    if (inspectPrimary.textContent !== primaryText) inspectPrimary.textContent = primaryText;
-    if (inspectDetail.textContent !== detailText) inspectDetail.textContent = detailText;
-  };
-  const plot = responsiveChart([], ctx.signal, (day) => setInspectText(day));
-  const trafficSummary = (receive, sent, summary = {}, breakdown = {}, peaks = {}, trafficMonth = month) => {
-    const total = (receive || 0) + (sent || 0);
-    const rxPct = receive != null && total > 0 ? Math.round(receive / total * 100) : null;
-    const ratioTag = rxPct != null ? `${rxPct}% / ${100 - rxPct}%` : "—";
-    const todayDeltaTag = summary.isCurrentMonth === false
-      ? "历史归档"
-      : summary.averageBytes > 0 && summary.todayBytes != null
-        ? (() => {
-            const pct = Math.round(((summary.todayBytes - summary.averageBytes) / summary.averageBytes) * 100);
-            return pct === 0 ? "持平均值" : `较均 ${pct > 0 ? "+" : ""}${pct}%`;
-          })()
-        : "UTC";
-    return node("div", { className: "a-dash-traffic-ledger" },
-      node("div", { className: "a-dash-ledger-cell is-primary", "data-refresh-key": "月累计流量" },
-        node("div", { className: "a-dash-ledger-head" },
-          muted("月累计流量"),
-          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, ratioTag)),
-        node("strong", {}, receive == null ? "—" : bytes(total)),
-        node("div", { className: "a-dash-ledger-foot" },
-          node("div", { className: "a-dash-ledger-duplex" },
-            node("span", { className: "a-dash-rx" }, `↓ ${receive == null ? "—" : bytes(receive)}`),
-            node("span", { className: "a-dash-tx" }, `↑ ${sent == null ? "—" : bytes(sent)}`)),
-          trafficSplitBar(receive || 0, sent || 0, total))),
-      node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "UTC 今日" },
-        node("div", { className: "a-dash-ledger-head" },
-          muted(summary.isCurrentMonth === false ? "统计月份" : "UTC 今日"),
-          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, todayDeltaTag)),
-        node("strong", {}, summary.isCurrentMonth === false ? trafficMonth : summary.todayBytes == null ? "—" : bytes(summary.todayBytes)),
-        node("div", { className: "a-dash-ledger-foot" },
-          summary.isCurrentMonth === false
-            ? node("div", { className: "a-dash-ledger-duplex" },
-                muted(`活跃 ${breakdown.activeDays ?? 0}/${summary.elapsedDays ?? 0} 天`))
-            : node("div", { className: "a-dash-ledger-duplex" },
-                node("span", { className: "a-dash-rx" }, `↓ ${breakdown.todayReceiveBytes == null ? "—" : bytes(breakdown.todayReceiveBytes)}`),
-                node("span", { className: "a-dash-tx" }, `↑ ${breakdown.todaySentBytes == null ? "—" : bytes(breakdown.todaySentBytes)}`)))),
-      node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "日均用量" },
-        node("div", { className: "a-dash-ledger-head" },
-          muted("日均用量"),
-          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, summary.elapsedDays ? `· ${summary.elapsedDays} 天` : "—")),
-        node("strong", {}, summary.averageBytes == null ? "—" : bytes(summary.averageBytes)),
-        node("div", { className: "a-dash-ledger-foot" },
-          node("div", { className: "a-dash-ledger-duplex" },
-            node("span", { className: "a-dash-rx" }, `↓ ${breakdown.averageReceiveBytes == null ? "—" : bytes(breakdown.averageReceiveBytes)}`),
-            node("span", { className: "a-dash-tx" }, `↑ ${breakdown.averageSentBytes == null ? "—" : bytes(breakdown.averageSentBytes)}`)))),
-      node("div", { className: "a-dash-ledger-cell", "data-refresh-key": "峰值带宽" },
-        node("div", { className: "a-dash-ledger-head" },
-          muted("单日峰值"),
-          node("span", { className: "a-muted a-dash-ledger-tag", "data-refresh-key": "tag" }, summary.peakDay ? summary.peakDay.slice(5) : "—")),
-        node("strong", {}, summary.peakDay ? bytes(summary.peakBytes) : "—"),
-        node("div", { className: "a-dash-ledger-foot" },
-          summary.peakDay || peaks.peakReceiveBPS || peaks.peakSendBPS
-            ? node("div", { className: "a-dash-ledger-duplex", title: "全月最高瞬时接收/发送速率峰值" },
-                node("span", { className: "a-dash-rx" }, `↓ ${bytes(peaks.peakReceiveBPS || 0)}/s`),
-                node("span", { className: "a-dash-tx" }, `↑ ${bytes(peaks.peakSendBPS || 0)}/s`))
-            : muted("—"))),
-    );
-  };
-  const trafficTotals = trafficSummary();
-  const trafficState = muted("读取中…");
-  trafficState.setAttribute("role", "status");
-  const trafficPeriod = badge(`${month} · UTC`);
-
-  const monthField = field("月份", "traffic_month", month, { type: "month", max: utcMonth(), required: true });
-  monthField.classList.add("a-dash-inline-field");
-  const monthInput = monthField.querySelector("input");
-  monthInput.addEventListener("change", () => {
-    if (!monthInput.checkValidity()) return;
-    month = monthInput.value;
-    ctx.state.data.dashboardMonth = month;
-    void read("traffic", query("/traffic-usage", { month }), true);
-  });
-  bindPreferenceFields(ctx, 'dashboard', [monthField], { restore: () => {
-    if (!monthInput.checkValidity()) return;
-    month = monthInput.value; ctx.state.data.dashboardMonth = month;
-    void read('traffic', query('/traffic-usage', { month }), true);
-  } });
-
-  const detailTable = table(["日期", "接收", "发送", "合计", "接收峰值", "发送峰值"], [], { label: "每日流量明细", paginate: 10, rowKey: row => row[0] });
-  const detailPeriod = muted("");
-  let trafficDialog;
-  const detailsButton = button("流量明细", () => {
-    if (trafficDialog?.open) return;
-    trafficDialog = ctx.dialog("流量明细", stack(detailPeriod, detailTable, actions(link("流量管理", "#traffic"))), { wide: true });
-  });
-
-  const rankingCard = can("traffic.read") ? createTrafficRankingCard(ctx, {
+  stage = can("traffic.read") ? createTrafficStage(ctx, {
     bytes,
-    getUsage: () => readings.get("traffic"),
-    getUsageState: () => states.get("traffic"),
-    getPolicies: () => readings.get("trafficPolicies"),
-    getPoliciesState: () => states.get("trafficPolicies"),
-    getAgents: () => orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids),
-    getOrderIDs: () => readings.get("order")?.ids || [],
     getMonth: () => month,
+    onMonth: selectMonth,
+    source: trafficSource,
+    getPolicies: () => readings.get("trafficPolicies"),
+    getAgents: orderedAgents,
+    getOrderIDs: () => readings.get("order")?.ids || NO_SUBS,
   }) : null;
-
-  const trafficCard = can("traffic.read") && section("流量概况", node("div", { className: "a-dash-traffic-wrap" },
-    node("div", { className: "a-dash-subbar a-dash-traffic-bar" }, monthField, detailsButton),
-    trafficTotals,
-    node("div", { className: "a-card-body a-dash-traffic-plot" },
-      node("div", { className: "a-dash-chart-inspect" }, inspectPrimary, inspectDetail),
-      node("div", { className: "a-dash-chart-box" }, plot),
-      node("div", { className: "a-chart-meta" },
-        node("span", { className: "a-chart-legend" },
-          node("span", { className: "a-chart-key-rx" }),
-          muted("接收"),
-          node("span", { className: "a-chart-key-tx" }),
-          muted("发送"),
-          node("span", { className: "a-chart-key-peak" }),
-          muted("峰值日")),
-        trafficPeriod)),
-  ), trafficState);
-  trafficCard?.classList?.add("a-dash-traffic-card");
 
   let topologySection;
   const probeController = createDashboardProbeController(ctx, {
@@ -479,7 +228,7 @@ export async function dashboardPage(ctx) {
       try {
         if (ctx.current()) {
           paintBusiness();
-          rankingCard?.paint();
+          stage?.paint();
           topologySection.schedulePaint();
           edgeTelemetry.paint();
         }
@@ -489,163 +238,116 @@ export async function dashboardPage(ctx) {
   };
   ctx.signal.addEventListener('abort', () => { cancelAnimationFrame(businessPaint); finishBusiness?.(); }, { once: true });
 
-  const coreBusinessKeys = new Set(["overview", "agents", "order"]);
-  const keyed = (key, el) => {
-    if (el?.setAttribute) el.setAttribute("data-refresh-key", key);
-    return el;
-  };
-  let lastOverviewSignature = "";
-  function paintBusiness() {
+  const waitText = (key) => ["failed", "denied"].includes(states.get(key)) ? "读取失败" : "读取中";
+
+  function nodeCell(overview, agents) {
+    const cell = blankCell("节点", "节点");
+    if (!readings.has("overview") && !readings.has("agents")) {
+      cell.state = states.get("overview") === "failed" ? "failed" : "loading";
+      cell.subs = [{ text: waitText("overview"), tone: cell.state === "failed" ? "bad" : "" }];
+      return cell;
+    }
+    const online = Number(overview.agents_online ?? agents.filter(agent => agent.status === "online").length) || 0;
+    const count = Number(overview.agents ?? agents.length) || 0;
+    const offline = Math.max(0, count - online);
+    cell.figure = [String(online), `/${count}`];
+    if (offline > 0) cell.subs = [{ text: `离线 ${offline}`, tone: "bad" }];
+    cell.viz = { type: "pips", on: online, total: count };
+    return cell;
+  }
+
+  // Sum of the valid live samples of the authorized nodes. Offline nodes and
+  // expired samples are left out; no valid sample shows no figure.
+  function rateCell(fleet, count) {
+    const cell = blankCell("节点速率", "节点速率");
+    cell.viz = { type: "trace", values: rateTrace };
+    if (!fleet.sampled) {
+      cell.state = readings.has("agents") ? "empty" : "loading";
+      cell.subs = [{ text: readings.has("agents") ? "无有效采样" : waitText("agents"), tone: "" }];
+      return cell;
+    }
+    cell.figure = quantityParts(bytes(fleet.receiveBPS + fleet.sendBPS), "/s");
+    if (fleet.sampled < count) cell.token = `${fleet.sampled}/${count} 节点`;
+    cell.subs = [{ text: `↓ ${bytes(fleet.receiveBPS)}/s`, tone: "" }, { text: `↑ ${bytes(fleet.sendBPS)}/s`, tone: "" }];
+    return cell;
+  }
+
+  function engineGroup(fleet) {
+    const group = { key: "运行内核", label: "内核", items: [{ key: "wait", text: waitText("agents") }] };
+    if (!readings.has("agents")) return group;
+    group.items = [{ key: "running", strong: String(fleet.running) }, { key: "installed", text: `/ ${fleet.installed}` }];
+    return group;
+  }
+
+  function taskGroup(tasks, known) {
+    const group = { key: "调度任务", label: "任务", items: [{ key: "wait", text: waitText("overview") }] };
+    if (!known) return group;
+    group.items = [{ key: "running", text: `运行 ${tasks.running}` }, { key: "pending", text: `排队 ${tasks.pending}` }];
+    if (tasks.failed <= 0) return group;
+    const failed = { key: "fail", text: `失败 ${tasks.failed}`, tone: "bad" };
+    if (can("tasks.read")) failed.href = "#tasks?status=failed";
+    group.items.push(failed);
+    return group;
+  }
+
+  // Status line and live cells: the slow-moving counts sit in the line, the
+  // node count and the live fleet rate beside the panel host.
+  function paintConsole() {
     const overview = readings.get("overview") || {};
-    const agents = orderNodesBySavedOrder(list(readings.get("agents")), readings.get("order")?.ids);
-    const failed = [...states].filter(([key, state]) => coreBusinessKeys.has(key) && ["failed", "denied"].includes(state));
-    const waiting = ["overview", ...(can("agents.read") ? ["agents"] : [])].some(key => !readings.has(key) && (!states.has(key) || states.get(key) === "loading"));
-    const nextBusinessText = waiting ? "读取中…" : failed.length ? "部分状态异常" : "";
-    const knownNodes = readings.has("overview") || readings.has("agents");
-    const online = knownNodes ? overview.agents_online ?? agents.filter(agent => agent.status === "online").length : "—";
-    const count = knownNodes ? overview.agents ?? agents.length : "—";
+    const agents = orderedAgents();
     const fleet = summarizeDashboardNodes(agents);
-    const knownRuntime = readings.has('agents');
-    const pendingTotal = knownNodes ? Number(overview.tasks_pending || 0) + Number(overview.tasks_queued || 0) : 0;
-    const runningTasks = knownNodes ? Number(overview.tasks_running || 0) : 0;
-    const failedTasks = knownNodes ? Number(overview.tasks_failed || 0) : 0;
-    const activeTasks = knownNodes ? pendingTotal + runningTasks : "—";
+    const known = readings.has("overview");
     const canAgents = can("agents.read");
-    const canMetrics = can("metrics.read");
-    const canTasks = can("tasks.read");
-
-    const overviewSig = JSON.stringify([
-      nextBusinessText, knownNodes, online, count, fleet, knownRuntime,
-      pendingTotal, runningTasks, failedTasks, activeTasks,
-      overview.node_configs ?? null, overview.configs ?? null,
-      canAgents, canMetrics, canTasks,
-    ]);
-
-    if (overviewSig !== lastOverviewSignature) {
-      lastOverviewSignature = overviewSig;
-      if (businessState.textContent !== nextBusinessText) businessState.textContent = nextBusinessText;
-      businessState.hidden = !nextBusinessText;
-
-      const engineChips = knownRuntime && fleet.engines.length
-        ? node("div", { className: "a-dash-engine-chips", "data-refresh-key": "chips" }, ...fleet.engines.map(e =>
-            node("span", { className: "a-dash-engine-chip", "data-refresh-key": e.engine },
-              node("span", { className: `a-dash-dot ${e.running > 0 ? "is-ok" : "is-muted"}` }),
-              `${({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "SS" })[e.engine] || e.engine} ${e.running}/${e.installed}`)))
-        : keyed("empty", muted(knownRuntime ? "未安装内核" : "读取中…"));
-
-      const taskMeta = knownNodes
-        ? actions(
-            keyed("counts", muted(`运行 ${runningTasks} · 排队 ${pendingTotal}`)),
-            failedTasks > 0 && canTasks
-              ? node("a", { className: "a-badge bad", href: "#tasks?status=failed", "data-refresh-key": "fail" }, `失败 ${failedTasks}`)
-              : keyed("fail", failedTasks > 0 ? badge(`失败 ${failedTasks}`, "bad") : badge("无失败", "ok")),
-          )
-        : keyed("empty", muted("读取中…"));
-
-      const nodePct = knownNodes && count > 0 ? Math.round((online / count) * 100) : 0;
-      const nodeDot = !knownNodes ? "" : online === count && count > 0 ? "is-ok" : online > 0 ? "is-warn" : "is-bad";
-
-      patch(overviewGrid, node("div", { className: overviewGrid.className },
-        cmdCell("在线节点",
-          node("strong", { className: "a-dash-cmd-val" }, knownNodes ? `${online}/${count}` : "—"),
-          stack(
-            knownNodes ? keyed("track", metricTrack(nodePct, true, false)) : null,
-            keyed("meta", muted(knownNodes ? `在线率 ${nodePct}% · 离线 ${Math.max(0, count - online)}` : "读取中…")),
-          ),
-          nodeDot),
-        canAgents
-          ? cmdCell("运行内核",
-              actions(
-                keyed("running", node("strong", { className: "a-dash-cmd-val" }, knownRuntime ? String(fleet.running) : "—")),
-                knownRuntime ? keyed("installed", muted(`/ ${fleet.installed}`)) : null,
-              ),
-              engineChips,
-              knownRuntime ? (fleet.running > 0 ? "is-ok" : "is-muted") : "")
-          : cmdCell("节点配置", node("strong", { className: "a-dash-cmd-val" }, String(overview.node_configs ?? "—")), muted("已授权节点配置")),
-        cmdCell("调度任务",
-          node("strong", { className: "a-dash-cmd-val" }, activeTasks === "—" ? "—" : String(activeTasks)),
-          taskMeta,
-          failedTasks > 0 ? "is-bad" : runningTasks > 0 ? "is-warn" : knownNodes ? "is-ok" : ""),
-        canAgents && canMetrics
-          ? cmdCell("全网实时吞吐",
-              node("strong", { className: "a-dash-cmd-val" }, fleet.sampled ? `↓ ${bytes(fleet.receiveBPS)}/s` : "—"),
-              stack(
-                fleet.sampled ? keyed("split", trafficSplitBar(fleet.receiveBPS, fleet.sendBPS, fleet.receiveBPS + fleet.sendBPS)) : null,
-                node("div", { className: "a-dash-duplex", "data-refresh-key": "duplex" },
-                  node("span", { className: "a-dash-tx" }, fleet.sampled ? `↑ ${bytes(fleet.sendBPS)}/s` : "↑ —"),
-                  muted(fleet.sampled ? `${fleet.sampled} 节点` : "无采样")),
-              ),
-              fleet.sampled ? "is-ok" : "is-muted")
-          : cmdCell("配置档案", node("strong", { className: "a-dash-cmd-val" }, String(overview.configs ?? "—")), muted(`节点配置 ${overview.node_configs ?? "—"}`)),
-      ));
-    }
-
-    if (canAgents) {
-      paintNodeTelemetryMatrix({
-        ctx,
-        nodeSummary,
-        matrixHost: nodeMatrix,
-        agents,
-        agentsReady: readings.has("agents") || states.get("agents") === "denied",
-        canMetrics,
-        bytes,
-        date,
-        status,
-      });
-    }
+    const cells = [nodeCell(overview, agents)];
+    if (canAgents && can("metrics.read")) cells.push(rateCell(fleet, agents.length));
+    const groups = canAgents ? [engineGroup(fleet)] : [];
+    groups.push(taskGroup(taskNumbers(overview), known));
+    const failed = [...states].some(([key, state]) => CORE_KEYS.has(key) && ["failed", "denied"].includes(state));
+    const waiting = ["overview", ...(canAgents ? ["agents"] : [])].some(key => !readings.has(key) && (!states.has(key) || states.get(key) === "loading"));
+    let statusText = "";
+    if (waiting) statusText = "读取中…";
+    else if (failed) statusText = "部分状态异常";
+    statusLine.paint({ clock: utcClock(), groups, status: statusText });
+    liveCells.paint(cells);
+    return agents;
   }
 
-  let lastTrafficSignature = "";
-  function paintTraffic() {
-    const traffic = readings.get("traffic");
-    const trafficStatus = states.get("traffic") || "";
-    const today = new Date().toISOString().slice(0, 10);
-    const statusText = trafficStatus === "denied"
-      ? "无流量权限"
-      : trafficStatus === "loading"
-        ? "读取中…"
-        : trafficStatus === "failed"
-          ? (traffic ? "刷新失败 · 保留已有记录" : "读取失败")
-          : traffic ? (list(traffic.days).length ? "" : "暂无记录") : "暂无记录";
-    const sig = JSON.stringify([trafficStatus, statusText, Boolean(traffic), traffic ? [traffic.month, today, traffic.days] : null]);
-    if (sig === lastTrafficSignature) return;
-    lastTrafficSignature = sig;
-
-    if (traffic) {
-      const days = aggregateDashboardTrafficDays(traffic.days, traffic.month).filter(day => day.day <= today);
-      const summary = summarizeDashboardTraffic(days, traffic.month);
-      const breakdown = summarizeDashboardTrafficBreakdown(days, traffic.month);
-      currentBreakdown = breakdown;
-      const peaks = summarizeDashboardTrafficPeaks(days);
-      trafficPeriod.textContent = `${traffic.month} · UTC`;
-      detailPeriod.textContent = `${traffic.month} · UTC`;
-      const receive = days.reduce((sum, day) => sum + day.received_bytes, 0), sent = days.reduce((sum, day) => sum + day.sent_bytes, 0);
-      patch(trafficTotals, trafficSummary(receive, sent, summary, breakdown, peaks, traffic.month));
-      detailTable.updateRows(days.map(day => [day.day, bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.received_bytes + day.sent_bytes), `${bytes(day.peak_receive_bps)}/s`, `${bytes(day.peak_send_bps)}/s`]));
-      plot.updateDays(days);
-      plot.refreshInspect?.();
-      rankingCard?.paint();
-    } else if (trafficStatus === "denied") {
-      currentBreakdown = {};
-      setInspectText(null);
-      trafficTotals.replaceChildren(); plot.updateDays([]); detailTable.updateRows([]);
-      rankingCard?.paint();
-    }
-    detailsButton.disabled = !traffic;
-    if (trafficState.textContent !== statusText) trafficState.textContent = statusText;
-    trafficState.hidden = !statusText;
+  function paintBusiness() {
+    const agents = paintConsole();
+    if (!nodes) return;
+    paintNodeRack({
+      ctx, summaryHost: rackSummary, rackHost, agents,
+      agentsReady: readings.has("agents") || states.get("agents") === "denied",
+      canMetrics: can("metrics.read"), bytes, date,
+    });
   }
 
+  let historyLastFetch = 0;
   function refresh(manual = false) {
-    const sources = [
-      ["overview", "/overview"],
-      ...(can("agents.read") ? [["agents", "/agents"], ["order", "/preferences/node-order"]] : []),
-      ...(can("panel-metrics.read") && shouldPoll("metrics", manual) ? [["metrics", "/panel-metrics"]] : []),
-      ...(can("traffic.read") && shouldPoll("traffic", manual) ? [["traffic", query("/traffic-usage", { month })]] : []),
-      ...(can("traffic.read") && shouldPoll("trafficPolicies", manual) ? [["trafficPolicies", "/traffic-policies?view=page"]] : []),
-      ...(can("agents.read") && can("tasks.read") && shouldPoll("probes", manual) ? [["probes", "/dashboard/probes"]] : []),
-    ];
     const now = Date.now();
+    // Persisted traffic history moves slowly, so it is read on a slower beat
+    // than the live node and host samples.
+    const historyDue = manual || !historyLastFetch || now - historyLastFetch >= 30000;
+    const sources = [["overview", "/overview"]];
+    if (can("agents.read")) sources.push(["agents", "/agents"], ["order", "/preferences/node-order"]);
+    if (can("panel-metrics.read") && shouldPoll("metrics", manual)) sources.push(["metrics", "/panel-metrics"]);
+    if (can("traffic.read")) {
+      if (historyDue && shouldPoll("traffic", manual)) sources.push(["traffic", query("/traffic-usage", { month })]);
+      if (shouldPoll("trafficPolicies", manual)) sources.push(["trafficPolicies", "/traffic-policies?view=page"]);
+      const periodMonths = dashboardTrafficPeriodMonths();
+      const selectedReady = readings.get("traffic")?.month === month;
+      for (const key of [...states.keys()]) {
+        if (!key.startsWith("usage:")) continue;
+        const needed = periodMonths.includes(key.slice(6)) && !(selectedReady && key.slice(6) === month);
+        if (!needed) { readings.delete(key); states.delete(key); }
+      }
+      for (const item of periodMonths.filter(value => value !== month)) {
+        const key = usageKey(item);
+        if ((historyDue || !states.has(key)) && shouldPoll(key, manual)) sources.push([key, query("/traffic-usage", { month: item })]);
+      }
+    }
+    if (can("agents.read") && can("tasks.read") && shouldPoll("probes", manual)) sources.push(["probes", "/dashboard/probes"]);
+    if (historyDue) historyLastFetch = now;
     if (manual || !edgeLastFetch || now - edgeLastFetch >= 30000) {
       edgeLastFetch = now;
       if (can("core-logs.read") && shouldPoll("connections", manual)) sources.push(["connections", "/client-connections?limit=1&timeline=true"]);
@@ -656,23 +358,17 @@ export async function dashboardPage(ctx) {
   }
 
   ctx.onRefresh(() => refresh(true));
-  ctx.signal.addEventListener("abort", () => { trafficDialog?.close(); }, { once: true });
-  paintMetrics(); paintTraffic(); paintBusiness();
+  paintMetrics(); paintBusiness(); stage?.paint();
   topologySection.paint(); edgeTelemetry.paint();
   void refresh(true);
   poll(ctx, () => refresh(false), probePollInterval);
-  const bentoRow = (className, ...items) => {
-    const visible = items.filter(Boolean);
-    return visible.length
-      ? node("div", { className: visible.length === 1 ? `${className} is-single` : className }, ...visible)
-      : null;
-  };
 
-  return node("div", { className: "a-dash-deck" },
-    overviewCard,
-    bentoRow("a-dash-bento-primary", host, trafficCard),
+  const live = node("div", { className: "a-con-live" }, liveCells.element, hostController?.element);
+  return node("div", { className: "a-dash-deck a-console" },
+    statusLine.element,
+    stage?.element,
+    live,
     topologySection.visible && topologySection.element,
-    rankingCard?.element,
     nodes,
     edgeTelemetry.visible && edgeTelemetry.element,
   );

@@ -12,6 +12,15 @@ const waitFor = async (test, message) => {
   }
 };
 const GiB = 1024 ** 3;
+// One probe sample a minute, oldest first; the newest one matches `latest`.
+const PROBE_TRACE_MS = [41.9, 42.6, 42.1, 43.4, 42.8, 44.9, 43.1, 42.4, 43.0, 44.2, 42.1, 43.8];
+const probeHistory = () => PROBE_TRACE_MS.map((ms, index, all) => ({
+  id: `s${index + 1}`,
+  sampled_at: new Date(Date.now() - 5000 - (all.length - 1 - index) * 60000).toISOString(),
+  state: "succeeded",
+  forward: { avg_ms: ms, loss_percent: 0, reached: true },
+  reverse: { avg_ms: Number((ms + 1.6).toFixed(1)), loss_percent: index === all.length - 1 ? 20 : 0, reached: true },
+}));
 
 export async function testDashboardRuntime(mode, preview = false) {
   const cspViolations = [];
@@ -84,7 +93,7 @@ export async function testDashboardRuntime(mode, preview = false) {
       disk_available: true, disk_used_bytes: 26.4 * GiB, disk_total_bytes: 80 * GiB,
       network_available: true, network_rate_available: true, network_rx_bps: 1.6 * 1024 ** 2, network_tx_bps: 864 * 1024,
       network_rx_bytes: 68 * GiB, network_tx_bytes: 42 * GiB,
-      panel_runtime: { sample_interval_seconds: 2, sample_window_count: 12, sample_window_capacity: 60 },
+      panel_runtime: { sample_interval_seconds: 2, sample_window_count: 12, sample_window_capacity: 60, goroutines: 42, go_version: "go1.24.4", process_uptime_seconds: 277560 },
       history: [
         { collected_at: new Date(Date.now() - 4000).toISOString(), cpu_available: true, cpu_percent: 19.2, memory_available: true, memory_used_bytes: 3.3 * GiB, memory_total_bytes: 8 * GiB, network_available: true, network_rate_available: true, network_rx_bps: 1.1 * 1024 ** 2, network_tx_bps: 620 * 1024 },
         { collected_at: new Date(Date.now() - 2000).toISOString(), cpu_available: true, cpu_percent: 21.8, memory_available: true, memory_used_bytes: 3.4 * GiB, memory_total_bytes: 8 * GiB, network_available: true, network_rate_available: true, network_rx_bps: 1.4 * 1024 ** 2, network_tx_bps: 740 * 1024 },
@@ -130,10 +139,7 @@ export async function testDashboardRuntime(mode, preview = false) {
             },
           ],
         },
-        history: [
-          { id: "s1", sampled_at: new Date(Date.now() - 65000).toISOString(), state: "succeeded", forward: { avg_ms: 42.1, loss_percent: 0, reached: true }, reverse: { avg_ms: 44.0, loss_percent: 0, reached: true } },
-          { id: "s2", sampled_at: new Date(Date.now() - 5000).toISOString(), state: "succeeded", forward: { avg_ms: 43.8, loss_percent: 0, reached: true }, reverse: { avg_ms: 45.4, loss_percent: 20, reached: true } },
-        ],
+        history: probeHistory(),
       },
       {
         id: "prb_2",
@@ -369,12 +375,12 @@ export async function testDashboardRuntime(mode, preview = false) {
   (await import("./analytics/app.js")).startAnalytics({ app: document.querySelector("#app"), session });
 
   const card = (title) => [...document.querySelectorAll(".a-main section.a-card")].find((c) => c.querySelector("h2")?.textContent === title);
-  const panel = () => card("面板运行资源");
-  const traffic = () => card("流量概况");
-  const ranking = () => card("流量累计排行");
+  const panel = () => card("面板主机");
+  const traffic = () => card("流量趋势");
+  const ranking = () => card("流量排行");
   const topology = () => card("网络延迟监测拓扑");
   const activeDialog = () => [...document.querySelectorAll("dialog.a-dialog[open]")].at(-1);
-  const nodes = () => card("节点运行状态");
+  const nodes = () => card("节点");
   const activity = () => card("最近任务");
   const metric = (label) => panel()?.querySelector(`[data-refresh-key="${label}"] strong`);
   const cpu = () => metric("CPU 使用率");
