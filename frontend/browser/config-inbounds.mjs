@@ -72,6 +72,12 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
       text.selectNodeContents(cell);
       return [...text.getClientRects()].every(rect => rect.right <= cell.getBoundingClientRect().right + 1);
     })()`),`port range overlaps the adjacent cell at ${viewport.join('x')}`);
+    assert(await run(`(() => {
+      const cell = ${row('quoted-port')}.cells[0];
+      const text = document.createRange();
+      text.selectNodeContents(cell);
+      return text.getClientRects().length === 1;
+    })()`),`fixed port breaks across lines at ${viewport.join('x')}`);
     await screenshot(page,`native-inbounds-${viewport.join('x')}`);
   }
   await resize(viewports[0]);

@@ -492,6 +492,10 @@ strong, b { font-weight: 600; }
   .a-port-list .a-table-scroll :is(th,td) { min-width: 0; }
   .a-port-list .a-table-scroll td > .a-actions { flex-wrap: wrap; }
 }
+@media (min-width: 48.01rem) {
+  .a-port-list .a-table-scroll :is(th,td)[data-column="端口"] { width: 88px; min-width: 88px; }
+  .a-port-list .a-table-scroll td[data-column="端口"] { overflow-wrap: normal; word-break: normal; }
+}
 
 .a-top-inner > .a-actions { flex-wrap: nowrap; gap: 8px; }
 .a-top-inner > .a-actions > .a-actions:empty { display: none; }
