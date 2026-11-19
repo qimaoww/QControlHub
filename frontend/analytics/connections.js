@@ -35,7 +35,7 @@ const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing
 export async function connectionsPage(ctx) {
   const data = ctx.state.data;
   const cache = data.analyticsConnectionCache ||= createConnectionCache();
-  let scopeReady = false;
+  let scopeReady = false, coldReadTimedOut = false;
   const scopePending = ctx.connectionScope || boundedRead(ctx.api, "/client-connections?scope_only=true", { signal: ctx.signal });
   const scopeRestore = scopePending.then(verified => cache.restore(verified.scope, () => ctx.current() && !scopeReady));
   void scopeRestore.catch(() => {});
@@ -210,6 +210,7 @@ export async function connectionsPage(ctx) {
         { ...fresh, sync_token: undefined, record_keys: undefined }));
       cache.set(key, fresh, fetchedAt, { observedAt, etag, unchanged });
       failures = 0;
+      if (coldReadTimedOut) { coldReadTimedOut = false; scopeWatch.start(); }
       result = fresh;
       cursor = target; cursors = history; nextCursor = result.next_cursor || "";
       if (!filters.agent_id) sources = result.sources || [];
@@ -257,6 +258,11 @@ export async function connectionsPage(ctx) {
       if (!current() || failure.name === "AbortError") return;
       if ([401, 403, 404, 409].includes(failure.status)) { cache.clear(); result = null; sources = []; nextCursor = ""; }
 
+      if ((!result || result.preview) && ([408, 504, 524].includes(failure.status) || failure.code === "read_timeout")) {
+        // There is no complete page to confirm. Focus and timer ticks must
+        // not restart a timed-out month scan. A user read can resume polling.
+        result = null; nextCursor = ""; coldReadTimedOut = true; scopeWatch.stop();
+      }
       failures++;
       error.textContent = redactDiagnostic(failure.message);
       status.textContent = result && !result.preview ? "更新失败，保留上次结果" : "读取失败，请重试";
@@ -282,7 +288,7 @@ export async function connectionsPage(ctx) {
   // A history confirmation revalidates the session and live grants itself.
   // Avoid a separate scope request on each polling tick.
   const scopeWatch = createPoller({
-    isActive: () => ctx.current() && !document.hidden,
+    isActive: () => ctx.current() && !document.hidden && !initializing && !coldReadTimedOut,
     delay: () => Math.min(120_000, connectionPollDelay * 2 ** Math.min(failures, 4)),
     run: () => load({ target: cursor, history: cursors }),
   });
@@ -300,14 +306,21 @@ export async function connectionsPage(ctx) {
     // gates only cached data. Start all three together and cap the cache wait.
     let timer;
     const grace = new Promise(resolve => { timer = setTimeout(resolve, 100); });
-    const restoration = Promise.race([scopeRestore.then(() => { scopeReady = true; }), grace]);
+    const restoration = Promise.race([scopeRestore.then(() => { scopeReady = true; }, failure => {
+      if ([401, 403, 404, 409].includes(failure.status)) throw failure;
+      // Cache access stays closed. The history request verifies authority independently.
+    }), grace]);
     try {
       const [, order] = await Promise.all([preferenceFields.ready, initialNodeOrder, restoration]);
       if (!ctx.current()) return;
       initializing = false;
       initialOrder = null; nodeOrder = order.ids; nodeOrderReady = true;
     } catch (failure) {
-      if (ctx.current()) { loading = false; error.textContent = redactDiagnostic(failure.message); paint(); }
+      if (ctx.current()) {
+        initializing = false; initialOrder = null; loading = false;
+        filters = { ...formData(controls), include_non_public: controls.elements.include_non_public.checked ? "true" : "" };
+        error.textContent = redactDiagnostic(failure.message); paint();
+      }
       return;
     } finally { clearTimeout(timer); }
     filters = { ...formData(controls), include_non_public: controls.elements.include_non_public.checked ? "true" : "" };

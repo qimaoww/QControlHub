@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 105
+const currentSchemaVersion = 106
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1035,6 +1035,24 @@ CREATE TABLE IF NOT EXISTS client_connection_history_groups (
  cache_key text NOT NULL REFERENCES client_connection_history_cache(key) ON DELETE CASCADE,
  group_key text NOT NULL, data jsonb NOT NULL, PRIMARY KEY(cache_key,group_key)
 );
+-- A pending day reads through to observations. Retained data is discovered
+-- one indexed day at a time, outside the schema migration.
+CREATE TABLE IF NOT EXISTS client_connection_rollup_scan (
+ id integer PRIMARY KEY CHECK(id=1), next_day timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS client_connection_rollup_days (
+ agent_id text NOT NULL, day timestamptz NOT NULL, state text NOT NULL DEFAULT 'pending'
+ CHECK(state IN ('pending','ready','raw')), PRIMARY KEY(agent_id,day)
+);
+CREATE INDEX IF NOT EXISTS client_connection_rollup_pending ON client_connection_rollup_days(day,agent_id) WHERE state='pending';
+CREATE TABLE IF NOT EXISTS client_connection_rollup_masks (
+ agent_id text NOT NULL, day timestamptz NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
+ protocol text NOT NULL,inbound text NOT NULL,transport text NOT NULL,local_ip inet NOT NULL,local_port integer NOT NULL,
+ port integer NOT NULL,block integer NOT NULL,mask bit varying NOT NULL,
+ id bigint NOT NULL,first_seen timestamptz NOT NULL,last_seen timestamptz NOT NULL,
+ FOREIGN KEY(agent_id,day) REFERENCES client_connection_rollup_days(agent_id,day) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS client_connection_rollup_masks_day ON client_connection_rollup_masks(agent_id,day);
 CREATE OR REPLACE FUNCTION track_client_connection_changes() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE keys_sql text;
 BEGIN
@@ -1059,10 +1077,17 @@ BEGIN
  ELSE
   keys_sql := 'SELECT agent_id,engine,client_ip,bucket FROM changed_old WHERE source=''core_logs''';
  END IF;
- EXECUTE 'INSERT INTO client_connection_journal(xid,agent_id,engine,client_ip,day)
-  SELECT pg_current_xact_id(),agent_id,engine,client_ip,day FROM
+ -- The first change to a group in this transaction also invalidates its
+ -- node/day. Publication and invalidation share the same row lock.
+ EXECUTE 'WITH logged AS (
+   INSERT INTO client_connection_journal(xid,agent_id,engine,client_ip,day)
+   SELECT pg_current_xact_id(),agent_id,engine,client_ip,day FROM
    (SELECT DISTINCT agent_id,engine,client_ip,(bucket AT TIME ZONE ''UTC'')::date AS day FROM ('||keys_sql||') keys) grouped
-   ON CONFLICT DO NOTHING';
+   ON CONFLICT DO NOTHING RETURNING agent_id,day
+  )
+  INSERT INTO client_connection_rollup_days AS d(agent_id,day)
+   SELECT DISTINCT agent_id,day::timestamp AT TIME ZONE ''UTC'' FROM logged ORDER BY 1,2
+   ON CONFLICT(agent_id,day) DO UPDATE SET state=''pending'' WHERE d.state<>''pending''';
  RETURN NULL;
 END $$;
 DROP TRIGGER IF EXISTS client_connection_insert_changes ON client_connections;
