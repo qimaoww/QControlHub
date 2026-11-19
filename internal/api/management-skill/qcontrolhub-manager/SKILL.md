@@ -9,11 +9,30 @@ Use only the panel and API Key injected as `QCH_API_BASE` (including `/api/v1`) 
 
 ## Install and load
 
-Download the management Skill from the panel's API page and extract the ZIP. Install the `qcontrolhub-manager` directory into your client's skill directory (for Codex: `~/.agents/skills/`), then reload skills or start a new chat. Invoke `$qcontrolhub-manager`, or ask your skill-capable client to manage QControlHub. For project-local DSH installation use the discovered project root's .dsh/skills/. An empty parent .git can change that root. Check the client's skill listing, then start a fresh session, invoke the skill and verify GET /api-key. Report extraction, discovery and the authorized read separately. Other clients must support loading `SKILL.md` and running the Python helper; adapt only the install location. Configure the two environment variables in the client's secure runtime, never in this directory. Example panel URL: `https://panel.example.com/api/v1`.
+Download and extract the panel's management Skill ZIP. From the extracted `qcontrolhub-manager` directory run `python3 scripts/install.py CLIENT --project /path/to/workspace`. Choose the agent's actual project or execution workspace. The installer prints `files_installed`. Open a fresh session, check the client's Skill catalog for `qcontrolhub-manager`, then invoke it and verify the authorized `GET /api-key` separately.
+
+| CLIENT | Project installation directory |
+| --- | --- |
+| codex, pi | `.agents/skills` |
+| claude | `.claude/skills` |
+| gemini | `.gemini/skills` |
+| copilot | `.github/skills` |
+| opencode | `.opencode/skills` |
+| cursor | `.cursor/skills` |
+| dsh | `.dsh/skills` in the nearest project root |
+| hermes | `.hermes/skills` in the nearest Git root |
+| openclaw | `skills` in the active agent workspace |
+
+Codex also supports a user install in `~/.agents/skills/`. DSH treats an empty ancestor `.git` as a project root. Hermes loads project skills in trusted checkouts. Confirm the project trust decision in Hermes and use `/qcontrolhub-manager` in the project session. For OpenClaw inspect `openclaw skills info qcontrolhub-manager` in the selected workspace. Each client's Python execution environment must receive the configured panel origin and Key.
+
+DSH headless can filter `QCH_API_KEY` from Bash. For its authorized read, use the installed `references/dsh-readonly.patch.yml` with the headless profile. The patch passes exactly the two named variables from the launcher to the per-tool process. The following invocation uses the group's installed location. Substitute the actual project root.
+
+```sh
+dsh headless --patch /path/to/project/.dsh/skills/qcontrolhub-manager/references/dsh-readonly.patch.yml \
+  'Load qcontrolhub-manager and use mcp__qch__authorization to check effective grants.'
+```
 
 ## Workflow
-
-Some DSH releases filter variables containing `KEY` before starting Bash. If the helper reports a missing `QCH_API_KEY`, report that discovery succeeded and authenticated invocation is unavailable in the current command environment. The operator must provide the credential through their approved execution environment.
 
 1. Establish the user's target and authorized action from the current conversation. Existing explicit authorization persists; request confirmation only when necessary for a destructive action, naming the actual objects and consequences.
 2. Run `python3 scripts/qch.py GET /api-key` from this Skill directory. Check the effective mode, permissions, workspace, user and `endpoints`. Query `GET /openapi.json` for the current panel contract; locate the intended method/path and its `x-key-policy`, parameters and request schema. References are live: do not substitute a remembered endpoint list.

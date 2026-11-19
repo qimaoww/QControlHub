@@ -68,7 +68,7 @@ func releaseTLSClient(t *testing.T, ctx context.Context, key configScopeAPIClien
 	}))
 	t.Cleanup(httpServer.Close)
 	if os.Getenv("QCH_TEST_SKILL_SESSIONS") == "1" {
-		for _, client := range []string{"codex", "dsh"} {
+		for _, client := range []string{"codex", "dsh", "dsh-mcp"} {
 			t.Run(client+"-session", func(t *testing.T) {
 				start := reads.Load()
 				cmd := exec.CommandContext(ctx, "python3", "../../scripts/check-management-skill-session.py", root, client)
