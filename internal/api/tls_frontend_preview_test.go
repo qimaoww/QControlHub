@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -171,7 +173,18 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 	// rollback followed by a later receipt on the same authenticated node.
 	retry := "tsk_0909090909090909"
 	body["task_id"] = retry
-	key.call("POST", execute, body, 202, nil)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	submit := httptest.NewRequest(http.MethodPost, "/api/v1"+execute, bytes.NewReader(payload))
+	submit.Header.Set("Authorization", "Bearer "+auth.Secret)
+	submit.Header.Set("Content-Type", "application/json")
+	accepted := httptest.NewRecorder()
+	key.handler.ServeHTTP(accepted, submit)
+	if accepted.Code != 202 || accepted.Header().Get("Location") != "/api/v1/agents/"+node.ID+"/tls-migrations/"+retry {
+		t.Fatal("missing operation lookup on acceptance")
+	}
 	partialLease, err := db.ClaimTask(ctx, node.ID)
 	if err != nil || partialLease == nil || partialLease.ID != retry {
 		t.Fatal("missing recovery test lease")
@@ -288,6 +301,12 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 	}
 	if op.State != "succeeded" || len(op.Result.Paths) != 3 {
 		t.Fatal("missing group receipt")
+	}
+	for i, pathResult := range op.Result.Paths {
+		member := op.Plan.Members[i]
+		if pathResult.Candidate != "succeeded" || pathResult.ConfigID != member.ConfigID || pathResult.InstanceID != member.InstanceID || pathResult.Engine != member.Engine || pathResult.Tag != member.Tag || pathResult.Path != member.Path {
+			t.Fatal("route observations were not bound to the authorized plan member")
+		}
 	}
 	grantee.call("GET", status, nil, 404, nil)
 	var summary store.TLSPortSummary

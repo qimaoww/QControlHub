@@ -74,7 +74,7 @@ if [ "$(printf '%s' "$op" | jq -r .state)" != unchanged ]; then
 fi
 ```
 
-The plan and result arrays use the same member order. Match a route by its config ID, engine and SHA-256 of its UTF-8 path. Each result records candidate and recovery evidence. A recovered original deployment reports `rolled_back`. For `recovery_incomplete`, report the step and affected members to the operator. Query the same task ID after repair. The panel refreshes recovery evidence from the node on reconnect and subsequent heartbeats. Existing sessions can disconnect during listener handoff. An older Agent has to advertise `tls-port-migration-v1` before execution. The legacy save/validate and save/deploy endpoints keep their previous behavior.
+Each result row identifies the configuration, instance, engine, inbound and path alongside its candidate and recovery evidence. The helper emits SHA-256 digests of the UTF-8 tag and path. On older panels, match result rows to plan members by array order. A 202 response includes the original task ID. Current panels also return its lookup URL in Location. A recovered original deployment reports `rolled_back`. For `recovery_incomplete`, report the step and affected members to the operator. Query the same task ID after repair. The panel refreshes recovery evidence from the node on reconnect and subsequent heartbeats. Existing sessions can disconnect during listener handoff. An older Agent has to advertise `tls-port-migration-v1` before execution. The legacy save/validate and save/deploy endpoints keep their previous behavior.
 
 ## Node Nginx and Caddy
 

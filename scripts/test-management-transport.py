@@ -42,6 +42,17 @@ class Transport(unittest.TestCase):
                 result = error.result
         return result, calls, stderr.getvalue()
 
+    def test_path_evidence_and_unknown_blocker(self):
+        row = {"config_id": "cfg_1111111111111111", "instance_id": "", "engine": "xray",
+               "tag": "private-inbound-name", "path": "/private-route", "candidate": "failed", "recovery": "succeeded"}
+        projected = qch.migration({"result": {"paths": [row]}})["result"]["paths"][0]
+        self.assertEqual(projected["config_id"], row["config_id"])
+        self.assertEqual(projected["instance_id"], "")
+        self.assertEqual(projected["recovery"], "succeeded")
+        self.assertEqual(projected["path_sha256"], qch.hashlib.sha256(row["path"].encode()).hexdigest())
+        self.assertNotIn("private", json.dumps(projected))
+        self.assertEqual(qch.preview({"blockers": ["sensitive-unknown-code"]})["blockers"], ["unknown_blocker"])
+
     def test_timeout_queries_migration(self):
         result,calls,_ = self.run_case(["POST",MIGRATE,"--stdin"],json.dumps({"task_id":TASK}).encode(),[qch.Failure("read_timeout"),(200,{},{"task_id":TASK,"state":"running"})])
         self.assertEqual(calls,[("POST",MIGRATE),("GET",AGENT+"/tls-migrations/"+TASK)])

@@ -6,276 +6,215 @@
           "application/json": {
             "example": {
               "error": "参数或业务校验失败",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "参数或业务校验失败"
+        "description": "参数或业务校验失败",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error401": {
         "content": {
           "application/json": {
             "example": {
               "error": "凭据无效、停用、到期、撤销或创建者失效",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "凭据无效、停用、到期、撤销或创建者失效"
+        "description": "凭据无效、停用、到期、撤销或创建者失效",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error403": {
         "content": {
           "application/json": {
             "example": {
               "error": "模式、权限、来源或资源授权拒绝",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "模式、权限、来源或资源授权拒绝"
+        "description": "模式、权限、来源或资源授权拒绝",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error404": {
         "content": {
           "application/json": {
             "example": {
               "error": "资源不存在或不可见",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "资源不存在或不可见"
+        "description": "资源不存在或不可见",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error409": {
         "content": {
           "application/json": {
             "example": {
               "error": "并发变更或状态冲突；重新读取并保留草稿",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "并发变更或状态冲突；重新读取并保留草稿"
+        "description": "并发变更或状态冲突；重新读取并保留草稿",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error429": {
         "content": {
           "application/json": {
             "example": {
               "error": "限流；按 Retry-After 有限等待",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "限流；按 Retry-After 有限等待"
+        "description": "限流；按 Retry-After 有限等待",
+        "headers": {
+          "Retry-After": {
+            "description": "认证或注册限流的剩余等待秒数，向上取整。其他繁忙响应可能省略。",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error500": {
         "content": {
           "application/json": {
             "example": {
               "error": "内部错误；记录 X-Request-ID 或 request_id",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "内部错误；记录 X-Request-ID 或 request_id"
+        "description": "内部错误；记录 X-Request-ID 或 request_id",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       }
     },
     "schemas": {
+      "APIError": {
+        "properties": {
+          "code": {
+            "description": "稳定错误类别，例如 invalid_input、permission_denied、port_conflict、rate_limited。",
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "failure_retention": {
+            "enum": [
+              "not_required",
+              "saved",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "failure_saved": {
+            "type": "boolean"
+          },
+          "failure_task_id": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "reason": {
+            "description": "业务原因，例如 stale_plan、stale_version、proxy_type_conflict。",
+            "type": "string"
+          },
+          "recovery_engine": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "api_agentConfigWorkspaceResource": {
         "additionalProperties": false,
         "properties": {
@@ -361,6 +300,81 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "api_apiKeyAuthorization": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoints": {
+            "description": "满足此 Key 模式与权限的 METHOD /path 模板。访问具体资源时仍验证归属。",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "凭据的到期时间，null 表示无到期时间。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ip_allowlist": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/core_APIKeyMode"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "description": "当前有效权限。",
+            "items": {
+              "$ref": "#/components/schemas/core_Permission"
+            },
+            "type": "array"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "source_ip": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "prefix",
+          "permissions",
+          "ip_allowlist",
+          "expires_at",
+          "workspace_id",
+          "user_id",
+          "source_ip",
+          "endpoints"
+        ],
         "type": "object"
       },
       "api_clientAccessAddressOption": {
@@ -4478,27 +4492,6 @@
         },
         "type": "object"
       },
-      "core_TLSMigrationResult": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "paths": {
-            "items": {
-              "$ref": "#/components/schemas/core_TLSRouteVerification"
-            },
-            "type": "array"
-          },
-          "state": {
-            "type": "string"
-          },
-          "step": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "core_TLSMigrationRoute": {
         "additionalProperties": false,
         "properties": {
@@ -6449,6 +6442,7 @@
             "type": "array"
           },
           "plan_id": {
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           },
           "public_port": {
@@ -6461,9 +6455,17 @@
             "type": "array"
           },
           "status": {
+            "enum": [
+              "blocked",
+              "runtime_evidence_required"
+            ],
             "type": "string"
           },
           "target_mode": {
+            "enum": [
+              "nginx",
+              "caddy"
+            ],
             "type": "string"
           }
         },
@@ -6499,7 +6501,7 @@
           "result": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/core_TLSMigrationResult"
+                "$ref": "#/components/schemas/store_TLSMigrationReceipt"
               },
               {
                 "type": "null"
@@ -6507,12 +6509,113 @@
             ]
           },
           "state": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "rolled_back",
+              "recovery_incomplete",
+              "pending",
+              "running",
+              "verifying",
+              "rolling_back",
+              "canceled",
+              "unchanged"
+            ],
             "type": "string"
           },
           "task_id": {
             "type": "string"
           }
         },
+        "required": [
+          "state",
+          "plan"
+        ],
+        "type": "object"
+      },
+      "store_TLSMigrationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/store_TLSPathResult"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "rolled_back",
+              "recovery_incomplete"
+            ],
+            "type": "string"
+          },
+          "step": {
+            "enum": [
+              "preflight",
+              "handoff",
+              "verify",
+              "restore",
+              "complete"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "step",
+          "paths"
+        ],
+        "type": "object"
+      },
+      "store_TLSPathResult": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "enum": [
+              "unknown",
+              "failed",
+              "succeeded"
+            ],
+            "type": "string"
+          },
+          "config_id": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "recovery": {
+            "enum": [
+              "unknown",
+              "failed",
+              "succeeded"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate",
+          "recovery",
+          "config_id",
+          "instance_id",
+          "engine",
+          "tag",
+          "path"
+        ],
         "type": "object"
       },
       "store_TLSPortSummary": {
@@ -6525,6 +6628,12 @@
             "type": "integer"
           },
           "state": {
+            "enum": [
+              "unconfirmed",
+              "partial",
+              "visible_in_use",
+              "observed_free"
+            ],
             "type": "string"
           },
           "visible_routes": {
@@ -11009,6 +11118,8 @@
                     "type": "integer"
                   },
                   "plan_id": {
+                    "description": "预览返回的计划标识。",
+                    "pattern": "^[0-9a-f]{64}$",
                     "type": "string"
                   },
                   "target_mode": {
@@ -11019,6 +11130,8 @@
                     "type": "string"
                   },
                   "task_id": {
+                    "description": "调用方预先保存的操作 ID，用于断线查询与重复提交核对。",
+                    "pattern": "^tsk_[0-9a-f]{16}$",
                     "type": "string"
                   }
                 },
@@ -11041,110 +11154,119 @@
               "application/json": {
                 "example": {
                   "plan": {
-                    "agent_id": "example",
-                    "blockers": [
-                      "example"
-                    ],
-                    "connection_interruption_possible": false,
+                    "agent_id": "agt_0000000000000001",
+                    "blockers": [],
+                    "connection_interruption_possible": true,
                     "members": [
                       {
-                        "backend_port": null,
-                        "certificate_id": null,
-                        "certificate_version": null,
-                        "config_id": null,
-                        "deployed_version": null,
-                        "domain": null,
-                        "engine": null,
-                        "from": null,
-                        "grant_generation": null,
-                        "instance_id": null,
-                        "path": null,
-                        "tag": null,
-                        "to": null,
-                        "transport": null,
-                        "version": null
+                        "backend_port": 23456,
+                        "certificate_id": "crt_0000000000000001",
+                        "certificate_version": 1,
+                        "config_id": "cfg_0000000000000001",
+                        "deployed_version": 1,
+                        "domain": "edge.example.test",
+                        "engine": "xray",
+                        "from": "nginx",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "tag": "site",
+                        "to": "caddy",
+                        "transport": "xhttp",
+                        "version": 1
                       }
                     ],
-                    "plan_id": "example",
-                    "public_port": 1,
+                    "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "public_port": 443,
                     "runtime_checks": [
-                      "example"
+                      "agent_listener_ownership_ipv4_ipv6",
+                      "proxy_config_and_service",
+                      "original_client_round_trip",
+                      "restore_original_paths"
                     ],
-                    "status": "example",
-                    "target_mode": "example"
+                    "status": "runtime_evidence_required",
+                    "target_mode": "caddy"
                   },
                   "result": {
-                    "code": "example",
                     "paths": [
-                      null
+                      {
+                        "candidate": "succeeded",
+                        "config_id": "cfg_0000000000000001",
+                        "engine": "xray",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "recovery": "unknown",
+                        "tag": "site"
+                      }
                     ],
-                    "state": "example",
-                    "step": "example"
+                    "state": "succeeded",
+                    "step": "complete"
                   },
-                  "state": "example",
-                  "task_id": "example"
+                  "state": "succeeded",
+                  "task_id": "tsk_0123456789abcdef"
                 },
                 "schema": {
                   "$ref": "#/components/schemas/store_TLSMigrationOperation"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "目标已生效，或复用已有终态操作。"
           },
           "202": {
             "content": {
               "application/json": {
                 "example": {
                   "plan": {
-                    "agent_id": "example",
-                    "blockers": [
-                      "example"
-                    ],
-                    "connection_interruption_possible": false,
+                    "agent_id": "agt_0000000000000001",
+                    "blockers": [],
+                    "connection_interruption_possible": true,
                     "members": [
                       {
-                        "backend_port": null,
-                        "certificate_id": null,
-                        "certificate_version": null,
-                        "config_id": null,
-                        "deployed_version": null,
-                        "domain": null,
-                        "engine": null,
-                        "from": null,
-                        "grant_generation": null,
-                        "instance_id": null,
-                        "path": null,
-                        "tag": null,
-                        "to": null,
-                        "transport": null,
-                        "version": null
+                        "backend_port": 23456,
+                        "certificate_id": "crt_0000000000000001",
+                        "certificate_version": 1,
+                        "config_id": "cfg_0000000000000001",
+                        "deployed_version": 1,
+                        "domain": "edge.example.test",
+                        "engine": "xray",
+                        "from": "nginx",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "tag": "site",
+                        "to": "caddy",
+                        "transport": "xhttp",
+                        "version": 1
                       }
                     ],
-                    "plan_id": "example",
-                    "public_port": 1,
+                    "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "public_port": 443,
                     "runtime_checks": [
-                      "example"
+                      "agent_listener_ownership_ipv4_ipv6",
+                      "proxy_config_and_service",
+                      "original_client_round_trip",
+                      "restore_original_paths"
                     ],
-                    "status": "example",
-                    "target_mode": "example"
+                    "status": "runtime_evidence_required",
+                    "target_mode": "caddy"
                   },
-                  "result": {
-                    "code": "example",
-                    "paths": [
-                      null
-                    ],
-                    "state": "example",
-                    "step": "example"
-                  },
-                  "state": "example",
-                  "task_id": "example"
+                  "state": "pending",
+                  "task_id": "tsk_0123456789abcdef"
                 },
                 "schema": {
                   "$ref": "#/components/schemas/store_TLSMigrationOperation"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "已受理。根据 Location 查询原操作。",
+            "headers": {
+              "Location": {
+                "description": "同源迁移状态地址，查询需要配置读取与任务读取权限。",
+                "required": true,
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -11282,44 +11404,44 @@
             "content": {
               "application/json": {
                 "example": {
-                  "agent_id": "example",
-                  "blockers": [
-                    "example"
-                  ],
-                  "connection_interruption_possible": false,
+                  "agent_id": "agt_0000000000000001",
+                  "blockers": [],
+                  "connection_interruption_possible": true,
                   "members": [
                     {
-                      "backend_port": 1,
-                      "certificate_id": "example",
+                      "backend_port": 23456,
+                      "certificate_id": "crt_0000000000000001",
                       "certificate_version": 1,
-                      "config_id": "example",
+                      "config_id": "cfg_0000000000000001",
                       "deployed_version": 1,
-                      "domain": "example",
-                      "engine": "mihomo",
-                      "from": "example",
-                      "grant_generation": 1,
-                      "instance_id": "example",
-                      "path": "example",
-                      "tag": "example",
-                      "to": "example",
-                      "transport": "example",
+                      "domain": "edge.example.test",
+                      "engine": "xray",
+                      "from": "nginx",
+                      "instance_id": "",
+                      "path": "/stream",
+                      "tag": "site",
+                      "to": "caddy",
+                      "transport": "xhttp",
                       "version": 1
                     }
                   ],
-                  "plan_id": "example",
-                  "public_port": 1,
+                  "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "public_port": 443,
                   "runtime_checks": [
-                    "example"
+                    "agent_listener_ownership_ipv4_ipv6",
+                    "proxy_config_and_service",
+                    "original_client_round_trip",
+                    "restore_original_paths"
                   ],
-                  "status": "example",
-                  "target_mode": "example"
+                  "status": "runtime_evidence_required",
+                  "target_mode": "caddy"
                 },
                 "schema": {
                   "$ref": "#/components/schemas/store_TLSFrontendPreview"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "预览包含保存版本、部署版本、阻碍及待 Agent 核实项。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -14403,7 +14525,7 @@
     },
     "/api/v1/agents/{id}/tls-migrations/{task}": {
       "get": {
-        "description": "result.paths 与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。",
+        "description": "result.paths 每行含配置 ID、实例 ID、引擎、入站标识和路径，与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。",
         "operationId": "getTLSMigration_api_v1_agents_{id}_tls-migrations_{task}",
         "parameters": [
           {
@@ -14433,55 +14555,63 @@
               "application/json": {
                 "example": {
                   "plan": {
-                    "agent_id": "example",
-                    "blockers": [
-                      "example"
-                    ],
-                    "connection_interruption_possible": false,
+                    "agent_id": "agt_0000000000000001",
+                    "blockers": [],
+                    "connection_interruption_possible": true,
                     "members": [
                       {
-                        "backend_port": null,
-                        "certificate_id": null,
-                        "certificate_version": null,
-                        "config_id": null,
-                        "deployed_version": null,
-                        "domain": null,
-                        "engine": null,
-                        "from": null,
-                        "grant_generation": null,
-                        "instance_id": null,
-                        "path": null,
-                        "tag": null,
-                        "to": null,
-                        "transport": null,
-                        "version": null
+                        "backend_port": 23456,
+                        "certificate_id": "crt_0000000000000001",
+                        "certificate_version": 1,
+                        "config_id": "cfg_0000000000000001",
+                        "deployed_version": 1,
+                        "domain": "edge.example.test",
+                        "engine": "xray",
+                        "from": "nginx",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "tag": "site",
+                        "to": "caddy",
+                        "transport": "xhttp",
+                        "version": 1
                       }
                     ],
-                    "plan_id": "example",
-                    "public_port": 1,
+                    "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "public_port": 443,
                     "runtime_checks": [
-                      "example"
+                      "agent_listener_ownership_ipv4_ipv6",
+                      "proxy_config_and_service",
+                      "original_client_round_trip",
+                      "restore_original_paths"
                     ],
-                    "status": "example",
-                    "target_mode": "example"
+                    "status": "runtime_evidence_required",
+                    "target_mode": "caddy"
                   },
                   "result": {
-                    "code": "example",
+                    "code": "business_validation_failed",
                     "paths": [
-                      null
+                      {
+                        "candidate": "failed",
+                        "config_id": "cfg_0000000000000001",
+                        "engine": "xray",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "recovery": "succeeded",
+                        "tag": "site"
+                      }
                     ],
-                    "state": "example",
-                    "step": "example"
+                    "state": "rolled_back",
+                    "step": "restore"
                   },
-                  "state": "example",
-                  "task_id": "example"
+                  "state": "rolled_back",
+                  "task_id": "tsk_0123456789abcdef"
                 },
                 "schema": {
                   "$ref": "#/components/schemas/store_TLSMigrationOperation"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "原操作在当前授权范围内的状态和逐路径验证结果。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -14569,17 +14699,17 @@
             "content": {
               "application/json": {
                 "example": {
-                  "agent_id": "example",
-                  "public_port": 1,
-                  "state": "example",
-                  "visible_routes": 1
+                  "agent_id": "agt_0000000000000001",
+                  "public_port": 443,
+                  "state": "partial",
+                  "visible_routes": 0
                 },
                 "schema": {
                   "$ref": "#/components/schemas/store_TLSPortSummary"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "可见路径数量及端口观测结论。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -14754,52 +14884,28 @@
               "application/json": {
                 "example": {
                   "endpoints": [
-                    "example"
+                    "GET /api/v1/api-key",
+                    "GET /api/v1/openapi.json"
                   ],
                   "expires_at": null,
-                  "id": "resource_example",
-                  "ip_allowlist": null,
-                  "mode": null,
-                  "name": "example",
+                  "id": "key_0000000000000001",
+                  "ip_allowlist": [],
+                  "mode": "read_only",
+                  "name": "test-reader",
                   "permissions": [
-                    "agent-access.read"
+                    "agent-config.read"
                   ],
-                  "prefix": null,
-                  "source_ip": null,
-                  "user_id": "example",
-                  "workspace_id": null
+                  "prefix": "qch_key_demo",
+                  "source_ip": "192.0.2.1",
+                  "user_id": "usr_0000000000000001",
+                  "workspace_id": "usr_0000000000000001"
                 },
                 "schema": {
-                  "properties": {
-                    "endpoints": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    "expires_at": {},
-                    "id": {},
-                    "ip_allowlist": {},
-                    "mode": {},
-                    "name": {},
-                    "permissions": {
-                      "items": {
-                        "$ref": "#/components/schemas/core_Permission"
-                      },
-                      "type": "array"
-                    },
-                    "prefix": {},
-                    "source_ip": {},
-                    "user_id": {
-                      "type": "string"
-                    },
-                    "workspace_id": {}
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/api_apiKeyAuthorization"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "当前 Key 的有效授权与可调用路由模板。具体资源仍需单独授权。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -14825,18 +14931,12 @@
         },
         "security": [
           {
-            "session": []
-          },
-          {
-            "environmentToken": []
-          },
-          {
             "apiKey": []
           }
         ],
         "summary": "查询自身有效授权",
         "x-api-key": true,
-        "x-authentication": "session_or_api_key",
+        "x-authentication": "api_key",
         "x-effect": "read",
         "x-key-policy": {
           "any": false,
@@ -14847,7 +14947,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "仅返回当前请求使用的 API Key 及创建者的有效授权。"
       }
     },
     "/api/v1/audit": {
@@ -20664,7 +20764,6 @@
           "200": {
             "content": {
               "application/zip": {
-                "example": "example",
                 "schema": {
                   "format": "binary",
                   "type": "string"
@@ -21427,7 +21526,20 @@
         "operationId": "getAPIContract_api_v1_openapi.json",
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "openapi",
+                    "info",
+                    "paths",
+                    "components"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "此面板构建发布的完整 OpenAPI 文档。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -24338,7 +24450,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "put": {
-        "operationId": "siteBranding_api_v1_settings_branding",
+        "operationId": "updateSiteBranding_api_v1_settings_branding",
         "requestBody": {
           "content": {
             "application/json": {

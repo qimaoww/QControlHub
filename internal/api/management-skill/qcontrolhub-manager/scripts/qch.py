@@ -30,7 +30,8 @@ MIGRATE_PATH = re.compile(r"(/agents/agt_[0-9a-f]{16})/configs/(?:xray|mihomo|si
 SUBMISSION_PATH = re.compile(r"/agents/agt_[0-9a-f]{16}/configs/(?:mihomo|xray|sing-box|ss-rust)/(?:server-inbounds|source|outbounds)")
 STATES = {"pending", "running", "succeeded", "failed", "canceled", "online", "offline", "unknown",
           "verifying", "rolling_back", "rolled_back", "recovery_incomplete", "blocked", "runtime_evidence_required"}
-CODES = {"stale_version", "instance_changed", "unsupported_mode", "port_group_incomplete", "port_group_unauthorized",
+CODES = {"invalid_input", "authentication_failed", "permission_denied", "not_found", "conflict", "rate_limited", "internal_error", "service_unavailable",
+         "stale_version", "instance_changed", "unsupported_mode", "port_group_incomplete", "port_group_unauthorized",
          "dependency_missing", "port_conflict", "route_conflict", "proxy_type_conflict", "business_validation_failed",
          "rollback_failed", "deployment_drift", "certificate_unauthorized", "certificate_binding_changed",
          "certificate_change_required", "ingress_unauthorized", "pending_tasks", "agent_offline",
@@ -40,8 +41,8 @@ ENGINES = {"sing-box", "xray", "mihomo", "ss-rust"}
 
 
 class Failure(Exception):
-    def __init__(self, code, **fields):
-        self.result = {"classification": code, **fields}
+    def __init__(self, classification, **fields):
+        self.result = {"classification": classification, **fields}
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -127,6 +128,19 @@ def resource(item):
     return result
 
 
+def route_identity(row):
+    result = resource(row)
+    if not isinstance(row, dict):
+        return result
+    if row.get("instance_id") == "":
+        result["instance_id"] = ""
+    # Both names can be user supplied. Retain correlation without printing them.
+    for field in ("path", "tag"):
+        if isinstance(row.get(field), str):
+            result[field + "_sha256"] = hashlib.sha256(row[field].encode()).hexdigest()
+    return result
+
+
 def preview(value):
     result = resource(value)
     plan = value.get("plan_id")
@@ -134,13 +148,9 @@ def preview(value):
         result["plan_id"] = plan
     result["members"] = []
     for member in value.get("members", []):
-        safe = resource(member)
-        # Paths can contain arbitrary credentials. A digest lets the caller
-        # correlate a known path without forwarding its contents to a model.
-        if isinstance(member, dict) and isinstance(member.get("path"), str):
-            safe["path_sha256"] = hashlib.sha256(member["path"].encode()).hexdigest()
+        safe = route_identity(member)
         result["members"].append(safe)
-    result["blockers"] = [v for v in value.get("blockers", []) if allowed(v, CODES)]
+    result["blockers"] = [v if allowed(v, CODES) else "unknown_blocker" for v in value["blockers"]]
     checks = {"agent_listener_ownership_ipv4_ipv6", "proxy_config_and_service", "original_client_round_trip", "restore_original_paths"}
     result["runtime_checks"] = [v for v in value.get("runtime_checks", []) if allowed(v, checks)]
     if type(value.get("connection_interruption_possible")) is bool:
@@ -161,8 +171,14 @@ def migration(value):
             safe["step"] = receipt["step"]
         if allowed(receipt.get("code"), CODES):
             safe["code"] = receipt["code"]
-        safe["paths"] = [{k: row[k] for k in ("candidate", "recovery") if allowed(row.get(k), {"succeeded", "failed", "unknown"})}
-                         for row in receipt.get("paths", []) if isinstance(row, dict)]
+        safe["paths"] = []
+        for row in receipt.get("paths", []):
+            if isinstance(row, dict):
+                path = route_identity(row)
+                for phase in ("candidate", "recovery"):
+                    if allowed(row.get(phase), {"succeeded", "failed", "unknown"}):
+                        path[phase] = row[phase]
+                safe["paths"].append(path)
         result["result"] = safe
     return result
 

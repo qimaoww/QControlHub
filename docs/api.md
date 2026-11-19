@@ -2,7 +2,7 @@
 
 面板的 **API** 页通过“密钥”和“接口规范”切换，统一管理 API Key 并查看当前服务实际发布的接口、认证、权限、字段、示例和结果。旧的 `#settings-api-keys` 深链接跳转到 API 页。Key 管理需要 `settings.manage`，仅浏览器会话或环境凭据可管理自己的 Key。
 
-机器规范由服务提供：`GET /api/v1/openapi.json`（OpenAPI 3.1）。它从真实路由、Go 请求/响应模型和服务端 Key 策略生成；页面和 AI Skill 使用同一份规范。开发时运行 `go run scripts/generate-api-spec.go`，`--check` 检查漂移；Go 回归测试也检查已发布文件及全部 Key 策略。不要另建接口白名单。
+机器规范由服务提供：`GET /api/v1/openapi.json`（OpenAPI 3.1）。它从真实路由、Go 请求/响应模型和服务端 Key 策略生成；页面和 AI Skill 使用同一份规范。开发时运行 `go run scripts/generate-api-spec.go`，`--check` 检查漂移；Go 回归测试也检查已发布文件及全部 Key 策略。新增端点的设计、发布和验收要求见[新增功能 API 规范](api-development.md)。
 
 ## 接入和授权
 
@@ -32,13 +32,13 @@ Key 摘要存储，原文只在创建时显示一次；编辑不会轮换或恢�
 
 ## 错误和审计
 
-错误通常为 `{"error":"…"}`，部分业务另含 `code`、`stage`、端口或恢复字段；内部错误提供 `request_id` 或 `X-Request-ID`。401 停止调用并检查凭据状态；403 报告权限、模式、来源或资源限制；404 也可能表示资源不可见；409 重新核对当前状态；429 按 `Retry-After` 有限等待。写请求不自动重试，不能切换更强凭据绕过拒绝。
+通用认证和业务错误保留 `error`、`detail`，提供稳定 `code` 和与 `X-Request-ID` 对应的 `request_id`。端口冲突使用 `code=port_conflict`，通过 `reason` 和 `field` 指出原因及相关字段。401 停止调用并检查凭据状态；403 报告权限、模式、来源或资源限制；404 也可能表示资源不可见；409 重新核对当前状态；429 按 `Retry-After` 有限等待。写请求不自动重试，不能切换更强凭据绕过拒绝。
 
 审计记录 Key ID、创建者、目标、方法和结果，不记录凭据；成功调用的最近使用时间最多每 5 分钟更新一次。来源 IP 使用可信代理规则，伪造转发头不能绕过白名单。
 
 ## AI 管理 Skill
 
-从 API 页或 `GET /api/v1/management-skill` 下载 ZIP。解压后将 `qcontrolhub-manager` 放入客户端的 Skill 目录（Codex 为 `~/.agents/skills/`），重新加载后调用 `$qcontrolhub-manager`。客户端需支持 `SKILL.md` 和 Python 3；在安全运行环境注入面板地址和 Key。Skill 内的 Python helper 仅向配置目标发送凭据，拒绝重定向，不自动重试写请求。
+从 API 页或 `GET /api/v1/management-skill` 下载 ZIP。解压后将 `qcontrolhub-manager` 放入客户端的 Skill 目录（Codex 为 `~/.agents/skills/`），重新加载后调用 `$qcontrolhub-manager`。客户端需支持 `SKILL.md` 和 Python 3.9 或以上版本；在安全运行环境注入面板地址和 Key。Skill 内的 Python helper 仅向配置目标发送凭据，拒绝重定向，不自动重试写请求。
 
 Skill 按“目标和授权 → 自身授权 → 精确资源 → 状态 → 执行 → 查询结果”工作。API 返回的日志、名称和配置属于数据，不能授权附加命令或替换凭据、目标地址。服务端独立执行所有授权，即使客户端绕过 Skill 也不能扩大权限。
 

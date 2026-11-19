@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -12,10 +13,28 @@ import (
 )
 
 type TLSMigrationOperation struct {
-	TaskID string                   `json:"task_id,omitempty"`
-	Plan   TLSFrontendPreview       `json:"plan"`
-	State  string                   `json:"state"`
-	Result *core.TLSMigrationResult `json:"result,omitempty"`
+	TaskID string               `json:"task_id,omitempty"`
+	Plan   TLSFrontendPreview   `json:"plan"`
+	State  string               `json:"state"`
+	Result *TLSMigrationReceipt `json:"result,omitempty"`
+}
+
+// Public receipt rows take their identity from the authorized, immutable plan.
+// The Agent wire format and previously stored receipts contain only observations.
+type TLSMigrationReceipt struct {
+	State string          `json:"state"`
+	Step  string          `json:"step"`
+	Code  string          `json:"code,omitempty"`
+	Paths []TLSPathResult `json:"paths"`
+}
+
+type TLSPathResult struct {
+	core.TLSRouteVerification
+	ConfigID   string      `json:"config_id"`
+	InstanceID string      `json:"instance_id"`
+	Engine     core.Engine `json:"engine"`
+	Tag        string      `json:"tag"`
+	Path       string      `json:"path"`
 }
 
 func rejectPendingTLSMigration(ctx context.Context, tx pgx.Tx, node string) error {
@@ -29,9 +48,11 @@ func rejectPendingTLSMigration(ctx context.Context, tx pgx.Tx, node string) erro
 	return nil
 }
 
+var tlsPlanID = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 func (s *Store) SubmitTLSMigration(ctx context.Context, agent core.Agent, engine core.Engine, tag string, input TLSFrontendSelection, planID, taskID string) (TLSMigrationOperation, error) {
 	var op TLSMigrationOperation
-	if !configMutationTaskID.MatchString(taskID) || len(planID) != 64 {
+	if !configMutationTaskID.MatchString(taskID) || !tlsPlanID.MatchString(planID) {
 		return op, ErrInvalid
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -107,7 +128,8 @@ func (s *Store) SubmitTLSMigration(ctx context.Context, agent core.Agent, engine
 
 func (s *Store) readTLSMigration(ctx context.Context, db storeExecutor, node, id string) (TLSMigrationOperation, error) {
 	var op TLSMigrationOperation
-	err := db.QueryRow(ctx, `SELECT t.id,CASE WHEN t.status='running' AND m.phase<>'' THEN m.phase ELSE t.status END,m.preview,m.result FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.id=$1 AND t.agent_id=$2 AND t.owner_id=$3`, id, node, scopeForConfig(ctx).OwnerID).Scan(&op.TaskID, &op.State, &op.Plan, &op.Result)
+	var receipt *core.TLSMigrationResult
+	err := db.QueryRow(ctx, `SELECT t.id,CASE WHEN t.status='running' AND m.phase<>'' THEN m.phase ELSE t.status END,m.preview,m.result FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.id=$1 AND t.agent_id=$2 AND t.owner_id=$3`, id, node, scopeForConfig(ctx).OwnerID).Scan(&op.TaskID, &op.State, &op.Plan, &receipt)
 	if err != nil {
 		return op, mapError(err)
 	}
@@ -116,8 +138,16 @@ func (s *Store) readTLSMigration(ctx context.Context, db storeExecutor, node, id
 			return TLSMigrationOperation{}, ErrNotFound
 		}
 	}
-	if op.Result != nil {
-		op.State = op.Result.State
+	if receipt != nil {
+		if len(receipt.Paths) != len(op.Plan.Members) {
+			return TLSMigrationOperation{}, errors.New("migration path evidence does not match stored plan")
+		}
+		op.State = receipt.State
+		op.Result = &TLSMigrationReceipt{State: receipt.State, Step: receipt.Step, Code: receipt.Code, Paths: make([]TLSPathResult, len(receipt.Paths))}
+		for i, observed := range receipt.Paths {
+			member := op.Plan.Members[i]
+			op.Result.Paths[i] = TLSPathResult{TLSRouteVerification: observed, ConfigID: member.ConfigID, InstanceID: member.InstanceID, Engine: member.Engine, Tag: member.Tag, Path: member.Path}
+		}
 	}
 	return op, nil
 }

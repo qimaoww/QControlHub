@@ -46,8 +46,8 @@ func (s *Server) authenticateAPIKey(w http.ResponseWriter, r *http.Request) (*ht
 	}
 	ip := authn.ClientIP(r, s.trustedProxies)
 	now := time.Now().UTC()
-	if !s.adminLimiter.Allow(ip, now) {
-		writeError(w, 429, "too many authentication failures")
+	if delay := s.adminLimiter.RetryAfter(ip, now); delay > 0 {
+		writeRateLimitError(w, delay, "too many authentication failures")
 		return r, false
 	}
 	invalid := func() (*http.Request, bool) {
@@ -208,6 +208,21 @@ func (s *Server) saveAPIKey(w http.ResponseWriter, r *http.Request, input core.A
 	}
 	writeJSON(w, 200, k)
 }
+
+type apiKeyAuthorization struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Mode        core.APIKeyMode   `json:"mode"`
+	Prefix      string            `json:"prefix"`
+	Permissions []core.Permission `json:"permissions"`
+	IPAllowlist []string          `json:"ip_allowlist"`
+	ExpiresAt   *time.Time        `json:"expires_at"`
+	WorkspaceID string            `json:"workspace_id"`
+	UserID      string            `json:"user_id"`
+	SourceIP    string            `json:"source_ip"`
+	Endpoints   []string          `json:"endpoints"`
+}
+
 func (s *Server) getAPIKeyAuthorization(w http.ResponseWriter, r *http.Request) {
 	k, ok := requestAPIKey(r)
 	if !ok {
@@ -223,7 +238,7 @@ func (s *Server) getAPIKeyAuthorization(w http.ResponseWriter, r *http.Request) 
 	} else {
 		ip = ""
 	}
-	writeJSON(w, 200, map[string]any{"id": k.ID, "name": k.Name, "mode": k.Mode, "prefix": k.Prefix, "permissions": permissions, "ip_allowlist": k.IPAllowlist, "expires_at": k.ExpiresAt, "workspace_id": k.OwnerID, "user_id": s.sessionUserID(r), "source_ip": ip, "endpoints": endpoints})
+	writeJSON(w, 200, apiKeyAuthorization{ID: k.ID, Name: k.Name, Mode: k.Mode, Prefix: k.Prefix, Permissions: permissions, IPAllowlist: k.IPAllowlist, ExpiresAt: k.ExpiresAt, WorkspaceID: k.OwnerID, UserID: s.sessionUserID(r), SourceIP: ip, Endpoints: endpoints})
 }
 
 func (s *Server) grantableAPIKeyPermissions(r *http.Request, readOnly bool) []core.Permission {

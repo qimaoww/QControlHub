@@ -49,10 +49,41 @@ func (g *generator) annotateField(name string, field object) {
 }
 
 func (g *generator) annotateModel(name string, schema object) {
+	fields, ok := schema["properties"].(object)
+	if !ok {
+		return
+	}
+	states := []string{"succeeded", "failed", "rolled_back", "recovery_incomplete"}
+	switch name {
+	case "api.apiKeyAuthorization":
+		fields["mode"] = g.named("core.APIKeyMode")
+		fields["expires_at"].(object)["description"] = "凭据的到期时间，null 表示无到期时间。"
+		fields["permissions"] = object{"type": "array", "items": g.named("core.Permission"), "description": "当前有效权限。"}
+		fields["ip_allowlist"] = object{"type": []string{"array", "null"}, "items": object{"type": "string"}}
+		fields["endpoints"].(object)["description"] = "满足此 Key 模式与权限的 METHOD /path 模板。访问具体资源时仍验证归属。"
+		schema["required"] = []string{"id", "name", "mode", "prefix", "permissions", "ip_allowlist", "expires_at", "workspace_id", "user_id", "source_ip", "endpoints"}
+	case "store.TLSFrontendPreview":
+		fields["status"].(object)["enum"] = []string{"blocked", "runtime_evidence_required"}
+		fields["target_mode"].(object)["enum"] = []string{"nginx", "caddy"}
+		fields["plan_id"].(object)["pattern"] = "^[0-9a-f]{64}$"
+	case "store.TLSPortSummary":
+		fields["state"].(object)["enum"] = []string{"unconfirmed", "partial", "visible_in_use", "observed_free"}
+	case "store.TLSMigrationOperation":
+		fields["state"].(object)["enum"] = append(states, "pending", "running", "verifying", "rolling_back", "canceled", "unchanged")
+		schema["required"] = []string{"state", "plan"}
+	case "store.TLSMigrationReceipt":
+		fields["state"].(object)["enum"] = states
+		fields["step"].(object)["enum"] = []string{"preflight", "handoff", "verify", "restore", "complete"}
+		schema["required"] = []string{"state", "step", "paths"}
+	case "store.TLSPathResult":
+		for _, field := range []string{"candidate", "recovery"} {
+			fields[field] = object{"type": "string", "enum": []string{"unknown", "failed", "succeeded"}}
+		}
+		schema["required"] = []string{"candidate", "recovery", "config_id", "instance_id", "engine", "tag", "path"}
+	}
 	if name != "core.ProxyIngress" {
 		return
 	}
-	fields := schema["properties"].(object)
 	fields["mode"] = object{"type": "string", "enum": []string{"nginx", "caddy"}, "description": "共享的反代类型；同一共享关系每种类型至多一项。"}
 	fields["scope"] = object{"type": "string", "enum": []string{"type"}, "description": "类型授权，不分配监听端口；mode-only 请求也按此语义保存。"}
 	fields["port"] = object{"type": "integer", "minimum": 1, "maximum": 65535, "description": "仅兼容旧请求或旧 Agent 策略；新共享响应省略。scope=type 时不得填写，不接受 0 或保留端口。"}
@@ -77,6 +108,14 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["x-resource-scope"] = "仅签名认证的实际 Agent 身份及其受理任务；API Key 不得冒充。"
 	}
 	switch path {
+	case "/api/v1/api-key":
+		op["x-authentication"] = "api_key"
+		op["security"] = []any{object{"apiKey": []string{}}}
+		op["x-resource-scope"] = "仅返回当前请求使用的 API Key 及创建者的有效授权。"
+	case "/api/v1/settings/branding":
+		if method == "put" {
+			op["operationId"] = "updateSiteBranding_api_v1_settings_branding"
+		}
 	case "/api/v1/preferences/ui":
 		op["summary"] = "查询界面偏好"
 		if method == "patch" {
@@ -129,6 +168,8 @@ func (g *generator) annotate(op object, handler, method, path string) {
 			required = []string{"target_mode", "expected_version", "expected_instance_id"}
 			if handler == "submitTLSMigration" {
 				required = append(required, "plan_id", "task_id")
+				fields["plan_id"] = object{"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "预览返回的计划标识。"}
+				fields["task_id"] = object{"type": "string", "pattern": "^tsk_[0-9a-f]{16}$", "description": "调用方预先保存的操作 ID，用于断线查询与重复提交核对。"}
 				media["example"].(object)["plan_id"] = strings.Repeat("0", 64)
 				media["example"].(object)["task_id"] = "tsk_0123456789abcdef"
 			}
@@ -214,7 +255,7 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["description"] = "visible_routes 仅统计当前授权实例。partial 表示存在不可见占用或检查不完整。observed_free 要求 15 秒内完成且未被后续变更失效的节点监听观测。unconfirmed 表示缺少证据。"
 	case "getTLSMigration":
 		op["summary"] = "查询 TLS 迁移与逐路径恢复结果"
-		op["description"] = "result.paths 与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。"
+		op["description"] = "result.paths 每行含配置 ID、实例 ID、引擎、入站标识和路径，与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。"
 	case "previewTLSFrontend":
 		op["summary"] = "预览同一节点公网端口的 TLS 前端变更"
 		op["description"] = "按唯一入站定位公网端口。只读返回可见成员的当前及目标模式、保存与部署版本、阻碍和待执行阶段核验项。无保存、签发、安装或服务变更。"
@@ -225,6 +266,23 @@ func (g *generator) annotate(op object, handler, method, path string) {
 	}
 	response := op["responses"].(object)
 	switch handler {
+	case "getAPIKeyAuthorization":
+		response["200"] = object{
+			"description": "当前 Key 的有效授权与可调用路由模板。具体资源仍需单独授权。",
+			"content": object{"application/json": object{
+				"schema": g.named("api.apiKeyAuthorization"),
+				"example": object{
+					"id": "key_0000000000000001", "name": "test-reader", "mode": "read_only", "prefix": "qch_key_demo",
+					"permissions": []string{"agent-config.read"}, "ip_allowlist": []string{}, "expires_at": nil,
+					"workspace_id": "usr_0000000000000001", "user_id": "usr_0000000000000001", "source_ip": "192.0.2.1",
+					"endpoints": []string{"GET /api/v1/api-key", "GET /api/v1/openapi.json"},
+				},
+			}},
+		}
+	case "getAPIContract":
+		response["200"] = object{"description": "此面板构建发布的完整 OpenAPI 文档。", "content": object{"application/json": object{"schema": object{"type": "object", "required": []string{"openapi", "info", "paths", "components"}}}}}
+	case "previewTLSFrontend", "submitTLSMigration", "getTLSMigration", "getTLSPortOccupancy":
+		annotateTLSResponses(response, handler)
 	case "getManagedProxies":
 		response["200"] = object{"description": "节点代理上报", "content": object{"application/json": object{"schema": g.named("api.nodeProxyReport")}}}
 	case "checkManagedProxy", "updateManagedProxy":
@@ -239,5 +297,42 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		response["200"] = object{"description": "真实任务状态及结果；view=status 省略完整内容", "content": object{"application/json": object{"schema": g.named("core.Task")}}}
 	case "downloadManagementSkill":
 		response["200"] = object{"description": "可安装的 qcontrolhub-manager Skill ZIP", "content": object{"application/zip": object{"schema": object{"type": "string", "format": "binary"}}}}
+	}
+}
+
+// Examples correspond to a single synthetic plan. Each stage shows the
+// actual response shape, including the absence of a receipt before completion.
+func annotateTLSResponses(responses object, handler string) {
+	member := object{
+		"config_id": "cfg_0000000000000001", "instance_id": "", "engine": "xray", "tag": "site", "version": 1,
+		"deployed_version": 1, "domain": "edge.example.test", "path": "/stream", "transport": "xhttp", "backend_port": 23456,
+		"from": "nginx", "to": "caddy", "certificate_id": "crt_0000000000000001", "certificate_version": 1,
+	}
+	plan := object{
+		"agent_id": "agt_0000000000000001", "public_port": 443, "target_mode": "caddy", "plan_id": strings.Repeat("a", 64),
+		"status": "runtime_evidence_required", "members": []any{member}, "blockers": []string{}, "connection_interruption_possible": true,
+		"runtime_checks": []string{"agent_listener_ownership_ipv4_ipv6", "proxy_config_and_service", "original_client_round_trip", "restore_original_paths"},
+	}
+	taskID := "tsk_0123456789abcdef"
+	set := func(status, description string, example object) {
+		r := responses[status].(object)
+		r["description"] = description
+		r["content"].(object)["application/json"].(object)["example"] = example
+	}
+	row := object{"config_id": member["config_id"], "instance_id": member["instance_id"], "engine": member["engine"], "tag": member["tag"], "path": member["path"]}
+	switch handler {
+	case "previewTLSFrontend":
+		set("200", "预览包含保存版本、部署版本、阻碍及待 Agent 核实项。", plan)
+	case "submitTLSMigration":
+		set("202", "已受理。根据 Location 查询原操作。", object{"task_id": taskID, "state": "pending", "plan": plan})
+		responses["202"].(object)["headers"] = object{"Location": object{"required": true, "schema": object{"type": "string", "format": "uri-reference"}, "description": "同源迁移状态地址，查询需要配置读取与任务读取权限。"}}
+		row["candidate"], row["recovery"] = "succeeded", "unknown"
+		receipt := object{"state": "succeeded", "step": "complete", "paths": []any{row}}
+		set("200", "目标已生效，或复用已有终态操作。", object{"state": "succeeded", "task_id": taskID, "plan": plan, "result": receipt})
+	case "getTLSMigration":
+		row["candidate"], row["recovery"] = "failed", "succeeded"
+		set("200", "原操作在当前授权范围内的状态和逐路径验证结果。", object{"task_id": taskID, "state": "rolled_back", "plan": plan, "result": object{"state": "rolled_back", "step": "restore", "code": "business_validation_failed", "paths": []any{row}}})
+	case "getTLSPortOccupancy":
+		set("200", "可见路径数量及端口观测结论。", object{"agent_id": "agt_0000000000000001", "public_port": 443, "visible_routes": 0, "state": "partial"})
 	}
 }

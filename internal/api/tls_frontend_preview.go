@@ -45,6 +45,7 @@ func (s *Server) submitTLSMigration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if op.State == "pending" || op.State == "running" || op.State == "verifying" || op.State == "rolling_back" {
+		w.Header().Set("Location", "/api/v1/agents/"+agent.ID+"/tls-migrations/"+op.TaskID)
 		writeJSON(w, http.StatusAccepted, op)
 		return
 	}

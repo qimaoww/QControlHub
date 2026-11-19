@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"maps"
 	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -191,18 +194,30 @@ func TestAPIKeyAuthenticationLifecycleAndProxyPolicy(t *testing.T) {
 		disabled := input
 		disabled.Disabled = true
 		k = update(k, disabled)
-		disabledBody := call(secret, "GET", "/api-key", nil, "192.0.2.92:42", "", 401).Body.String()
+		deniedBody := func(resp *httptest.ResponseRecorder) map[string]string {
+			t.Helper()
+			var body map[string]string
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if id := body["request_id"]; !regexp.MustCompile(`^req_[0-9a-f]{16}$`).MatchString(id) || id != resp.Header().Get("X-Request-ID") || body["code"] != "authentication_failed" {
+				t.Fatal("invalid authentication error contract")
+			}
+			delete(body, "request_id")
+			return body
+		}
+		disabledBody := deniedBody(call(secret, "GET", "/api-key", nil, "192.0.2.92:42", "", 401))
 		k = update(k, input)
 		_, err = conn.Exec(ctx, `UPDATE admin_api_keys SET expires_at=now()-interval '1 minute' WHERE id=$1`, k.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		expired := call(secret, "GET", "/api-key", nil, "192.0.2.93:42", "", 401).Body.String()
+		expired := deniedBody(call(secret, "GET", "/api-key", nil, "192.0.2.93:42", "", 401))
 		k = update(k, input)
 		call(config.AdminToken, "DELETE", "/settings/api-keys/"+k.ID, nil, "", "", 200)
-		revoked := call(secret, "GET", "/api-key", nil, "192.0.2.94:42", "", 401).Body.String()
-		invalid := call("qch_key_"+strings.Repeat("z", 43), "GET", "/api-key", nil, "192.0.2.95:42", "", 401).Body.String()
-		if disabledBody != expired || expired != revoked || revoked != invalid {
+		revoked := deniedBody(call(secret, "GET", "/api-key", nil, "192.0.2.94:42", "", 401))
+		invalid := deniedBody(call("qch_key_"+strings.Repeat("z", 43), "GET", "/api-key", nil, "192.0.2.95:42", "", 401))
+		if !maps.Equal(disabledBody, expired) || !maps.Equal(expired, revoked) || !maps.Equal(revoked, invalid) {
 			t.Fatal("credential states disclosed")
 		}
 		call(config.AdminToken, "PUT", "/settings/api-keys/"+k.ID, input, "", "", 409)
@@ -280,7 +295,12 @@ func TestAPIKeyAuthenticationLifecycleAndProxyPolicy(t *testing.T) {
 		// per-IP failure counter.
 		call(limitedSecret, "GET", "/api-key", nil, remote, "", 403)
 		call(invalidToken, "GET", "/api-key", nil, remote, "", 401)
-		call(invalidToken, "GET", "/api-key", nil, remote, "", 429)
+		throttled := call(invalidToken, "GET", "/api-key", nil, remote, "", 429)
+		delay, err := strconv.Atoi(throttled.Header().Get("Retry-After"))
+		var body map[string]string
+		if err != nil || delay <= 0 || json.Unmarshal(throttled.Body.Bytes(), &body) != nil || body["code"] != "rate_limited" || body["request_id"] == "" || body["request_id"] != throttled.Header().Get("X-Request-ID") {
+			t.Fatal("invalid rate limit response")
+		}
 	})
 }
 

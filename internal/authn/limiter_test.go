@@ -21,6 +21,9 @@ func TestFailureLimiterBlocksAtLimitAndSuccessClears(t *testing.T) {
 	}
 	thirdFailure := base.Add(20 * time.Second)
 	limiter.Failure(key, thirdFailure)
+	if got := limiter.RetryAfter(key, thirdFailure.Add(40*time.Millisecond)); got != 2*time.Minute-40*time.Millisecond {
+		t.Fatalf("wrong remaining block time: %v", got)
+	}
 	if limiter.Allow(key, thirdFailure) {
 		t.Fatal("key remained allowed after reaching failure limit")
 	}
