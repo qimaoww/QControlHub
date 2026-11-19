@@ -211,7 +211,7 @@ func (s *Store) SyncClientConnections(ctx context.Context, q ClientConnectionQue
 				return active.page(q, token)
 			}
 		}
-		if time.Now().Before(entry.backoff) {
+		if time.Now().Before(entry.backoff) || q.RecordsOnly && entry.data == nil {
 			entry.mu.Unlock()
 			return core.ClientConnectionHistory{}, false, nil
 		}
@@ -475,14 +475,24 @@ func connectionDirtyGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQue
 }
 
 func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, wanted []connectionLookupKey, revision int64, budget int64) (map[string]connectionGroup, error) {
-	where, args := connectionGroupWhere(ctx, q)
-	if wanted != nil {
-		data, _ := json.Marshal(wanted)
-		args = append(args, data)
-		where += fmt.Sprintf(` AND (c.agent_id,c.engine,c.client_ip) IN (SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text))`, len(args))
-	}
 	limit := min(connectionSyncGroups, int(budget/(2*connectionRecordEstimate)))
-	rows, err := tx.Query(ctx, connectionGroupsSQL(where, len(args)+1), append(args, limit+1)...)
+	var sql string
+	var args []any
+	if useConnectionRollups(q) {
+		// The range planner can overestimate uncovered node/days by orders
+		// of magnitude and spend longer compiling JIT code than reading them.
+		if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
+			return nil, err
+		}
+		sql, args = connectionMonthlyGroups(ctx, q, wanted, limit+1)
+	} else {
+		var where string
+		where, args = connectionGroupWhere(ctx, q)
+		where, args = connectionWantedGroups(where, args, wanted)
+		sql = connectionGroupsSQL(where, len(args)+1)
+		args = append(args, limit+1)
+	}
+	rows, err := tx.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
