@@ -72,7 +72,13 @@ func (s *Store) SubmitTLSMigration(ctx context.Context, agent core.Agent, engine
 	key, permissions := apiKeyTaskIdentity(ctx)
 	owner := scopeForConfig(ctx).OwnerID
 	var oldID string
-	err = tx.QueryRow(ctx, `SELECT t.id FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.agent_id=$1 AND t.owner_id=$2 AND t.api_key_id=$3 AND ((m.plan_id=$4 AND (t.status IN ('pending','running','succeeded') OR m.result->>'state'='recovery_incomplete')) OR t.id=$5) ORDER BY t.created_at DESC LIMIT 1`, agent.ID, owner, key, planID, taskID).Scan(&oldID)
+	err = tx.QueryRow(ctx, `
+		SELECT t.id FROM tasks t JOIN tls_migrations m ON m.task_id=t.id
+		WHERE t.agent_id=$1 AND t.owner_id=$2 AND t.api_key_id=$3
+		  AND (t.id=$5 OR (m.plan_id=$4 AND (
+		      t.status IN ('pending','running','succeeded') OR m.result->>'state'='recovery_incomplete')))
+		ORDER BY (t.id=$5) DESC, t.created_at DESC LIMIT 1`,
+		agent.ID, owner, key, planID, taskID).Scan(&oldID)
 	if err == nil {
 		op, err = s.readTLSMigration(ctx, tx, agent.ID, oldID)
 		if err == nil {

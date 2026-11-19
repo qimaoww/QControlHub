@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -260,6 +261,13 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 	key.call("POST", execute, body, 202, &op)
 	if op.TaskID != body["task_id"] || op.State != "pending" {
 		t.Fatal("no pending execution")
+	}
+	replay := maps.Clone(body)
+	replay["task_id"] = retry
+	var original store.TLSMigrationOperation
+	key.call("POST", execute, replay, 200, &original)
+	if original.TaskID != retry || original.State != "rolled_back" {
+		t.Fatal("resubmitting a rolled-back task returned a different execution")
 	}
 	key.call("POST", execute, body, 202, nil)
 	submitted, err := db.ClaimTask(ctx, node.ID)
