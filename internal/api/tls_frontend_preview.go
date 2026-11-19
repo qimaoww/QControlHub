@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
@@ -43,7 +44,7 @@ func (s *Server) submitTLSMigration(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if op.State == "pending" || op.State == "running" {
+	if op.State == "pending" || op.State == "running" || op.State == "verifying" || op.State == "rolling_back" {
 		writeJSON(w, http.StatusAccepted, op)
 		return
 	}
@@ -56,4 +57,23 @@ func (s *Server) getTLSMigration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, op)
+}
+
+func (s *Server) getTLSPortOccupancy(w http.ResponseWriter, r *http.Request) {
+	agent, err := s.store.GetAgent(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	port, err := strconv.Atoi(r.PathValue("port"))
+	if err != nil {
+		writeStoreError(w, store.ErrInvalid)
+		return
+	}
+	summary, err := s.store.TLSPortOccupancy(r.Context(), agent, port)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
 }

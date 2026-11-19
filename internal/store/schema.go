@@ -327,7 +327,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 CREATE TABLE IF NOT EXISTS tls_migrations (
  task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
  plan_id text NOT NULL, preview jsonb NOT NULL, execution jsonb NOT NULL,
- result jsonb, UNIQUE(plan_id,task_id)
+ phase text NOT NULL DEFAULT '', result jsonb, UNIQUE(plan_id,task_id)
 );
 CREATE TABLE IF NOT EXISTS ip_quality_reports (
     task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,

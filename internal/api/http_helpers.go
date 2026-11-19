@@ -83,8 +83,12 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.As(err, &portConflict):
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":  chineseErrorMessage(http.StatusConflict, err.Error()),
+		status := http.StatusConflict
+		if errors.Is(err, store.ErrInvalid) {
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, map[string]any{
+			"error":  chineseErrorMessage(status, err.Error()),
 			"reason": portConflict.Reason,
 			"code":   "port_conflict", "port": portConflict.Port, "field": portConflict.Field,
 			"recovery_engine": portConflict.RecoveryEngine, "detail": core.RedactDiagnostic(err.Error()),

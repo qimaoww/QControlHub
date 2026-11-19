@@ -1,5 +1,6 @@
 import { nodeAddressSetting, publicAddressRows } from '../modules/agent-address-model.js';
 import { node, field, muted, stack, pathID } from './ui.js';
+import { date } from './operations.js';
 import { patch } from './live-dom.js';
 
 export function nodeAddress(ctx, agent, { available, form }) {
@@ -42,7 +43,13 @@ export function nodeAddress(ctx, agent, { available, form }) {
     const setting = nodeAddressSetting(agent.labels);
     patch(effective, node('div', { className: 'a-stack', role: 'status' }, muted(`当前模式 · ${setting.mode === 'manual' ? '手动设置' : '自动获取'}`),
       setting.address && stack(muted(`当前默认地址 · ${setting.source}`), node('div', { className: 'a-probe-address-value' }, node('span', { dir: 'ltr' }, setting.address))),
-      ...publicAddressRows(agent.metrics, agent.labels, agent.features).map(row => muted(`${row.label} · ${row.value || '暂无公网地址'} · ${row.source}`))));
+      ...publicAddressRows(agent.metrics, agent.labels, agent.features).map(row => {
+        const parts = [row.label, row.value || '暂无公网地址', row.source];
+        if (row.observedAt) parts.push(`观测于 ${date(row.observedAt)}`);
+        if (row.changedAt) parts.push(`地址变更于 ${date(row.changedAt)}`);
+        return muted(parts.join(' · '));
+      }),
+      agent.metrics?.observed_public_ip && muted(`控制面连接来源 · ${agent.metrics.observed_public_ip} · ${agent.observed_public_ip_at ? date(agent.observed_public_ip_at) : '观测时间未知'}${agent.observed_public_ip_changed_at ? ' · 地址变更于 ' + date(agent.observed_public_ip_changed_at) : ''}`)));
   }
   function update() {
     const latest = nodeAddressSetting(agent.labels);

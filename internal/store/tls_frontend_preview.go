@@ -95,28 +95,7 @@ func (s *Store) previewTLSFrontendTx(ctx context.Context, tx pgx.Tx, agent core.
 	if instance != *input.ExpectedInstanceID {
 		return p, &PortConflictError{Reason: "instance_changed", Field: "expected_instance_id", Cause: ErrConflict}
 	}
-	// Include encrypted saved drafts owned by the caller and every retained
-	// runtime revision on this node. A newer draft cannot hide an old listener.
-	rows, err := tx.Query(ctx, `
-	WITH states AS (
-	SELECT engine,config_id,config_version,owner_id,'' AS instance,uncertain OR config_uncertain OR NOT running AS uncertain
-	FROM agent_engine_ownership WHERE agent_id=$1
-	UNION ALL SELECT engine,config_id,config_version,owner_id,share_id,uncertain OR config_uncertain OR NOT running
-	FROM agent_shared_instance_ownership WHERE agent_id=$1
-	)
-	SELECT c.id,c.owner_id,c.engine,$3,c.version,c.version,c.content,false,false
-	FROM configs c WHERE c.agent_id=$1 AND c.owner_id=$2 AND c.deleted_at IS NULL
-	UNION ALL SELECT st.config_id,st.owner_id,st.engine,st.instance,st.config_version,COALESCE(c.version,0),
-	COALESCE(r.content,CASE WHEN c.version=st.config_version THEN c.content END,''),true,st.uncertain OR c.deleted_at IS NOT NULL
-	FROM states st LEFT JOIN configs c ON c.id=st.config_id LEFT JOIN config_revisions r ON r.config_id=st.config_id AND r.version=st.config_version`, agent.ID, owner, instance)
-	if err != nil {
-		return p, err
-	}
-	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (frontendWorkspace, error) {
-		var w frontendWorkspace
-		err := row.Scan(&w.id, &w.owner, &w.engine, &w.instance, &w.version, &w.savedVersion, &w.content, &w.applied, &w.uncertain)
-		return w, err
-	})
+	items, err := s.frontendWorkspaces(ctx, tx, agent.ID, owner, instance)
 	if err != nil {
 		return p, err
 	}
@@ -283,5 +262,104 @@ func (s *Store) previewTLSFrontendTx(ctx context.Context, tx pgx.Tx, agent core.
 	}
 	sum := sha256.Sum256(data)
 	p.PlanID = hex.EncodeToString(sum[:])
+	return p, nil
+}
+
+func (s *Store) frontendWorkspaces(ctx context.Context, tx pgx.Tx, agentID, owner, instance string) ([]frontendWorkspace, error) {
+	// Include encrypted saved drafts owned by the caller and every retained
+	// runtime revision on this node. A newer draft cannot hide an old listener.
+	rows, err := tx.Query(ctx, `
+	WITH states AS (
+	SELECT engine,config_id,config_version,owner_id,'' AS instance,uncertain OR config_uncertain OR NOT running AS uncertain
+	FROM agent_engine_ownership WHERE agent_id=$1
+	UNION ALL SELECT engine,config_id,config_version,owner_id,share_id,uncertain OR config_uncertain OR NOT running
+	FROM agent_shared_instance_ownership WHERE agent_id=$1
+	)
+	SELECT c.id,c.owner_id,c.engine,$3,c.version,c.version,c.content,false,false
+	FROM configs c WHERE c.agent_id=$1 AND c.owner_id=$2 AND c.deleted_at IS NULL
+	UNION ALL SELECT st.config_id,st.owner_id,st.engine,st.instance,st.config_version,COALESCE(c.version,0),
+	COALESCE(r.content,CASE WHEN c.version=st.config_version THEN c.content END,''),true,st.uncertain OR c.deleted_at IS NOT NULL
+	FROM states st LEFT JOIN configs c ON c.id=st.config_id LEFT JOIN config_revisions r ON r.config_id=st.config_id AND r.version=st.config_version`, agentID, owner, instance)
+	if err != nil {
+		return nil, err
+	}
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (frontendWorkspace, error) {
+		var w frontendWorkspace
+		err := row.Scan(&w.id, &w.owner, &w.engine, &w.instance, &w.version, &w.savedVersion, &w.content, &w.applied, &w.uncertain)
+		return w, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// Port state describes the last attributable observation, without exposing
+// another user's configuration, port list, hostnames, or instance identifiers.
+type TLSPortSummary struct {
+	AgentID       string `json:"agent_id"`
+	PublicPort    int    `json:"public_port"`
+	VisibleRoutes int    `json:"visible_routes"`
+	State         string `json:"state"`
+}
+
+func (s *Store) TLSPortOccupancy(ctx context.Context, agent core.Agent, port int) (TLSPortSummary, error) {
+	p := TLSPortSummary{AgentID: agent.ID, PublicPort: port, State: "unconfirmed"}
+	if port < 1 || port > 65535 {
+		return p, ErrInvalid
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return p, err
+	}
+	defer tx.Rollback(ctx)
+	owner := scopeForConfig(ctx).OwnerID
+	items, err := s.frontendWorkspaces(ctx, tx, agent.ID, owner, "")
+	if err != nil {
+		return p, err
+	}
+	incomplete := false
+	for _, w := range items {
+		if !w.applied {
+			continue
+		}
+		if w.uncertain || w.content == "" {
+			incomplete = true
+			continue
+		}
+		content, err := s.decryptContent(w.content)
+		if err != nil {
+			return p, err
+		}
+		routes, err := s.managedTLSFrontendsTx(ctx, tx, w.id, w.version, w.engine, content)
+		if err != nil {
+			incomplete = true
+			continue
+		}
+		for _, f := range routes {
+			if f.PublicPort != port {
+				continue
+			}
+			if w.owner != owner || !slices.Contains(agent.Capabilities, w.engine) || (w.instance != "" && !slices.Contains(agent.SharedEngines, w.engine)) {
+				incomplete = true
+				continue
+			}
+			p.VisibleRoutes++
+		}
+	}
+	seen, err := observedHostPortsTx(ctx, tx, agent.ID, "")
+	if err != nil {
+		return p, err
+	}
+	switch {
+	case incomplete:
+		p.State = "partial"
+	case p.VisibleRoutes > 0:
+		p.State = "visible_in_use"
+	case agent.Status == "online" && seen != nil && !seen[port]:
+		p.State = "observed_free"
+	case seen[port]:
+		p.State = "partial"
+	}
 	return p, nil
 }

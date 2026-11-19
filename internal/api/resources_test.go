@@ -84,10 +84,10 @@ func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
 	if len(candidates) != 3 {
 		t.Fatalf("probed candidates = %+v", candidates)
 	}
-	if candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 本地直连探测 · IPv4" {
+	if candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 探测（来源未知） · IPv4" {
 		t.Fatalf("probed IPv4 candidate = %+v", candidates[0])
 	}
-	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "Agent 本地直连探测 · IPv6" {
+	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "Agent 探测（来源未知） · IPv6" {
 		t.Fatalf("probed IPv6 candidate = %+v", candidates[1])
 	}
 	if candidates[2].address != "93.184.216.34" || candidates[2].source != "已验证连接来源 · IPv4" {
@@ -180,7 +180,7 @@ func TestClientAddressCandidatesKeepManualConnectionAheadOfAutomaticFamilies(t *
 	if candidates[1].address != "93.184.216.34" || candidates[1].source != "节点公网 IP" {
 		t.Fatalf("manual public IP priority = %+v", candidates[1])
 	}
-	if candidates[2].address != "198.35.26.96" || candidates[2].source != "Agent 本地直连探测 · IPv4" {
+	if candidates[2].address != "198.35.26.96" || candidates[2].source != "Agent 探测（来源未知） · IPv4" {
 		t.Fatalf("probe fallback priority = %+v", candidates[2])
 	}
 	if candidates[3].address != "2001:4860:4860::8888" || candidates[3].source != "Agent 默认路由接口 eth0" {
@@ -234,10 +234,10 @@ func TestClientAddressCandidatesPriorityAndDedup(t *testing.T) {
 	if len(candidates) != 4 {
 		t.Fatalf("priority candidates = %+v", candidates)
 	}
-	if candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 本地直连探测 · IPv4" {
+	if candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 探测（来源未知） · IPv4" {
 		t.Fatalf("probe IPv4 candidate = %+v", candidates[0])
 	}
-	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "Agent 本地直连探测 · IPv6" {
+	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "Agent 探测（来源未知） · IPv6" {
 		t.Fatalf("probe IPv6 candidate = %+v", candidates[1])
 	}
 	if candidates[2].address != "8.8.8.8" || candidates[2].source != "Agent 默认路由接口 eth0" {

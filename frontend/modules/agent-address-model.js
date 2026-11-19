@@ -332,8 +332,9 @@ export function publicAddressRows(metrics = {}, labels = {}, features = []) {
     ) {
       const source = family.probeSource === "control-plane-config"
         ? "控制面配置的 Agent 直连探测"
-        : "Agent 本地直连探测";
-      return { ...family, value: probed.slice(5), source, ok: true };
+        : family.probeSource === "agent-config" ? "Agent 本地直连探测" : "Agent 探测（来源未知）";
+      return { ...family, value: probed.slice(5), source, ok: true,
+        observedAt: metrics[`public_ip${family.cls}_observed_at`], changedAt: metrics[`public_ip${family.cls}_changed_at`] };
     }
     if (family.interfaceSource) {
       return {

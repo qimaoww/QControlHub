@@ -549,6 +549,10 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCoreLogsAck, BatchID: message.CoreLogs.ID}); err != nil {
 					return
 				}
+			case "tls-progress":
+				if message.TLSProgress == nil || message.TLSProgress.TaskID != inFlightTask || s.store.RecordTLSMigrationPhase(ctx, id, *message.TLSProgress) != nil {
+					return
+				}
 			case core.WireResult:
 				if message.Result == nil || message.Result.TaskID == "" || message.Result.TaskID != inFlightTask {
 					_ = connection.Close(websocket.StatusPolicyViolation, "unexpected task result")

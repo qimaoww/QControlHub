@@ -66,6 +66,7 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
+	TLSProgress               *TLSMigrationProgress      `json:"tls_progress,omitempty"`
 	Diagnostics               []DiagnosticCommand        `json:"diagnostics,omitempty"`
 	DiagnosticResult          *DiagnosticResult          `json:"diagnostic_result,omitempty"`
 	ManagedCertificateSources []ManagedCertificateSource `json:"managed_certificate_sources,omitempty"`

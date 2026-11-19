@@ -109,6 +109,7 @@ var apiKeyPolicies = map[string]apiKeyPolicy{
 	"POST /api/v1/agents/{id}/configs/{engine}/plans":                         {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite}},
 	"POST /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/migrate": {Write: true, Permissions: []core.Permission{core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},
 	"GET /api/v1/agents/{id}/tls-migrations/{task}":                                        {Write: false, Permissions: []core.Permission{core.PermissionAgentConfigRead, core.PermissionTasksRead}},
+	"GET /api/v1/agents/{id}/tls-ports/{port}":                                             {Permissions: []core.Permission{core.PermissionAgentConfigRead}},
 	"POST /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/preview": {Permissions: []core.Permission{core.PermissionAgentConfigRead}},
 	"POST /api/v1/agents/{id}/configs/{engine}/server-inbounds":                            {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},
 	"POST /api/v1/agents/{id}/configs/{engine}/source":                                     {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},

@@ -189,6 +189,9 @@ func (m *tlsFrontendManager) restoreTLSMigration(ctx context.Context, j *tlsMigr
 	for _, s := range j.Snapshots {
 		snapshots = append(snapshots, tlsRuntimeSnapshot{s.Mode, s.Service, s.Content, s.Status, s.Enabled, s.Exists})
 	}
+	if err := m.migrationFile(j.Operation.ID+".phase", "rolling_back"); err != nil {
+		return err
+	}
 	j.Result.Step = "restore"
 	j.Result.State = "recovery_incomplete"
 	current, err := m.load()
@@ -213,6 +216,9 @@ func (m *tlsFrontendManager) restoreTLSMigration(ctx context.Context, j *tlsMigr
 	} else if err == nil {
 		err = errors.New("original path verification incomplete")
 	}
+	if err != nil {
+		j.Result.Code = "rollback_failed"
+	}
 	if e := m.migrationFile(j.Operation.ID+".result", j.Result); e != nil {
 		return e
 	}
@@ -230,7 +236,7 @@ func (m *tlsFrontendManager) migrateTLS(ctx context.Context, op *core.TLSMigrati
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	j := tlsMigrationJournal{Operation: *op, Result: core.TLSMigrationResult{State: "failed", Step: "preflight", Paths: make([]core.TLSRouteVerification, len(op.Routes))}}
+	j := tlsMigrationJournal{Operation: *op, Result: core.TLSMigrationResult{State: "failed", Step: "preflight", Code: "port_group_incomplete", Paths: make([]core.TLSRouteVerification, len(op.Routes))}}
 	for i := range j.Result.Paths {
 		j.Result.Paths[i] = core.TLSRouteVerification{Candidate: "unknown", Recovery: "unknown"}
 	}
@@ -248,6 +254,7 @@ func (m *tlsFrontendManager) migrateTLS(ctx context.Context, op *core.TLSMigrati
 		return fail()
 	}
 	if !m.verifyMigration(ctx, &j, j.Previous, true) {
+		j.Result.Code = "business_validation_failed"
 		return fail()
 	}
 	for i := range j.Result.Paths {
@@ -267,7 +274,9 @@ func (m *tlsFrontendManager) migrateTLS(ctx context.Context, op *core.TLSMigrati
 	err = m.sync(ctx, j.Next)
 	if err == nil {
 		j.Result.Step = "verify"
-		if !m.verifyMigration(ctx, &j, j.Next, false) {
+		err = m.migrationFile(op.ID+".phase", "verifying")
+		if err == nil && !m.verifyMigration(ctx, &j, j.Next, false) {
+			j.Result.Code = "business_validation_failed"
 			err = errors.New("path verification failed")
 		}
 	}
@@ -279,6 +288,7 @@ func (m *tlsFrontendManager) migrateTLS(ctx context.Context, op *core.TLSMigrati
 		defer cancel()
 		return m.restoreTLSMigration(recovery, &j)
 	}
+	j.Result.Code = ""
 	j.Result.State = "succeeded"
 	j.Result.Step = "complete"
 	if err = m.migrationFile(op.ID+".result", j.Result); err != nil {

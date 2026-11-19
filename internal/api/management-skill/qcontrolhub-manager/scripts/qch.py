@@ -199,6 +199,13 @@ def project(path, value, contract):
         return preview(value)
     if (MIGRATE_PATH.fullmatch(path) or (TASK_PATH.fullmatch(path) and "/tls-migrations/" in path)) and isinstance(value, dict):
         return migration(value)
+    if re.fullmatch(r"/agents/agt_[0-9a-f]{16}/tls-ports/[0-9]+", path) and isinstance(value, dict):
+        result = resource(value)
+        if type(value.get("visible_routes")) is int:
+            result["visible_routes"] = value["visible_routes"]
+        if allowed(value.get("state"), {"partial", "observed_free", "unconfirmed", "visible_in_use"}):
+            result["state"] = value["state"]
+        return result
     if path in ("/agents", "/tasks", "/deployments", "/configs") and isinstance(value, list):
         return [resource(v) for v in value]
     if isinstance(value, dict):

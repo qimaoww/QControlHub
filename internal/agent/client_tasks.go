@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,7 +21,17 @@ func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<
 }
 
 func (c *Client) executeTaskForSession(executionContext, deliveryContext context.Context, task core.Task, outgoing chan<- core.WireMessage) {
+	var finishProgress func()
+	if task.Action == core.ActionMigrateTLS && migrationTaskID.MatchString(task.ID) {
+		progress, cancel := context.WithCancel(deliveryContext)
+		done := make(chan struct{})
+		go func() { defer close(done); reportTLSMigrationPhase(progress, task, outgoing) }()
+		finishProgress = func() { cancel(); <-done }
+	}
 	result := c.resultForTask(executionContext, task)
+	if finishProgress != nil {
+		finishProgress()
+	}
 	uploadContext, uploadCancel := context.WithTimeout(deliveryContext, 60*time.Second)
 	if err := c.uploadDiagnostic(uploadContext, task.ID, result); err != nil {
 		slog.Warn("task diagnostic delivery is pending; result remains cached", "task_id", task.ID, "error", core.RedactDiagnostic(err.Error()))
@@ -493,4 +506,29 @@ func (c *Client) validTask(task core.Task) bool {
 	}
 	return task.AgentID == c.creds.AgentID && validTaskID(task.ID) && len(task.LeaseID) >= 32 &&
 		task.Status == core.TaskRunning && task.Action.Valid() && engineValid
+}
+
+func reportTLSMigrationPhase(ctx context.Context, task core.Task, out chan<- core.WireMessage) {
+	ticks := time.NewTicker(150 * time.Millisecond)
+	defer ticks.Stop()
+	last := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks.C:
+		}
+		data, err := os.ReadFile(filepath.Join(tlsFrontendRoot, task.ID+".phase"))
+		var phase string
+		if err != nil || json.Unmarshal(data, &phase) != nil || phase == last || (phase != "verifying" && phase != "rolling_back") {
+			continue
+		}
+		message := core.WireMessage{Type: "tls-progress", TLSProgress: &core.TLSMigrationProgress{TaskID: task.ID, LeaseID: task.LeaseID, Phase: phase}}
+		select {
+		case <-ctx.Done():
+			return
+		case out <- message:
+			last = phase
+		}
+	}
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -26,48 +27,7 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 	}
 	_, ctx, admin, _, other := newConfigScopeAPIFixture(t)
 	key, created := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionPreferencesRead, core.PermissionPreferencesWrite})
-	data := key.call("GET", "/management-skill", nil, 200, nil)
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	installed := t.TempDir()
-	for _, file := range archive.File {
-		if !filepath.IsLocal(file.Name) {
-			t.Fatal("unsafe archive path")
-		}
-		target := filepath.Join(installed, file.Name)
-		if err = os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			t.Fatal(err)
-		}
-		r, err := file.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := io.ReadAll(r)
-		r.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = os.WriteFile(target, body, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	root := filepath.Join(installed, "qcontrolhub-manager")
-	if os.Getenv("QCH_TEST_SKILL_DISCOVERY") == "1" {
-		cmd := exec.CommandContext(ctx, python, "../../scripts/check-management-skill-discovery.py", root)
-		// Discovery receives no panel credential.
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatal("client discovery failed", string(out))
-		}
-		t.Log(string(out))
-	}
-	manifest, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
-	if err != nil || !bytes.HasPrefix(manifest, []byte("---\nname: qcontrolhub-manager\ndescription:")) {
-		t.Fatal("distributed Skill manifest is invalid")
-	}
+	root := installReleaseSkill(t, ctx, key)
 	server := httptest.NewServer(admin.handler)
 	defer server.Close()
 	run := func(base, method, path string, body any, wantSuccess bool) []byte {
@@ -142,4 +102,51 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 	if hits.Load() != 0 {
 		t.Fatal("credential crossed configured origin")
 	}
+}
+
+func installReleaseSkill(t *testing.T, ctx context.Context, key configScopeAPIClient) string {
+	t.Helper()
+	data := key.call("GET", "/management-skill", nil, 200, nil)
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := t.TempDir()
+	for _, file := range archive.File {
+		if !filepath.IsLocal(file.Name) {
+			t.Fatal("unsafe archive path")
+		}
+		target := filepath.Join(installed, file.Name)
+		if err = os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			t.Fatal(err)
+		}
+		r, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(r)
+		r.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(target, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(installed, "qcontrolhub-manager")
+	if os.Getenv("QCH_TEST_SKILL_DISCOVERY") == "1" {
+		cmd := exec.CommandContext(ctx, "python3", "../../scripts/check-management-skill-discovery.py", root)
+		// Discovery receives no panel credential.
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatal("client discovery failed", string(out))
+		}
+		t.Log(string(out))
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
+	if err != nil || !bytes.HasPrefix(manifest, []byte("---\nname: qcontrolhub-manager\ndescription:")) {
+		t.Fatal("distributed Skill manifest is invalid")
+	}
+	return root
 }

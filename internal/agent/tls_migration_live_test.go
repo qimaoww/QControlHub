@@ -2,9 +2,15 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gorilla/websocket"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +53,7 @@ func TestTLSMigrationLiveGroup(t *testing.T) {
 	keyData, _ := os.ReadFile(key)
 	op := core.TLSMigration{ID: "tsk_0000000000000001", Mode: "caddy", Port: 443}
 	before := tlsDeployments{}
+	var originalWS serverconfig.Input
 	for i, engine := range []core.Engine{core.EngineXray, core.EngineMihomo, core.EngineSingBox} {
 		spec := DefaultSpecs()[engine]
 		protocol := serverconfig.ProtocolXHTTPTLS
@@ -79,6 +86,9 @@ func TestTLSMigrationLiveGroup(t *testing.T) {
 			if err = os.Chown(path, 0, int(id.gid)); err != nil {
 				t.Fatal(err)
 			}
+		}
+		if engine == core.EngineSingBox {
+			originalWS = p
 		}
 		content, err := serverconfig.Generate(engine, p)
 		if err != nil {
@@ -165,21 +175,47 @@ func TestTLSMigrationLiveGroup(t *testing.T) {
 	if err = os.Rename(binary, binary+".real"); err != nil {
 		t.Fatal(err)
 	}
-	wrapper := "#!/bin/sh\nif [ \"$1\" = run ]; then case $(cat /run/qch-fixture-fault 2>/dev/null) in\nroute) sed 's/127.0.0.1:32002/127.0.0.1:32001/g' \"$3\" > \"$HOME/fixture.json\"; set -- run --config \"$HOME/fixture.json\";;\nport) exec /usr/bin/python3 -c 'import socket,time;s=socket.socket();s.bind((\"127.0.0.1\",443));s.listen();time.sleep(20)' ;;\nesac; fi\nexec " + binary + ".real \"$@\"\n"
+	wrapper := "#!/bin/sh\nif [ \"$1\" = reload ] && [ -f /run/qch-fixture-fail-reload ]; then exit 1; fi\nif [ \"$1\" = run ]; then case $(cat /run/qch-fixture-fault 2>/dev/null) in\nroute) sed 's/127.0.0.1:32002/127.0.0.1:32001/g' \"$3\" > \"$HOME/fixture.json\"; set -- run --config \"$HOME/fixture.json\";;\nport) exec /usr/bin/python3 -c 'import socket,time;s=socket.socket();s.bind((\"127.0.0.1\",443));s.listen();time.sleep(20)' ;;\nesac; fi\nexec " + binary + ".real \"$@\"\n"
 	if err = os.WriteFile(binary, []byte(wrapper), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for i, fault := range []string{"route", "port", "none"} {
+	for i, fault := range []string{"route", "port", "reload", "none"} {
 		if err = os.WriteFile("/run/qch-fixture-fault", []byte(fault), 0644); err != nil {
 			t.Fatal(err)
 		}
 		op.ID = fmt.Sprintf("tsk_%016x", i+1)
+		if fault == "reload" {
+			spec := DefaultSpecs()[core.EngineSingBox]
+			dep := before[spec.Service]
+			second := dep.Frontends[0]
+			second.Mode = "caddy"
+			second.PublicPort = 34443
+			second.Tag = "isolated-reload"
+			dep.Frontends = append(dep.Frontends, second)
+			before[spec.Service] = dep
+			if err = m.sync(ctx, before); err != nil {
+				t.Fatal(err)
+			}
+			if err = m.migrationFile("deployments.json", before); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile("/run/qch-fixture-fail-reload", nil, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if fault == "none" {
+			watch := watchMigrationConnections(t, certData, originalWS)
 			run("succeeded")
+			watch()
 			run("succeeded")
 			break
 		}
 		result := run("rolled_back")
+		if fault == "reload" {
+			if err = os.Remove("/run/qch-fixture-fail-reload"); err != nil {
+				t.Fatal(err)
+			}
+		}
 		for i, path := range result.Paths {
 			if path.Recovery != "succeeded" {
 				t.Fatal("original client failed after rollback")
@@ -194,10 +230,109 @@ func TestTLSMigrationLiveGroup(t *testing.T) {
 		}
 		for _, d := range loaded {
 			for _, f := range d.Frontends {
-				if !strings.EqualFold(f.Mode, "nginx") {
+				if f.PublicPort == 443 && !strings.EqualFold(f.Mode, "nginx") {
 					t.Fatal("original frontend lost")
 				}
 			}
 		}
+	}
+}
+
+// Measure an authenticated WebSocket stream established before the handoff
+// and fresh upgrade attempts during it, using the original certificate.
+func watchMigrationConnections(t *testing.T, cert []byte, p serverconfig.Input) func() {
+	t.Helper()
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(cert) {
+		t.Fatal("bad fixture certificate")
+	}
+	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{ServerName: p.TLSServerName, RootCAs: roots, MinVersion: tls.VersionTLS12}, HandshakeTimeout: 300 * time.Millisecond}
+	dest := "wss://127.0.0.1:443" + p.TransportPath
+	echo, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		c, err := echo.Accept()
+		if err == nil {
+			defer c.Close()
+			_, _ = io.Copy(c, c)
+		}
+	}()
+	conn, _, err := dialer.Dial(dest, nil)
+	if err != nil {
+		echo.Close()
+		t.Fatal("original WebSocket unavailable")
+	}
+	cred, err := hex.DecodeString(strings.ReplaceAll(p.Credential, "-", ""))
+	if err != nil || len(cred) != 16 {
+		t.Fatal("invalid fixture credential")
+	}
+	port := echo.Addr().(*net.TCPAddr).Port
+	first := append([]byte{0}, cred...)
+	first = append(first, 0, 1, byte(port>>8), byte(port), 1, 127, 0, 0, 1)
+	first = append(first, 42)
+	if err = conn.WriteMessage(websocket.BinaryMessage, first); err != nil {
+		t.Fatal(err)
+	}
+	// VLESS version/addon response and the first echo can arrive separately.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var received []byte
+	for len(received) < 3 {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal("old connection data failed")
+		}
+		received = append(received, msg...)
+	}
+	if received[2] != 42 {
+		t.Fatal("unexpected echo")
+	}
+	stop := make(chan struct{})
+	type stats struct {
+		upgrades, failures int
+		longest            time.Duration
+	}
+	done := make(chan stats, 1)
+	go func() {
+		var counts stats
+		var firstFailure time.Time
+		for {
+			c, _, e := dialer.Dial(dest, nil)
+			now := time.Now()
+			if e == nil {
+				c.Close()
+				counts.upgrades++
+				if !firstFailure.IsZero() {
+					counts.longest = max(counts.longest, now.Sub(firstFailure))
+					firstFailure = time.Time{}
+				}
+			} else {
+				counts.failures++
+				if firstFailure.IsZero() {
+					firstFailure = now
+				}
+			}
+			select {
+			case <-stop:
+				done <- counts
+				return
+			case <-time.After(15 * time.Millisecond):
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		counts := <-done
+		defer conn.Close()
+		defer echo.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+		e := conn.WriteMessage(websocket.BinaryMessage, []byte{43})
+		continuous := false
+		if e == nil {
+			_, msg, e := conn.ReadMessage()
+			continuous = e == nil && len(msg) == 1 && msg[0] == 43
+		}
+		t.Logf("existing authenticated WS survived=%t; fresh upgrades=%d failed=%d longest sampled reconnect gap=%s", continuous, counts.upgrades, counts.failures, counts.longest.Round(time.Millisecond))
 	}
 }

@@ -198,12 +198,12 @@ func TestManagedPublicIPProbeTrustUsesCurrentSessionAndFamilyWithPostgreSQL(t *t
 	}
 	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "", "", "", "")
 
-	// Missing source remains the v1 local Agent endpoint compatibility path.
+	// A v1 probe retains its address without claiming knowledge of its source.
 	local := core.HostMetrics{PublicIPv4: "198.35.26.96"}
 	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, local); err != nil {
 		t.Fatalf("legacy local probe update: %v", err)
 	}
-	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "198.35.26.96", core.PublicIPProbeSourceAgent, "", "")
+	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "198.35.26.96", "", "", "")
 }
 
 func assertRawPublicIPProbeRow(t *testing.T, ctx context.Context, dataStore *Store, agentID, ipv4, ipv4Source, ipv6, ipv6Source string) {

@@ -51,11 +51,16 @@ func (s *Store) SubmitTLSMigration(ctx context.Context, agent core.Agent, engine
 	key, permissions := apiKeyTaskIdentity(ctx)
 	owner := scopeForConfig(ctx).OwnerID
 	var oldID string
-	err = tx.QueryRow(ctx, `SELECT t.id FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.agent_id=$1 AND t.owner_id=$2 AND t.api_key_id=$3 AND (m.plan_id=$4 OR t.id=$5) ORDER BY t.created_at DESC LIMIT 1`, agent.ID, owner, key, planID, taskID).Scan(&oldID)
+	err = tx.QueryRow(ctx, `SELECT t.id FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.agent_id=$1 AND t.owner_id=$2 AND t.api_key_id=$3 AND ((m.plan_id=$4 AND (t.status IN ('pending','running','succeeded') OR m.result->>'state'='recovery_incomplete')) OR t.id=$5) ORDER BY t.created_at DESC LIMIT 1`, agent.ID, owner, key, planID, taskID).Scan(&oldID)
 	if err == nil {
 		op, err = s.readTLSMigration(ctx, tx, agent.ID, oldID)
-		if err == nil && op.Plan.PlanID != planID {
-			return op, ErrConflict
+		if err == nil {
+			selected := slices.ContainsFunc(op.Plan.Members, func(m TLSFrontendMember) bool {
+				return input.ExpectedInstanceID != nil && m.InstanceID == *input.ExpectedInstanceID && m.Engine == engine && m.Tag == tag && m.Version == input.ExpectedVersion
+			})
+			if op.Plan.PlanID != planID || input.TargetMode != op.Plan.TargetMode || !selected {
+				return TLSMigrationOperation{}, ErrConflict
+			}
 		}
 		return op, err
 	}
@@ -102,7 +107,7 @@ func (s *Store) SubmitTLSMigration(ctx context.Context, agent core.Agent, engine
 
 func (s *Store) readTLSMigration(ctx context.Context, db storeExecutor, node, id string) (TLSMigrationOperation, error) {
 	var op TLSMigrationOperation
-	err := db.QueryRow(ctx, `SELECT t.id,t.status,m.preview,m.result FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.id=$1 AND t.agent_id=$2 AND t.owner_id=$3`, id, node, scopeForConfig(ctx).OwnerID).Scan(&op.TaskID, &op.State, &op.Plan, &op.Result)
+	err := db.QueryRow(ctx, `SELECT t.id,CASE WHEN t.status='running' AND m.phase<>'' THEN m.phase ELSE t.status END,m.preview,m.result FROM tasks t JOIN tls_migrations m ON m.task_id=t.id WHERE t.id=$1 AND t.agent_id=$2 AND t.owner_id=$3`, id, node, scopeForConfig(ctx).OwnerID).Scan(&op.TaskID, &op.State, &op.Plan, &op.Result)
 	if err != nil {
 		return op, mapError(err)
 	}
@@ -169,13 +174,17 @@ func (s *Store) finishTLSMigrationTx(ctx context.Context, tx pgx.Tx, node, id st
 	}
 	valid := result != nil && len(result.Paths) == len(plan.Members) && slices.Contains([]string{"succeeded", "failed", "rolled_back", "recovery_incomplete"}, result.State)
 	if valid {
-		valid = slices.Contains([]string{"preflight", "handoff", "verify", "restore", "complete"}, result.Step)
+		valid = slices.Contains([]string{"", "rollback_failed", "port_group_incomplete", "dependency_missing", "business_validation_failed"}, result.Code)
+		valid = valid && slices.Contains([]string{"preflight", "handoff", "verify", "restore", "complete"}, result.Step)
 		for _, r := range result.Paths {
 			valid = valid && slices.Contains([]string{"unknown", "succeeded", "failed"}, r.Candidate) && slices.Contains([]string{"unknown", "succeeded", "failed"}, r.Recovery) && (result.State != "succeeded" || r.Candidate == "succeeded") && (result.State != "rolled_back" || r.Recovery == "succeeded")
 		}
 	}
 	if !valid || (result.State == "succeeded") != success {
-		result = &core.TLSMigrationResult{State: "recovery_incomplete", Step: "verify"}
+		result = &core.TLSMigrationResult{State: "recovery_incomplete", Step: "verify", Code: "rollback_failed", Paths: make([]core.TLSRouteVerification, len(plan.Members))}
+		for i := range result.Paths {
+			result.Paths[i] = core.TLSRouteVerification{Candidate: "unknown", Recovery: "unknown"}
+		}
 		success = false
 	}
 	if success {
@@ -303,4 +312,12 @@ func (s *Store) publishTLSMigration(ctx context.Context, tx pgx.Tx, plan TLSFron
 		}
 	}
 	return nil
+}
+
+func (s *Store) RecordTLSMigrationPhase(ctx context.Context, node string, p core.TLSMigrationProgress) error {
+	if p.Phase != "verifying" && p.Phase != "rolling_back" {
+		return ErrInvalid
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE tls_migrations m SET phase=$4 FROM tasks t WHERE m.task_id=t.id AND t.id=$1 AND t.agent_id=$2 AND t.lease_id=$3 AND t.status='running'`, p.TaskID, node, p.LeaseID, p.Phase)
+	return err
 }

@@ -16,7 +16,7 @@ const ipRows = publicAddressRows({
 });
 assert.equal(ipRows.length, 2);
 assert.equal(ipRows[0].value, "198.35.26.96");
-assert.equal(ipRows[0].source, "Agent 本地直连探测");
+assert.equal(ipRows[0].source, "Agent 探测（来源未知）");
 assert.equal(ipRows[0].ok, true);
 assert.equal(ipRows[1].value, "2001:4860:4860::8888");
 
@@ -50,7 +50,7 @@ const manualRows = publicAddressRows(
 assert.equal(manualRows[0].value, "198.35.26.10");
 assert.equal(manualRows[0].source, "手动设置");
 assert.equal(manualRows[1].value, "2001:4860:4860::8888");
-assert.equal(manualRows[1].source, "Agent 本地直连探测");
+assert.equal(manualRows[1].source, "Agent 探测（来源未知）");
 
 // A hostname remains the highest-priority client connection setting, while a
 // supported public_ip literal may still fill its own family without DNS
@@ -98,7 +98,7 @@ const invalidManualRows = publicAddressRows(
   ["public-ip-probe-v1"],
 );
 assert.equal(invalidManualRows[0].value, "198.35.26.96");
-assert.equal(invalidManualRows[0].source, "Agent 本地直连探测");
+assert.equal(invalidManualRows[0].source, "Agent 探测（来源未知）");
 assert.equal(invalidManualRows[1].value, "");
 assert.equal(invalidManualRows[1].ok, false);
 
@@ -172,9 +172,9 @@ const normalizedProbeRows = publicAddressRows(
   ["public-ip-probe-v1"],
 );
 assert.equal(normalizedProbeRows[0].value, "1.1.1.1");
-assert.equal(normalizedProbeRows[0].source, "Agent 本地直连探测");
+assert.equal(normalizedProbeRows[0].source, "Agent 探测（来源未知）");
 assert.equal(normalizedProbeRows[1].value, "2001:4860::192.0.2.1");
-assert.equal(normalizedProbeRows[1].source, "Agent 本地直连探测");
+assert.equal(normalizedProbeRows[1].source, "Agent 探测（来源未知）");
 
 const normalizedObservedRows = publicAddressRows({
   observed_public_ip: "::ffff:0101:0101",

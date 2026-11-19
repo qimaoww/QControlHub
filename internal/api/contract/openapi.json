@@ -4481,6 +4481,9 @@
       "core_TLSMigrationResult": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "type": "string"
+          },
           "paths": {
             "items": {
               "$ref": "#/components/schemas/core_TLSRouteVerification"
@@ -6508,6 +6511,24 @@
           },
           "task_id": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "store_TLSPortSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "public_port": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "visible_routes": {
+            "type": "integer"
           }
         },
         "type": "object"
@@ -10595,7 +10616,14 @@
                     "description": "仅 modify 允许。原生片段替换，要求 original_tag，不与预设 input 同时提交。"
                   },
                   "input": {
-                    "$ref": "#/components/schemas/serverconfig_Input",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/serverconfig_Input"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
                     "description": "add 或结构化 modify 使用完整预设输入；凭据必须通过协议校验。"
                   },
                   "install_if_missing": {
@@ -11046,6 +11074,7 @@
                     "target_mode": "example"
                   },
                   "result": {
+                    "code": "example",
                     "paths": [
                       null
                     ],
@@ -11100,6 +11129,7 @@
                     "target_mode": "example"
                   },
                   "result": {
+                    "code": "example",
                     "paths": [
                       null
                     ],
@@ -14436,6 +14466,7 @@
                     "target_mode": "example"
                   },
                   "result": {
+                    "code": "example",
                     "paths": [
                       null
                     ],
@@ -14502,6 +14533,102 @@
           "permissions": [
             "agent-config.read",
             "tasks.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/tls-ports/{port}": {
+      "get": {
+        "description": "visible_routes 仅统计当前授权实例。partial 表示存在不可见占用或检查不完整。observed_free 要求 15 秒内完成且未被后续变更失效的节点监听观测。unconfirmed 表示缺少证据。",
+        "operationId": "getTLSPortOccupancy_api_v1_agents_{id}_tls-ports_{port}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "agent_id": "example",
+                  "public_port": 1,
+                  "state": "example",
+                  "visible_routes": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSPortSummary"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询节点的可见 TLS 路径数与端口占用证据",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"

@@ -137,7 +137,7 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 	if dispatched.Type != core.WireTask || dispatched.Task == nil || dispatched.Task.ID != task.ID {
 		t.Fatalf("legacy next message = %+v; want task %s and no managed config", dispatched, task.ID)
 	}
-	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "198.35.26.96", core.PublicIPProbeSourceAgent, "", "", []string{})
+	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "198.35.26.96", "", "", "", []string{})
 }
 
 func TestWSSManagedAgentPolicyDeliversValidPolicyWithPostgreSQL(t *testing.T) {

@@ -28,7 +28,13 @@ type TLSRouteVerification struct {
 	Candidate string `json:"candidate"`
 	Recovery  string `json:"recovery"`
 }
+type TLSMigrationProgress struct {
+	TaskID  string `json:"task_id"`
+	LeaseID string `json:"lease_id"`
+	Phase   string `json:"phase"`
+}
 type TLSMigrationResult struct {
+	Code  string                 `json:"code,omitempty"`
 	State string                 `json:"state"`
 	Step  string                 `json:"step"`
 	Paths []TLSRouteVerification `json:"paths"`

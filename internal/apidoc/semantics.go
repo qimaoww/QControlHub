@@ -209,6 +209,9 @@ func (g *generator) annotate(op object, handler, method, path string) {
 	case "submitTLSMigration":
 		op["summary"] = "迁移已预览的 TLS 公网端口组"
 		op["description"] = "提供预览的 plan_id、自选 tsk_ 加 16 位十六进制关联标识，及相同的实例、版本和模式。202 表示已受理。端口交接可能中断长连接和新连接，按节点 tls-migrations/{task} 查询各路径的真实数据往返和恢复结果。仅整组通过才发布新版本。无变化返回 unchanged。"
+	case "getTLSPortOccupancy":
+		op["summary"] = "查询节点的可见 TLS 路径数与端口占用证据"
+		op["description"] = "visible_routes 仅统计当前授权实例。partial 表示存在不可见占用或检查不完整。observed_free 要求 15 秒内完成且未被后续变更失效的节点监听观测。unconfirmed 表示缺少证据。"
 	case "getTLSMigration":
 		op["summary"] = "查询 TLS 迁移与逐路径恢复结果"
 		op["description"] = "result.paths 与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。"
