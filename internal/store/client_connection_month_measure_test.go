@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func TestClientConnectionMonthChurnMeasurement(t *testing.T) {
@@ -15,7 +17,7 @@ func TestClientConnectionMonthChurnMeasurement(t *testing.T) {
 	agent := sharedTestAgent(t, db, ctx)
 	ctx, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 	defer stop()
-	end := time.Now().UTC().Truncate(time.Minute).Add(time.Hour)
+	end := time.Now().UTC().Truncate(24 * time.Hour).Add(24*time.Hour - time.Minute)
 	q := ClientConnectionQuery{Since: end.AddDate(0, 0, -30), Until: end, GroupByIP: true, SkipTimeline: true, Limit: 100, Bucket: "day"}
 	for batch := 0; batch < 4; batch++ {
 		if _, err := db.pool.Exec(ctx, `INSERT INTO client_connections
@@ -111,5 +113,67 @@ func TestClientConnectionMonthChurnMeasurement(t *testing.T) {
 			}
 			t.Logf("monthly cold read, prepared=%t simultaneous readers=%d: %v", prepared, readers, time.Since(started))
 		}
+	}
+	measureConnectionReadStates(t, db, ctx, q, agent.ID)
+}
+
+func measureConnectionReadStates(t *testing.T, db *Store, ctx context.Context, q ClientConnectionQuery, agent string) {
+	t.Helper()
+	type scenario struct {
+		name  string
+		query ClientConnectionQuery
+		sync  bool
+	}
+	scenarios := []scenario{}
+	add := func(name string, sync bool, edit func(*ClientConnectionQuery)) {
+		sample := q
+		edit(&sample)
+		scenarios = append(scenarios, scenario{name, sample, sync})
+	}
+	add("current day", true, func(q *ClientConnectionQuery) {
+		q.Since = q.Until.Truncate(24 * time.Hour)
+		q.Until = q.Since.Add(24 * time.Hour)
+	})
+	add("historical day", true, func(q *ClientConnectionQuery) {
+		q.Until = q.Until.Truncate(24 * time.Hour).Add(-24 * time.Hour)
+		q.Since = q.Until.Add(-24 * time.Hour)
+	})
+	add("filtered IP", true, func(q *ClientConnectionQuery) {
+		q.ClientIP = "8.0.0.1"
+		q.AgentID = agent
+		q.Port = 443
+		q.Engine = "mihomo"
+	})
+	add("cold locations only", false, func(q *ClientConnectionQuery) { q.RecordsOnly = true })
+	add("database page", false, func(q *ClientConnectionQuery) {})
+	add("daily timeline and raw page", false, func(q *ClientConnectionQuery) { q.GroupByIP = false; q.SkipTimeline = false })
+	add("hourly timeline and raw page", false, func(q *ClientConnectionQuery) { q.GroupByIP = false; q.SkipTimeline = false; q.Bucket = "hour" })
+	add("minute timeline and raw page", false, func(q *ClientConnectionQuery) { q.GroupByIP = false; q.SkipTimeline = false; q.Bucket = "minute" })
+	for _, s := range scenarios {
+		start := time.Now()
+		var h core.ClientConnectionHistory
+		var err error
+		if s.sync {
+			var used bool
+			h, used, err = db.SyncClientConnections(ctx, s.query, "measurement-states", "")
+			if !used {
+				t.Fatal("missing snapshot", s.name)
+			}
+		} else {
+			h, err = db.ClientConnectionHistory(ctx, s.query)
+		}
+		if err != nil || len(h.Records) == 0 {
+			t.Fatalf("%s: records=%d err=%v", s.name, len(h.Records), err)
+		}
+		if !s.query.SkipTimeline {
+			var n int64
+			for _, b := range h.Timeline {
+				n += b.Flows
+			}
+			if n != 4800000 || n != h.Flows {
+				t.Fatalf("%s: invalid timeline: %d", s.name, n)
+			}
+		}
+		t.Logf("%s: %s (records=%d, flows=%d, buckets=%d)", s.name, time.Since(start), len(h.Records), h.Flows, len(h.Timeline))
 	}
 }

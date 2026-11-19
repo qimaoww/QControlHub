@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
@@ -50,6 +52,9 @@ func (s *Store) BuildClientConnectionRollup(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM client_connection_rollup_times WHERE agent_id=$1 AND day=$2`, agent, day); err != nil {
+		return false, err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM client_connection_rollup_masks WHERE agent_id=$1 AND day=$2`, agent, day); err != nil {
 		return false, err
 	}
@@ -74,6 +79,9 @@ func (s *Store) BuildClientConnectionRollup(ctx context.Context) (bool, error) {
 				return false, err
 			}
 			return false, tx.Commit(ctx)
+		}
+		if err := saveConnectionTimeline(ctx, tx, agent, day, end); err != nil {
+			return false, err
 		}
 		state = "ready"
 	}
@@ -129,7 +137,15 @@ func connectionMaskGroupsSQL(prefix, chunks string, limitArg int) string {
 	FROM totals t JOIN agents a ON a.id=t.agent_id LEFT JOIN client_connection_locations l ON l.client_ip=t.client_ip`, prefix, chunks, limitArg)
 }
 
-func connectionMonthlyGroups(ctx context.Context, q ClientConnectionQuery, wanted []connectionLookupKey, limit int) (string, []any) {
+// A local calendar day can span 23 hours across a daylight saving change.
+func useConnectionRollups(q ClientConnectionQuery) bool { return q.Until.Sub(q.Since) >= 23*time.Hour }
+
+type connectionReadRanges struct {
+	prefix, raw, saved, timeFilters string
+	args                            []any
+}
+
+func connectionRollupRanges(ctx context.Context, q ClientConnectionQuery, wanted []connectionLookupKey) connectionReadRanges {
 	args := []any{q.Since, q.Until}
 	nodes := `SELECT a.id FROM agents a WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &args)
 	if q.AgentID != "" {
@@ -151,24 +167,58 @@ func connectionMonthlyGroups(ctx context.Context, q ClientConnectionQuery, wante
 	 WHERE scan.next_day<$2 AND NOT EXISTS(SELECT 1 FROM days d WHERE d.agent_id=nodes.id AND d.day=h.day)
 	),`
 	filters, args := connectionWantedGroups("", args, wanted)
-	if q.Engine != "" {
-		args = append(args, string(q.Engine))
-		filters += fmt.Sprintf(" AND c.engine=$%d", len(args))
+	add := func(field string, value any) {
+		args = append(args, value)
+		filters += fmt.Sprintf(" AND c.%s=$%d", field, len(args))
 	}
-	if !q.IncludeNonPublic {
+	if q.Engine != "" {
+		add("engine", string(q.Engine))
+	}
+	if q.Protocol != "" {
+		add("protocol", q.Protocol)
+	}
+	if q.Inbound != "" {
+		add("inbound", q.Inbound)
+	}
+	if q.Transport != "" {
+		add("transport", q.Transport)
+	}
+	if q.ClientIP != "" {
+		ip, _ := netip.ParseAddr(q.ClientIP)
+		add("client_ip", ip.Unmap().String())
+	}
+	if !q.IncludeNonPublic || q.CountryCode != "" {
 		args = append(args, netpolicy.NonPublicPrefixes())
 		filters += fmt.Sprintf(" AND NOT(c.client_ip <<= ANY($%d::inet[]))", len(args))
+	}
+	if q.CountryCode != "" {
+		args = append(args, q.CountryCode)
+		filters += fmt.Sprintf(" AND EXISTS(SELECT 1 FROM client_connection_locations l WHERE l.client_ip=c.client_ip AND l.country_code=$%d)", len(args))
+	}
+	rawFilters, savedFilters := filters, filters
+	if q.Port != 0 {
+		args = append(args, q.Port)
+		rawFilters += fmt.Sprintf(" AND COALESCE(c.inbound_port,c.local_port)=$%d", len(args))
+		savedFilters += fmt.Sprintf(" AND c.port=$%d", len(args))
 	}
 	// Keep the index range on (agent_id,bucket) even when planner statistics
 	// predate a large retention pass. Closed covered days never visit raw rows.
 	raw := `ranges r CROSS JOIN LATERAL (SELECT c.* FROM client_connections c
 	 WHERE c.agent_id=r.agent_id AND c.bucket>=greatest(r.day,date_trunc('minute',$1::timestamptz))
 	  AND c.bucket<least(r.day+interval '24 hours',$2::timestamptz) AND c.source='core_logs'
-	  AND c.last_seen>=$1 AND c.first_seen<$2` + filters + ` OFFSET 0) c`
-	chunks := connectionPortChunks(raw) + ` UNION ALL SELECT c.` + strings.ReplaceAll(connectionChunkColumns, ",", ",c.") + `
-	 FROM days d JOIN client_connection_rollup_masks c ON c.agent_id=d.agent_id AND c.day=d.day WHERE d.covered` + filters
-	args = append(args, limit)
-	return connectionMaskGroupsSQL(prefix, chunks, len(args)), args
+	  AND c.last_seen>=$1 AND c.first_seen<$2` + rawFilters + ` OFFSET 0) c`
+	saved := `days d JOIN client_connection_rollup_masks c ON c.agent_id=d.agent_id AND c.day=d.day WHERE d.covered` + savedFilters
+	return connectionReadRanges{prefix: prefix, raw: raw, saved: saved, timeFilters: filters, args: args}
+}
+
+func (r connectionReadRanges) chunks() string {
+	return connectionPortChunks(r.raw) + ` UNION ALL SELECT c.` + strings.ReplaceAll(connectionChunkColumns, ",", ",c.") + " FROM " + r.saved
+}
+
+func connectionMonthlyGroups(ctx context.Context, q ClientConnectionQuery, wanted []connectionLookupKey, limit int) (string, []any) {
+	r := connectionRollupRanges(ctx, q, wanted)
+	args := append(r.args, limit)
+	return connectionMaskGroupsSQL(r.prefix, r.chunks(), len(args)), args
 }
 
 func connectionWantedGroups(filters string, args []any, wanted []connectionLookupKey) (string, []any) {
@@ -179,4 +229,83 @@ func connectionWantedGroups(filters string, args []any, wanted []connectionLooku
 		 FROM jsonb_to_recordset($%d::jsonb) AS targets(agent_id text,engine text,client_ip text))`, len(args))
 	}
 	return filters, args
+}
+
+// Lightweight pages and enrichment need the observation boundaries and
+// serving ports. They can skip decoding flow membership entirely.
+func (r connectionReadRanges) records() string {
+	const keys = "c.agent_id,c.engine,c.client_ip,c.id,c.first_seen,c.last_seen"
+	return "WITH " + r.prefix + " observations AS (SELECT " + keys + ",COALESCE(c.inbound_port,c.local_port) port FROM " + r.raw +
+		" UNION ALL SELECT " + keys + ",c.port FROM " + r.saved + ") "
+}
+
+func connectionRollupTotals(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, result *core.ClientConnectionHistory) error {
+	base := q
+	base.CountryCode = ""
+	base.IncludeNonPublic = q.IncludeNonPublic && q.CountryCode == ""
+	r := connectionRollupRanges(ctx, base, nil)
+	args := append(r.args, q.CountryCode, netpolicy.NonPublicPrefixes())
+	country := fmt.Sprintf("($%d='' OR l.country_code=$%d)", len(args)-1, len(args)-1)
+	public := fmt.Sprintf("NOT (ip.client_ip <<= ANY($%d::inet[]))", len(args))
+	return tx.QueryRow(ctx, "WITH "+r.prefix+" chunks AS ("+r.chunks()+`),
+	  flows AS (SELECT client_ip,bit_count(bit_or(mask)) n FROM chunks
+	    GROUP BY agent_id,engine,protocol,inbound,transport,client_ip,local_ip,local_port,block),
+	  ip AS (SELECT client_ip,sum(n) n FROM flows GROUP BY client_ip)
+	  SELECT COALESCE(sum(ip.n) FILTER (WHERE `+country+`),0),count(*) FILTER (WHERE `+country+`),
+	  COALESCE(array_agg(DISTINCT l.country_code ORDER BY l.country_code) FILTER(WHERE l.country_code<>'' AND `+public+`),ARRAY[]::varchar[])
+	  FROM ip LEFT JOIN client_connection_locations l USING(client_ip)`, args...).Scan(&result.Flows, &result.IPs, &result.CountryCodes)
+}
+
+// Only UTC day timelines can reuse daily membership. Minute/hour buckets
+// retain precise event times, with scalar deduplication before counting.
+func connectionTimeline(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery) (pgx.Rows, error) {
+	if q.Bucket == "day" && useConnectionRollups(q) {
+		r := connectionRollupRanges(ctx, q, nil)
+		raw := `SELECT r.day, c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.local_ip,c.local_port,
+		 c.client_port/%[1]d block,bit_or(set_bit(B'0'::bit(%[1]d),c.client_port %% %[1]d,1)) mask
+		 FROM %s GROUP BY 1,2,3,4,5,6,7,8,9,10`
+		return tx.Query(ctx, "WITH "+r.prefix+" chunks AS ("+fmt.Sprintf(raw, connectionPortBlock, r.raw)+`
+		 UNION ALL SELECT c.day,c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.local_ip,c.local_port,c.block,c.mask FROM `+r.saved+`
+		 ), flows AS (SELECT day,client_ip,bit_count(bit_or(mask)) n FROM chunks
+		 GROUP BY day,agent_id,engine,protocol,inbound,transport,client_ip,local_ip,local_port,block)
+		 SELECT day,sum(n)::bigint,count(DISTINCT client_ip) FROM flows GROUP BY day ORDER BY day`, r.args...)
+	}
+	if useConnectionRollups(q) && q.Protocol == "" && q.Inbound == "" && q.Transport == "" && q.Port == 0 {
+		r := connectionRollupRanges(ctx, q, nil)
+		args := append(r.args, q.Bucket)
+		grain := fmt.Sprintf("$%d::text", len(args))
+		return tx.Query(ctx, "WITH "+r.prefix+" recent AS ("+connectionTimedFlows(r.raw, grain)+`
+		 ),counts AS (SELECT bucket,client_ip,count(*) n FROM recent GROUP BY bucket,client_ip
+		 UNION ALL SELECT c.day+m.slot*interval '1 minute',c.client_ip,m.n FROM days d
+		 JOIN client_connection_rollup_times c ON c.agent_id=d.agent_id AND c.day=d.day
+		 CROSS JOIN LATERAL unnest(c.minutes,c.flows) m(slot,n) WHERE d.covered AND c.grain=`+grain+r.timeFilters+`)
+		 SELECT bucket,sum(n)::bigint,count(DISTINCT client_ip) FROM counts GROUP BY bucket ORDER BY bucket`, args...)
+	}
+	where, args := connectionGroupWhere(ctx, q)
+	args = append(args, q.Bucket)
+	return tx.Query(ctx, fmt.Sprintf(`WITH flows AS (SELECT DISTINCT date_trunc($%d::text,c.bucket,'UTC') bucket,c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port
+	 FROM client_connections c`, len(args))+where+`)
+	 SELECT bucket,count(*),count(DISTINCT client_ip) FROM flows GROUP BY bucket ORDER BY bucket`, args...)
+}
+
+// Include the complete flow key in minute/hour deduplication even for rows
+// imported with sub-minute buckets. Only nonempty offsets are persisted.
+func connectionTimedFlows(from, grain string) string {
+	return "SELECT DISTINCT date_trunc(" + grain + ",c.bucket,'UTC') bucket,c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port FROM " + from
+}
+
+func saveConnectionTimeline(ctx context.Context, tx pgx.Tx, agent string, day, end time.Time) error {
+	const from = "client_connections c WHERE c.agent_id=$1 AND c.bucket>=$2 AND c.bucket<$3 AND c.source='core_logs'"
+	for _, grain := range []string{"hour", "minute"} {
+		_, err := tx.Exec(ctx, `INSERT INTO client_connection_rollup_times(agent_id,day,engine,client_ip,grain,minutes,flows)
+		 WITH members AS (`+connectionTimedFlows(from, "$4::text")+`),slots AS (
+		 SELECT engine,client_ip,(extract(epoch FROM bucket-$2::timestamptz)/60)::smallint slot,count(*) n
+		 FROM members GROUP BY engine,client_ip,bucket)
+		 SELECT $1,$2,engine,client_ip,$4,array_agg(slot ORDER BY slot),array_agg(n ORDER BY slot)
+		 FROM slots GROUP BY engine,client_ip`, agent, day, end, grain)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

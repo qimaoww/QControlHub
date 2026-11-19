@@ -52,10 +52,16 @@ func (cursor connectionIPCursor) encode() string {
 }
 
 func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, where string, args []any) ([]core.ClientConnectionRecord, string, string, error) {
+	prefix, from := "", " FROM client_connections c JOIN agents a ON a.id=c.agent_id"+where
 	params := append([]any{}, args...)
+	if useConnectionRollups(q) {
+		r := connectionRollupRanges(ctx, q, nil)
+		prefix, from, params = r.records(), " FROM observations c JOIN agents a ON a.id=c.agent_id", r.args
+	}
 	params = append(params, q.NodeOrder)
 	rank := fmt.Sprintf(`COALESCE(array_position($%d::text[],c.agent_id),2147483647)`, len(params))
 	const endpoint = `ARRAY[a.name::text,c.agent_id::text,c.engine::text] COLLATE "C"`
+	pagePorts := useConnectionRollups(q) && !q.RecordsOnly
 	having := ""
 	if q.Cursor != "" {
 		cursor, err := decodeConnectionIPCursor(q.Cursor)
@@ -72,24 +78,48 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 	params = append(params, q.Limit+1)
 	// Apply the cursor to whole IP groups. IP provides a deterministic tie-break
 	// independent of connection arrival times and IDs.
-	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+rank+`,`+endpoint+`
- FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+`
- GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+rank+`,`+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
+	selectPorts := ""
+	if pagePorts {
+		// Fetch ports with the page's bounds. A second probe per selected
+		// group would traverse both raw boundaries and retained days again.
+		selectPorts = fmt.Sprintf(",CASE WHEN count(DISTINCT c.port)<= %d THEN array_agg(DISTINCT c.port ORDER BY c.port) END", clientConnectionPageBudget/connectionEndpointEstimate)
+	}
+	rows, err := tx.Query(ctx, prefix+`SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+rank+`,`+endpoint+selectPorts+
+		from+` GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+rank+`,`+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
 	if err != nil {
 		return nil, "", "", err
 	}
 	records := []core.ClientConnectionRecord{}
 	keys := []connectionIPCursor{}
+	remaining := int64(clientConnectionPageBudget)
 	for rows.Next() {
 		var r core.ClientConnectionRecord
 		var key connectionIPCursor
-		if err := rows.Scan(&r.ID, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &key.Rank, &key.Endpoint); err != nil {
+		var ports []int32
+		fields := []any{&r.ID, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &key.Rank, &key.Endpoint}
+		if pagePorts {
+			fields = append(fields, &ports)
+		}
+		if err := rows.Scan(fields...); err != nil {
 			rows.Close()
 			return nil, "", "", err
 		}
 		key.IP = r.ClientIP
 		key.Scope = "node_engine_ip"
 		r.AgentName, r.AgentID, r.Engine = key.Endpoint[0], key.Endpoint[1], core.Engine(key.Endpoint[2])
+		if pagePorts && len(records) < q.Limit {
+			prototype := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine}
+			remaining -= connectionRecordBytes(r) + int64(len(ports))*connectionEndpointBytes(prototype)
+			if ports == nil || remaining < 0 {
+				rows.Close()
+				return nil, "", "", errClientConnectionPageBudget
+			}
+			r.Endpoints = make([]core.ClientConnectionEndpoint, 0, len(ports))
+			for _, port := range ports {
+				prototype.LocalPort = int(port)
+				r.Endpoints = append(r.Endpoints, prototype)
+			}
+		}
 		keys = append(keys, key)
 		records = append(records, r)
 	}
@@ -106,7 +136,7 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 		keys[0].Inclusive = true
 		page = keys[0].encode()
 	}
-	if q.RecordsOnly || len(records) == 0 {
+	if q.RecordsOnly || pagePorts || len(records) == 0 {
 		return records, next, page, nil
 	}
 	if err := s.clientConnectionIPEndpoints(ctx, tx, records, where, args); err != nil {
@@ -122,18 +152,11 @@ func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, reco
 		groups[i] = connectionLookup(r)
 		index[groups[i]] = i
 	}
-	payload, err := json.Marshal(groups)
-	if err != nil {
-		return err
-	}
-	params := append(append([]any{}, args...), payload, clientConnectionPageBudget/connectionEndpointEstimate+1)
-	// DISTINCT already removes duplicate ports. Stream the bounded result
-	// directly into the page without a second copy of all observations.
-	rows, err := tx.Query(ctx, `SELECT DISTINCT host(c.client_ip),c.agent_id,c.engine,COALESCE(c.inbound_port,c.local_port)
- FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+fmt.Sprintf(`
- AND (c.agent_id,c.engine,c.client_ip) IN (
-  SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text)
- ) LIMIT $%d`, len(params)-1, len(params)), params...)
+	params := append([]any{}, args...)
+	where, params = connectionWantedGroups(where, params, groups)
+	sql := "SELECT DISTINCT host(c.client_ip),c.agent_id,c.engine,COALESCE(c.inbound_port,c.local_port) FROM client_connections c JOIN agents a ON a.id=c.agent_id" + where
+	params = append(params, clientConnectionPageBudget/connectionEndpointEstimate+1)
+	rows, err := tx.Query(ctx, sql+fmt.Sprintf(" LIMIT $%d", len(params)), params...)
 	if err != nil {
 		return err
 	}

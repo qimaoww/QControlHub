@@ -68,6 +68,30 @@ func TestClientConnectionMonthRollupMatchesRawHistory(t *testing.T) {
 	check(3, 2)
 	drain()
 	check(3, 2)
+	for _, grain := range []string{"day", "hour", "minute"} {
+		full := q
+		full.GroupByIP, full.SkipTimeline, full.Bucket = false, false, grain
+		h, err := db.ClientConnectionHistory(owner, full)
+		if err != nil || len(h.Records) != 5 || h.Flows != 3 {
+			t.Fatalf("%s details: %d %d %v", grain, len(h.Records), h.Flows, err)
+		}
+		var observed int64
+		for _, b := range h.Timeline {
+			observed += b.Flows
+			if b.IPs != 1 {
+				t.Fatalf("%s bucket IPs: %d", grain, b.IPs)
+			}
+		}
+		if observed != 5 {
+			t.Fatalf("%s timeline counted %d observations", grain, observed)
+		}
+		full.ClientIP = "8.8.8.8"
+		full.Port = 8443
+		h, err = db.ClientConnectionHistory(owner, full)
+		if err != nil || h.Flows != 2 || len(h.Records) != 2 {
+			t.Fatalf("%s endpoint filter: %d %d %v", grain, h.Flows, len(h.Records), err)
+		}
+	}
 	insert(agent.ID, 30, 42, 9443)
 	check(4, 3)
 	drain()

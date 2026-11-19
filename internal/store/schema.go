@@ -1052,7 +1052,13 @@ CREATE TABLE IF NOT EXISTS client_connection_rollup_masks (
  id bigint NOT NULL,first_seen timestamptz NOT NULL,last_seen timestamptz NOT NULL,
  FOREIGN KEY(agent_id,day) REFERENCES client_connection_rollup_days(agent_id,day) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS client_connection_rollup_masks_day ON client_connection_rollup_masks(agent_id,day);
+CREATE INDEX IF NOT EXISTS client_connection_rollup_masks_day ON client_connection_rollup_masks(agent_id,day,engine,client_ip);
+CREATE TABLE IF NOT EXISTS client_connection_rollup_times (
+ agent_id text NOT NULL,day timestamptz NOT NULL,engine text NOT NULL,client_ip inet NOT NULL,
+ grain text NOT NULL,minutes smallint[] NOT NULL,flows bigint[] NOT NULL,
+ PRIMARY KEY(agent_id,day,engine,client_ip,grain),
+ FOREIGN KEY(agent_id,day) REFERENCES client_connection_rollup_days(agent_id,day) ON DELETE CASCADE
+);
 CREATE OR REPLACE FUNCTION track_client_connection_changes() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE keys_sql text;
 BEGIN

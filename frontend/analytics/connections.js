@@ -23,6 +23,10 @@ const connectionKey = record => {
 export function mergeConnectionUpdate(previous, update) {
   if (!update.delta) return update;
   if (!previous || !Array.isArray(update.record_keys)) throw new Error("结果需要重新读取，请重试。");
+  if (!update.records.length && previous.records.length === update.record_keys.length &&
+      previous.records.every((record, index) => connectionKey(record) === update.record_keys[index])) {
+    return { ...update, delta: false, records: previous.records };
+  }
   const records = new Map(previous.records.map(record => [connectionKey(record), record]));
   for (const record of update.records) records.set(connectionKey(record), record);
   const next = update.record_keys.map(key => records.get(key));
@@ -100,6 +104,7 @@ export async function connectionsPage(ctx) {
     }
     select.value = value;
   }
+  let paintedRecords, paintedSettings;
   function paint() {
     updateRegions();
     const records = result?.records || [], reportSources = result?.sources || [];
@@ -109,13 +114,16 @@ export async function connectionsPage(ctx) {
     status.hidden = !result;
     view.root.setAttribute("aria-busy", String(loading));
     collection.trigger.disabled = !result;
-    view.update(records, record => {
-      const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
-      const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
-      const region = !record.location?.non_public && geoRegionDetails(record.location?.country_code);
-      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", { className: "a-probe-name" }, nodeRegionFlag(ctx, agent), node("span", {}, agent.name)),
-        badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
-    }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试", connectionKey);
+    if (!result || paintedRecords !== records || paintedSettings !== data.settings || globalThis.getSelection?.()?.isCollapsed === false) {
+      paintedRecords = globalThis.getSelection?.()?.isCollapsed === false ? null : records; paintedSettings = data.settings;
+      view.update(records, record => {
+        const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
+        const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
+        const region = !record.location?.non_public && geoRegionDetails(record.location?.country_code);
+        return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", { className: "a-probe-name" }, nodeRegionFlag(ctx, agent), node("span", {}, agent.name)),
+          badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
+      }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试", connectionKey);
+    }
     collection.update(reportSources.map(source => ({
       agentID: source.agent_id, agentName: source.agent_name || source.agent_id,
       engine: filters.engine ? engineName(filters.engine) : "全部内核", state: connectionSourceLabel(source),
@@ -190,7 +198,7 @@ export async function connectionsPage(ctx) {
       let fresh = mergeConnectionUpdate(previousResult, response);
       // Deferred geography is extra data for the exact record. Preserve its
       // retry time only while the server's geography still agrees.
-      if (fresh !== previousResult && previousResult) {
+      if (previousResult && fresh.records !== previousResult.records) {
         const before = new Map(previousResult.records.map(record => [connectionKey(record), record]));
         fresh = { ...fresh, records: fresh.records.map(record => {
           const prior = before.get(connectionKey(record));
@@ -206,7 +214,7 @@ export async function connectionsPage(ctx) {
       }
       const fetchedAt = Date.now();
       cache.bind(fresh.cache_scope); scopeReady = true;
-      const unchanged = Boolean(previousResult && sameConnectionValue({ ...previousResult, sync_token: undefined, record_keys: undefined },
+      const unchanged = fresh === previousResult || Boolean(previousResult && sameConnectionValue({ ...previousResult, sync_token: undefined, record_keys: undefined },
         { ...fresh, sync_token: undefined, record_keys: undefined }));
       cache.set(key, fresh, fetchedAt, { observedAt, etag, unchanged });
       failures = 0;

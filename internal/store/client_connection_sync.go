@@ -211,7 +211,7 @@ func (s *Store) SyncClientConnections(ctx context.Context, q ClientConnectionQue
 				return active.page(q, token)
 			}
 		}
-		if time.Now().Before(entry.backoff) {
+		if time.Now().Before(entry.backoff) || q.RecordsOnly && entry.data == nil {
 			entry.mu.Unlock()
 			return core.ClientConnectionHistory{}, false, nil
 		}
@@ -478,7 +478,7 @@ func (s *Store) readConnectionGroups(ctx context.Context, tx pgx.Tx, q ClientCon
 	limit := min(connectionSyncGroups, int(budget/(2*connectionRecordEstimate)))
 	var sql string
 	var args []any
-	if q.Until.Sub(q.Since) > 24*time.Hour && q.Port == 0 && q.Protocol == "" && q.Inbound == "" && q.Transport == "" && q.ClientIP == "" {
+	if useConnectionRollups(q) {
 		// The range planner can overestimate uncovered node/days by orders
 		// of magnitude and spend longer compiling JIT code than reading them.
 		if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
