@@ -92,3 +92,26 @@ func backfillClientConnectionLogs(ctx context.Context, dataStore *store.Store) {
 		}
 	}
 }
+
+// Prepare closed UTC days independently of dashboard requests. Dirty or
+// partially covered days remain readable directly from the observation table.
+func maintainClientConnectionRollups(ctx context.Context, dataStore *store.Store) {
+	for ctx.Err() == nil {
+		start := time.Now()
+		idle, err := dataStore.BuildClientConnectionRollup(ctx)
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("prepare client connection history", "error", err)
+		}
+		// Yield between retained node/days according to the work just done.
+		// This also allows ingestion and foreground reads to drain on upgrades.
+		delay := time.Minute
+		if !idle && err == nil {
+			delay = min(time.Since(start), delay)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
+}

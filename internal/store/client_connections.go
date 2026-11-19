@@ -193,17 +193,25 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	defer tx.Rollback(ctx)
 	where, args := connectionHistoryWhere(ctx, q)
 	from := ` FROM client_connections c JOIN agents a ON a.id=c.agent_id`
+	if useConnectionRollups(q) {
+		if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
+			return result, err
+		}
+	}
 	if !q.RecordsOnly {
-		// Use one authorized window for both the country list and totals. Group
-		// scalar flows before joining geography, once per IP rather than per row.
-		base := q
-		base.CountryCode = ""
-		base.IncludeNonPublic = q.IncludeNonPublic && q.CountryCode == ""
-		summaryWhere, summaryArgs := connectionGroupWhere(ctx, base)
-		summaryArgs = append(summaryArgs, q.CountryCode, netpolicy.NonPublicPrefixes())
-		country := fmt.Sprintf("($%d='' OR l.country_code=$%d)", len(summaryArgs)-1, len(summaryArgs)-1)
-		public := fmt.Sprintf("NOT (ip.client_ip <<= ANY($%d::inet[]))", len(summaryArgs))
-		if err := tx.QueryRow(ctx, `WITH flow AS (
+		if useConnectionRollups(q) {
+			if err := connectionRollupTotals(ctx, tx, q, &result); err != nil {
+				return result, err
+			}
+		} else {
+			base := q
+			base.CountryCode = ""
+			base.IncludeNonPublic = q.IncludeNonPublic && q.CountryCode == ""
+			summaryWhere, summaryArgs := connectionGroupWhere(ctx, base)
+			summaryArgs = append(summaryArgs, q.CountryCode, netpolicy.NonPublicPrefixes())
+			country := fmt.Sprintf("($%d='' OR l.country_code=$%d)", len(summaryArgs)-1, len(summaryArgs)-1)
+			public := fmt.Sprintf("NOT (ip.client_ip <<= ANY($%d::inet[]))", len(summaryArgs))
+			if err := tx.QueryRow(ctx, `WITH flow AS (
 		  SELECT DISTINCT c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port
 		  FROM client_connections c`+summaryWhere+`
 		), ip AS (SELECT client_ip,count(*) flows FROM flow GROUP BY client_ip)
@@ -211,14 +219,12 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		  COALESCE(array_agg(DISTINCT l.country_code ORDER BY l.country_code)
 		    FILTER (WHERE l.country_code<>'' AND `+public+`), ARRAY[]::varchar[])
 		FROM ip LEFT JOIN client_connection_locations l ON l.client_ip=ip.client_ip`, summaryArgs...).Scan(&result.Flows, &result.IPs, &result.CountryCodes); err != nil {
-			return result, err
+				return result, err
+			}
 		}
 		result.CountryCodes = slices.DeleteFunc(result.CountryCodes, func(code string) bool { return !geoip.ValidRegionCode(code) })
-		tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`
-
 		if !q.SkipTimeline {
-			timelineArgs := append(append([]any{}, args...), q.Bucket)
-			rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT date_trunc($%d::text,c.bucket,'UTC') AS time,count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where+` GROUP BY time ORDER BY time`, len(timelineArgs)), timelineArgs...)
+			rows, err := connectionTimeline(ctx, tx, q)
 			if err != nil {
 				return result, err
 			}

@@ -187,6 +187,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema v%d -> v%d after %s: %w", appliedVersion, currentSchemaVersion, time.Since(started).Round(time.Millisecond), err)
 	}
+	if appliedVersion < 106 {
+		// Keep retained observation scans out of the schema migration.
+		if _, err := tx.Exec(ctx, `INSERT INTO client_connection_rollup_scan VALUES (1,'-infinity') ON CONFLICT DO NOTHING`); err != nil {
+			return fmt.Errorf("initialize connection rollup discovery: %w", err)
+		}
+	}
 	if appliedVersion < 52 {
 		// Legacy selections referred only to a node/engine/tag. Pin them to the
 		// deployed configuration before independent user workspaces can replace

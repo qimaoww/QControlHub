@@ -19,7 +19,7 @@ export async function requestCoreLogJSON(api, path, { signal, timeout = 15000, .
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   timer = setTimeout(() => {
-    const error = Object.assign(new Error("读取超时，请重试。"), { readOnly: true, failureRetention: "not_required" });
+    const error = Object.assign(new Error("读取超时，请重试。"), { code: "read_timeout", readOnly: true, failureRetention: "not_required" });
     controller.abort(new DOMException("Read timed out", "TimeoutError"));
     cancel(error);
   }, timeout);
