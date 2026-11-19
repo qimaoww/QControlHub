@@ -17,8 +17,8 @@ revision=$(field pkgver)
 printf '%s' "$revision" > revision
 [ "$1" = check ] && exit 0
 if [ -n "$2" ] && [ "$(apk version -t "$revision" "$2")" = '<' ]; then
-    echo "refusing downgrade from $2 to $revision" >&2
-    exit 1
+    touch newer-installed
+    exit 0
 fi
 mkdir -p extracted/usr/sbin
 tar -xOzf "$3" usr/sbin/nginx > extracted/usr/sbin/nginx

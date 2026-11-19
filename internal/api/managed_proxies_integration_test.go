@@ -40,6 +40,12 @@ func TestManagedProxyNodePermissions(t *testing.T) {
 	shared.call("POST", "/tasks", req, 403, nil)
 	var update core.Task
 	owner.call("POST", "/tasks", req, 201, &update)
+	admin.call("POST", check, nil, 409, nil)
+	var activity nodeProxyReport
+	owner.call("GET", "/agents/"+node.ID+"/proxies", nil, 200, &activity)
+	if state := activity.Tasks[core.ActionUpdateNginx]; state.Status != core.TaskPending || state.FinishedAt != nil {
+		t.Fatalf("queued activity %+v", state)
+	}
 	completeConfigScopeAPITask(t, ctx, db, update)
 	perms := []core.Permission{core.PermissionAgentsRead}
 	admin.call("PUT", "/users/"+owner.userID, core.UserUpdate{Permissions: &perms}, 200, nil)
@@ -52,6 +58,12 @@ func TestManagedProxyNodePermissions(t *testing.T) {
 		t.Fatal("concurrent check not reused")
 	}
 	completeConfigScopeAPITask(t, ctx, db, first)
+	owner.call("GET", "/agents/"+node.ID+"/proxies", nil, 200, &activity)
+	for _, action := range []core.Action{core.ActionUpdateNginx, core.ActionCheckNginx} {
+		if state := activity.Tasks[action]; state.Status != core.TaskSucceeded || state.FinishedAt == nil {
+			t.Fatalf("terminal %s %+v", action, state)
+		}
+	}
 }
 
 func TestManagedProxyAPIKeyManagement(t *testing.T) {

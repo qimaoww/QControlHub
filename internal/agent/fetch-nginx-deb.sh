@@ -31,8 +31,8 @@ candidate=$(apt-cache policy nginx | awk '$1 == "Candidate:" {print $2}')
 printf '%s' "$candidate" > revision
 [ "$operation" = check ] && exit 0
 if [ -n "$current" ] && ! dpkg --compare-versions "$candidate" ge "$current"; then
-    echo "refusing downgrade from $current to $candidate" >&2
-    exit 1
+    touch newer-installed
+    exit 0
 fi
 apt-get download "nginx=$candidate" >&2
 set -- ./*.deb

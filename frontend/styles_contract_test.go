@@ -64,8 +64,8 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// and source indentation, line numbers and JSON syntax highlighting, and
 	// the approved open tools layout, metric strips and readable route columns,
 	// plus wrapped record endpoints with independently centered direction markers,
-	// readable inbound port values at narrow desktop widths, and the responsive node proxy version rows.
-	const expected = "3e21734a1bfa2a5488b8f3117c1290e970a7be47745808f8f8623968df03a463"
+	// readable inbound port values at narrow desktop widths, and the responsive node proxy version rows with aligned retry feedback.
+	const expected = "c49273ab62756bdc575e5f68f2742f87bc626fd6d7fd861b7c210d669f5cdd1b"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

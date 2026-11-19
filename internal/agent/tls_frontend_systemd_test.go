@@ -140,13 +140,25 @@ func TestManagedTLSSystemdSandbox(t *testing.T) {
 	invoke(shared, core.ActionDeploy, false, []core.TLSFrontend{other, caddyRoute}, true)
 	managerForRevoke, _ := NewServiceManager(kind)
 	executor := &Executor{Services: managerForRevoke, tlsFrontendHelperPath: "/usr/local/lib/qagent/qagent"}
-	if out, err := executor.runProxyTask(ctx, core.ActionUpdateCaddy, "test-build"); err != nil {
+	task := core.Task{Action: core.ActionUpdateCaddy, CreatedAt: time.Now().UTC()}
+	if out, err := executor.runProxyTask(ctx, task, "test-build"); err != nil {
 		t.Fatalf("Caddy upgrade: %v %s", err, out)
 	}
-	if report := readProxyReports()["caddy"]; report.Running == "" || report.Running == "v2.11.8" || report.Running != report.Latest || report.Running != report.Installed {
+	if report := readProxyReports()["caddy"]; report.Running == "" || report.Running == "v2.11.7" || !report.UpdateRequestAt.Equal(task.CreatedAt) || report.UpdateState != "succeeded" || report.Running != report.Latest || report.Running != report.Installed {
 		t.Fatalf("Caddy upgrade report %+v", report)
 	} else {
-		t.Logf("Caddy v2.11.8 -> %s, verified active process and backend", report.Running)
+		t.Logf("Caddy v2.11.7 -> %s, verified active process and backend", report.Running)
+	}
+	caddyService, _, _ := (&tlsFrontendManager{services: managerForRevoke, root: tlsFrontendRoot, state: tlsFrontendState}).serviceDefinition("caddy", false)
+	beforePID, err := managedServiceProcessPID(ctx, managerForRevoke, caddyService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := executor.runProxyTask(ctx, task, "test-build"); err != nil {
+		t.Fatalf("Caddy repeat: %v %s", err, out)
+	}
+	if afterPID, err := managedServiceProcessPID(ctx, managerForRevoke, caddyService); err != nil || beforePID != afterPID {
+		t.Fatalf("Caddy repeat changed PID: %d -> %d (%v)", beforePID, afterPID, err)
 	}
 	stop, err := executor.reconcileSharedProxyIngresses(ctx, core.EngineSingBox, "shr_0000000000000001", []core.ProxyIngress{{Mode: "caddy", Scope: core.ProxyIngressTypeScope, Generation: 8}})
 	if err != nil || stop {

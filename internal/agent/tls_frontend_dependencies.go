@@ -134,21 +134,22 @@ func (m *tlsFrontendManager) caddyCandidate(ctx context.Context) (*CoreUpdater, 
 	if err != nil {
 		return nil, "", githubReleaseAsset{}, fmt.Errorf("下载 Caddy 官方发布信息：%w", err)
 	}
+	asset, err := caddyLinuxAsset(release, updater.goarch)
+	return updater, release.TagName, asset, err
+}
+
+func caddyLinuxAsset(release githubRelease, arch string) (githubReleaseAsset, error) {
 	if release.Draft || release.Prerelease || !caddyStableTag.MatchString(release.TagName) {
-		return nil, "", githubReleaseAsset{}, errors.New("Caddy 最新发布不是支持的 v2 稳定版")
+		return githubReleaseAsset{}, errors.New("Caddy 发布不是支持的 v2 稳定版")
 	}
-	name := "caddy_" + strings.TrimPrefix(release.TagName, "v") + "_linux_" + updater.goarch + ".tar.gz"
-	var asset githubReleaseAsset
-	for _, candidate := range release.Assets {
-		if candidate.Name == name {
-			asset = candidate
-			break
+	name := "caddy_" + strings.TrimPrefix(release.TagName, "v") + "_linux_" + arch + ".tar.gz"
+	for _, asset := range release.Assets {
+		if asset.Name == name && releaseDigest.MatchString(asset.Digest) && validateReleaseAssetMetadata(asset) == nil &&
+			asset.BrowserDownloadURL == "https://github.com/caddyserver/caddy/releases/download/"+release.TagName+"/"+name {
+			return asset, nil
 		}
 	}
-	if asset.Name == "" || !releaseDigest.MatchString(asset.Digest) {
-		return nil, "", githubReleaseAsset{}, fmt.Errorf("Caddy 官方发布缺少 %s 或 SHA256 摘要", name)
-	}
-	return updater, release.TagName, asset, nil
+	return githubReleaseAsset{}, fmt.Errorf("%w：%s", issueAsset, name)
 }
 
 func caddyAssetBinary(ctx context.Context, updater *CoreUpdater, asset githubReleaseAsset) ([]byte, error) {

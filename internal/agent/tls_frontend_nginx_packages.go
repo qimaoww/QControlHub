@@ -78,7 +78,7 @@ func nginxPackagePlatform(osRelease map[string]string, arch string) (nginxPlatfo
 		p = nginxPlatform{id, major}
 	}
 	if (arch != "amd64" && arch != "arm64") || p.family == "" || !regexp.MustCompile(`^[a-z0-9.]+$`).MatchString(p.suite) {
-		return nginxPlatform{}, fmt.Errorf("无适用于 %s %s/%s 的 Nginx 官方仓库", id, version, arch)
+		return nginxPlatform{}, fmt.Errorf("%w：%s %s/%s", issuePlatform, id, version, arch)
 	}
 	return p, nil
 }
@@ -164,7 +164,7 @@ func fetchOfficialNginx(ctx context.Context, platform nginxPlatform, currentRevi
 	}
 	output, err := runInDirectory(ctx, dir, "/bin/sh", "-ec", script, "fetch-nginx", platform.family, platform.suite, operation, currentRevision)
 	if err != nil {
-		return "", "", fmt.Errorf("获取 Nginx 官方签名包失败：%w：%s", err, output)
+		return "", "", fmt.Errorf("%w：%w：%s", issueCandidate, err, output)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "revision"))
 	revision := string(raw)
@@ -173,6 +173,9 @@ func fetchOfficialNginx(ctx context.Context, platform nginxPlatform, currentRevi
 	}
 	if operation == "check" {
 		return "", revision, nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, "newer-installed")); err == nil {
+		return "", revision, issueNewerInstalled
 	}
 	source := filepath.Join(dir, "extracted/usr/sbin/nginx")
 	info, err := os.Lstat(source)

@@ -61,7 +61,7 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 		return "", err
 	}
 	if status != "active" {
-		return "", fmt.Errorf("托管 Nginx 服务状态为 %s，请在维护窗口核对并更新", status)
+		return "", fmt.Errorf("%w（%s）", issueStopped, status)
 	}
 	if err = m.checkProxyUnit(ctx, "nginx"); err != nil {
 		return "", err
@@ -112,6 +112,12 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 	}
 
 	candidate, revision, err := upgradePackage(ctx, binary)
+	if errors.Is(err, issueNewerInstalled) && privateNginxRevision(binary) != "" && binary == runningBinary && os.SameFile(installed, running) {
+		if err := m.verifyRunningProxy(ctx, "nginx", service, binary, installed); err != nil {
+			return "", err
+		}
+		return "保留已验证的较新 Nginx " + privateNginxRevision(binary), m.writeConfig(marker, markerValue, true)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -124,7 +130,7 @@ func (m *tlsFrontendManager) upgradeManagedNginx(ctx context.Context, build stri
 	}
 	if !os.SameFile(running, installed) || candidate != binary {
 		if _, err := m.validateNginxBinary(ctx, filepath.Join(m.root, "nginx.conf"), candidate); err != nil {
-			return "", errors.New("候选 Nginx 配置校验失败，请在节点核对托管配置和读取权限")
+			return "", issueProxyConfig
 		}
 		if err := m.switchNginx(ctx, service, unit, runningBinary, candidate, installed); err != nil {
 			return "", err
@@ -199,9 +205,9 @@ func (m *tlsFrontendManager) switchProxy(ctx context.Context, mode, service, uni
 	recoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if restoreErr := m.recoverProxySwitch(recoverCtx, mode); restoreErr != nil {
-		return fmt.Errorf("%s 切换失败（%v），恢复失败：%w", mode, err, restoreErr)
+		return fmt.Errorf("%w（%v）：%w", issueRecovery, err, restoreErr)
 	}
-	return fmt.Errorf("%s 切换失败，已恢复 %s：%w", mode, m.proxyVersion(recoverCtx, mode, old), err)
+	return fmt.Errorf("%w %s：%w", issueRolledBack, m.proxyVersion(recoverCtx, mode, old), err)
 }
 
 func (m *tlsFrontendManager) verifyRunningProxy(ctx context.Context, mode, service, binary string, installed os.FileInfo) error {

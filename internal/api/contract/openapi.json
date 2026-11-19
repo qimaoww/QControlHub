@@ -671,6 +671,12 @@
           },
           "supported": {
             "type": "boolean"
+          },
+          "tasks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/core_ProxyTaskState"
+            },
+            "type": "object"
           }
         },
         "type": "object"
@@ -3842,6 +3848,17 @@
       "core_ProxyStatus": {
         "additionalProperties": false,
         "properties": {
+          "check_attempt_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "check_error": {
+            "type": "string"
+          },
+          "check_request_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "checked_at": {
             "format": "date-time",
             "type": "string"
@@ -3876,6 +3893,48 @@
           },
           "state": {
             "type": "string"
+          },
+          "update_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "update_error": {
+            "type": "string"
+          },
+          "update_request_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "update_started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "update_state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_ProxyTaskState": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/core_TaskStatus"
           }
         },
         "type": "object"
@@ -12446,6 +12505,9 @@
                 "example": {
                   "agent_id": "example",
                   "caddy": {
+                    "check_attempt_at": "2026-11-10T12:00:00Z",
+                    "check_error": "example",
+                    "check_request_at": "2026-11-10T12:00:00Z",
                     "checked_at": "2026-11-10T12:00:00Z",
                     "installed": "example",
                     "latest": "example",
@@ -12456,9 +12518,17 @@
                     "outcome": "example",
                     "running": "example",
                     "shared_instances": 1,
-                    "state": "example"
+                    "state": "example",
+                    "update_at": "2026-11-10T12:00:00Z",
+                    "update_error": "example",
+                    "update_request_at": "2026-11-10T12:00:00Z",
+                    "update_started_at": "2026-11-10T12:00:00Z",
+                    "update_state": "example"
                   },
                   "nginx": {
+                    "check_attempt_at": "2026-11-10T12:00:00Z",
+                    "check_error": "example",
+                    "check_request_at": "2026-11-10T12:00:00Z",
                     "checked_at": "2026-11-10T12:00:00Z",
                     "installed": "example",
                     "latest": "example",
@@ -12469,10 +12539,16 @@
                     "outcome": "example",
                     "running": "example",
                     "shared_instances": 1,
-                    "state": "example"
+                    "state": "example",
+                    "update_at": "2026-11-10T12:00:00Z",
+                    "update_error": "example",
+                    "update_request_at": "2026-11-10T12:00:00Z",
+                    "update_started_at": "2026-11-10T12:00:00Z",
+                    "update_state": "example"
                   },
                   "status": "example",
-                  "supported": false
+                  "supported": false,
+                  "tasks": {}
                 },
                 "schema": {
                   "$ref": "#/components/schemas/api_nodeProxyReport"

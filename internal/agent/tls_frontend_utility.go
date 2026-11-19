@@ -16,6 +16,7 @@ import (
 
 type tlsFrontendRequest struct {
 	ObserveProxies bool                           `json:"observe_proxies,omitempty"`
+	ProxyRequestAt time.Time                      `json:"proxy_request_at,omitzero"`
 	ProxyBuild     string                         `json:"proxy_build,omitempty"`
 	NginxUpgrade   string                         `json:"nginx_upgrade,omitempty"`
 	DeferCleanup   bool                           `json:"defer_cleanup,omitempty"`
@@ -120,7 +121,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		return nil
 	}
 	if mode := request.Action.ProxyComponent(); mode != "" {
-		return manager.proxyOperation(ctx, mode, request.Action, request.ProxyBuild, true)
+		return manager.proxyOperation(ctx, mode, request.Action, request.ProxyBuild, true, request.ProxyRequestAt)
 	}
 	if request.NginxUpgrade != "" {
 		if (request.Action != core.ActionStatus && request.Action != core.ActionUpgradeAgent) || request.Stage || request.Certificates || request.NativeHandoff != "" || len(request.Frontends) != 0 {
@@ -128,7 +129,7 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		}
 		var results []error
 		for _, mode := range []string{"nginx", "caddy"} {
-			if err := manager.proxyOperation(ctx, mode, request.Action, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent); err != nil {
+			if err := manager.proxyOperation(ctx, mode, request.Action, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent, time.Time{}); err != nil {
 				results = append(results, err)
 			}
 		}

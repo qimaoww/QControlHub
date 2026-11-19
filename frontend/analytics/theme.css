@@ -560,7 +560,7 @@ strong, b { font-weight: 600; }
 .a-node-proxies { container-type: inline-size; }
 .a-proxy-row {
   display: grid;
-  grid-template-columns: minmax(150px,1.05fr) minmax(0,2.8fr) auto;
+  grid-template-columns: minmax(150px,1.05fr) minmax(0,2.8fr) 10.75rem;
   grid-template-areas: "identity versions controls" "identity checked controls";
   align-items: start;
   gap: 8px 20px;
@@ -576,7 +576,8 @@ strong, b { font-weight: 600; }
 .a-proxy-versions > :first-child dd { font-weight: 600; }
 .a-proxy-checked { grid-area: checked; }
 .a-proxy-controls { grid-area: controls; align-self: center; }
-.a-proxy-feedback { grid-column: 1 / -1; overflow-wrap: anywhere; white-space: pre-line; }
+.a-proxy-controls .a-actions { justify-content: end; }
+.a-proxy-feedback { grid-column: 1 / -1; display: grid; justify-items: start; gap: 4px; padding-inline-start: 10px; border-inline-start: 2px solid var(--border); color: var(--soft-ink); font-size: var(--text-label); overflow-wrap: anywhere; }
 @container (max-width: 740px) {
   .a-proxy-row { grid-template-columns: minmax(0,1fr) auto; grid-template-areas: "identity controls" "versions versions" "checked checked"; row-gap: 12px; }
 }

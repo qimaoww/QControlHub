@@ -8,11 +8,12 @@ import (
 )
 
 type nodeProxyReport struct {
-	AgentID   string           `json:"agent_id"`
-	Status    string           `json:"status"`
-	Supported bool             `json:"supported"`
-	Nginx     core.ProxyStatus `json:"nginx"`
-	Caddy     core.ProxyStatus `json:"caddy"`
+	AgentID   string                              `json:"agent_id"`
+	Status    string                              `json:"status"`
+	Tasks     map[core.Action]core.ProxyTaskState `json:"tasks,omitempty"`
+	Supported bool                                `json:"supported"`
+	Nginx     core.ProxyStatus                    `json:"nginx"`
+	Caddy     core.ProxyStatus                    `json:"caddy"`
 }
 
 func (s *Server) getManagedProxies(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +27,11 @@ func (s *Server) getManagedProxies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := nodeProxyReport{AgentID: agent.ID, Status: agent.Status, Supported: slices.Contains(agent.Features, core.AgentFeatureManagedProxies), Nginx: agent.ManagedProxies["nginx"], Caddy: agent.ManagedProxies["caddy"]}
+	response.Tasks, err = s.store.ProxyTaskStates(r.Context(), agent.ID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	if response.Nginx.State == "" {
 		response.Nginx.State = "unknown"
 	}
