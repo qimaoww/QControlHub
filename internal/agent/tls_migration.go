@@ -211,7 +211,8 @@ func (m *tlsFrontendManager) restoreTLSMigration(ctx context.Context, j *tlsMigr
 	if err == nil {
 		err = m.migrationFile("deployments.json", j.Previous)
 	}
-	if err == nil && m.verifyMigration(ctx, j, j.Previous, true) {
+	verified := m.verifyMigration(ctx, j, j.Previous, true)
+	if err == nil && verified {
 		j.Result.State = "rolled_back"
 	} else if err == nil {
 		err = errors.New("original path verification incomplete")
@@ -286,6 +287,9 @@ func (m *tlsFrontendManager) migrateTLS(ctx context.Context, op *core.TLSMigrati
 	if err != nil {
 		recovery, cancel := context.WithTimeout(context.Background(), core.ManagedTLSOperationTimeout)
 		defer cancel()
+		if saveErr := m.migrationFile(migrationPending, j); saveErr != nil {
+			return saveErr
+		}
 		return m.restoreTLSMigration(recovery, &j)
 	}
 	j.Result.Code = ""

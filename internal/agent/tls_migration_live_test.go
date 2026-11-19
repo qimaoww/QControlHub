@@ -175,11 +175,24 @@ func TestTLSMigrationLiveGroup(t *testing.T) {
 	if err = os.Rename(binary, binary+".real"); err != nil {
 		t.Fatal(err)
 	}
-	wrapper := "#!/bin/sh\nif [ \"$1\" = reload ] && [ -f /run/qch-fixture-fail-reload ]; then exit 1; fi\nif [ \"$1\" = run ]; then case $(cat /run/qch-fixture-fault 2>/dev/null) in\nroute) sed 's/127.0.0.1:32002/127.0.0.1:32001/g' \"$3\" > \"$HOME/fixture.json\"; set -- run --config \"$HOME/fixture.json\";;\nport) exec /usr/bin/python3 -c 'import socket,time;s=socket.socket();s.bind((\"127.0.0.1\",443));s.listen();time.sleep(20)' ;;\nesac; fi\nexec " + binary + ".real \"$@\"\n"
+	wrapper := `#!/bin/sh
+if [ "$1" = reload ] && [ -f /run/qch-fixture-fail-reload ]; then exit 1; fi
+if [ "$1" = run ]; then
+  case $(cat /run/qch-fixture-fault 2>/dev/null) in
+    route|restore)
+      sed 's/127.0.0.1:32002/127.0.0.1:32001/g' "$3" > "$HOME/fixture.json"
+      set -- run --config "$HOME/fixture.json";;
+    port)
+      /usr/bin/python3 -c 'import socket,time;s=socket.socket();s.bind(("127.0.0.1",443));s.listen();open("/var/lib/qcontrolhub-tls/fixture.bound","w").close();time.sleep(20)' &
+      for i in $(seq 1 100); do [ -f "$HOME/fixture.bound" ] && break; sleep .01; done;;
+  esac
+fi
+exec ` + binary + `.real "$@"
+`
 	if err = os.WriteFile(binary, []byte(wrapper), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for i, fault := range []string{"route", "port", "reload", "none"} {
+	for i, fault := range []string{"route", "port", "restore", "reload", "none"} {
 		if err = os.WriteFile("/run/qch-fixture-fault", []byte(fault), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -209,6 +222,27 @@ func TestTLSMigrationLiveGroup(t *testing.T) {
 			watch()
 			run("succeeded")
 			break
+		}
+		if fault == "restore" {
+			// The existing Nginx process remains healthy. Only its next start
+			// fails, after Caddy has taken over and failed route verification.
+			path := m.nginxBinary()
+			if err = os.Rename(path, path+".real"); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			result := run("recovery_incomplete")
+			if result.Code != "rollback_failed" {
+				t.Fatal("missing recovery failure code")
+			}
+			if err = os.Rename(path+".real", path); err != nil {
+				t.Fatal(err)
+			}
+			if err = exec.Command("systemctl", "reset-failed", "qagent-tls-nginx").Run(); err != nil {
+				t.Fatal(err)
+			}
 		}
 		result := run("rolled_back")
 		if fault == "reload" {

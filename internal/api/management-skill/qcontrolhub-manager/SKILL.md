@@ -13,6 +13,8 @@ Download the management Skill from the panel's API page and extract the ZIP. Ins
 
 ## Workflow
 
+Some DSH releases filter variables containing `KEY` before starting Bash. If the helper reports a missing `QCH_API_KEY`, report that discovery succeeded and authenticated invocation is unavailable in the current command environment. The operator must provide the credential through their approved execution environment.
+
 1. Establish the user's target and authorized action from the current conversation. Existing explicit authorization persists; request confirmation only when necessary for a destructive action, naming the actual objects and consequences.
 2. Run `python3 scripts/qch.py GET /api-key` from this Skill directory. Check the effective mode, permissions, workspace, user and `endpoints`. Query `GET /openapi.json` for the current panel contract; locate the intended method/path and its `x-key-policy`, parameters and request schema. References are live: do not substitute a remembered endpoint list.
 3. Use the stable Agent ID. observed_public_ip is the connection address seen by the panel. public_ipv4 and public_ipv6 are Agent egress probes; retain unknown observation times. Use GET /agents/{id}/tls-ports/{port} for the scoped count and occupancy evidence. partial includes invisible occupancy or incomplete checks. Only observed_free carries a fresh idle-port observation. Read the authorized node, instance and resource state. Use actual IDs returned by the panel. A name, domain, path or port is not proof of identity or ownership. Disambiguate user intent if multiple resources match. Never assume the main instance. Bind every request, draft and result to the same user, node, instance and configuration.
