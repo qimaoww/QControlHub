@@ -137,8 +137,16 @@ func connectionMaskGroupsSQL(prefix, chunks string, limitArg int) string {
 	FROM totals t JOIN agents a ON a.id=t.agent_id LEFT JOIN client_connection_locations l ON l.client_ip=t.client_ip`, prefix, chunks, limitArg)
 }
 
-// A local calendar day can span 23 hours across a daylight saving change.
-func useConnectionRollups(q ClientConnectionQuery) bool { return q.Until.Sub(q.Since) >= 23*time.Hour }
+// Only a complete, closed UTC day can have a usable daily summary. Recent
+// and partial-day reads can go straight to the indexed observation window.
+func useConnectionRollups(q ClientConnectionQuery) bool {
+	start := q.Since.UTC().Truncate(24 * time.Hour)
+	if start.Before(q.Since) {
+		start = start.Add(24 * time.Hour)
+	}
+	end := start.Add(24 * time.Hour)
+	return !end.After(q.Until) && !end.After(time.Now())
+}
 
 type connectionReadRanges struct {
 	prefix, raw, saved, timeFilters string
