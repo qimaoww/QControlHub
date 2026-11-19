@@ -52,6 +52,8 @@ const (
 	WireHeartbeat                 = "heartbeat"
 	WireMetrics                   = "metrics"
 	WireTelemetryResync           = "telemetry_resync"
+	WireTLSRecoveryQuery          = "tls_recovery_query"
+	WireTLSRecoveryResult         = "tls_recovery_result"
 	WireTask                      = "task"
 	WireResult                    = "result"
 	WireResultAck                 = "result_ack"
@@ -66,6 +68,7 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
+	TLSRecovery               *TLSMigrationResult        `json:"tls_recovery,omitempty"`
 	TLSProgress               *TLSMigrationProgress      `json:"tls_progress,omitempty"`
 	Diagnostics               []DiagnosticCommand        `json:"diagnostics,omitempty"`
 	DiagnosticResult          *DiagnosticResult          `json:"diagnostic_result,omitempty"`

@@ -308,13 +308,35 @@ func (e *Executor) runTLSMigration(ctx context.Context, task core.Task) (*core.T
 	kind := e.serviceManager().Kind()
 	req := tlsFrontendRequest{Action: task.Action, Migration: op, Service: DefaultSpecsForServiceManager(kind)[core.EngineSingBox].Service, Kind: kind, Deadline: tlsOperationDeadline(ctx)}
 	err := e.runTLSFrontendRequest(ctx, req)
-	data, readErr := readConfigurationFile(filepath.Join(tlsFrontendRoot, op.ID+".result"))
-	var result core.TLSMigrationResult
-	if readErr != nil || json.Unmarshal([]byte(data), &result) != nil {
-		return nil, errors.New("migration receipt unavailable")
+	result, readErr := readTLSMigrationReceipt(op.ID)
+	if readErr != nil {
+		if _, pendingErr := os.Stat(filepath.Join(tlsFrontendRoot, migrationPending)); pendingErr == nil {
+			// A terminated helper may leave an interrupted handoff. Invoke only
+			// the normal journal recovery path; do not submit another migration.
+			recoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), core.ManagedTLSOperationTimeout)
+			defer cancel()
+			recoverReq := tlsFrontendRequest{ObserveProxies: true, Action: core.ActionStatus, Service: req.Service, Kind: kind, Deadline: tlsOperationDeadline(recoverCtx)}
+			err = e.runTLSFrontendRequest(recoverCtx, recoverReq)
+			result, readErr = readTLSMigrationReceipt(op.ID)
+		}
+	}
+	if readErr != nil {
+		return nil, readErr
 	}
 	if result.State != "succeeded" {
 		err = errors.New("migration did not complete")
 	}
-	return &result, err
+	return result, err
+}
+
+func readTLSMigrationReceipt(id string) (*core.TLSMigrationResult, error) {
+	if !migrationTaskID.MatchString(id) {
+		return nil, errors.New("invalid migration ID")
+	}
+	data, readErr := readConfigurationFile(filepath.Join(tlsFrontendRoot, id+".result"))
+	var result core.TLSMigrationResult
+	if readErr != nil || json.Unmarshal([]byte(data), &result) != nil {
+		return nil, errors.New("migration receipt unavailable")
+	}
+	return &result, nil
 }

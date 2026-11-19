@@ -321,3 +321,37 @@ func (s *Store) RecordTLSMigrationPhase(ctx context.Context, node string, p core
 	_, err := s.pool.Exec(ctx, `UPDATE tls_migrations m SET phase=$4 FROM tasks t WHERE m.task_id=t.id AND t.id=$1 AND t.agent_id=$2 AND t.lease_id=$3 AND t.status='running'`, p.TaskID, node, p.LeaseID, p.Phase)
 	return err
 }
+
+// A failed handoff remains a failed task even if its subsequent recovery
+// succeeds. Only the Agent that owns this operation can advance that evidence.
+func (s *Store) PendingTLSRecoveries(ctx context.Context, node string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT m.task_id FROM tasks t JOIN tls_migrations m ON t.id=m.task_id
+      WHERE t.agent_id=$1 AND t.status='failed' AND m.result->>'state'='recovery_incomplete'
+      AND m.result->>'step'='restore' ORDER BY t.created_at`, node)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func (s *Store) ConfirmTLSRecovery(ctx context.Context, node, id string, result *core.TLSMigrationResult) error {
+	if result == nil || result.State != "rolled_back" || result.Step != "restore" || len(result.Paths) == 0 || len(result.Paths) > 256 {
+		return ErrInvalid
+	}
+	for _, path := range result.Paths {
+		if path.Recovery != "succeeded" || !slices.Contains([]string{"unknown", "failed", "succeeded"}, path.Candidate) {
+			return ErrInvalid
+		}
+	}
+	// Preserve the original failure code and candidate observations. A late
+	// recovery may update the receipt, never an ownership or configuration row.
+	tag, err := s.pool.Exec(ctx, `UPDATE tls_migrations m SET result = m.result || jsonb_build_object('state','rolled_back','paths',$3::jsonb)
+       FROM tasks t WHERE m.task_id=t.id AND t.agent_id=$1 AND t.id=$2 AND t.status='failed'
+       AND m.result->>'state'='recovery_incomplete' AND m.result->>'step'='restore'
+       AND (SELECT jsonb_agg(p->'candidate' ORDER BY n) FROM jsonb_array_elements(m.result->'paths') WITH ORDINALITY AS old(p,n)) =
+           (SELECT jsonb_agg(p->'candidate' ORDER BY n) FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS observed(p,n))`, node, id, result.Paths)
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrConflict
+	}
+	return err
+}

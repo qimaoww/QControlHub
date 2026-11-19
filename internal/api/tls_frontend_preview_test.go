@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,41 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 	body["plan_id"] = preview.PlanID
 	body["task_id"] = "tsk_0123456789abcdef"
 	var op store.TLSMigrationOperation
+	// Use a separate operation to exercise an acknowledged, incomplete
+	// rollback followed by a later receipt on the same authenticated node.
+	retry := "tsk_0909090909090909"
+	body["task_id"] = retry
+	key.call("POST", execute, body, 202, nil)
+	partialLease, err := db.ClaimTask(ctx, node.ID)
+	if err != nil || partialLease == nil || partialLease.ID != retry {
+		t.Fatal("missing recovery test lease")
+	}
+	partial := core.TLSMigrationResult{State: "recovery_incomplete", Step: "restore", Code: "rollback_failed"}
+	for range preview.Members {
+		partial.Paths = append(partial.Paths, core.TLSRouteVerification{Candidate: "failed", Recovery: "unknown"})
+	}
+	if err = db.CompleteTask(ctx, node.ID, retry, core.TaskResultRequest{LeaseID: partialLease.LeaseID, TLSMigration: &partial}); err != nil {
+		t.Fatal(err)
+	}
+	recoveryPath := "/agents/" + node.ID + "/tls-migrations/" + retry
+	key.call("GET", recoveryPath, nil, 200, &op)
+	ids, err := db.PendingTLSRecoveries(ctx, node.ID)
+	if err != nil || len(ids) != 1 || ids[0] != retry || op.State != "recovery_incomplete" {
+		t.Fatal("missing outstanding recovery")
+	}
+	partial.State = "rolled_back"
+	for i := range partial.Paths {
+		partial.Paths[i].Recovery = "succeeded"
+	}
+	if err = db.ConfirmTLSRecovery(ctx, node.ID, retry, &partial); err != nil {
+		t.Fatal(err)
+	}
+	key.call("GET", recoveryPath, nil, 200, &op)
+	ids, err = db.PendingTLSRecoveries(ctx, node.ID)
+	if err != nil || len(ids) != 0 || op.State != "rolled_back" {
+		t.Fatal("late rollback confirmation lost")
+	}
+	body["task_id"] = "tsk_0123456789abcdef"
 	if skill != nil {
 		plan := skill("POST", path, map[string]any{"expected_instance_id": "", "expected_version": 1, "target_mode": "caddy"}, false)
 		if plan["plan_id"] != preview.PlanID {
@@ -226,6 +262,18 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 		if result.State != "succeeded" {
 			t.Fatal("runtime verification", result)
 		}
+		// Drop the first result. A fresh Agent process reads the same
+		// operation journal on reconnect; the control plane resumes its lease.
+		resumed, err := db.RunningTask(ctx, node.ID)
+		if err != nil || resumed == nil || resumed.ID != submitted.ID || resumed.LeaseID != submitted.LeaseID {
+			t.Fatal("lost disconnected operation")
+		}
+		replay := isolatedTLSLease(t, ctx, liveRunner, resumed)
+		if replay.State != result.State || !slices.Equal(result.Paths, replay.Paths) {
+			t.Fatal("resumed receipt differs")
+		}
+		t.Log("Dropped successful receipt, re-opened original lease and confirmed all three candidate paths")
+		result = *replay
 	}
 	if err = db.CompleteTask(ctx, node.ID, op.TaskID, core.TaskResultRequest{Success: true, LeaseID: submitted.LeaseID, TLSMigration: &result}); err != nil {
 		t.Fatal(err)

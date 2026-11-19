@@ -117,6 +117,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	var telemetryResyncNeeded bool
 	var inFlightTask string
 	var inFlightAction core.Action
+	var recoveryIDs []string
+	var nextRecoveryQuery time.Time
 	// Dispatch is deferred until this connection has supplied a heartbeat that
 	// was persisted. Reading the stored features before the first heartbeat
 	// could observe a stale mihomo-development-source-v1 left by a previous
@@ -419,6 +421,23 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "agent features changed during session")
 					return
 				}
+				if agentHasFeature(message.Heartbeat.Features, core.AgentFeatureTLSMigration) {
+					if !heartbeatReceived {
+						recoveryIDs, err = s.store.PendingTLSRecoveries(ctx, id)
+						if err != nil {
+							return
+						}
+					}
+					if len(recoveryIDs) > 0 && !now.Before(nextRecoveryQuery) {
+						// Check one receipt at a time, in round-robin order.
+						taskID := recoveryIDs[0]
+						recoveryIDs = append(recoveryIDs[1:], taskID)
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTLSRecoveryQuery, TaskID: taskID}); err != nil {
+							return
+						}
+						nextRecoveryQuery = now.Add(time.Minute)
+					}
+				}
 				if !heartbeatReceived {
 					heartbeatReceived = true
 					managedPublicIPProbe = reportedManagedPublicIPProbe
@@ -549,6 +568,11 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCoreLogsAck, BatchID: message.CoreLogs.ID}); err != nil {
 					return
 				}
+			case core.WireTLSRecoveryResult:
+				if !slices.Contains(recoveryIDs, message.TaskID) || s.store.ConfirmTLSRecovery(ctx, id, message.TaskID, message.TLSRecovery) != nil {
+					return
+				}
+				recoveryIDs = slices.DeleteFunc(recoveryIDs, func(id string) bool { return id == message.TaskID })
 			case "tls-progress":
 				if message.TLSProgress == nil || message.TLSProgress.TaskID != inFlightTask || s.store.RecordTLSMigrationPhase(ctx, id, *message.TLSProgress) != nil {
 					return
@@ -569,6 +593,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Warn("store task result", "agent_id", id, "task_id", message.Result.TaskID, "error", err)
 					_ = connection.Close(websocket.StatusPolicyViolation, "task result rejected")
 					return
+				}
+				if r := message.Result.Result.TLSMigration; inFlightAction == core.ActionMigrateTLS && r != nil && r.State == "recovery_incomplete" && r.Step == "restore" && !slices.Contains(recoveryIDs, message.Result.TaskID) {
+					recoveryIDs = append(recoveryIDs, message.Result.TaskID)
 				}
 				if message.Result.Result.Success && (inFlightAction == core.ActionDeploy || inFlightAction == core.ActionImportExisting) {
 					s.refreshAgentTrafficPolicies(id)

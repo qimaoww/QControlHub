@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gorilla/websocket"
 	"io"
 	"net"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"go.yaml.in/yaml/v4"
@@ -192,7 +192,7 @@ exec ` + binary + `.real "$@"
 	if err = os.WriteFile(binary, []byte(wrapper), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for i, fault := range []string{"route", "port", "restore", "reload", "none"} {
+	for i, fault := range []string{"route", "port", "restore", "crash", "reload", "none"} {
 		if err = os.WriteFile("/run/qch-fixture-fault", []byte(fault), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -214,6 +214,37 @@ exec ` + binary + `.real "$@"
 			}
 			if err = os.WriteFile("/run/qch-fixture-fail-reload", nil, 0644); err != nil {
 				t.Fatal(err)
+			}
+		}
+		if fault == "crash" {
+			// Run the same privileged executable in a separate process and kill
+			// it after listener handoff, before a durable result exists.
+			request := tlsFrontendRequest{Action: core.ActionMigrateTLS, Migration: &op, Service: DefaultSpecs()[core.EngineSingBox].Service, Kind: ServiceManagerSystemd, Deadline: tlsOperationDeadline(ctx)}
+			name, err := writeTLSFrontendRequest(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(filepath.Join(tlsFrontendRequests, name))
+			helper := exec.CommandContext(ctx, "/usr/local/bin/qagent", "manage-tls", name)
+			if err = helper.Start(); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(12 * time.Second)
+			phasePath := filepath.Join(m.root, op.ID+".phase")
+			for time.Now().Before(deadline) {
+				if phase, _ := os.ReadFile(phasePath); string(phase) == `"verifying"` {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			phase, _ := os.ReadFile(phasePath)
+			killErr := helper.Process.Kill()
+			_ = helper.Wait()
+			if string(phase) != `"verifying"` || killErr != nil {
+				t.Fatal("failed to interrupt the live verification phase")
+			}
+			if _, err := os.Stat(filepath.Join(m.root, op.ID+".result")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("unexpected receipt after helper termination")
 			}
 		}
 		if fault == "none" {

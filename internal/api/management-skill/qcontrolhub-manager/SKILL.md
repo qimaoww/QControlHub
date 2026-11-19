@@ -5,7 +5,7 @@ description: Manage QControlHub nodes, instances, configurations, tasks, certifi
 
 # QControlHub management
 
-Use only the panel and API Key injected as `QCH_API_BASE` (including `/api/v1`) and `QCH_API_KEY`. Never ask the user to paste a credential into chat or include it in commands, reports or generated files. This skill requires Python 3 and network access to that panel.
+Use only the panel and API Key injected as `QCH_API_BASE` (including `/api/v1`) and `QCH_API_KEY`. Never ask the user to paste a credential into chat or include it in commands, reports or generated files. This skill requires Python 3.9 or newer and network access to that panel.
 
 ## Install and load
 
@@ -74,7 +74,7 @@ if [ "$(printf '%s' "$op" | jq -r .state)" != unchanged ]; then
 fi
 ```
 
-The plan and result arrays use the same member order. Match a route by its config ID, engine and SHA-256 of its UTF-8 path. Each result records candidate and recovery evidence. A recovered original deployment reports `rolled_back`. For `recovery_incomplete`, report the step and affected members to the operator. Existing sessions can disconnect during listener handoff. An older Agent has to advertise `tls-port-migration-v1` before execution. The legacy save/validate and save/deploy endpoints keep their previous behavior.
+The plan and result arrays use the same member order. Match a route by its config ID, engine and SHA-256 of its UTF-8 path. Each result records candidate and recovery evidence. A recovered original deployment reports `rolled_back`. For `recovery_incomplete`, report the step and affected members to the operator. Query the same task ID after repair. The panel refreshes recovery evidence from the node on reconnect and subsequent heartbeats. Existing sessions can disconnect during listener handoff. An older Agent has to advertise `tls-port-migration-v1` before execution. The legacy save/validate and save/deploy endpoints keep their previous behavior.
 
 ## Node Nginx and Caddy
 
