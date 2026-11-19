@@ -9,16 +9,30 @@ Use only the panel and API Key injected as `QCH_API_BASE` (including `/api/v1`) 
 
 ## Install and load
 
-Download the management Skill from the panel's API page and extract the ZIP. Install the `qcontrolhub-manager` directory into your client's skill directory (for Codex: `~/.agents/skills/`), then reload skills or start a new chat. Invoke `$qcontrolhub-manager`, or ask your skill-capable client to manage QControlHub. Other clients must support loading `SKILL.md` and running the Python helper; adapt only the install location. Configure the two environment variables in the client's secure runtime, never in this directory. Example panel URL: `https://panel.example.com/api/v1`.
+Download the management Skill from the panel's API page and extract the ZIP. Install the `qcontrolhub-manager` directory into your client's skill directory (for Codex: `~/.agents/skills/`), then reload skills or start a new chat. Invoke `$qcontrolhub-manager`, or ask your skill-capable client to manage QControlHub. For project-local DSH installation use the discovered project root's .dsh/skills/. An empty parent .git can change that root. Check the client's skill listing, then start a fresh session, invoke the skill and verify GET /api-key. Report extraction, discovery and the authorized read separately. Other clients must support loading `SKILL.md` and running the Python helper; adapt only the install location. Configure the two environment variables in the client's secure runtime, never in this directory. Example panel URL: `https://panel.example.com/api/v1`.
 
 ## Workflow
 
 1. Establish the user's target and authorized action from the current conversation. Existing explicit authorization persists; request confirmation only when necessary for a destructive action, naming the actual objects and consequences.
 2. Run `python3 scripts/qch.py GET /api-key` from this Skill directory. Check the effective mode, permissions, workspace, user and `endpoints`. Query `GET /openapi.json` for the current panel contract; locate the intended method/path and its `x-key-policy`, parameters and request schema. References are live: do not substitute a remembered endpoint list.
-3. Read the authorized node, instance and resource state. Use actual IDs returned by the panel. A name, domain, path or port is not proof of identity or ownership. Disambiguate user intent if multiple resources match. Never assume the main instance. Bind every request, draft and result to the same user, node, instance and configuration.
-4. Execute only the intended operation using the documented fields and current concurrency token. Save JSON bodies to a private temporary file and pass `--body-file PATH`. Unchanged redacted configuration values can be retained only in their original location using the current version. Omitted, null and empty values have different meanings; consult the contract. Write access does not imply access to secrets.
-5. Query the actual result. A task receipt or HTTP 202 is not completion. Query the task or resource identified by the response until terminal state, up to 30 reads spaced at least two seconds apart; stop early on permission loss, target invalidation or user cancellation. At that bound report the still-pending state and IDs. Never report success from acceptance alone.
+3. Use the stable Agent ID. observed_public_ip is the connection address seen by the panel. public_ipv4 and public_ipv6 are Agent egress probes; retain unknown observation times. Empty visible inbounds on a shared node do not establish a free port. Read the authorized node, instance and resource state. Use actual IDs returned by the panel. A name, domain, path or port is not proof of identity or ownership. Disambiguate user intent if multiple resources match. Never assume the main instance. Bind every request, draft and result to the same user, node, instance and configuration.
+4. Execute only the intended operation using the documented fields and current concurrency token. Supply JSON via `--stdin` (up to 16 MiB). Alternatively pass one `--body-file PATH`. Empty or invalid JSON fails before submission. Only full content edits can preserve unchanged redacted values in their original positions at the current version. Never put credential placeholders in structured input. Omitted, null and empty values have different meanings; consult the contract. Write access does not imply access to secrets.
+5. Query the actual result. A task receipt or HTTP 202 is not completion. Use `GET /tasks/tsk_… --wait --budget 60` to poll the original task. The budget is in seconds and includes network time. Report the last observed phase and task ID on expiry. Never report success from acceptance alone.
 6. Report the action, actual target IDs and observed result. Include a request ID for failures if available. Remove private request-body files and do not retain credentials or sensitive responses in logs.
+
+Use only the two variables supplied to the current process. If either is missing, report its name. Reload the shell only as directed by the user. Never search shell configuration, environment snapshots or credential files. Obtain explicit permission for the specific field, purpose and scope before reading a sensitive value.
+
+## TLS frontend preview
+
+Set the following identifiers from the authorized workspace. Use an empty string for the main instance. Use the assigned share ID for a shared instance. Preview runs without `secrets.read`.
+
+```sh
+python3 scripts/qch.py POST "/agents/$AGENT/configs/$ENGINE/server-inbounds/$TAG/tls-frontend/preview" --stdin <<'JSON'
+{"expected_version":1,"expected_instance_id":"","target_mode":"caddy"}
+JSON
+```
+
+Use a URL-encoded tag and the current saved version. Review each member's source and target mode, blockers and remaining Agent checks. The preview creates no revision or task. The existing server-inbounds intents both persist a revision and queue work. Validate checks the saved candidate. Deploy attempts to activate it. Query the task ID and applied revision before reporting completion. Keep credentials, configuration bodies and diagnostic logs out of output.
 
 ## Node Nginx and Caddy
 
@@ -34,7 +48,7 @@ An endpoint grant never authorizes every resource. Respect current user scope, r
 
 - 401: stop; the credential may be invalid, disabled, expired, revoked or its creator unavailable. Ask the user to fix the configured credential without revealing it.
 - 403: stop that operation and report the denied mode, permission, source or resource boundary from the response. Do not try alternate identities or endpoints to evade it.
-- 429: honor `Retry-After` within 30 seconds; the helper retries safe GETs at most twice. Do not repeatedly submit writes.
+- 429: honor both HTTP-date and seconds in `Retry-After` within the remaining budget; the helper retries safe GETs at most twice. Do not repeatedly submit writes.
 - 409: reload the target, preserve the user's intended edit, check whether the requested effect already happened, and ask only if resolving changed state requires a new decision. Never overwrite concurrency tokens blindly.
 - Timeout, disconnect or missing response after a write: the result is uncertain. Query existing tasks/resources/audit within the authorized scope before deciding whether another submission is safe. The helper never retries writes automatically.
 - 400/404: correct the actual input or target; never guess other owners' IDs. Other failures: retain the request ID, limit read retries and report what remains unverified.

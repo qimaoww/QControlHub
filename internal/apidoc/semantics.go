@@ -11,6 +11,9 @@ import (
 // exclusively from registrations and the capability registry.
 func (g *generator) annotateField(name string, field object) {
 	switch name {
+	case "tls_mode":
+		field["enum"] = []string{"", "native", "nginx", "caddy", "external"}
+		field["description"] = "空或 native 使用原生配置。Xray/Mihomo 独立 VLESS XHTTP TLS 支持 native、nginx、caddy。sing-box TLS WebSocket/HTTPUpgrade 支持托管或 external，HTTP/H2 托管仅 Caddy。托管后端绑定 127.0.0.1，不支持 REALITY；external 自行管理证书。面板证书按引用授权。"
 	case "proxy_ingresses":
 		field["description"] = "按 Nginx/Caddy 类型共享反代，每种类型一项，使用 scope=type 且不填写 port。省略/null 保留，空数组撤销；旧 mode+port 请求按类型归并。代次及升级兼容凭据由服务端生成，客户端值不授予执行权限。新增授权要求 shared-proxy-ingress-v2 Agent。"
 	case "page_size":
@@ -118,6 +121,23 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		}
 		var required []string
 		switch handler {
+		case "previewTLSFrontend":
+			fields := copySchema["properties"].(object)
+			fields["target_mode"] = object{"type": "string", "enum": []string{"nginx", "caddy"}}
+			fields["expected_instance_id"] = object{"type": "string", "description": "必填，主实例为空字符串，共享实例为实际 shr_ ID。省略和 null 均拒绝。"}
+			media["example"] = object{"expected_version": 1, "expected_instance_id": "", "target_mode": "caddy"}
+			required = []string{"target_mode", "expected_version", "expected_instance_id"}
+		case "saveServerInbound":
+			fields := copySchema["properties"].(object)
+			fields["operation"] = object{"type": "string", "enum": []string{"add", "modify", "delete"}}
+			fields["intent"] = object{"type": "string", "enum": []string{"validate", "deploy"}, "description": "两种操作均保存配置、创建版本和任务。validate 校验候选，deploy 校验并尝试部署。"}
+			fields["expected_version"] = object{"type": "integer", "minimum": 0, "description": "首次创建为 0。已有配置中新增、修改或删除均提交当前保存版本，过期返回 409。"}
+			fields["expected_instance_id"] = object{"type": []string{"string", "null"}, "description": "空字符串校验主实例，shr_ ID 校验共享实例。旧接口省略或 null 时按授权隐式选择。显式 ID 不匹配返回 409。"}
+			fields["original_tag"].(object)["description"] = "modify 和 delete 提供当前唯一的目标标识；add 省略或为空。"
+			fields["fragment"].(object)["description"] = "仅 modify 允许。原生片段替换，要求 original_tag，不与预设 input 同时提交。"
+			fields["input"].(object)["description"] = "add 或结构化 modify 使用完整预设输入；凭据必须通过协议校验。"
+			media["example"] = object{"operation": "delete", "expected_instance_id": "", "expected_version": 1, "original_tag": "retired-listener", "intent": "validate"}
+			required = []string{"operation", "intent", "expected_version"}
 		case "putPageSize":
 			copySchema["properties"].(object)["revision"] = object{"type": "integer", "minimum": 0}
 			required = []string{"page_size", "revision"}
@@ -181,7 +201,12 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["description"] = "Key 只能编辑非管理员且非创建者账户的显示名称、收缩权限或停用；保留权限不能超过 Key 当前范围。增加账户权限、重新启用及身份/凭据操作需要会话，以防通过替代账号扩大能力。账户创建、删除、清理也需要会话。"
 	case "putAgentSharing", "putUserAgentAccess":
 		op["description"] = "Key 转授权仅允许创建者所有的节点，不能借管理员角色转授他人节点；用户授权不能操作管理员或创建者。批量与旧授权逐项复核。"
-	case "saveServerInbound", "saveManagedOutbound", "saveConfigField", "savePresetSource":
+	case "previewTLSFrontend":
+		op["summary"] = "预览同一节点公网端口的 TLS 前端变更"
+		op["description"] = "按唯一入站定位公网端口。只读返回可见成员的当前及目标模式、保存与部署版本、阻碍和待执行阶段核验项。无保存、签发、安装或服务变更。"
+	case "saveServerInbound":
+		op["description"] = "add 创建入站，modify 编辑现有入站，delete 删除入站。validate 和 deploy 均保存配置并受理异步任务。按 task.id 查询 /tasks/{id}，终态与已部署版本需分别核对。"
+	case "saveManagedOutbound", "saveConfigField", "savePresetSource":
 		op["description"] = "保存当前授权工作区配置，必要时同时受理异步任务；按返回配置和任务 ID 查询结果。snapshot 引用还要求 tasks.read，不能引用他人配置/证书。"
 	}
 	response := op["responses"].(object)

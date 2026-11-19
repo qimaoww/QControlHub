@@ -406,7 +406,9 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 	}
 	if body, ok := op["requestBody"].(object); ok {
 		media := body["content"].(object)["application/json"].(object)
-		media["example"] = g.example(media["schema"].(object), 0)
+		if _, provided := media["example"]; !provided {
+			media["example"] = g.example(media["schema"].(object), 0)
+		}
 	}
 
 	if path == "/api/v1/tasks" && method == "post" {

@@ -99,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace/snapshots/{snapshot}", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigRead, core.PermissionTasksRead}, http.HandlerFunc(s.agentConfigWorkspace)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/state", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigState)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/preview", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.previewTLSFrontend)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.saveServerInbound)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getInboundSource)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getConfigField)))

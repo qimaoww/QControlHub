@@ -24,8 +24,8 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 	if err != nil {
 		t.Skip("Python 3 is required for the distributed Skill transport")
 	}
-	_, ctx, admin, _, _ := newConfigScopeAPIFixture(t)
-	_, created := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionConfigsRead, core.PermissionConfigsWrite})
+	_, ctx, admin, _, other := newConfigScopeAPIFixture(t)
+	_, created := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionPreferencesRead, core.PermissionPreferencesWrite})
 	data := admin.call("GET", "/management-skill", nil, 200, nil)
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -56,27 +56,28 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 	root := filepath.Join(installed, "qcontrolhub-manager")
 	manifest, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
 	if err != nil || !bytes.HasPrefix(manifest, []byte("---\nname: qcontrolhub-manager\ndescription:")) {
-		t.Fatal("Skill cannot be discovered")
+		t.Fatal("distributed Skill manifest is invalid")
 	}
 	server := httptest.NewServer(admin.handler)
 	defer server.Close()
 	run := func(base, method, path string, body any, wantSuccess bool) []byte {
 		t.Helper()
 		args := []string{filepath.Join(root, "scripts/qch.py"), method, path}
+		var input []byte
 		if body != nil {
-			raw, _ := json.Marshal(body)
-			file := filepath.Join(installed, "input.json")
-			if err = os.WriteFile(file, raw, 0600); err != nil {
-				t.Fatal(err)
+			input, err = json.Marshal(body)
+			if err != nil {
+				t.Fatal("invalid test request")
 			}
-			args = append(args, "--body-file", file)
+			args = append(args, "--stdin")
 		}
 		command := exec.CommandContext(ctx, python, args...)
+		command.Stdin = bytes.NewReader(input)
 		command.Dir = root
 		command.Env = append(os.Environ(), "QCH_API_BASE="+base, "QCH_API_KEY="+created.Secret)
 		output, err := command.CombinedOutput()
 		if (err == nil) != wantSuccess {
-			t.Fatalf("%s %s success=%v: %s", method, path, err == nil, output)
+			t.Fatalf("unexpected transport result for %s %s (success=%t)", method, path, err == nil)
 		}
 		if bytes.Contains(output, []byte(created.Secret)) {
 			t.Fatal("transport exposed credential")
@@ -95,11 +96,27 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 	if err = json.Unmarshal(raw, &config); err != nil {
 		t.Fatal(err)
 	}
-	config.Name = "Skill saved"
-	config.Content = strings.ReplaceAll(config.Content, "21551", "21552")
-	run(server.URL+"/api/v1", "PUT", "/configs/"+config.ID, config, true)
-	if raw = run(server.URL+"/api/v1", "GET", "/configs/"+config.ID+"/revisions/2", nil, true); !bytes.Contains(raw, []byte("21552")) || bytes.Contains(raw, []byte("private-test")) {
-		t.Fatal("saved result/redaction not confirmed")
+	if config.Content != "" {
+		t.Fatal("config body exposed by default")
+	}
+	run(server.URL+"/api/v1", "PUT", "/configs/"+config.ID, map[string]any{"name": "Skill saved", "engine": config.Engine, "version": config.Version, "content": "mixed-port: 21552\nsecret: '[redacted]'\n"}, true)
+	raw = run(server.URL+"/api/v1", "GET", "/configs/"+config.ID+"/revisions/2", nil, true)
+	if bytes.Contains(raw, []byte("21552")) || bytes.Contains(raw, []byte("private-test")) {
+		t.Fatal("revision content leaked")
+	}
+	var actual core.Config
+	admin.call("GET", "/configs/"+config.ID+"/revisions/2", nil, 200, &actual)
+	if !strings.Contains(actual.Content, "21552") {
+		t.Fatal("saved revision not confirmed")
+	}
+	patch := map[string]any{"revision": 0, "values": map[string]any{"shell": map[string]bool{"collapsed": true}}}
+	run(server.URL+"/api/v1", "PATCH", "/preferences/ui", patch, true)
+	raw = run(server.URL+"/api/v1", "GET", "/preferences/ui", nil, true)
+	if !bytes.Contains(raw, []byte(`"collapsed": true`)) {
+		t.Fatal("account preference not confirmed")
+	}
+	if bytes.Contains(other.call("GET", "/preferences/ui", nil, 200, nil), []byte("collapsed")) {
+		t.Fatal("preference crossed accounts")
 	}
 	if raw = run(server.URL+"/api/v1", "POST", "/users", map[string]any{}, false); !bytes.Contains(raw, []byte(`"status": 403`)) {
 		t.Fatal("transport did not report denial")
