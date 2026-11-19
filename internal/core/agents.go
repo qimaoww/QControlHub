@@ -51,6 +51,8 @@ type SharedInstanceRuntime struct {
 }
 
 type Agent struct {
+	ObservedPublicIPAt         *time.Time                      `json:"observed_public_ip_at,omitempty"`
+	ObservedPublicIPChangedAt  *time.Time                      `json:"observed_public_ip_changed_at,omitempty"`
 	ManagedProxies             map[string]ProxyStatus          `json:"managed_proxies,omitempty"`
 	ID                         string                          `json:"id"`
 	OwnerID                    string                          `json:"-"`

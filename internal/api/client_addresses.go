@@ -251,7 +251,9 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 				family = "IPv4"
 			}
 			source := "Agent 本地直连探测 · " + family
-			if probed.provenance == core.PublicIPProbeSourceControlPlane {
+			if probed.provenance == "" {
+				source = "Agent 探测（来源未知） · " + family
+			} else if probed.provenance == core.PublicIPProbeSourceControlPlane {
 				source = "控制面配置的 Agent 直连探测 · " + family
 			}
 			result = append(result, clientAddressCandidate{address: address, source: source, family: clientAddressFamily(address)})

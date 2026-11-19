@@ -25,8 +25,12 @@ func TestAPIContractMatchesSourceAndEveryKeyPolicy(t *testing.T) {
 	}
 	var document struct {
 		Paths map[string]map[string]struct {
-			Key    bool `json:"x-api-key"`
-			Policy struct {
+			ID        string                     `json:"operationId"`
+			Auth      string                     `json:"x-authentication"`
+			Security  []map[string][]string      `json:"security"`
+			Responses map[string]json.RawMessage `json:"responses"`
+			Key       bool                       `json:"x-api-key"`
+			Policy    struct {
 				Write       bool              `json:"write"`
 				Any         bool              `json:"any"`
 				Permissions []core.Permission `json:"permissions"`
@@ -44,10 +48,25 @@ func TestAPIContractMatchesSourceAndEveryKeyPolicy(t *testing.T) {
 	if err = json.Unmarshal(shipped, &document); err != nil {
 		t.Fatal(err)
 	}
+	ids := map[string]string{}
 	seen := map[string]bool{}
 	for path, methods := range document.Paths {
 		for method, operation := range methods {
 			pattern := strings.ToUpper(method) + " " + path
+			if operation.ID == "" || ids[operation.ID] != "" {
+				t.Fatalf("missing or duplicate operationId for %s (previous %s)", pattern, ids[operation.ID])
+			}
+			ids[operation.ID] = pattern
+			if path == "/api/v1/api-key" {
+				if len(operation.Security) != 1 || operation.Security[0]["apiKey"] == nil || operation.Auth != "api_key" {
+					t.Fatal("self-inspection requires a delegated Key")
+				}
+			}
+			for responseCode, raw := range operation.Responses {
+				if responseCode == "204" && bytes.Contains(raw, []byte(`"content"`)) {
+					t.Fatalf("204 response documents a body for %s", pattern)
+				}
+			}
 			policy, exists := apiKeyPolicies[pattern]
 			if operation.Key != exists {
 				t.Fatalf("route/Key policy mismatch: %s", pattern)

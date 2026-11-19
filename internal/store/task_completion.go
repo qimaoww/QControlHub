@@ -166,6 +166,17 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			configID, configVersion = importedID, importedVersion
 		}
 	}
+	if action == core.ActionMigrateTLS {
+		success, e := s.finishTLSMigrationTx(ctx, tx, agentID, taskID, result.TLSMigration, result.Success)
+		if e != nil {
+			return e
+		}
+		if !success {
+			status = core.TaskFailed
+		}
+		result.Output = ""
+		result.Error = ""
+	}
 	storedContent := ""
 	storedOutput := truncate(core.DiagnosticText(result.Output), 64<<10)
 	storedError := truncate(core.DiagnosticText(result.Error), 8<<10)

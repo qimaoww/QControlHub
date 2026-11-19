@@ -112,6 +112,14 @@ func Generate(root string) ([]byte, error) {
 			return true
 		})
 	}
+	g.schemas["APIError"] = object{"type": "object", "required": []string{"error"}, "properties": object{
+		"error": object{"type": "string"}, "detail": object{"type": "string"}, "request_id": object{"type": "string"},
+		"code":   object{"type": "string", "description": "稳定错误类别，例如 invalid_input、permission_denied、port_conflict、rate_limited。"},
+		"reason": object{"type": "string", "description": "业务原因，例如 stale_plan、stale_version、proxy_type_conflict。"},
+		"field":  object{"type": "string"}, "port": object{"type": "integer"}, "recovery_engine": object{"type": "string"}, "stage": object{"type": "string"},
+		"failure_retention": object{"type": "string", "enum": []string{"not_required", "saved", "failed"}},
+		"failure_task_id":   object{"type": "string"}, "failure_saved": object{"type": "boolean"},
+	}}
 	document := object{"openapi": "3.1.0", "info": object{"title": "QControlHub API", "version": "v1", "description": "正式业务 API。有效范围取 Key 模式、显式权限、创建者当前权限、接口策略和资源授权的交集。"}, "servers": []any{object{"url": "/"}}, "paths": paths, "components": object{"schemas": g.schemas, "responses": commonResponses(), "securitySchemes": object{"apiKey": object{"type": "http", "scheme": "bearer", "bearerFormat": "qch_key_*"}, "environmentToken": object{"type": "http", "scheme": "bearer", "description": "环境凭据；独立于委托 API Key，不能自动替换使用。"}, "session": object{"type": "apiKey", "in": "cookie", "name": "qcontrolhub_api_session_dev", "description": "浏览器会话；写操作还需 X-QControlHub-CSRF，HTTPS Cookie 为 __Host-qcontrolhub_api_session；开发 HTTP 为 qcontrolhub_api_session_dev。"}, "agentSignature": object{"type": "apiKey", "in": "header", "name": "X-QControlHub-Signature", "description": "Agent ID、时间戳、nonce 及 Ed25519 请求签名；Key 无法替代。"}}}}
 	b, err := json.MarshalIndent(document, "", "  ")
 	return append(b, '\n'), err
@@ -397,7 +405,7 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 			if content, ok := r["content"].(object); ok {
 				for _, rawMedia := range content {
 					media := rawMedia.(object)
-					if schema, ok := media["schema"].(object); ok {
+					if schema, ok := media["schema"].(object); ok && media["example"] == nil && handler != "downloadManagementSkill" && handler != "getAPIContract" {
 						media["example"] = g.example(schema, 0)
 					}
 				}
@@ -406,7 +414,9 @@ func (g *generator) addRoute(paths object, pattern string, expr ast.Expr, polici
 	}
 	if body, ok := op["requestBody"].(object); ok {
 		media := body["content"].(object)["application/json"].(object)
-		media["example"] = g.example(media["schema"].(object), 0)
+		if _, provided := media["example"]; !provided {
+			media["example"] = g.example(media["schema"].(object), 0)
+		}
 	}
 
 	if path == "/api/v1/tasks" && method == "post" {
@@ -653,7 +663,11 @@ func (g *generator) named(name string) object {
 func commonResponses() object {
 	result := object{}
 	for status, description := range map[string]string{"400": "参数或业务校验失败", "401": "凭据无效、停用、到期、撤销或创建者失效", "403": "模式、权限、来源或资源授权拒绝", "404": "资源不存在或不可见", "409": "并发变更或状态冲突；重新读取并保留草稿", "429": "限流；按 Retry-After 有限等待", "500": "内部错误；记录 X-Request-ID 或 request_id"} {
-		result["error"+status] = object{"description": description, "content": object{"application/json": object{"schema": object{"type": "object", "required": []string{"error"}, "properties": object{"error": object{"type": "string"}, "request_id": object{"type": "string"}, "code": object{"type": "string"}, "stage": object{"type": "string"}, "failure_retention": object{"type": "string", "enum": []string{"not_required", "saved", "failed"}}}}, "example": object{"error": description, "request_id": "req_example"}}}}
+		headers := object{"X-Request-ID": object{"description": "面板生成的排错标识，可与 JSON 的 request_id 核对。", "schema": object{"type": "string"}}}
+		if status == "429" {
+			headers["Retry-After"] = object{"description": "认证或注册限流的剩余等待秒数，向上取整。其他繁忙响应可能省略。", "schema": object{"type": "integer", "minimum": 1}}
+		}
+		result["error"+status] = object{"description": description, "headers": headers, "content": object{"application/json": object{"schema": object{"$ref": "#/components/schemas/APIError"}, "example": object{"error": description, "request_id": "req_0123456789abcdef"}}}}
 	}
 	return result
 }

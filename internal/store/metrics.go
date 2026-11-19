@@ -32,10 +32,12 @@ func applyPublicIPProbeTrust(metrics *core.HostMetrics, trust PublicIPProbeTrust
 	if strings.TrimSpace(metrics.PublicIPv4Source) == core.PublicIPProbeSourceControlPlane && !trust.ControlPlaneIPv4 {
 		metrics.PublicIPv4 = ""
 		metrics.PublicIPv4Source = ""
+		metrics.PublicIPv4ObservedAt, metrics.PublicIPv4ChangedAt = time.Time{}, time.Time{}
 	}
 	if strings.TrimSpace(metrics.PublicIPv6Source) == core.PublicIPProbeSourceControlPlane && !trust.ControlPlaneIPv6 {
 		metrics.PublicIPv6 = ""
 		metrics.PublicIPv6Source = ""
+		metrics.PublicIPv6ObservedAt, metrics.PublicIPv6ChangedAt = time.Time{}, time.Time{}
 	}
 }
 
@@ -151,13 +153,7 @@ func validateProbedPublicAddress(value, source *string, wantIPv4 bool) error {
 		return nil
 	}
 	*source = strings.TrimSpace(*source)
-	// v1 Agents predate the source field; their opt-in endpoints were always
-	// local Agent configuration, so the provenance can be reconstructed without
-	// inventing a different trust anchor.
-	if *source == "" {
-		*source = core.PublicIPProbeSourceAgent
-	}
-	if *source != core.PublicIPProbeSourceAgent && *source != core.PublicIPProbeSourceControlPlane {
+	if *source != "" && *source != core.PublicIPProbeSourceAgent && *source != core.PublicIPProbeSourceControlPlane {
 		return errors.New("agent reported an invalid public IP probe source")
 	}
 	normalized := authn.NormalizePublicIP(*value)

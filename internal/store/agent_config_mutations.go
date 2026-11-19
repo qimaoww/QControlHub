@@ -126,6 +126,9 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 		}
 		return core.Config{}, err
 	}
+	if err := rejectPendingTLSMigration(ctx, tx, input.AgentID); err != nil {
+		return core.Config{}, err
+	}
 	var capabilities []core.Engine
 	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
 		return core.Config{}, err

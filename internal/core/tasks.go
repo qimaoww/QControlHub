@@ -46,7 +46,7 @@ const (
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionCheckNginx, ActionUpdateNginx, ActionCheckCaddy, ActionUpdateCaddy, ActionNetworkDiagnostic, ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
+	case ActionMigrateTLS, ActionCheckNginx, ActionUpdateNginx, ActionCheckCaddy, ActionUpdateCaddy, ActionNetworkDiagnostic, ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
 		return true
 	default:
 		return false
@@ -58,7 +58,7 @@ func (a Action) SystemBBR() bool {
 }
 
 func (a Action) AgentLevel() bool {
-	return a.ProxyComponent() != "" || a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality || a == ActionNetworkDiagnostic
+	return a == ActionMigrateTLS || a.ProxyComponent() != "" || a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality || a == ActionNetworkDiagnostic
 }
 
 func (a Action) RequiresAgentManagement() bool {
@@ -95,6 +95,7 @@ const (
 )
 
 type Task struct {
+	TLSMigration           *TLSMigration           `json:"tls_migration,omitempty"`
 	SubmissionID           string                  `json:"submission_id,omitempty"`
 	ExistingSourceID       string                  `json:"existing_source_id,omitempty"`
 	ImportSourceDigest     string                  `json:"import_source_digest,omitempty"`
@@ -156,6 +157,7 @@ type ImportDependency struct {
 }
 
 type TaskResultRequest struct {
+	TLSMigration       *TLSMigrationResult   `json:"tls_migration,omitempty"`
 	ImportDependencies []ImportDependency    `json:"import_dependencies,omitempty"`
 	ImportSourceDigest string                `json:"import_source_digest,omitempty"`
 	ExecutedAttempt    int                   `json:"executed_attempt,omitempty"`

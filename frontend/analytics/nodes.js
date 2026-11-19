@@ -536,7 +536,30 @@ export async function nodesPage(ctx) {
     const proxies = agent.can_manage !== false && nodeProxyManager(ctx, agent,
       () => ctx.current() && box.open && settingsScope() === openedScope && agents.includes(agent), () => box.close());
     if (proxies) settingsUpdates.push(proxies.render);
-    const nodePanel = stack(nodeForm || details, allocation, proxies?.element, operations);
+    let occupancy;
+    if (ctx.can('agent-config.read')) {
+      const portField = field('公网 TCP 端口', 'tls_public_port', '443', { type: 'number', min: 1, max: 65535, required: true });
+      const result = node('div', { role: 'status', 'aria-live': 'polite' });
+      const input = portField.querySelector('input');
+      const query = button('查询占用', async () => {
+        if (!input.reportValidity()) return;
+        const port = input.valueAsNumber;
+        query.disabled = true;
+        result.textContent = '正在查询';
+        try {
+          const data = await ctx.api(`${base}/tls-ports/${port}`);
+          if (!box.open || !ctx.current() || settingsScope() !== openedScope) return;
+          const states = { partial: '部分占用不可见或检查不完整', visible_in_use: '当前可见实例占用', observed_free: '最近监听观测确认空闲', unconfirmed: '缺少可确认空闲的监听观测' };
+          result.textContent = `${port} · 可见 TLS 路径 ${data.visible_routes} 条 · ${states[data.state] || '证据不足'}`;
+        } catch (error) {
+          if (box.open && ctx.current()) result.textContent = '端口占用查询失败';
+        } finally {
+          query.disabled = false;
+        }
+      });
+      occupancy = section('TLS 端口占用', node('div', { className: 'a-card-body a-stack' }, portField, actions(query), result));
+    }
+    const nodePanel = stack(nodeForm || details, allocation, proxies?.element, occupancy, operations);
     nodePanel.dataset.settingsPanel = 'node'; nodePanel.setAttribute('role', 'region'); nodePanel.setAttribute('aria-label', '节点设置');
     let activePanel = 'node';
     const scrollPositions = { node: 0, core: 0 };

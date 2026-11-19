@@ -678,6 +678,14 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
 				}
 				continue
+			case core.WireTLSRecoveryQuery:
+				receipt, err := readTLSMigrationReceipt(message.TaskID)
+				if err == nil && receipt.State == "rolled_back" {
+					if err := outbox.EnqueueHigh(sessionContext, core.WireMessage{Type: core.WireTLSRecoveryResult, TaskID: message.TaskID, TLSRecovery: receipt}); err != nil {
+						return err
+					}
+				}
+				continue
 			case core.WireTelemetryResync:
 				telemetryBaseline.Invalidate()
 				continue

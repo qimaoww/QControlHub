@@ -97,8 +97,8 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 		}
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
-		if !s.adminLimiter.Allow(key, now) {
-			writeError(w, http.StatusTooManyRequests, "too many authentication failures")
+		if delay := s.adminLimiter.RetryAfter(key, now); delay > 0 {
+			writeRateLimitError(w, delay, "too many authentication failures")
 			return
 		}
 		role, ok := s.sessionRole(request)
@@ -218,8 +218,8 @@ func (s *Server) agent(next http.Handler) http.Handler {
 			key += ":" + id
 		}
 		now := time.Now().UTC()
-		if !s.agentLimiter.Allow(key, now) {
-			writeError(w, http.StatusTooManyRequests, "too many failed agent authentication attempts")
+		if delay := s.agentLimiter.RetryAfter(key, now); delay > 0 {
+			writeRateLimitError(w, delay, "too many failed agent authentication attempts")
 			return
 		}
 		if !validAgentID(id) || authn.ValidateRequestHeaders(request, now) != nil {

@@ -43,6 +43,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if request.ExistingSourceID != "" && (request.Action != core.ActionReadConfig || !core.ValidExistingSourceID(request.ExistingSourceID)) {
 		return core.Task{}, fmt.Errorf("%w: invalid existing source selection", ErrInvalid)
 	}
+	if request.Action == core.ActionMigrateTLS {
+		return core.Task{}, fmt.Errorf("%w: use the TLS frontend migration endpoint", ErrInvalid)
+	}
 	if request.Action == core.ActionNetworkDiagnostic {
 		return core.Task{}, fmt.Errorf("%w: use network-diagnostics API", ErrInvalid)
 	}
@@ -132,6 +135,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Task{}, fmt.Errorf("agent: %w", ErrNotFound)
 		}
+		return core.Task{}, err
+	}
+	if err := rejectPendingTLSMigration(ctx, tx, request.AgentID); err != nil {
 		return core.Task{}, err
 	}
 	if request.ExpectedInstanceID != nil {

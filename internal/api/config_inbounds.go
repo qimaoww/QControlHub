@@ -97,19 +97,19 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	var input struct {
-		ExpectedInstanceID    *string            `json:"expected_instance_id,omitempty"`
-		Operation             string             `json:"operation"`
-		InstallIfMissing      bool               `json:"install_if_missing"`
-		PreserveSSRustGlobals bool               `json:"preserve_ss_rust_globals"`
-		OriginalTag           string             `json:"original_tag"`
-		ExpectedVersion       int                `json:"expected_version"`
-		DisableMutableAPI     bool               `json:"disable_mutable_api"`
-		Name                  string             `json:"name"`
-		Description           string             `json:"description"`
-		Intent                string             `json:"intent"`
-		Fragment              *string            `json:"fragment"`
-		SnapshotTaskID        string             `json:"snapshot_task_id"`
-		Input                 serverconfig.Input `json:"input"`
+		ExpectedInstanceID    *string             `json:"expected_instance_id,omitempty"`
+		Operation             string              `json:"operation"`
+		InstallIfMissing      bool                `json:"install_if_missing"`
+		PreserveSSRustGlobals bool                `json:"preserve_ss_rust_globals"`
+		OriginalTag           string              `json:"original_tag"`
+		ExpectedVersion       int                 `json:"expected_version"`
+		DisableMutableAPI     bool                `json:"disable_mutable_api"`
+		Name                  string              `json:"name"`
+		Description           string              `json:"description"`
+		Intent                string              `json:"intent"`
+		Fragment              *string             `json:"fragment"`
+		SnapshotTaskID        string              `json:"snapshot_task_id"`
+		Input                 *serverconfig.Input `json:"input"`
 	}
 	mutationError := func(message string) {
 		if input.Operation == "delete" && !strings.HasPrefix(message, "删除入站失败") {
@@ -124,6 +124,17 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if input.Operation != "add" && input.Operation != "modify" && input.Operation != "delete" {
 		mutationError("operation must be add, modify, or delete")
 		return
+	}
+	if input.Fragment != nil && input.Input != nil {
+		mutationError("fragment 与 input 不能同时提交")
+		return
+	}
+	if input.Input == nil {
+		if input.Fragment == nil && input.Operation != "delete" {
+			mutationError("结构化新增和修改需要 input")
+			return
+		}
+		input.Input = &serverconfig.Input{}
 	}
 	if input.Intent != "validate" && input.Intent != "deploy" {
 		mutationError("intent must be validate or deploy")
@@ -174,7 +185,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			mutationError("外部反代请自行配置证书")
 			return
 		}
-		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, &input.Input); err != nil {
+		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, input.Input); err != nil {
 			writeStoreError(w, err)
 			return
 		}
@@ -184,7 +195,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	var generated string
 	var err error
 	if input.Operation == "add" {
-		generated, err = serverconfig.Generate(engine, input.Input)
+		generated, err = serverconfig.Generate(engine, *input.Input)
 		if err != nil {
 			mutationError(err.Error())
 			return
@@ -260,7 +271,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				mutationError("此配置无法安全使用预设，请使用完整入站配置")
 				return
 			}
-			generated, err = serverconfig.GenerateNativePresetEdit(engine, input.Input, projections[*selected.ProjectionIndex])
+			generated, err = serverconfig.GenerateNativePresetEdit(engine, *input.Input, projections[*selected.ProjectionIndex])
 			if err != nil {
 				mutationError(err.Error())
 				return
@@ -381,9 +392,9 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				writeStoreError(w, metadataErr)
 				return
 			}
-			previous = serverconfig.PreviousManagedTLSMetadata(input.Input, values, input.OriginalTag)
+			previous = serverconfig.PreviousManagedTLSMetadata(*input.Input, values, input.OriginalTag)
 		}
-		clientMetadata, err = serverconfig.MarshalClientMetadataWithPrevious(input.Input, previous)
+		clientMetadata, err = serverconfig.MarshalClientMetadataWithPrevious(*input.Input, previous)
 		if err != nil {
 			mutationError(err.Error())
 			return

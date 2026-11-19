@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,7 +21,17 @@ func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<
 }
 
 func (c *Client) executeTaskForSession(executionContext, deliveryContext context.Context, task core.Task, outgoing chan<- core.WireMessage) {
+	var finishProgress func()
+	if task.Action == core.ActionMigrateTLS && migrationTaskID.MatchString(task.ID) {
+		progress, cancel := context.WithCancel(deliveryContext)
+		done := make(chan struct{})
+		go func() { defer close(done); reportTLSMigrationPhase(progress, task, outgoing) }()
+		finishProgress = func() { cancel(); <-done }
+	}
 	result := c.resultForTask(executionContext, task)
+	if finishProgress != nil {
+		finishProgress()
+	}
 	uploadContext, uploadCancel := context.WithTimeout(deliveryContext, 60*time.Second)
 	if err := c.uploadDiagnostic(uploadContext, task.ID, result); err != nil {
 		slog.Warn("task diagnostic delivery is pending; result remains cached", "task_id", task.ID, "error", core.RedactDiagnostic(err.Error()))
@@ -98,6 +111,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	var output string
 	var sideEffects []string
 	var executionErr error
+	var migration *core.TLSMigrationResult
 	var ipQuality *core.IPQualityResult
 	preparedLogTransition := false
 	if c.diagnostics != nil && c.diagnostics.Active() {
@@ -124,6 +138,20 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			if output == "" {
 				output = "IPQuality check completed"
 			}
+		}
+	} else if task.Action == core.ActionMigrateTLS {
+		if executionErr = checkMigrationOperation(task.TLSMigration); executionErr == nil {
+			for _, r := range task.TLSMigration.Routes {
+				if r.InstanceID != "" {
+					executionErr = c.traffic.authorizeProxyIngresses(r.InstanceID, []core.TLSFrontend{{Mode: task.TLSMigration.Mode, PublicPort: task.TLSMigration.Port, SharedIngressGeneration: r.GrantGeneration}})
+					if executionErr != nil {
+						break
+					}
+				}
+			}
+		}
+		if executionErr == nil {
+			migration, executionErr = c.executor.runTLSMigration(ctx, task)
 		}
 	} else if task.Action.ProxyComponent() != "" {
 		output, executionErr = c.executor.runProxyTask(ctx, task, c.config.Version)
@@ -255,7 +283,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	if len(sideEffects) > 0 {
 		output += "\n附属步骤失败（主操作结果见任务状态）：\n" + strings.Join(sideEffects, "\n")
 	}
-	result := core.TaskResultRequest{
+	result := core.TaskResultRequest{TLSMigration: migration,
 		ExecutedAttempt: task.Attempt,
 		LeaseID:         task.LeaseID, Success: executionErr == nil, Output: output,
 		IPQuality: ipQuality,
@@ -404,8 +432,8 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 		return core.TaskResultRequest{}, false
 	}
 	return core.TaskResultRequest{
-		ExecutedAttempt: cached.ExecutedAttempt,
-		LeaseID:         task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error, DiagnosticDigest: cached.DiagnosticDigest,
+		TLSMigration: cached.TLSMigration, ExecutedAttempt: cached.ExecutedAttempt,
+		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error, DiagnosticDigest: cached.DiagnosticDigest,
 		IPQuality: cached.IPQuality, InstanceStatus: cached.InstanceStatus, HostPorts: cached.HostPorts,
 	}, true
 }
@@ -428,7 +456,7 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 		c.removeDiagnostic(oldestID)
 	}
 	c.creds.CompletedTasks[taskID] = completedTask{
-		ExecutedAttempt:  result.ExecutedAttempt,
+		TLSMigration: result.TLSMigration, ExecutedAttempt: result.ExecutedAttempt,
 		DiagnosticDigest: result.DiagnosticDigest, Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
 		IPQuality: result.IPQuality, InstanceStatus: result.InstanceStatus, HostPorts: result.HostPorts,
@@ -478,4 +506,29 @@ func (c *Client) validTask(task core.Task) bool {
 	}
 	return task.AgentID == c.creds.AgentID && validTaskID(task.ID) && len(task.LeaseID) >= 32 &&
 		task.Status == core.TaskRunning && task.Action.Valid() && engineValid
+}
+
+func reportTLSMigrationPhase(ctx context.Context, task core.Task, out chan<- core.WireMessage) {
+	ticks := time.NewTicker(150 * time.Millisecond)
+	defer ticks.Stop()
+	last := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks.C:
+		}
+		data, err := os.ReadFile(filepath.Join(tlsFrontendRoot, task.ID+".phase"))
+		var phase string
+		if err != nil || json.Unmarshal(data, &phase) != nil || phase == last || (phase != "verifying" && phase != "rolling_back") {
+			continue
+		}
+		message := core.WireMessage{Type: "tls-progress", TLSProgress: &core.TLSMigrationProgress{TaskID: task.ID, LeaseID: task.LeaseID, Phase: phase}}
+		select {
+		case <-ctx.Done():
+			return
+		case out <- message:
+			last = phase
+		}
+	}
 }

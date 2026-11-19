@@ -165,4 +165,19 @@ func TestRequeueStaleTasksUsesActionSpecificLeaseAndAttemptLimit(t *testing.T) {
 	if requeued, err := dataStore.GetTask(ctx, upgrade.ID); err != nil || requeued.Status != core.TaskPending {
 		t.Fatalf("expired Agent upgrade was not requeued: %+v %v", requeued, err)
 	}
+	// A locally committed handoff needs the original operation ID until its
+	// receipt arrives, including after the ordinary retry limit is exhausted.
+	const migrationID = "tsk_8888888899999999"
+	if _, err := dataStore.pool.Exec(ctx, `INSERT INTO tasks (id,agent_id,action,engine,status,attempt,created_at,started_at)
+          VALUES($1,$2,'migrate-tls','','running',3,now(),$3)`, migrationID, agent.ID, time.Now().Add(-core.ManagedTLSLeaseTimeout-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.RequeueStaleTasks(ctx, time.Minute, 6*time.Minute, 3); err != nil {
+		t.Fatal(err)
+	}
+	resumable, err := dataStore.GetTask(ctx, migrationID)
+	if err != nil || resumable.Status != core.TaskPending || resumable.FinishedAt != nil {
+		t.Fatal("lost migration receipt reconciliation after lease expiration", err)
+	}
+
 }

@@ -89,7 +89,7 @@ func observedHostPortsTx(ctx context.Context, tx pgx.Tx, agentID, candidateID st
 		WHERE observation.agent_id=$1 AND proof.action='status' AND proof.status='succeeded'
 		AND observation.observed_at>now()-interval '15 seconds'
 		AND NOT EXISTS(SELECT 1 FROM tasks changed WHERE changed.agent_id=$1 AND changed.id<>$2
-			AND (changed.action IN ('deploy','import-existing','start','stop','restart','install','uninstall','upgrade-agent') OR changed.install_if_missing)
+			AND (changed.action IN ('migrate-tls','update-nginx','update-caddy','deploy','import-existing','start','stop','restart','install','uninstall','upgrade-agent') OR changed.install_if_missing)
 			AND (changed.status IN ('pending','running') OR changed.started_at>=proof.started_at))`, agentID, candidateID).Scan(&ports)
 	if err == pgx.ErrNoRows {
 		return nil, nil

@@ -78,7 +78,7 @@ const rootOfflineThresholdSQL = `(SELECT agent_offline_threshold_seconds FROM pa
 var agentOfflineThresholdSQL = agentOfflineThresholdForOwnerSQL("agents.owner_id", rootOfflineThresholdSQL)
 
 var agentColumnsSQL = `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,observed_public_ip_at,observed_public_ip_changed_at,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
 				time_zone_mode,time_zone,applied_time_zone,time_zone_status,time_zone_error,time_zone_revision,time_zone_auto_address_hash,
 				last_seen,enrolled_at,
@@ -108,7 +108,7 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 		var timeZoneMode, timeZone, appliedTimeZone, timeZoneStatus, timeZoneError, timeZoneAddressHash string
 		var timeZoneRevision int64
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &timeZoneMode, &timeZone, &appliedTimeZone, &timeZoneStatus, &timeZoneError, &timeZoneRevision, &timeZoneAddressHash, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.ManagedProxies, &agent.SharedEngines); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &agent.ObservedPublicIPAt, &agent.ObservedPublicIPChangedAt, &metricsState, &timeZoneMode, &timeZone, &appliedTimeZone, &timeZoneStatus, &timeZoneError, &timeZoneRevision, &timeZoneAddressHash, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.ManagedProxies, &agent.SharedEngines); err != nil {
 			return nil, err
 		}
 		agent.TimeZone = core.AgentTimeZoneState{Mode: timeZoneMode, TimeZone: timeZone, AppliedTimeZone: appliedTimeZone, Status: timeZoneStatus, Error: timeZoneError, Revision: timeZoneRevision, AutoAddressHash: timeZoneAddressHash}

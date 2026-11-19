@@ -29,14 +29,15 @@ const (
 // connection used, so these probes close the dual-stack blind spot for
 // client-access address candidates.
 type PublicIPProber struct {
-	mu         sync.Mutex
-	addresses  [2]string
-	sources    [2]string
-	config     publicIPProbeRuntimeConfig
-	local      bool
-	generation uint64
-	wake       chan struct{}
-	inflight   chan struct{}
+	mu                    sync.Mutex
+	addresses             [2]string
+	sources               [2]string
+	observedAt, changedAt [2]time.Time
+	config                publicIPProbeRuntimeConfig
+	local                 bool
+	generation            uint64
+	wake                  chan struct{}
+	inflight              chan struct{}
 
 	httpV4   *http.Client
 	httpV6   *http.Client
@@ -189,6 +190,14 @@ func (prober *PublicIPProber) probeAll(ctx context.Context) {
 	}
 	previous := prober.addresses
 	for family := range results {
+		now := time.Now().UTC()
+		if previous[family] != "" && previous[family] != results[family] {
+			prober.changedAt[family] = now
+		}
+		prober.observedAt[family] = time.Time{}
+		if results[family] != "" {
+			prober.observedAt[family] = now
+		}
 		prober.addresses[family] = results[family]
 		if results[family] == "" {
 			prober.sources[family] = ""
@@ -256,6 +265,7 @@ func (prober *PublicIPProber) ApplyManagedConfig(config core.PublicIPProbeConfig
 	prober.generation++
 	prober.addresses = [2]string{}
 	prober.sources = [2]string{}
+	prober.observedAt, prober.changedAt = [2]time.Time{}, [2]time.Time{}
 	prober.mu.Unlock()
 	select {
 	case prober.wake <- struct{}{}:
@@ -281,6 +291,18 @@ func (prober *PublicIPProber) SnapshotWithSources() (ipv4, ipv6, ipv4Source, ipv
 	prober.mu.Lock()
 	defer prober.mu.Unlock()
 	return prober.addresses[0], prober.addresses[1], prober.sources[0], prober.sources[1]
+}
+
+func (prober *PublicIPProber) applySnapshot(m *core.HostMetrics) {
+	if prober == nil {
+		return
+	}
+	prober.mu.Lock()
+	defer prober.mu.Unlock()
+	m.PublicIPv4, m.PublicIPv6 = prober.addresses[0], prober.addresses[1]
+	m.PublicIPv4Source, m.PublicIPv6Source = prober.sources[0], prober.sources[1]
+	m.PublicIPv4ObservedAt, m.PublicIPv6ObservedAt = prober.observedAt[0], prober.observedAt[1]
+	m.PublicIPv4ChangedAt, m.PublicIPv6ChangedAt = prober.changedAt[0], prober.changedAt[1]
 }
 
 func (prober *PublicIPProber) Enabled() bool {

@@ -111,7 +111,9 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 			                  features=$4::jsonb, managed_proxies=$8,
 			                  os=CASE WHEN $5='' THEN os ELSE $5 END,
 			                  arch=CASE WHEN $6='' THEN arch ELSE $6 END,
-			                  observed_public_ip=CASE WHEN $7='' THEN observed_public_ip ELSE $7 END
+			                  observed_public_ip_changed_at=CASE WHEN $7<>'' AND observed_public_ip<>'' AND observed_public_ip<>$7 THEN now() ELSE observed_public_ip_changed_at END,
+                                  observed_public_ip_at=CASE WHEN $7<>'' THEN now() ELSE observed_public_ip_at END,
+                                  observed_public_ip=CASE WHEN $7='' THEN observed_public_ip ELSE $7 END
 			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, featuresState, heartbeat.OS, heartbeat.Arch, observedPublicIP, heartbeat.ManagedProxies)
 	if err != nil {
 		return err
@@ -244,7 +246,9 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 		}
 	}
 	command, err := s.pool.Exec(ctx, `
-		UPDATE agents SET observed_public_ip=$2
+		UPDATE agents SET observed_public_ip=$2,
+		observed_public_ip_at=CASE WHEN $2<>'' THEN now() END,
+		observed_public_ip_changed_at=CASE WHEN observed_public_ip<>'' AND observed_public_ip<>$2 THEN now() ELSE observed_public_ip_changed_at END
 		WHERE id=$1 AND revoked_at IS NULL`, id, address)
 	if err != nil {
 		return err

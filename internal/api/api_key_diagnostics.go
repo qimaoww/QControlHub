@@ -81,7 +81,8 @@ func (w *apiKeyResponseWriter) finish() int {
 		return readError(err)
 	}
 	data := w.body.Bytes()
-	if len(data) > 0 {
+	embeddedZIP := w.request != nil && w.request.Pattern == "GET /api/v1/management-skill" && w.status == http.StatusOK
+	if len(data) > 0 && !embeddedZIP {
 		var value any
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.UseNumber()
