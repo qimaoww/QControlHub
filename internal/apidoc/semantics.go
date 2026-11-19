@@ -121,12 +121,17 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		}
 		var required []string
 		switch handler {
-		case "previewTLSFrontend":
+		case "submitTLSMigration", "previewTLSFrontend":
 			fields := copySchema["properties"].(object)
 			fields["target_mode"] = object{"type": "string", "enum": []string{"nginx", "caddy"}}
 			fields["expected_instance_id"] = object{"type": "string", "description": "必填，主实例为空字符串，共享实例为实际 shr_ ID。省略和 null 均拒绝。"}
 			media["example"] = object{"expected_version": 1, "expected_instance_id": "", "target_mode": "caddy"}
 			required = []string{"target_mode", "expected_version", "expected_instance_id"}
+			if handler == "submitTLSMigration" {
+				required = append(required, "plan_id", "task_id")
+				media["example"].(object)["plan_id"] = strings.Repeat("0", 64)
+				media["example"].(object)["task_id"] = "tsk_0123456789abcdef"
+			}
 		case "saveServerInbound":
 			fields := copySchema["properties"].(object)
 			fields["operation"] = object{"type": "string", "enum": []string{"add", "modify", "delete"}}
@@ -201,6 +206,12 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["description"] = "Key 只能编辑非管理员且非创建者账户的显示名称、收缩权限或停用；保留权限不能超过 Key 当前范围。增加账户权限、重新启用及身份/凭据操作需要会话，以防通过替代账号扩大能力。账户创建、删除、清理也需要会话。"
 	case "putAgentSharing", "putUserAgentAccess":
 		op["description"] = "Key 转授权仅允许创建者所有的节点，不能借管理员角色转授他人节点；用户授权不能操作管理员或创建者。批量与旧授权逐项复核。"
+	case "submitTLSMigration":
+		op["summary"] = "迁移已预览的 TLS 公网端口组"
+		op["description"] = "提供预览的 plan_id、自选 tsk_ 加 16 位十六进制关联标识，及相同的实例、版本和模式。202 表示已受理。端口交接可能中断长连接和新连接，按节点 tls-migrations/{task} 查询各路径的真实数据往返和恢复结果。仅整组通过才发布新版本。无变化返回 unchanged。"
+	case "getTLSMigration":
+		op["summary"] = "查询 TLS 迁移与逐路径恢复结果"
+		op["description"] = "result.paths 与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。"
 	case "previewTLSFrontend":
 		op["summary"] = "预览同一节点公网端口的 TLS 前端变更"
 		op["description"] = "按唯一入站定位公网端口。只读返回可见成员的当前及目标模式、保存与部署版本、阻碍和待执行阶段核验项。无保存、签发、安装或服务变更。"

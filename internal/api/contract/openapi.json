@@ -1036,6 +1036,7 @@
           "import-existing",
           "install",
           "ip-quality",
+          "migrate-tls",
           "network-diagnostic",
           "panel-failure",
           "read-config",
@@ -1116,6 +1117,28 @@
           },
           "name": {
             "type": "string"
+          },
+          "observed_public_ip_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_public_ip_changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "os": {
             "type": "string"
@@ -2886,10 +2909,26 @@
           "public_ipv4": {
             "type": "string"
           },
+          "public_ipv4_changed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "public_ipv4_observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "public_ipv4_source": {
             "type": "string"
           },
           "public_ipv6": {
+            "type": "string"
+          },
+          "public_ipv6_changed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "public_ipv6_observed_at": {
+            "format": "date-time",
             "type": "string"
           },
           "public_ipv6_source": {
@@ -4416,6 +4455,98 @@
         },
         "type": "object"
       },
+      "core_TLSMigration": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "default": "read_only",
+            "description": "省略为 read_only；读写模式不自动增加业务权限。",
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/core_TLSMigrationRoute"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "core_TLSMigrationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/core_TLSRouteVerification"
+            },
+            "type": "array"
+          },
+          "state": {
+            "type": "string"
+          },
+          "step": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_TLSMigrationRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_port": {
+            "type": "integer"
+          },
+          "certificate_id": {
+            "type": "string"
+          },
+          "certificate_version": {
+            "type": "integer"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "from": {
+            "type": "string"
+          },
+          "grant_generation": {
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_TLSRouteVerification": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "type": "string"
+          },
+          "recovery": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_Task": {
         "additionalProperties": false,
         "properties": {
@@ -4540,6 +4671,16 @@
               "$ref": "#/components/schemas/core_TLSFrontend"
             },
             "type": "array"
+          },
+          "tls_migration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_TLSMigration"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object"
@@ -6236,6 +6377,9 @@
           "backend_port": {
             "type": "integer"
           },
+          "certificate_id": {
+            "type": "string"
+          },
           "certificate_version": {
             "type": "integer"
           },
@@ -6253,6 +6397,9 @@
           },
           "from": {
             "type": "string"
+          },
+          "grant_generation": {
+            "type": "integer"
           },
           "instance_id": {
             "type": "string"
@@ -6335,6 +6482,31 @@
               "nginx",
               "caddy"
             ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "store_TLSMigrationOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/store_TLSFrontendPreview"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_TLSMigrationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "task_id": {
             "type": "string"
           }
         },
@@ -6920,7 +7092,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -8648,7 +8826,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -9115,7 +9299,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -9475,7 +9667,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 },
                 "schema": {
@@ -9746,7 +9946,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -10530,7 +10736,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -10711,6 +10923,256 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/migrate": {
+      "post": {
+        "description": "提供预览的 plan_id、自选 tsk_ 加 16 位十六进制关联标识，及相同的实例、版本和模式。202 表示已受理。端口交接可能中断长连接和新连接，按节点 tls-migrations/{task} 查询各路径的真实数据往返和恢复结果。仅整组通过才发布新版本。无变化返回 unchanged。",
+        "operationId": "submitTLSMigration_api_v1_agents_{id}_configs_{engine}_server-inbounds_{tag}_tls-frontend_migrate",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "tag",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "expected_instance_id": "",
+                "expected_version": 1,
+                "plan_id": "0000000000000000000000000000000000000000000000000000000000000000",
+                "target_mode": "caddy",
+                "task_id": "tsk_0123456789abcdef"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_instance_id": {
+                    "description": "必填，主实例为空字符串，共享实例为实际 shr_ ID。省略和 null 均拒绝。",
+                    "type": "string"
+                  },
+                  "expected_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "plan_id": {
+                    "type": "string"
+                  },
+                  "target_mode": {
+                    "enum": [
+                      "nginx",
+                      "caddy"
+                    ],
+                    "type": "string"
+                  },
+                  "task_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target_mode",
+                  "expected_version",
+                  "expected_instance_id",
+                  "plan_id",
+                  "task_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "plan": {
+                    "agent_id": "example",
+                    "blockers": [
+                      "example"
+                    ],
+                    "connection_interruption_possible": false,
+                    "members": [
+                      {
+                        "backend_port": null,
+                        "certificate_id": null,
+                        "certificate_version": null,
+                        "config_id": null,
+                        "deployed_version": null,
+                        "domain": null,
+                        "engine": null,
+                        "from": null,
+                        "grant_generation": null,
+                        "instance_id": null,
+                        "path": null,
+                        "tag": null,
+                        "to": null,
+                        "transport": null,
+                        "version": null
+                      }
+                    ],
+                    "plan_id": "example",
+                    "public_port": 1,
+                    "runtime_checks": [
+                      "example"
+                    ],
+                    "status": "example",
+                    "target_mode": "example"
+                  },
+                  "result": {
+                    "paths": [
+                      null
+                    ],
+                    "state": "example",
+                    "step": "example"
+                  },
+                  "state": "example",
+                  "task_id": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSMigrationOperation"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "plan": {
+                    "agent_id": "example",
+                    "blockers": [
+                      "example"
+                    ],
+                    "connection_interruption_possible": false,
+                    "members": [
+                      {
+                        "backend_port": null,
+                        "certificate_id": null,
+                        "certificate_version": null,
+                        "config_id": null,
+                        "deployed_version": null,
+                        "domain": null,
+                        "engine": null,
+                        "from": null,
+                        "grant_generation": null,
+                        "instance_id": null,
+                        "path": null,
+                        "tag": null,
+                        "to": null,
+                        "transport": null,
+                        "version": null
+                      }
+                    ],
+                    "plan_id": "example",
+                    "public_port": 1,
+                    "runtime_checks": [
+                      "example"
+                    ],
+                    "status": "example",
+                    "target_mode": "example"
+                  },
+                  "result": {
+                    "paths": [
+                      null
+                    ],
+                    "state": "example",
+                    "step": "example"
+                  },
+                  "state": "example",
+                  "task_id": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSMigrationOperation"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "迁移已预览的 TLS 公网端口组",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "agent-config.write",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "agent-config.write",
+            "tasks.execute"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/preview": {
       "post": {
         "description": "按唯一入站定位公网端口。只读返回可见成员的当前及目标模式、保存与部署版本、阻碍和待执行阶段核验项。无保存、签发、安装或服务变更。",
@@ -10798,12 +11260,14 @@
                   "members": [
                     {
                       "backend_port": 1,
+                      "certificate_id": "example",
                       "certificate_version": 1,
                       "config_id": "example",
                       "deployed_version": 1,
                       "domain": "example",
                       "engine": "mihomo",
                       "from": "example",
+                      "grant_generation": 1,
                       "instance_id": "example",
                       "path": "example",
                       "tag": "example",
@@ -11085,7 +11549,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -11243,11 +11713,17 @@
                     "network_tx_bytes": 1,
                     "observed_public_ip": "example",
                     "public_ipv4": "example",
+                    "public_ipv4_changed_at": "2026-11-10T12:00:00Z",
+                    "public_ipv4_observed_at": "2026-11-10T12:00:00Z",
                     "public_ipv4_source": "example",
                     "public_ipv6": "example",
+                    "public_ipv6_changed_at": "2026-11-10T12:00:00Z",
+                    "public_ipv6_observed_at": "2026-11-10T12:00:00Z",
                     "public_ipv6_source": "example"
                   },
                   "name": "example",
+                  "observed_public_ip_at": "2026-11-10T12:00:00Z",
+                  "observed_public_ip_changed_at": "2026-11-10T12:00:00Z",
                   "os": "example",
                   "region_code": "example",
                   "runtime": {},
@@ -11438,11 +11914,17 @@
                       "network_tx_bytes": 1,
                       "observed_public_ip": "example",
                       "public_ipv4": "example",
+                      "public_ipv4_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv4_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv4_source": "example",
                       "public_ipv6": "example",
+                      "public_ipv6_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv6_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv6_source": "example"
                     },
                     "name": "example",
+                    "observed_public_ip_at": "2026-11-10T12:00:00Z",
+                    "observed_public_ip_changed_at": "2026-11-10T12:00:00Z",
                     "os": "example",
                     "region_code": "example",
                     "runtime": {},
@@ -11855,11 +12337,17 @@
                       "network_tx_bytes": 1,
                       "observed_public_ip": "example",
                       "public_ipv4": "example",
+                      "public_ipv4_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv4_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv4_source": "example",
                       "public_ipv6": "example",
+                      "public_ipv6_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv6_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv6_source": "example"
                     },
                     "name": "example",
+                    "observed_public_ip_at": "2026-11-10T12:00:00Z",
+                    "observed_public_ip_changed_at": "2026-11-10T12:00:00Z",
                     "os": "example",
                     "region_code": "example",
                     "runtime": {},
@@ -12891,7 +13379,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -13064,7 +13560,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -13862,6 +14366,142 @@
           "any": false,
           "permissions": [
             "agents.manage"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/tls-migrations/{task}": {
+      "get": {
+        "description": "result.paths 与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。",
+        "operationId": "getTLSMigration_api_v1_agents_{id}_tls-migrations_{task}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "plan": {
+                    "agent_id": "example",
+                    "blockers": [
+                      "example"
+                    ],
+                    "connection_interruption_possible": false,
+                    "members": [
+                      {
+                        "backend_port": null,
+                        "certificate_id": null,
+                        "certificate_version": null,
+                        "config_id": null,
+                        "deployed_version": null,
+                        "domain": null,
+                        "engine": null,
+                        "from": null,
+                        "grant_generation": null,
+                        "instance_id": null,
+                        "path": null,
+                        "tag": null,
+                        "to": null,
+                        "transport": null,
+                        "version": null
+                      }
+                    ],
+                    "plan_id": "example",
+                    "public_port": 1,
+                    "runtime_checks": [
+                      "example"
+                    ],
+                    "status": "example",
+                    "target_mode": "example"
+                  },
+                  "result": {
+                    "paths": [
+                      null
+                    ],
+                    "state": "example",
+                    "step": "example"
+                  },
+                  "state": "example",
+                  "task_id": "example"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSMigrationOperation"
+                }
+              }
+            },
+            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询 TLS 迁移与逐路径恢复结果",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "tasks.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "tasks.read"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
@@ -18578,7 +19218,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -18669,7 +19317,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -19918,12 +20574,20 @@
           },
           {
             "environmentToken": []
+          },
+          {
+            "apiKey": []
           }
         ],
         "summary": "下载管理 Skill",
-        "x-api-key": false,
-        "x-authentication": "session",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
         "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [],
+          "write": false
+        },
         "x-permissions": {
           "any": false,
           "permissions": []
@@ -22223,6 +22887,7 @@
                               "ip-quality",
                               "enable-bbr",
                               "disable-bbr",
+                              "migrate-tls",
                               "configure-tcp",
                               "check-nginx",
                               "update-nginx",
@@ -25855,7 +26520,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 ],
                 "schema": {
@@ -26056,7 +26729,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 ],
                 "schema": {
@@ -26282,7 +26963,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -26373,7 +27062,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -26771,7 +27468,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -27183,7 +27888,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 },
                 "schema": {
@@ -27352,7 +28065,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -27526,7 +28247,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 },
                 "schema": {

@@ -88,6 +88,8 @@ func sameHostMetricsSnapshot(prev, cur core.HostMetrics) bool {
 		prev.ObservedPublicIP != cur.ObservedPublicIP ||
 		prev.PublicIPv4 != cur.PublicIPv4 ||
 		prev.PublicIPv6 != cur.PublicIPv6 ||
+		!prev.PublicIPv4ObservedAt.Equal(cur.PublicIPv4ObservedAt) || !prev.PublicIPv6ObservedAt.Equal(cur.PublicIPv6ObservedAt) ||
+		!prev.PublicIPv4ChangedAt.Equal(cur.PublicIPv4ChangedAt) || !prev.PublicIPv6ChangedAt.Equal(cur.PublicIPv6ChangedAt) ||
 		prev.PublicIPv4Source != cur.PublicIPv4Source ||
 		prev.PublicIPv6Source != cur.PublicIPv6Source {
 		return false

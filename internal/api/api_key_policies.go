@@ -19,6 +19,7 @@ var apiKeyPolicies = map[string]apiKeyPolicy{
 	"POST /api/v1/tasks/failures":                         {Write: true, Permissions: []core.Permission{core.PermissionTasksExecute}},
 	"POST /api/v1/agents/{id}/configs/{engine}/import":    {Write: true, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksRead, core.PermissionTasksExecute}},
 	"PUT /api/v1/users/{id}":                              {Write: true, Permissions: []core.Permission{core.PermissionUsersManage}},
+	"GET /api/v1/management-skill":                        {},
 	"GET /api/v1/openapi.json":                            {},
 
 	"DELETE /api/v1/agents/{id}":                                              {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentsManage}},
@@ -106,6 +107,8 @@ var apiKeyPolicies = map[string]apiKeyPolicy{
 	"POST /api/v1/agents/{id}/configs/{engine}/fields/{key}":                  {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},
 	"POST /api/v1/agents/{id}/configs/{engine}/outbounds":                     {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},
 	"POST /api/v1/agents/{id}/configs/{engine}/plans":                         {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite}},
+	"POST /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/migrate": {Write: true, Permissions: []core.Permission{core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},
+	"GET /api/v1/agents/{id}/tls-migrations/{task}":                                        {Write: false, Permissions: []core.Permission{core.PermissionAgentConfigRead, core.PermissionTasksRead}},
 	"POST /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/preview": {Permissions: []core.Permission{core.PermissionAgentConfigRead}},
 	"POST /api/v1/agents/{id}/configs/{engine}/server-inbounds":                            {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},
 	"POST /api/v1/agents/{id}/configs/{engine}/source":                                     {Write: true, Any: false, Permissions: []core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}},

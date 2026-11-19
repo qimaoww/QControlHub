@@ -6,5 +6,5 @@ func TaskFilterActions() []Action {
 	return []Action{ActionValidate, ActionDeploy, ActionInstall, ActionUninstall,
 		ActionStart, ActionStop, ActionRestart, ActionStatus, ActionUpgradeAgent,
 		ActionNetworkDiagnostic, ActionIPQuality, ActionEnableBBR, ActionDisableBBR,
-		ActionConfigureTCP, ActionCheckNginx, ActionUpdateNginx, ActionCheckCaddy, ActionUpdateCaddy, ActionPanelFailure}
+		ActionMigrateTLS, ActionConfigureTCP, ActionCheckNginx, ActionUpdateNginx, ActionCheckCaddy, ActionUpdateCaddy, ActionPanelFailure}
 }

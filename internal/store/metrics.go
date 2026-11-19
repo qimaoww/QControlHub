@@ -32,10 +32,12 @@ func applyPublicIPProbeTrust(metrics *core.HostMetrics, trust PublicIPProbeTrust
 	if strings.TrimSpace(metrics.PublicIPv4Source) == core.PublicIPProbeSourceControlPlane && !trust.ControlPlaneIPv4 {
 		metrics.PublicIPv4 = ""
 		metrics.PublicIPv4Source = ""
+		metrics.PublicIPv4ObservedAt, metrics.PublicIPv4ChangedAt = time.Time{}, time.Time{}
 	}
 	if strings.TrimSpace(metrics.PublicIPv6Source) == core.PublicIPProbeSourceControlPlane && !trust.ControlPlaneIPv6 {
 		metrics.PublicIPv6 = ""
 		metrics.PublicIPv6Source = ""
+		metrics.PublicIPv6ObservedAt, metrics.PublicIPv6ChangedAt = time.Time{}, time.Time{}
 	}
 }
 

@@ -25,8 +25,8 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 		t.Skip("Python 3 is required for the distributed Skill transport")
 	}
 	_, ctx, admin, _, other := newConfigScopeAPIFixture(t)
-	_, created := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionPreferencesRead, core.PermissionPreferencesWrite})
-	data := admin.call("GET", "/management-skill", nil, 200, nil)
+	key, created := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionPreferencesRead, core.PermissionPreferencesWrite})
+	data := key.call("GET", "/management-skill", nil, 200, nil)
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +54,16 @@ func TestManagementSkillInstalledHTTPFlow(t *testing.T) {
 		}
 	}
 	root := filepath.Join(installed, "qcontrolhub-manager")
+	if os.Getenv("QCH_TEST_SKILL_DISCOVERY") == "1" {
+		cmd := exec.CommandContext(ctx, python, "../../scripts/check-management-skill-discovery.py", root)
+		// Discovery receives no panel credential.
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatal("client discovery failed", string(out))
+		}
+		t.Log(string(out))
+	}
 	manifest, err := os.ReadFile(filepath.Join(root, "SKILL.md"))
 	if err != nil || !bytes.HasPrefix(manifest, []byte("---\nname: qcontrolhub-manager\ndescription:")) {
 		t.Fatal("distributed Skill manifest is invalid")

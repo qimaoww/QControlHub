@@ -98,6 +98,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	var output string
 	var sideEffects []string
 	var executionErr error
+	var migration *core.TLSMigrationResult
 	var ipQuality *core.IPQualityResult
 	preparedLogTransition := false
 	if c.diagnostics != nil && c.diagnostics.Active() {
@@ -124,6 +125,20 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			if output == "" {
 				output = "IPQuality check completed"
 			}
+		}
+	} else if task.Action == core.ActionMigrateTLS {
+		if executionErr = checkMigrationOperation(task.TLSMigration); executionErr == nil {
+			for _, r := range task.TLSMigration.Routes {
+				if r.InstanceID != "" {
+					executionErr = c.traffic.authorizeProxyIngresses(r.InstanceID, []core.TLSFrontend{{Mode: task.TLSMigration.Mode, PublicPort: task.TLSMigration.Port, SharedIngressGeneration: r.GrantGeneration}})
+					if executionErr != nil {
+						break
+					}
+				}
+			}
+		}
+		if executionErr == nil {
+			migration, executionErr = c.executor.runTLSMigration(ctx, task)
 		}
 	} else if task.Action.ProxyComponent() != "" {
 		output, executionErr = c.executor.runProxyTask(ctx, task, c.config.Version)
@@ -255,7 +270,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	if len(sideEffects) > 0 {
 		output += "\n附属步骤失败（主操作结果见任务状态）：\n" + strings.Join(sideEffects, "\n")
 	}
-	result := core.TaskResultRequest{
+	result := core.TaskResultRequest{TLSMigration: migration,
 		ExecutedAttempt: task.Attempt,
 		LeaseID:         task.LeaseID, Success: executionErr == nil, Output: output,
 		IPQuality: ipQuality,
@@ -404,8 +419,8 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 		return core.TaskResultRequest{}, false
 	}
 	return core.TaskResultRequest{
-		ExecutedAttempt: cached.ExecutedAttempt,
-		LeaseID:         task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error, DiagnosticDigest: cached.DiagnosticDigest,
+		TLSMigration: cached.TLSMigration, ExecutedAttempt: cached.ExecutedAttempt,
+		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error, DiagnosticDigest: cached.DiagnosticDigest,
 		IPQuality: cached.IPQuality, InstanceStatus: cached.InstanceStatus, HostPorts: cached.HostPorts,
 	}, true
 }
@@ -428,7 +443,7 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 		c.removeDiagnostic(oldestID)
 	}
 	c.creds.CompletedTasks[taskID] = completedTask{
-		ExecutedAttempt:  result.ExecutedAttempt,
+		TLSMigration: result.TLSMigration, ExecutedAttempt: result.ExecutedAttempt,
 		DiagnosticDigest: result.DiagnosticDigest, Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
 		IPQuality: result.IPQuality, InstanceStatus: result.InstanceStatus, HostPorts: result.HostPorts,

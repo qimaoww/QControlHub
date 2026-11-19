@@ -15,6 +15,7 @@ import (
 )
 
 type tlsFrontendRequest struct {
+	Migration      *core.TLSMigration             `json:"migration,omitempty"`
 	ObserveProxies bool                           `json:"observe_proxies,omitempty"`
 	ProxyRequestAt time.Time                      `json:"proxy_request_at,omitzero"`
 	ProxyBuild     string                         `json:"proxy_build,omitempty"`
@@ -111,6 +112,12 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		if err = f.Validate(); err != nil {
 			return err
 		}
+	}
+	if err := manager.recoverTLSMigration(ctx); err != nil {
+		return err
+	}
+	if request.Action == core.ActionMigrateTLS {
+		return manager.migrateTLS(ctx, request.Migration)
 	}
 	if request.ObserveProxies {
 		for _, mode := range []string{"nginx", "caddy"} {

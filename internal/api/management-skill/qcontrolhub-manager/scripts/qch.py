@@ -3,7 +3,7 @@
 import argparse
 import datetime
 import email.utils
-import http.client
+import hashlib
 import ipaddress
 import json
 import math
@@ -25,7 +25,8 @@ BODY_LIMIT = 16 * 1024 * 1024
 RESPONSE_LIMIT = 32 * 1024 * 1024
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 ID = re.compile(r"(?:agt|cfg|tsk|shr|usr|crt|key|req|tpl|ndg|trf|sst|ssi|cor|cac|log)_[0-9a-f]{16}")
-TASK_PATH = re.compile(r"/tasks/(tsk_[a-f0-9]{16})")
+TASK_PATH = re.compile(r"(?:/tasks|/agents/agt_[0-9a-f]{16}/tls-migrations)/(tsk_[a-f0-9]{16})")
+MIGRATE_PATH = re.compile(r"(/agents/agt_[0-9a-f]{16})/configs/(?:xray|mihomo|sing-box)/server-inbounds/[^/]+/tls-frontend/migrate")
 SUBMISSION_PATH = re.compile(r"/agents/agt_[0-9a-f]{16}/configs/(?:mihomo|xray|sing-box|ss-rust)/(?:server-inbounds|source|outbounds)")
 STATES = {"pending", "running", "succeeded", "failed", "canceled", "online", "offline", "unknown",
           "verifying", "rolling_back", "rolled_back", "recovery_incomplete", "blocked", "runtime_evidence_required"}
@@ -34,7 +35,7 @@ CODES = {"stale_version", "instance_changed", "unsupported_mode", "port_group_in
          "rollback_failed", "deployment_drift", "certificate_unauthorized", "certificate_binding_changed",
          "certificate_change_required", "ingress_unauthorized", "pending_tasks", "agent_offline",
          "unsupported_target_configuration", "state_unverified", "tls_certificate_conflict", "backend_port_conflict",
-         "task_schema_incompatible", "read_timeout"}
+         "task_schema_incompatible", "stale_plan", "agent_upgrade_required", "read_timeout"}
 ENGINES = {"sing-box", "xray", "mihomo", "ss-rust"}
 
 
@@ -126,6 +127,46 @@ def resource(item):
     return result
 
 
+def preview(value):
+    result = resource(value)
+    plan = value.get("plan_id")
+    if isinstance(plan, str) and re.fullmatch("[0-9a-f]{64}", plan):
+        result["plan_id"] = plan
+    result["members"] = []
+    for member in value.get("members", []):
+        safe = resource(member)
+        # Paths can contain arbitrary credentials. A digest lets the caller
+        # correlate a known path without forwarding its contents to a model.
+        if isinstance(member, dict) and isinstance(member.get("path"), str):
+            safe["path_sha256"] = hashlib.sha256(member["path"].encode()).hexdigest()
+        result["members"].append(safe)
+    result["blockers"] = [v for v in value.get("blockers", []) if allowed(v, CODES)]
+    checks = {"agent_listener_ownership_ipv4_ipv6", "proxy_config_and_service", "original_client_round_trip", "restore_original_paths"}
+    result["runtime_checks"] = [v for v in value.get("runtime_checks", []) if allowed(v, checks)]
+    if type(value.get("connection_interruption_possible")) is bool:
+        result["connection_interruption_possible"] = value["connection_interruption_possible"]
+    return result
+
+
+def migration(value):
+    result = resource(value)
+    if allowed(value.get("state"), STATES | {"unchanged"}):
+        result["state"] = value["state"]
+    if isinstance(value.get("plan"), dict):
+        result["plan"] = preview(value["plan"])
+    receipt = value.get("result")
+    if isinstance(receipt, dict):
+        safe = {}
+        if allowed(receipt.get("step"), {"preflight", "handoff", "verify", "restore", "complete"}):
+            safe["step"] = receipt["step"]
+        if allowed(receipt.get("code"), CODES):
+            safe["code"] = receipt["code"]
+        safe["paths"] = [{k: row[k] for k in ("candidate", "recovery") if allowed(row.get(k), {"succeeded", "failed", "unknown"})}
+                         for row in receipt.get("paths", []) if isinstance(row, dict)]
+        result["result"] = safe
+    return result
+
+
 def project(path, value, contract):
     path = urllib.parse.urlsplit(path).path
     if path == "/openapi.json":
@@ -155,13 +196,9 @@ def project(path, value, contract):
         result["values"] = pages
         return result
     if path.endswith("/tls-frontend/preview") and isinstance(value, dict):
-        result = resource(value)
-        plan = value.get("plan_id")
-        if isinstance(plan, str) and re.fullmatch("[0-9a-f]{64}", plan):
-            result["plan_id"] = plan
-        result["members"] = [resource(m) for m in value.get("members", [])]
-        result["blockers"] = [v for v in value.get("blockers", []) if allowed(v, CODES)]
-        return result
+        return preview(value)
+    if (MIGRATE_PATH.fullmatch(path) or (TASK_PATH.fullmatch(path) and "/tls-migrations/" in path)) and isinstance(value, dict):
+        return migration(value)
     if path in ("/agents", "/tasks", "/deployments", "/configs") and isinstance(value, list):
         return [resource(v) for v in value]
     if isinstance(value, dict):
@@ -289,6 +326,14 @@ def main():
     submission = None
     if args.method == "POST" and SUBMISSION_PATH.fullmatch(args.path):
         submission = "tsk_" + secrets.token_hex(8)
+    lookup = "/tasks/" + submission + "?view=status" if submission else None
+    migrate = MIGRATE_PATH.fullmatch(args.path) if args.method == "POST" else None
+    if migrate and body:
+        data = json.loads(body)
+        candidate = data.get("task_id") if isinstance(data, dict) else None
+        if isinstance(candidate, str) and re.fullmatch(r"tsk_[0-9a-f]{16}", candidate):
+            lookup = migrate[1] + "/tls-migrations/" + candidate
+    last = None
     while True:
         try:
             write = args.method != "GET"
@@ -298,14 +343,26 @@ def main():
             classification = error.result["classification"]
             if write and classification in ("connection_failure", "read_timeout", "server_failure"):
                 error.result["result"] = "unknown"
-                if submission:
-                    error.result["submission_id"] = submission
+                if lookup:
+                    expected = candidate if migrate else submission
+                    error.result["task_id"] = expected
                     try:
-                        found = call(base, key, "GET", "/tasks/" + submission + "?view=status", None, deadline)
-                        if isinstance(found, dict) and submission in (found.get("id"), found.get("submission_id")):
-                            return resource(found)
+                        found = call(base, key, "GET", lookup, None, deadline)
+                        if isinstance(found, dict) and expected in (found.get("id"), found.get("submission_id"), found.get("task_id")):
+                            return project(lookup, found, spec)
                     except Failure:
                         pass
+            if classification == "conflict" and migrate:
+                try:
+                    selection = {k: data[k] for k in ("expected_instance_id", "target_mode", "expected_version")}
+                    workspace = args.path.split("/server-inbounds/")[0]
+                    latest = call(base, key, "GET", workspace, None, deadline)
+                    selection["expected_version"] = latest["version"]
+                    check = call(base, key, "POST", args.path.removesuffix("migrate") + "preview", json.dumps(selection).encode(), deadline)
+                    error.result["preview"] = preview(check)
+                    error.result["effect_present"] = not check["connection_interruption_possible"] and not check["blockers"]
+                except (Failure, KeyError, ValueError, TypeError, AttributeError):
+                    pass
             if classification == "conflict" and args.path == "/preferences/ui" and args.method == "PATCH":
                 try:
                     latest = call(base, key, "GET", args.path, None, deadline)
@@ -314,22 +371,27 @@ def main():
                     error.result["effect_present"] = all(latest["values"].get(p, {}).get(k) == v for p, fields in patch.items() for k, v in fields.items())
                 except (Failure, KeyError, ValueError, TypeError, AttributeError):
                     pass
+            if args.wait and classification == "read_timeout" and last:
+                raise Failure("pending", **last)
             if args.wait:
                 error.result["task_id"] = task[1]
             raise
         result = project(args.path, value, spec)
         if not args.wait:
             return result
-        if result.get("id") != task[1] or result.get("status") not in STATES:
+        state = result.get("state", result.get("status"))
+        if result.get("task_id", result.get("id")) != task[1] or state not in STATES:
             raise Failure("invalid_task_response", task_id=task[1])
-        if result["status"] == "succeeded":
+        if state == "succeeded":
             return result
-        if result["status"] not in ("pending", "running", "verifying", "rolling_back"):
+        if state not in ("pending", "running", "verifying", "rolling_back"):
             raise Failure("task_failed", **result)
         print(json.dumps(result), file=sys.stderr, flush=True)
-        if time.monotonic() + 2 >= deadline:
-            raise Failure("pending", **result)
-        time.sleep(2)
+        last = result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise Failure("pending", **last)
+        time.sleep(min(remaining, 2))
 
 
 if __name__ == "__main__":

@@ -242,7 +242,7 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
  WITH stale AS (SELECT id,attempt FROM tasks
  WHERE action<>'network-diagnostic' AND status='running' AND started_at < now() - CASE
  WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
- WHEN action IN ('check-nginx','update-nginx','check-caddy','update-caddy') THEN GREATEST($1::interval,$5::interval)
+ WHEN action IN ('migrate-tls','check-nginx','update-nginx','check-caddy','update-caddy') THEN GREATEST($1::interval,$5::interval)
  WHEN action='upgrade-agent' THEN GREATEST($1::interval,$6::interval)
  WHEN install_if_missing AND engine IN ('sing-box','xray') THEN GREATEST($2::interval,$5::interval)
  WHEN action='install' OR install_if_missing THEN $2::interval
@@ -284,6 +284,9 @@ func (s *Store) openTaskExecutionTx(ctx context.Context, tx pgx.Tx, task *core.T
 	}
 	if denied {
 		return ErrForbidden
+	}
+	if task.Action == core.ActionMigrateTLS {
+		return s.openTLSMigrationTx(ctx, tx, task, features)
 	}
 	if !task.Action.AgentLevel() {
 		var runtime map[core.Engine]core.RuntimeState

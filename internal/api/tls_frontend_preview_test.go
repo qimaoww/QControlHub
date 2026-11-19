@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"net/url"
-	"slices"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
@@ -13,10 +15,11 @@ import (
 )
 
 func TestTLSFrontendPortPreview(t *testing.T) {
-	db, ctx, admin, owner, recipient := newConfigScopeAPIFixture(t)
+	db, ctx, admin, owner, recipient := newConfigScopeAPIFixtureWithin(t, 3*time.Minute)
+	liveRunner := os.Getenv("QCH_TEST_TLS_LEASE_RUNNER")
 	engines := []core.Engine{core.EngineXray, core.EngineMihomo, core.EngineSingBox}
 	node, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "isolated-preview", engines...)
-	features := append(node.Features, core.AgentFeatureManagedTLS, core.AgentFeatureCertificates, core.AgentFeatureManagedTLSCertificates, core.AgentFeatureXHTTP, core.AgentFeatureXHTTPTLS, core.AgentFeatureNginxACME)
+	features := append(node.Features, core.AgentFeatureTLSMigration, core.AgentFeatureManagedTLS, core.AgentFeatureCertificates, core.AgentFeatureManagedTLSCertificates, core.AgentFeatureXHTTP, core.AgentFeatureXHTTPTLS, core.AgentFeatureNginxACME)
 	runtime := map[core.Engine]core.RuntimeState{}
 	for _, e := range engines {
 		runtime[e] = core.RuntimeState{Installed: true, ServiceStatus: "active"}
@@ -54,6 +57,9 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 		claimed, err := db.ClaimTask(ctx, node.ID)
 		if err != nil || claimed == nil || claimed.ID != saved.Task.ID {
 			t.Fatal("missing deployment lease", err)
+		}
+		if liveRunner != "" {
+			isolatedTLSLease(t, ctx, liveRunner, claimed)
 		}
 		if err = db.CompleteTask(ctx, node.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 			t.Fatal(err)
@@ -111,7 +117,59 @@ func TestTLSFrontendPortPreview(t *testing.T) {
 	}
 	restricted, _ := testCreateBusinessKey(t, admin, []core.Permission{core.PermissionTasksRead})
 	restricted.call("POST", path, body, 403, nil)
-	if !slices.Contains(engines, preview.Members[0].Engine) {
-		t.Fatal("unknown engine")
+	if !bytes.Equal(before, snapshot()) {
+		t.Fatal("rejected preview changed state")
+	}
+	execute := strings.TrimSuffix(path, "preview") + "migrate"
+	body["plan_id"] = preview.PlanID
+	body["task_id"] = "tsk_0123456789abcdef"
+	var op store.TLSMigrationOperation
+	key.call("POST", execute, body, 202, &op)
+	if op.TaskID != body["task_id"] || op.State != "pending" {
+		t.Fatal("no pending execution")
+	}
+	key.call("POST", execute, body, 202, nil)
+	submitted, err := db.ClaimTask(ctx, node.ID)
+	if err != nil || submitted == nil || submitted.TLSMigration == nil || len(submitted.TLSMigration.Routes) != 3 {
+		t.Fatal("group not leased", err)
+	}
+	result := core.TLSMigrationResult{State: "succeeded", Step: "complete"}
+	for range submitted.TLSMigration.Routes {
+		result.Paths = append(result.Paths, core.TLSRouteVerification{Candidate: "succeeded", Recovery: "unknown"})
+	}
+	if liveRunner != "" {
+		result = *isolatedTLSLease(t, ctx, liveRunner, submitted)
+		if result.State != "succeeded" {
+			t.Fatal("runtime verification", result)
+		}
+	}
+	if err = db.CompleteTask(ctx, node.ID, op.TaskID, core.TaskResultRequest{Success: true, LeaseID: submitted.LeaseID, TLSMigration: &result}); err != nil {
+		t.Fatal(err)
+	}
+	status := "/agents/" + node.ID + "/tls-migrations/" + op.TaskID
+	key.call("GET", status, nil, 200, &op)
+	if op.State != "succeeded" || len(op.Result.Paths) != 3 {
+		t.Fatal("missing group receipt")
+	}
+	grantee.call("GET", status, nil, 404, nil)
+	for i, e := range engines {
+		var cfg core.Config
+		owner.call("GET", bases[e], nil, 200, &cfg)
+		if cfg.Version != 2 || !strings.Contains(cfg.Content, secrets[i]) {
+			t.Fatal("connection credential or ownership changed")
+		}
+	}
+	delete(body, "plan_id")
+	delete(body, "task_id")
+	body["expected_version"] = 2
+	key.call("POST", path, body, 200, &preview)
+	if len(preview.Blockers) != 0 || preview.ConnectionInterruptionPossible {
+		t.Fatal("unchanged plan", preview.Blockers)
+	}
+	body["plan_id"] = preview.PlanID
+	body["task_id"] = "tsk_0123456789abcdee"
+	key.call("POST", execute, body, 200, &op)
+	if op.State != "unchanged" {
+		t.Fatal("unchanged frontend queued another deployment")
 	}
 }

@@ -48,6 +48,7 @@ type credentials struct {
 }
 
 type completedTask struct {
+	TLSMigration     *core.TLSMigrationResult   `json:"tls_migration,omitempty"`
 	ExecutedAttempt  int                        `json:"executed_attempt,omitempty"`
 	DiagnosticDigest string                     `json:"diagnostic_digest,omitempty"`
 	HostPorts        *core.HostPortObservation  `json:"host_ports,omitempty"`

@@ -30,6 +30,8 @@ type TLSFrontendMember struct {
 	BackendPort        int         `json:"backend_port"`
 	From               string      `json:"from"`
 	To                 string      `json:"to"`
+	CertificateID      string      `json:"certificate_id,omitempty"`
+	GrantGeneration    int64       `json:"grant_generation,omitempty"`
 	CertificateVersion int         `json:"certificate_version,omitempty"`
 }
 
@@ -127,6 +129,9 @@ func (s *Store) previewTLSFrontendTx(ctx context.Context, tx pgx.Tx, agent core.
 	for i := range items {
 		w := &items[i]
 		w.visible = w.owner == owner && w.instance == instance && slices.Contains(agent.Capabilities, w.engine)
+		if w.applied && w.uncertain {
+			block("port_group_incomplete")
+		}
 		if w.content == "" {
 			if w.uncertain {
 				block("port_group_incomplete")
@@ -202,6 +207,7 @@ func (s *Store) previewTLSFrontendTx(ctx context.Context, tx pgx.Tx, agent core.
 			}
 			if f.UsesPanelCertificate() {
 				id := strings.SplitN(strings.TrimPrefix(f.CertificatePath, core.PanelCertificatePrefix), "/", 2)[0]
+				m.CertificateID = id
 				if err = certificateUseTx(ctx, tx, id, owner); err != nil {
 					if !errors.Is(err, ErrForbidden) {
 						return p, err
@@ -221,10 +227,11 @@ func (s *Store) previewTLSFrontendTx(ctx context.Context, tx pgx.Tx, agent core.
 			f.Mode = input.TargetMode
 			f.StaticPageOwner = w.id
 			if shared {
-				_, allowed, e := proxyIngressGrantTx(ctx, tx, agent.ID, owner, f)
+				generation, allowed, e := proxyIngressGrantTx(ctx, tx, agent.ID, owner, f)
 				if e != nil && !errors.Is(e, ErrConflict) {
 					return p, e
 				}
+				m.GrantGeneration = generation
 				if !allowed {
 					block("ingress_unauthorized")
 				}
@@ -247,6 +254,9 @@ func (s *Store) previewTLSFrontendTx(ctx context.Context, tx pgx.Tx, agent core.
 	}
 	if pending {
 		block("pending_tasks")
+	}
+	if !slices.Contains(agent.Features, core.AgentFeatureTLSMigration) {
+		block("agent_upgrade_required")
 	}
 	if agent.Status != "online" {
 		block("agent_offline")

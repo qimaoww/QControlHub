@@ -59,7 +59,8 @@ const unauthorizedTaskPrincipalSQL = unauthorizedTaskAPIKeySQL + ` OR (t.owner_i
 	WHERE u.id=t.owner_id AND (u.disabled OR (u.role<>'admin' AND
 		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' WHEN t.action IN ('check-caddy','check-nginx') THEN 'agents.read' ELSE 'tasks.execute' END)
 		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp','ip-quality','update-nginx','update-caddy') AND NOT u.permissions ? 'agents.manage')
-		 OR (a.owner_id<>u.id AND
+		 OR (t.action='migrate-tls' AND (NOT u.permissions ? 'agent-config.read' OR NOT u.permissions ? 'agent-config.write'))
+ OR (a.owner_id<>u.id AND t.action<>'migrate-tls' AND
 			((t.install_if_missing AND NOT t.shared_instance)
 			 OR (t.action NOT IN ('deploy','validate') AND NOT (t.shared_instance AND t.shared_traffic_id<>''
 				AND t.action IN ('start','stop','restart','status','read-config','read-managed-config')) AND NOT (t.action='install' AND t.shared_instance

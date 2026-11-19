@@ -22,7 +22,7 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	where := agentAccessClause(ctx, "agents.id", &args)
 	query := scopedAgentsSQL(ctx, &args)
 	err := s.pool.QueryRow(ctx, query+` AND id=$1`+where, args...).Scan(
-		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState,
+		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &agent.ObservedPublicIPAt, &agent.ObservedPublicIPChangedAt, &metricsState,
 		&agent.TimeZone.Mode, &agent.TimeZone.TimeZone, &agent.TimeZone.AppliedTimeZone, &agent.TimeZone.Status, &agent.TimeZone.Error, &agent.TimeZone.Revision, &agent.TimeZone.AutoAddressHash,
 		&agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.ManagedProxies, &agent.SharedEngines)
 	if errors.Is(err, pgx.ErrNoRows) {
