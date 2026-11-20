@@ -33,6 +33,7 @@ export async function logsPage(ctx) {
   let entries = [], sources = [], page = 0, anchor = null, serial = 0, controller, pendingRead, failures = 0, incomplete = false, readState = "loading";
   let signature = data.analyticsLogAccessSignature || "", scope = "", queryFrame, cache = data.analyticsLogCache ||= createCoreLogCache();
   let nodeOrder = savedNodeOrder(), sourceUnavailable = false;
+  let agentLabels = new Map(), sourcesKnown = false;
   const status = muted("正在读取日志…"); status.setAttribute("data-log-refresh-label", "");
   const error = notice("");
   const collection = sourceStatus(ctx, { marker: "data-log-sources", lastSeenLabel: "最近日志", lastSeenEmpty: "尚无日志" });
@@ -76,7 +77,10 @@ export async function logsPage(ctx) {
     if (select.value !== value) select.value = value;
   }
   function sourceOptions() {
-    options("agent_id", [["", "全部获授权节点"], ...orderNodesBySavedOrder(coreLogSourceAgents(sources), nodeOrder).map(agent => [agent.id, agent.name || agent.id])]);
+    if (!sourcesKnown) return;
+    const agents = orderNodesBySavedOrder(coreLogSourceAgents(sources), nodeOrder);
+    agentLabels = new Map(agents.map(agent => [agent.id, agent.label]));
+    options("agent_id", [["", "全部获授权节点"], ...agentLabels]);
     const available = sources.filter(source => !filters.agent_id || source.agent_id === filters.agent_id);
     options("instance_id", [["", "全部授权实例"], ...new Map(available.map(source => [source.instance_id, [source.instance_id, instanceLabel(source)]])).values()]);
     options("engine", [["", "全部内核"], ...engines.filter(engine => available.some(source => source.engine === engine && (!filters.instance_id || source.instance_id === filters.instance_id))).map(engine => [engine, engine])]);
@@ -85,7 +89,7 @@ export async function logsPage(ctx) {
     collection.update(relevant.map(source => {
       const state = coreLogSourceState(source);
       const attention = ["failed", "offline", "unsupported", "not-installed", "status-unavailable"].includes(source.status);
-      return { agentID: source.agent_id, agentName: source.name || source.agent_id,
+      return { agentID: source.agent_id, agentName: agentLabels.get(source.agent_id),
         instanceID: source.instance_id, instance: instanceLabel(source), engine: engineName(source.engine),
         state: state.key === "active" ? "采集正常" : state.key === "ready" ? "就绪，等待日志" : state.title,
         tone: source.status === "failed" ? "bad" : attention ? "warn" : state.key === "active" ? "ok" : "",
@@ -114,13 +118,14 @@ export async function logsPage(ctx) {
     view.update(records, record => {
       const source = sources.find(source => source.agent_id === record.agent_id && source.engine === record.engine && source.instance_id === record.instance_id);
       const engine = engineName(record.engine);
+      const agentName = agentLabels.get(record.agent_id) || record.agent_id;
       const heading = actions(
-        node("p", {}, node("strong", {}, source?.name || record.agent_id)),
+        node("p", {}, node("strong", {}, agentName)),
         badge(`内核 · ${engine}`), node("p", { className: "a-muted" }, source ? instanceLabel(source) : coreLogInstanceName(record)),
         badge(levelName(record.level), ["error", "critical"].includes(record.level) ? "bad" : record.level === "warning" ? "warn" : ""),
         node("time", { className: "a-muted", datetime: record.logged_at }, date(record.logged_at)));
       return [heading,
-        node("pre", { className: "a-code a-log-message", tabindex: "0", "aria-label": `${source?.name || record.agent_id} · ${engine} · 日志正文` }, redactDiagnostic(record.message))];
+        node("pre", { className: "a-code a-log-message", tabindex: "0", "aria-label": `${agentName} · ${engine} · 日志正文` }, redactDiagnostic(record.message))];
     }, !entries.length && readState === "loading" ? "正在读取日志…" : !entries.length && readState === "failed" ? "日志读取失败" :
       entries.length ? "没有匹配日志" : sourceUnavailable ? "暂无日志" : !relevant.length ? "没有获授权的日志实例" : collectionState.emptyTitle || "暂无匹配日志");
     count.textContent = `${visible.length} 条日志${visible.length !== entries.length ? ` · 已加载 ${entries.length} 条` : ""}${visible.length > 200 ? ` · 第 ${page + 1} / ${Math.ceil(visible.length / 200)} 页` : ""} · 信息 ${counts.level.info} · 警告 ${counts.level.warning} · 错误 ${counts.level.error}`;
@@ -136,7 +141,7 @@ export async function logsPage(ctx) {
   }
   function showReadFailure(failure) {
     failures++; readState = "failed";
-    if ([401, 403, 404].includes(failure.status)) { entries = []; sources = []; incomplete = false; data.analyticsLogAccessSignature = signature = ""; data.analyticsLogCache = cache = createCoreLogCache(); sourceOptions(); }
+    if ([401, 403, 404].includes(failure.status)) { entries = []; sources = []; sourcesKnown = true; incomplete = false; data.analyticsLogAccessSignature = signature = ""; data.analyticsLogCache = cache = createCoreLogCache(); sourceOptions(); }
     error.textContent = redactDiagnostic(failure.message);
     status.textContent = entries.length ? incomplete ? "补齐失败，当前仅显示部分日志" : "刷新失败，保留上次数据" : "读取失败，请重试";
     draw();
@@ -203,14 +208,14 @@ export async function logsPage(ctx) {
       // The directory verifies memory snapshots and supplies presentation
       // metadata. A network window has independent server authorization and
       // must be able to finish while this bounded request is still pending.
-      void requestCoreLogJSON(ctx.api, "/core-log-sources", { signal: directoryController.signal, timeout: 8000 }).then(receivedSources => {
+      const directoryRead = requestCoreLogJSON(ctx.api, "/core-log-sources", { signal: directoryController.signal, timeout: 8000 }).then(receivedSources => {
         if (!current() || directoryController.signal.aborted) return;
         const access = JSON.stringify(receivedSources.map(source => [source.agent_id, source.instance_id, source.engine, source.owner_id, source.grant_revision]));
         if (access !== signature) {
           cache = data.analyticsLogCache = createCoreLogCache();
           if (!fresh) { entries = []; incomplete = false; }
         }
-        data.analyticsLogAccessSignature = signature = access; sources = receivedSources;
+        data.analyticsLogAccessSignature = signature = access; sources = receivedSources; sourcesKnown = true;
         sourceUnavailable = false; grants = new Map(sources.map(source => [identity(source), source.owner_id])); directoryReady = true;
         if (fresh) entries = authorized(entries);
         const normalized = normalizeCoreLogScope(filters, sources);
@@ -251,6 +256,11 @@ export async function logsPage(ctx) {
       let result;
       try {
         const window = await windowRead.then(value => ({ status: "fulfilled", value }), reason => ({ status: "rejected", reason }));
+        // A saved or linked ID may have been deleted. Let this round's bounded
+        // directory read confirm the remaining grants before abandoning it.
+        if (current() && window.reason?.status === 404 && (filters.agent_id || filters.instance_id || filters.user_id)) {
+          await directoryRead;
+        }
         if (!current()) return;
         if (denied) throw denied;
         if (coreLogScopeKey(filters) !== key) {

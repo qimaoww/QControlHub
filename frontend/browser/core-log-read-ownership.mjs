@@ -60,6 +60,7 @@ export async function testLogReadOwnership() {
     control.value = agent; control.dispatchEvent(new Event('change', { bubbles: true }));
   };
   try {
+    sources[1].name = sources[0].name;
     windows.set('alpha:200', deferred()); windows.set('alpha:2000', deferred());
     boot(); await waitFor(() => calls.filter(call => call.kind === 'directory').length === 1 && calls.filter(call => call.kind === 'window').length === 2, 'independently authorized reads did not start with the directory');
     assert.equal(rows().length, 0, 'unvalidated cached logs appeared');
@@ -70,6 +71,10 @@ export async function testLogReadOwnership() {
     await waitFor(() => calls.filter(call => call.kind === 'window').length === 2, 'preview and full windows did not start concurrently');
     order.resolve(); order = null;
     await waitFor(() => document.querySelector('[name=agent_id]').options[1]?.value === 'gamma', 'log node choices ignored the delayed server order');
+    const nodeLabels = new Map([...document.querySelector('[name=agent_id]').options].map(option => [option.value, option.textContent]));
+    assert.equal(nodeLabels.get('gamma'), 'GAMMA', 'unique name changed');
+    assert.ok(nodeLabels.get('alpha') !== nodeLabels.get('beta'), 'duplicate node labels are indistinguishable');
+    assert.equal(rows()[0].querySelector('strong').textContent, nodeLabels.get('alpha'), 'log heading does not identify the selected node');
     windows.get('alpha:200').resolve(entries('alpha', 200));
     await waitFor(() => rows().length === 200 && main().textContent.includes('正在补齐'), 'preview did not display before the complete window');
     windows.get('alpha:2000').resolve(entries('alpha', 2000));
@@ -142,8 +147,14 @@ export async function testLogReadOwnership() {
     assert.equal([...document.querySelector('[name=agent_id]').options].length, 1, 'previous account nodes leaked after late read');
     const linkedAgent = 'agt_0000000000000001', linkedInstance = 'shr_0000000000000001';
     sources = [{ ...source(linkedAgent), instance_id: linkedInstance, username: '共享测试用户' }];
+    directory = deferred();
     const beforeLink = calls.length;
     boot(`#core-logs?agent=${linkedAgent}&instance=${linkedInstance}&engine=xray`);
+    await waitFor(() => ready() && rows().length === 200, 'shared link waited for metadata before showing its authorized history');
+    assert.equal(document.querySelector('[name=agent_id]').value, linkedAgent, 'pending directory dropped the linked node');
+    assert.equal(document.querySelector('[name=instance_id]').value, linkedInstance, 'pending directory dropped the linked instance');
+    directory.resolve(); directory = null;
+    await waitFor(() => document.querySelector('[name=instance_id]').selectedOptions[0]?.textContent.includes('共享测试用户'), 'shared link metadata did not arrive');
     await waitFor(() => ready() && rows().length === 200, 'shared-instance log link did not load');
     assert.equal(document.querySelector('[name=agent_id]').value, linkedAgent, 'shared link ignored node target');
     assert.equal(document.querySelector('[name=instance_id]').value, linkedInstance, 'shared link ignored instance target');
@@ -154,6 +165,16 @@ export async function testLogReadOwnership() {
     await waitFor(() => ready() && main().textContent.includes('没有获授权的日志实例'), 'revoked shared link did not clear scope');
     assert.equal(rows().length, 0, 'revoked shared link retained history');
     assert.ok(calls.slice(beforeDeniedLink).some(call => call.kind === 'window' && call.instance !== linkedInstance), 'revoked target was not replaced by the verified scope');
+    // A deleted ID can return 404 before the directory lists the replacement.
+    directory = deferred(); sources = [source('replacement')];
+    windowFailure = 404; failedWindows.add('alpha:100');
+    boot('#core-logs', { agent_id: 'alpha', limit: 100 });
+    await waitFor(() => calls.some(call => call.kind === 'window' && call.agent === 'alpha' && call.limit === 100), 'saved deleted ID was not queried');
+    await delay(30);
+    directory.resolve(); directory = null;
+    await waitFor(() => ready() && rows().length === 100 && [...rows()].every(row => row.textContent.includes('replacement authorized log')), 'early 404 canceled the directory needed to recover a deleted ID');
+    assert.equal(document.querySelector('[name=agent_id]').value, '', 'fallback implicitly selected the replacement');
+    failedWindows.clear(); windowFailure = 503;
     session = { role: 'user', user_id: 'logs-only', permissions: ['core-logs.read'] };
     sources = [source('alpha')]; boot();
     await waitFor(() => ready() && rows().length === 200, 'log-only user lost authorized history without agents.read');
