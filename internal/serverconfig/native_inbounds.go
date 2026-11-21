@@ -18,14 +18,15 @@ const ssRustRootSourceIndex = -1
 // native identity. A legacy SS Rust singleton has an implicit identity, but
 // its display name still comes from the document.
 type NativeInbound struct {
-	Section     string `json:"section"`
-	Tag         string `json:"tag"`
-	Listen      string `json:"listen,omitempty"`
-	Port        int    `json:"port,omitempty"`
-	PortSpec    string `json:"port_spec,omitempty"`
-	Network     string `json:"network,omitempty"`
-	TargetTag   string `json:"target_tag,omitempty"`
-	SourceIndex int    `json:"-"`
+	Section       string `json:"section"`
+	Tag           string `json:"tag"`
+	Listen        string `json:"listen,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	PortSpec      string `json:"port_spec,omitempty"`
+	Network       string `json:"network,omitempty"`
+	TargetTag     string `json:"target_tag,omitempty"`
+	ProtocolLabel string `json:"protocol_label,omitempty"`
+	SourceIndex   int    `json:"-"`
 }
 
 func DiscoverNativeInbounds(engine core.Engine, content string) ([]NativeInbound, error) {
@@ -137,10 +138,11 @@ func describeNativeInbound(engine core.Engine, section string, root, entry map[s
 		if mode == "" {
 			mode = "tcp_only"
 		}
-		return NativeInbound{Section: section, Tag: tag, Listen: listen, Port: port, Network: nativeNetworkLabel(mode)}
+		protocol, _ := FindProtocol(engine, shadowsocksRustProtocol(stringValue(entry["method"])))
+		return NativeInbound{Section: section, Tag: tag, Listen: listen, Port: port, Network: nativeNetworkLabel(mode), ProtocolLabel: protocol.Name}
 	}
 	return NativeInbound{
-		Section: section, Tag: tag, Listen: listen, Port: port, PortSpec: portSpec,
+		Section: section, Tag: tag, Listen: listen, Port: port, PortSpec: portSpec, ProtocolLabel: kind,
 		Network: nativeNetworkLabel(string(trafficEntryProtocol(engine, entry, kind, ""))),
 	}
 }

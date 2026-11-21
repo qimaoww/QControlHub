@@ -35,6 +35,8 @@ const (
 	ProtocolOpenVPNServer            = "openvpn-server"
 )
 
+var portForwardNetworks = []string{"tcp", "udp", "tcp,udp"}
+
 type Protocol struct {
 	SnellVersion         int          `json:"snell_version,omitempty"`
 	SnellMode            string       `json:"snell_mode,omitempty"`
@@ -62,6 +64,7 @@ type Protocol struct {
 	UsesReality          bool         `json:"uses_reality"`
 	SupportsRealityMLDSA bool         `json:"supports_reality_mldsa"`
 	UsesVLESSEncryption  bool         `json:"uses_vless_encryption"`
+	ForwardNetworks      []string     `json:"forward_networks,omitempty"`
 	PortForward          bool         `json:"port_forward"`
 	DefaultListen        string       `json:"default_listen,omitempty"`
 	UsesWireGuard        bool         `json:"uses_wireguard,omitempty"`
@@ -275,7 +278,7 @@ func Protocols(engine core.Engine) []Protocol {
 			Key: ProtocolPortForward, Name: "端口转发", Badge: "FORWARD",
 			Description: "将本机监听端口收到的 TCP、UDP 或双协议流量转发到指定目标地址与端口。",
 			Docs:        base + portForwardPath, DefaultPort: 8080,
-			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true,
+			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true, ForwardNetworks: portForwardNetworks,
 		},
 	}
 	// VLESS Encryption 可以直接跑在原生 TCP 上：Xray 允许在启用 VLESS Encryption 时

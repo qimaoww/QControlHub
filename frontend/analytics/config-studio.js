@@ -292,13 +292,15 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     }
     function render(plan) {
       baseline=plan;
+      regenerate.hidden = protocol.port_forward;
       form.dataset.blockMainlandDestination = plan.block_mainland_destination ? '1' : '0';
       form.dataset.blockMainlandSource = plan.block_mainland_source ? '1' : '0';
       const keys=['tag','listen','port',...(!protocol.port_forward&&!protocol.ignores_username?['username']:[]),...(!protocol.port_forward?[ 'credential',...(protocol.secondary_credential_label?['secondary_credential']:[])]:[]),...(protocol.methods?.length?['method']:[])];
       const certificateID=plan.panel_certificate_id||'';
       const certificateOptions=[['','节点已有证书 / 原有 TLS 方式']];
       if(certificateID)certificateOptions.push([certificateID,'正在加载所选证书…']);
-      const options=key=>key==='tls_static_page'?[['','不显示页面'],...(protocol.static_pages||[]).map(page=>[page.key,page.name]),['custom','自定义 HTML']]:key==='mieru_transport'?['TCP','UDP']:key==='mieru_traffic_pattern'?[['off','关闭'],['light','轻度'],['balanced','均衡'],['aggressive','激进'],['custom','自定义']]:key==='xhttp_mode'?['auto','stream-one','stream-up','packet-up']:key==='xhttp_cdn'?[['none','无'],['cloudflare','Cloudflare'],['other','其他 CDN']]:key==='panel_certificate_id'?certificateOptions:key==='method'?protocol.methods:key==='transport'?protocol.transports:key==='tls_mode'?[['native','内核 TLS'],['caddy','Caddy'],['nginx','Nginx'],...(protocol.key==='vless-xhttp-tls'?[]:[['external','外部终止']])]:undefined;
+      const forwardNetworks = protocol.forward_networks?.map(value => [value, value.toUpperCase().replace(',', ' + ')]);
+      const options=key=>key==='network'?forwardNetworks:key==='tls_static_page'?[['','不显示页面'],...(protocol.static_pages||[]).map(page=>[page.key,page.name]),['custom','自定义 HTML']]:key==='mieru_transport'?['TCP','UDP']:key==='mieru_traffic_pattern'?[['off','关闭'],['light','轻度'],['balanced','均衡'],['aggressive','激进'],['custom','自定义']]:key==='xhttp_mode'?['auto','stream-one','stream-up','packet-up']:key==='xhttp_cdn'?[['none','无'],['cloudflare','Cloudflare'],['other','其他 CDN']]:key==='panel_certificate_id'?certificateOptions:key==='method'?protocol.methods:key==='transport'?protocol.transports:key==='tls_mode'?[['native','内核 TLS'],['caddy','Caddy'],['nginx','Nginx'],...(protocol.key==='vless-xhttp-tls'?[]:[['external','外部终止']])]:undefined;
       const control=key=>field(key==='credential'?protocol.credential_label||labels[key]:labels[key]||key,key,key==='tls_static_page'?(plan.tls_static_html?(protocol.static_pages||[]).find(page=>page.html===plan.tls_static_html)?.key||'custom':''):key==='panel_certificate_id'?certificateID:typeof plan[key]==='object'?JSON.stringify(plan[key]||{},null,2):plan[key]??(booleans.has(key)?false:''),{...(booleans.has(key)?{type:'checkbox',value:'1'}:numeric.has(key)?{type:'number',min:0,max:key.includes('port')?65535:undefined}:multiline.has(key)?{multiline:4,spellcheck:false}:/credential|private_key|password|auth_key|preshared_key|seed|decryption/.test(key)?{type:'password',autocomplete:'new-password'}:{}),...(options(key)?{options:options(key)}:{}),required:['tag','listen','port'].includes(key),readonly:key==='listen'&&engine==='sing-box'&&protocol.uses_wireguard,maxlength:multiline.has(key)?undefined:key==='reality_mldsa65_verify'?2603:2000});
       const sections=[node('div',{className:'a-form-grid'},keys.map(control))];
       if(protocol.transport_config)sections.push(group('传输',node('div',{className:'a-form-grid'},['transport','transport_path','transport_host','transport_http_method','flow'].map(control)),true));
@@ -649,13 +651,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const input=inbounds[row.projection_index];
       const target=row.target_tag&&targets.find(item=>item.tag===row.target_tag&&item.port===row.port);
       const object=row.target_tag&&managed.find(item=>item.inbound&&item.section===row.section&&item.tag===row.target_tag&&managedCounts.get(`${item.section}\0${item.tag}`)===1);
-      const protocol=row.preset_editable&&input&&!input.source_only&&current.protocols.find(item=>item.key===input.protocol);
+      const protocol=input&&!input.source_only&&current.protocols.find(item=>item.key===input.protocol);
       const saved=!current.snapshot_task_id;
-      return [row.port||row.port_spec||'无固定端口',stack(row.tag||'—',muted([row.listen,row.network].filter(Boolean).join(' · '))),protocol?.name||'自定义',
+      return [row.port||row.port_spec||'无固定端口',stack(row.tag||'—',muted([row.listen,row.network].filter(Boolean).join(' · '))),protocol?.name||row.protocol_label||'自定义',
         deployment.inboundState(row.port,isChangedSnapshot()?undefined:object?.enabled),actions(
         saved&&target&&ctx.can('agent-config.read')&&button('访问限制',()=>restrictions(target,selection)),
         writable&&saved&&target&&object&&toggle(object),
-        writable&&button('修改',()=>protocol?inboundEdit(row,'modify',selection):files(selection)),
+        writable&&button('修改',()=>row.preset_editable&&protocol?inboundEdit(row,'modify',selection):files(selection)),
         ctx.can('client-access.read')&&row.client_export&&input&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(input,selection))),
         writable&&row.target_tag&&button('删除',()=>removeInbound({tag:row.target_tag,port:row.port},selection),{tone:'danger'}),
         writable&&target&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{

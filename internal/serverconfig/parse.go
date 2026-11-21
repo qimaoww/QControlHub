@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -275,7 +276,7 @@ func parsedInputValid(input Input) bool {
 	}
 	if input.Protocol == ProtocolPortForward {
 		return input.Tag != "" && input.Port != 0 && input.TargetAddress != "" && input.TargetPort != 0 &&
-			(input.Network == "tcp" || input.Network == "udp" || input.Network == "tcp,udp")
+			slices.Contains(portForwardNetworks, input.Network)
 	}
 	return input.Protocol != "" && input.Tag != "" && input.Port != 0 && input.Credential != ""
 }

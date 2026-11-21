@@ -25,7 +25,13 @@ export async function testPresetCatalogRuntime(catalog) {
         assert(!control('tls_server_name')&&!control('certificate_path'),'native Snell requires unrelated TLS configuration');
         edit('snell_udp',false);edit('snell_reuse',false);
       }
-      if(actual.protocol.port_forward) { edit('target_address','127.0.0.1');edit('target_port',8080); }
+      if(actual.protocol.port_forward) {
+        const network = control('network');
+        assert(network instanceof HTMLSelectElement && network.value === 'tcp', 'forwarding network must default to TCP');
+        assert([...network.options].map(option=>option.textContent).join('/') === 'TCP/UDP/TCP + UDP', 'forwarding network choices disagree with the catalog');
+        assert(![...form().querySelectorAll('button')].some(button=>button.textContent==='重新生成凭据' && button.checkVisibility()), 'port forwarding exposed credential regeneration');
+        edit('target_address','127.0.0.1');edit('target_port',8080);
+      }
       if(['vless-xhttp-five','vless-xhttp-tls-reality','vless-xhttp-reality-tls'].includes(actual.protocol.key)) { edit('tls_server_name','tls.example.test');edit('reality_server_name','reality.example.test');edit('certificate_path','/etc/qcontrolhub/tls/test.crt');edit('private_key_path','/etc/qcontrolhub/tls/test.key'); }
       if(actual.protocol.supports_managed_tls) {
         assert(control('tls_mode').value==='caddy'&&control('tls_public_port').value==='443','managed TLS defaults lost');
@@ -77,6 +83,14 @@ export async function testPresetCatalogRuntime(catalog) {
       const saved=await save();
       if(actual.plan.transport!=='xhttp')assert(saved.client_address==='edge.example.test'&&saved.client_port===34443&&control('client_address').value==='edge.example.test'&&control('client_port').value==='34443','client dial options lost on save/reopen');
       assert(saved.protocol===actual.protocol.key,'catalog submitted a different protocol');
+      if(actual.protocol.port_forward) {
+        assert(saved.network === 'tcp' && control('network').value === 'tcp', 'TCP did not round-trip');
+        for (const network of ['udp','tcp,udp']) {
+          edit('network', network);
+          const changed = await save();
+          assert(changed.network === network && control('network').value === network, 'forwarding network changed after save');
+        }
+      }
       if(actual.protocol.snell_version) {
         assert(test.row(saved.tag).textContent.includes(actual.protocol.name),'Snell row exposes an internal protocol key');
         assert(saved.snell_version===actual.protocol.snell_version&&saved.snell_mode===(actual.protocol.snell_mode||''),'Snell version/mode changed during save');
