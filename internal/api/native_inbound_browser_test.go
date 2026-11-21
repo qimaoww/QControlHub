@@ -21,9 +21,9 @@ func TestNativeInboundWorkspaceBrowserSessions(t *testing.T) {
 	for _, mode := range []string{"desktop", "mobile"} {
 		t.Run(mode, func(t *testing.T) {
 			db, ctx, _, owner, _ := newConfigScopeAPIFixtureWithin(t, 90*time.Second)
-			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "配置验收节点", core.EngineXray)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "配置验收节点", core.EngineXray, core.EngineShadowsocksRust)
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
-				Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ServiceStatus: "active"}},
+				Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ServiceStatus: "active"}, core.EngineShadowsocksRust: {Installed: true, ServiceStatus: "active"}},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -32,6 +32,7 @@ func TestNativeInboundWorkspaceBrowserSessions(t *testing.T) {
 			}
 			base := "/agents/" + agent.ID + "/configs/xray"
 			owner.call("PUT", base, core.Config{Name: "混合入站", Content: mixedNativeXraySource}, 200, nil)
+			owner.call("PUT", "/agents/"+agent.ID+"/configs/ss-rust", core.Config{Name: "Shadowsocks Rust", Content: `{"mode":"tcp_and_udp","servers":[{"method":"2022-blake3-aes-128-gcm","password":"MDEyMzQ1Njc4OWFiY2RlZg==","server":"::","server_port":22222}]}`}, 200, nil)
 			taskCtx, stop := context.WithCancel(ctx)
 			done := make(chan struct{})
 			go func() {

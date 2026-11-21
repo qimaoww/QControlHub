@@ -107,17 +107,20 @@ func InheritShadowsocksRustGlobals(input Input, content string) Input {
 	return input
 }
 
+func shadowsocksRustProtocol(method string) string {
+	if strings.HasPrefix(method, "2022-") {
+		return ProtocolSS2022
+	}
+	return ProtocolShadowsocks
+}
+
 func parseShadowsocksRustEntry(root map[string]any, tag string) (Input, bool) {
 	if root == nil {
 		return Input{}, false
 	}
 	method, password := stringValue(root["method"]), stringValue(root["password"])
-	protocol := ProtocolShadowsocks
-	if strings.HasPrefix(method, "2022-") {
-		protocol = ProtocolSS2022
-	}
 	input := Input{
-		Protocol: protocol, Tag: tag, Listen: shadowsocksRustListen(root),
+		Protocol: shadowsocksRustProtocol(method), Tag: tag, Listen: shadowsocksRustListen(root),
 		Port: intValue(shadowsocksRustPort(root)), Username: "default", Credential: password,
 		Method: method, Transport: "raw",
 		SSRustDNS: stringValue(root["dns"]), SSRustOutboundBindAddr: stringValue(root["outbound_bind_addr"]),

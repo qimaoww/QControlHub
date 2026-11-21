@@ -615,6 +615,9 @@
               }
             ]
           },
+          "protocol_label": {
+            "type": "string"
+          },
           "section": {
             "type": "string"
           },
@@ -6014,6 +6017,9 @@
             "type": "integer"
           },
           "port_spec": {
+            "type": "string"
+          },
+          "protocol_label": {
             "type": "string"
           },
           "section": {
@@ -12148,6 +12154,7 @@
                       "port_spec": "example",
                       "preset_editable": false,
                       "projection_index": 1,
+                      "protocol_label": "example",
                       "section": "example",
                       "tag": "example",
                       "target_tag": "example"
@@ -12571,6 +12578,7 @@
                       "port_spec": "example",
                       "preset_editable": false,
                       "projection_index": 1,
+                      "protocol_label": "example",
                       "section": "example",
                       "tag": "example",
                       "target_tag": "example"

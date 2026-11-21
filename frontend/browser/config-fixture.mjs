@@ -98,7 +98,7 @@ export async function createConfigFixture(engine, options = {}) {
     managed_objects:inbounds.map(item=>({section:engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds",tag:item.tag,port:item.port,inbound:true,enabled:!disabled.some(ref=>ref.tag === item.tag)})).concat((saved ? JSON.parse(saved.content).outbounds || [] : []).filter(item=>!item.tag.startsWith("qch-")).map(item=>({section:"outbounds",tag:item.tag,kind:item.protocol||item.type,inbound:false,enabled:!disabled.some(ref=>ref.tag===item.tag)}))),
     inbound_targets:inbounds.map(item=>({tag:item.tag, port:item.port, kind:options.native ? "socks" : item.protocol})),
     inbound_rows:inbounds.map((item,index)=>({section:item.protocol==='wireguard'&&engine==='sing-box'?'endpoints':inboundSection,
-      tag:item.tag,target_tag:item.tag,port:item.port,listen:item.listen,
+      tag:item.tag,target_tag:item.tag,port:item.port,listen:item.listen,protocol_label:options.nativeProtocol,
       ...(!options.native?{projection_index:index,preset_editable:!item.source_only,client_export:true}:{})})),
     protocols:entries.map(entry => entry.protocol),
     catalog:{name:engine, format:engine === "mihomo" ? "YAML" : "JSON", fields, topic_groups:[]},

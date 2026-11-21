@@ -649,13 +649,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const input=inbounds[row.projection_index];
       const target=row.target_tag&&targets.find(item=>item.tag===row.target_tag&&item.port===row.port);
       const object=row.target_tag&&managed.find(item=>item.inbound&&item.section===row.section&&item.tag===row.target_tag&&managedCounts.get(`${item.section}\0${item.tag}`)===1);
-      const protocol=row.preset_editable&&input&&!input.source_only&&current.protocols.find(item=>item.key===input.protocol);
+      const protocol=input&&!input.source_only&&current.protocols.find(item=>item.key===input.protocol);
       const saved=!current.snapshot_task_id;
-      return [row.port||row.port_spec||'无固定端口',stack(row.tag||'—',muted([row.listen,row.network].filter(Boolean).join(' · '))),protocol?.name||'自定义',
+      return [row.port||row.port_spec||'无固定端口',stack(row.tag||'—',muted([row.listen,row.network].filter(Boolean).join(' · '))),protocol?.name||row.protocol_label||'自定义',
         deployment.inboundState(row.port,isChangedSnapshot()?undefined:object?.enabled),actions(
         saved&&target&&ctx.can('agent-config.read')&&button('访问限制',()=>restrictions(target,selection)),
         writable&&saved&&target&&object&&toggle(object),
-        writable&&button('修改',()=>protocol?inboundEdit(row,'modify',selection):files(selection)),
+        writable&&button('修改',()=>row.preset_editable&&protocol?inboundEdit(row,'modify',selection):files(selection)),
         ctx.can('client-access.read')&&row.client_export&&input&&button('复制入站连接',event=>void ctx.mutate(event.currentTarget,()=>copyInbound(input,selection))),
         writable&&row.target_tag&&button('删除',()=>removeInbound({tag:row.target_tag,port:row.port},selection),{tone:'danger'}),
         writable&&target&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{
