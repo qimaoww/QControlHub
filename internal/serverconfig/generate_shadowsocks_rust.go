@@ -18,23 +18,26 @@ func generateShadowsocksRust(input Input) (string, error) {
 	if input.SSRustOutboundBindAddr != "" && net.ParseIP(input.SSRustOutboundBindAddr) == nil {
 		return "", errors.New("出站绑定地址必须是 IP 地址")
 	}
-	root := map[string]any{
+	server := map[string]any{
 		"id":          input.Tag,
 		"server":      input.Listen,
 		"server_port": input.Port,
 		"password":    input.Credential,
 		"method":      input.Method,
-		"mode":        "tcp_and_udp",
-		"timeout":     300,
-		"no_delay":    true,
-		"fast_open":   false,
-		"ipv6_first":  input.SSRustIPv6First,
+	}
+	if input.SSRustOutboundBindAddr != "" {
+		server["outbound_bind_addr"] = input.SSRustOutboundBindAddr
+	}
+	root := map[string]any{
+		"servers":    []any{server},
+		"mode":       "tcp_and_udp",
+		"timeout":    300,
+		"no_delay":   true,
+		"fast_open":  false,
+		"ipv6_first": input.SSRustIPv6First,
 	}
 	if input.SSRustDNS != "" {
 		root["dns"] = input.SSRustDNS
-	}
-	if input.SSRustOutboundBindAddr != "" {
-		root["outbound_bind_addr"] = input.SSRustOutboundBindAddr
 	}
 	value, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {

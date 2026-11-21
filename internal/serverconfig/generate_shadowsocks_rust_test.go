@@ -1,6 +1,7 @@
 package serverconfig
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -31,6 +32,14 @@ func TestShadowsocksRustGeneratedConfigurationsRoundTrip(t *testing.T) {
 			content, err := Generate(core.EngineShadowsocksRust, input)
 			if err != nil {
 				t.Fatal(err)
+			}
+			var root map[string]any
+			if err := json.Unmarshal([]byte(content), &root); err != nil {
+				t.Fatal(err)
+			}
+			server := firstMap(root["servers"])
+			if root["server_port"] != nil || server["id"] != input.Tag || server["server_port"] != float64(input.Port) || server["ipv6_first"] != nil {
+				t.Fatalf("generated preset must place the listener in servers: %s", content)
 			}
 			parsed, ok := Parse(core.EngineShadowsocksRust, content)
 			if !ok || parsed.Protocol != input.Protocol || parsed.Listen != input.Listen || parsed.Port != input.Port || parsed.Credential != input.Credential || parsed.Method != input.Method || parsed.Transport != "raw" {

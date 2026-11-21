@@ -171,6 +171,18 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 	if _, ok := parseShadowsocksRust(generatedContent); !ok {
 		return "", fmt.Errorf("ss-rust 生成配置缺少完整服务端字段")
 	}
+	// Older callers supply a singleton preset. Both representations feed
+	// the same port merge and retain its existing global-settings semantics.
+	if servers, exists := generated["servers"]; exists {
+		entries, ok := servers.([]any)
+		if !ok || len(entries) != 1 || generated["server"] != nil || generated["server_port"] != nil || generated["shadowsocks"] != nil {
+			return "", fmt.Errorf("入站预设必须包含一个服务端")
+		}
+		delete(generated, "servers")
+		for key, value := range mapValue(entries[0]) {
+			generated[key] = value
+		}
+	}
 	merged := currentContent
 	if strings.TrimSpace(merged) == "" {
 		merged = "{}"
