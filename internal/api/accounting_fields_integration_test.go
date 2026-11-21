@@ -61,18 +61,18 @@ func TestAccountingFieldMutationsWithPostgreSQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key, fragment := "outbounds", `[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]`
+			fieldPath, fragment := "outbounds", `[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]`
 			if engine == core.EngineSingBox {
 				fragment = `[{"tag":"direct","type":"direct","bind_interface":"lo"}]`
 			}
 			if engine == core.EngineMihomo {
-				key, fragment = "rules", "- DOMAIN,example.com,REJECT\n- MATCH,DIRECT\n"
+				fieldPath, fragment = "rules", "- DOMAIN,example.com,REJECT\n- MATCH,DIRECT\n"
 			}
 			if engine == core.EngineShadowsocksRust {
-				key, fragment = "server_port", "21002"
+				fieldPath, fragment = "server_port?inbound="+input.Tag, "21002"
 			}
 			body, _ := json.Marshal(map[string]any{"mutation": "modify", "fragment": fragment, "expected_version": saved.Version, "intent": "validate"})
-			r := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agent.ID+"/configs/"+string(engine)+"/fields/"+key, bytes.NewReader(body))
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agent.ID+"/configs/"+string(engine)+"/fields/"+fieldPath, bytes.NewReader(body))
 			token := strings.Repeat("a", 48)
 			r.Header.Set("Authorization", "Bearer "+token)
 			w := httptest.NewRecorder()

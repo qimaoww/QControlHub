@@ -27,6 +27,13 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 	if err := json.Unmarshal([]byte(generated), &incoming); err != nil {
 		return "", err
 	}
+	if servers, extended := incoming["servers"]; extended {
+		var entries []map[string]json.RawMessage
+		if err := json.Unmarshal(servers, &entries); err != nil || len(entries) != 1 || incoming["server_port"] != nil || incoming["server"] != nil || incoming["shadowsocks"] != nil {
+			return "", errors.New("入站预设必须包含一个服务端")
+		}
+		incoming = entries[0]
+	}
 	if _, ok := parseShadowsocksRust(generated); !ok && operation != "delete" {
 		return "", errors.New("生成配置缺少完整服务端字段")
 	}

@@ -58,8 +58,18 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
   const viewports = mode === 'mobile' ? [[390,844],[768,1024]] : [[1920,1080],[3840,2160],[960,800]];
   const resize = ([width,height]) => call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:mode==='mobile'},page);
   await resize(viewports[0]);
+  await run(`location.hash=${JSON.stringify(`#live-config?agent=${agent}&engine=ss-rust`)}`);
+  await expectRows('Shadowsocks 2022');
+  const unnamed = `${rows}[0]`;
+  assert(await run(`${unnamed}.cells[0].textContent==='22222' && ${unnamed}.cells[4].textContent.includes('复制入站连接')`), 'unnamed SS Rust entry lost its port or client export');
+  await run(`${unnamed}.scrollIntoView({block:'center'})`);
+  await screenshot(page, `unnamed-ss2022-${viewports[0].join('x')}`);
+  await click('修改', unnamed);
+  await until(`!!${form}?.elements.content && !${form}.elements.protocol`);
+  await dismiss();
+  await until("!document.querySelector('dialog[open]')");
   await run(`location.hash=${JSON.stringify(route)}`);
-  await expectRows('VMess/自定义/端口转发');
+  await expectRows('VMess/http/端口转发');
   const initial = await read();
   assert(await run(`${row('native-range')}.cells[0].textContent==='21101-21102' && !/访问限制|复制入站连接|出站/.test(${row('native-range')}.cells[4].textContent)`),'ranged listener inherited a fixed-port operation');
   assert(await run(`${row('quoted-port')}.textContent.includes('复制入站连接') && !${row('forward')}.textContent.includes('复制入站连接') && !document.querySelector('.a-port-list').textContent.includes('123e4567')`),'export capability or credential visibility drifted');
@@ -105,7 +115,7 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
   await until(`${form}?.elements.target_port?.value==='80'`);
   await run(`${form}.elements.target_port.value='8080'`);
   await submit();
-  await expectRows('VMess/自定义/端口转发');
+  await expectRows('VMess/http/端口转发');
   const changed = await read();
   const beforeDoc = JSON.parse(initial.config.content), afterDoc = JSON.parse(changed.config.content);
   beforeDoc.inbounds[2].settings.rewritePort = 8080;
@@ -121,7 +131,7 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
   await until(`!!${form}?.elements.content`);
   await editSource(portable);
   await submit();
-  await expectRows('VMess/自定义/端口转发');
+  await expectRows('VMess/http/端口转发');
 
   const saveNativeDocument = async content => {
     const {config} = await read();
@@ -130,9 +140,9 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
   };
   const [a,b,c] = afterDoc.inbounds;
   for (const [inbounds,labels] of [
-    [[b,a,c],'自定义/VMess/端口转发'],
-    [[a,c,b],'VMess/端口转发/自定义'],
-    [[b],'自定义'],
+    [[b,a,c],'http/VMess/端口转发'],
+    [[a,c,b],'VMess/端口转发/http'],
+    [[b],'http'],
     [[], ''],
   ]) {
     await saveNativeDocument(JSON.stringify({...afterDoc,inbounds}));
@@ -144,7 +154,7 @@ export async function testNativeInboundWorkspaceBrowser({page, mode, agent, iden
   const invalid = await api(page,identity,'GET',base);
   await api(page,identity,'PUT',base,{...invalid,content:portable});
   await load();
-  await expectRows('VMess/自定义/端口转发');
+  await expectRows('VMess/http/端口转发');
   const draft = await source();
   await editSource(draft+'\n ');
   const saved = (await read()).config;
@@ -457,8 +467,8 @@ async function testUDP443Options() {
 
 async function testSourceOnlyProjection() {
   for (const engine of ['xray','sing-box','mihomo']) {
-    const test=await fixture(engine,{protocol:'vless',plan:{source_only:true}});
-    assert([...test.root.querySelectorAll('.a-port-list tbody tr')].every(row=>row.cells[2].textContent==='自定义'),'unmatched native inbound did not display custom');
+    const test=await fixture(engine,{protocol:'vless',plan:{source_only:true},nativeProtocol:'vless'});
+    assert([...test.root.querySelectorAll('.a-port-list tbody tr')].every(row=>row.cells[2].textContent==='vless'),'unmatched VLESS transport did not display its native protocol');
     test.click('modify');
     await waitFor(()=>editor()?.elements.content,'unmatched native inbound did not open complete configuration');
     assert(!editor().elements.protocol&&!test.calls.some(call=>call.path.endsWith("/plans"))&&!test.writes.length,'source-only edit silently selected a preset');

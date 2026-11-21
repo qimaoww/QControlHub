@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -90,7 +91,7 @@ func generate(engine core.Engine, input Input, requireWireGuardClient bool) (str
 		if input.TargetPort < 1 || input.TargetPort > 65535 {
 			return "", errors.New("目标端口必须在 1 到 65535 之间")
 		}
-		if input.Network != "tcp" && input.Network != "udp" && input.Network != "tcp,udp" {
+		if !slices.Contains(protocol.ForwardNetworks, input.Network) {
 			return "", errors.New("转发协议必须是 TCP、UDP 或 TCP + UDP")
 		}
 	} else {
