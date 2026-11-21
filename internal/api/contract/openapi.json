@@ -6061,6 +6061,12 @@
           "docs": {
             "type": "string"
           },
+          "forward_networks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "group": {
             "type": "string"
           },
@@ -12314,6 +12320,9 @@
                       "default_tls": false,
                       "description": "example",
                       "docs": "example",
+                      "forward_networks": [
+                        "example"
+                      ],
                       "group": "example",
                       "ignores_username": false,
                       "key": "example",
@@ -12738,6 +12747,9 @@
                       "default_tls": false,
                       "description": "example",
                       "docs": "example",
+                      "forward_networks": [
+                        "example"
+                      ],
                       "group": "example",
                       "ignores_username": false,
                       "key": "example",
@@ -18418,6 +18430,9 @@
                       "default_tls": false,
                       "description": "example",
                       "docs": "example",
+                      "forward_networks": [
+                        "example"
+                      ],
                       "group": "example",
                       "ignores_username": false,
                       "key": "example",
