@@ -123,26 +123,49 @@ func TestCPUUsagePercentZeroDeltaReportsIdleZero(t *testing.T) {
 	}
 }
 
-func TestSampledCPUPercentIgnoresBackToBackTickerSample(t *testing.T) {
-	t.Parallel()
-	started := time.Unix(100, 0)
-	previous := metricSample{
-		cpuTotal: 1000, cpuIdle: 800, cpuAt: started, cpuValid: true,
-		cpuPercent: 12.5, cpuPercentValid: true,
+func TestCPUWindowIgnoresBackToBackSamples(t *testing.T) {
+	start := time.Unix(100, 0)
+	for _, tc := range []struct {
+		name                              string
+		quota                             float64
+		baseline, short, half, full, idle uint64
+	}{
+		{"proc", 0, 1000, 1001, 1100, 1200, 50},
+		{"cgroup", 0.5, 1000, 8000, 251000, 751000, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sample cpuSample
+			check := func(after time.Duration, total, idle uint64, percent float64, available bool, baseline time.Duration) {
+				t.Helper()
+				sample.record(cpuReading{at: start.Add(after), total: total, idle: idle, quota: tc.quota})
+				if sample.percent != percent || sample.available != available || !sample.reading.at.Equal(start.Add(baseline)) {
+					t.Fatalf("after %s, got %+v; want %.1f%%, available=%t, baseline=%s", after, sample, percent, available, baseline)
+				}
+			}
+			check(0, tc.baseline, 0, 0, false, 0)
+			check(5*time.Millisecond, tc.short, 0, 0, false, 0)
+			check(time.Second, tc.half, tc.idle, 50, true, time.Second)
+			check(time.Second+time.Millisecond, tc.half+1, tc.idle, 50, true, time.Second)
+			check(2*time.Second, tc.full, tc.idle, 100, true, 2*time.Second)
+			check(3*time.Second, 10, 0, 100, true, 3*time.Second)
+			check(4*time.Second, 10, 0, 0, true, 4*time.Second)
+		})
 	}
-	percent, available, advance := sampledCPUPercent(previous, 1001, 800, started.Add(5*time.Millisecond))
-	if !available || advance || percent != 12.5 {
-		t.Fatalf("back-to-back sample = (%v, %v, %v), want cached 12.5 without advancing", percent, available, advance)
-	}
-	percent, available, advance = sampledCPUPercent(previous, 1100, 850, started.Add(time.Second))
-	if !available || !advance || percent != 50 {
-		t.Fatalf("stable sample = (%v, %v, %v), want fresh 50", percent, available, advance)
-	}
-	reset := previous
-	reset.cpuTotal, reset.cpuIdle = 1200, 900
-	percent, available, advance = sampledCPUPercent(reset, 100, 80, started.Add(time.Second))
-	if !available || !advance || percent != 12.5 {
-		t.Fatalf("counter reset = (%v, %v, %v), want cached 12.5 with a new baseline", percent, available, advance)
+}
+
+func TestCPUWindowRestartsWhenSourceOrQuotaChanges(t *testing.T) {
+	var sample cpuSample
+	start := time.Unix(100, 0)
+	for i, quota := range []float64{0, 1, 0.5, 0} {
+		at := start.Add(time.Duration(2*i) * time.Second)
+		sample.record(cpuReading{at: at, total: 1000, quota: quota})
+		if sample.available {
+			t.Fatalf("quota %v reused a different CPU baseline", quota)
+		}
+		sample.record(cpuReading{at: at.Add(time.Second), total: 1000, quota: quota})
+		if !sample.available || sample.percent != 0 {
+			t.Fatalf("quota %v, complete idle window: %+v", quota, sample)
+		}
 	}
 }
 

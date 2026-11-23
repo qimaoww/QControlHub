@@ -53,6 +53,7 @@ func TestMetricSamplesRecordQueryAndPrune(t *testing.T) {
 		t.Fatalf("second heartbeat: %v", err)
 	}
 
+	now = time.Now().UTC()
 	recorded, err := dataStore.RecordAgentMetricSamples(ctx, now)
 	if err != nil {
 		t.Fatalf("record metric samples: %v", err)
@@ -94,6 +95,58 @@ func TestMetricSamplesRecordQueryAndPrune(t *testing.T) {
 	remaining, err := dataStore.MetricSamples(ctx, agent.ID, now.Add(-time.Hour), 100)
 	if err != nil || len(remaining) != 0 {
 		t.Fatalf("samples after prune = %d, %v; want none", len(remaining), err)
+	}
+}
+
+func TestMetricHistoryDoesNotRepeatLastCPUReading(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	db, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, db)
+	defer cleanupTaskTestAgent(db, agent.ID, enrollmentID)
+
+	report := func() time.Time {
+		t.Helper()
+		if err := db.UpdateAgentMetrics(ctx, agent.ID, core.HostMetrics{CPUAvailable: true, CPUPercent: 100}); err != nil {
+			t.Fatal(err)
+		}
+		current, err := db.GetAgent(ctx, agent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return current.Metrics.CollectedAt
+	}
+	record := func(at time.Time, want int64) {
+		t.Helper()
+		if n, err := db.RecordAgentMetricSamples(ctx, at); err != nil || n != want {
+			t.Errorf("record history at %s = %d, %v; want %d", at, n, err, want)
+		}
+	}
+
+	first := report()
+	record(first.Add(-time.Second), 0)
+	record(first.Add(5*time.Minute), 0)
+	record(first.Add(time.Second), 1)
+	record(first.Add(2*time.Second), 0)
+	record(first.Add(5*time.Minute), 0)
+	second := report()
+	record(second.Add(time.Minute/2), 1)
+	rows, err := db.MetricSamples(ctx, agent.ID, first.Add(-time.Second), 10)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("history = %+v, %v; want two reports", rows, err)
+	}
+	for i, at := range []time.Time{first, second} {
+		if rows[i].SampledAt.Sub(at).Abs() >= time.Microsecond || rows[i].CPUPercent != 100 {
+			t.Fatalf("history row %d = %+v; want original report at %s with 100%% CPU", i, rows[i], at)
+		}
 	}
 }
 

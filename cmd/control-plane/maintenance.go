@@ -11,7 +11,7 @@ import (
 )
 
 func janitor(ctx context.Context, dataStore *store.Store) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(store.MetricSampleInterval)
 	defer ticker.Stop()
 	pruneCounter := 0
 	for {
