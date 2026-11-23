@@ -17,6 +17,9 @@ var errSharedAccountingTransition = errors.New("shared instance deployment is in
 type nativeAccountingSnapshot struct {
 	Plan              serverconfig.AccountingPlan
 	Counters          map[string]uint64
+	ConfigID          string
+	ConfigVersion     int
+	ScopeError        string
 	ProcessEpoch      string
 	ListenerProtocols map[int]core.TrafficProtocol
 }
@@ -101,9 +104,10 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 			Protocol string `json:"protocol"`
 			Settings struct {
 				Network string `json:"network"`
+				UDP     any    `json:"udp"`
 			} `json:"settings"`
 			Stream struct {
-				Network  string `json:"network"`
+				Network  any    `json:"network"`
 				Security string `json:"security"`
 				TLS      struct {
 					ALPN []string `json:"alpn"`
@@ -127,7 +131,7 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 			ports[inbound.Port] = core.TrafficProtocolUDP
 		case "vless", "vmess", "trojan":
 			switch inbound.Stream.Network {
-			case "", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade":
+			case nil, "", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade":
 				ports[inbound.Port] = core.TrafficProtocolTCP
 			case "splithttp", "xhttp":
 				ports[inbound.Port] = core.TrafficProtocolTCP
@@ -137,6 +141,11 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 			case "quic", "kcp":
 				ports[inbound.Port] = core.TrafficProtocolUDP
 			}
+		case "socks":
+			ports[inbound.Port], _ = serverconfig.ExplicitListenerProtocol(engine, inbound.Protocol, map[string]any{
+				"settings":       map[string]any{"udp": inbound.Settings.UDP},
+				"streamSettings": map[string]any{"network": inbound.Stream.Network},
+			})
 		case "shadowsocks", "dokodemo-door":
 			if inbound.Settings.Network == "tcp" {
 				ports[inbound.Port] = core.TrafficProtocolTCP
@@ -149,9 +158,25 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 	return ports
 }
 
-func nativeAccountingScopeAllowed(policy core.PortTrafficPolicy, snapshot nativeAccountingSnapshot) bool {
-	return policy.Protocol == core.TrafficProtocolBoth ||
-		(snapshot.ListenerProtocols[policy.Port] == policy.Protocol && policy.Protocol != "")
+func nativeAccountingScopeIssue(policy core.PortTrafficPolicy, snapshot nativeAccountingSnapshot) string {
+	if snapshot.ScopeError != "" {
+		return snapshot.ScopeError
+	}
+	if snapshot.ConfigID != "" && policy.ConfigID != "" &&
+		(policy.ConfigID != snapshot.ConfigID || policy.ConfigVersion != snapshot.ConfigVersion) {
+		return "policy configuration does not match the active deployment"
+	}
+	if policy.InboundTag != "" {
+		for _, port := range snapshot.Plan.Ports {
+			if port.Port == policy.Port && port.Inbound != "" && port.Inbound != policy.InboundTag {
+				return "policy inbound does not match the active deployment"
+			}
+		}
+	}
+	if policy.Protocol == core.TrafficProtocolBoth || policy.Protocol != "" && snapshot.ListenerProtocols[policy.Port] == policy.Protocol {
+		return ""
+	}
+	return "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
 }
 
 func accountingListenerProtocols(engine core.Engine, content string) map[int]core.TrafficProtocol {
@@ -209,7 +234,9 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			default:
 				result[in.Port] = core.TrafficProtocolBoth
 			}
-			if in.Transport.Type != "" && in.Transport.Type != "tcp" && in.Transport.Type != "ws" && in.Transport.Type != "http" && in.Transport.Type != "httpupgrade" && in.Transport.Type != "grpc" {
+			if outer, ok := serverconfig.ExplicitListenerProtocol(engine, in.Type, map[string]any{"transport": map[string]any{"type": in.Transport.Type}}); ok {
+				result[in.Port] = outer
+			} else if in.Transport.Type != "" && in.Transport.Type != "tcp" && in.Transport.Type != "ws" && in.Transport.Type != "http" && in.Transport.Type != "httpupgrade" && in.Transport.Type != "grpc" {
 				result[in.Port] = core.TrafficProtocolBoth
 			}
 		}
@@ -238,8 +265,10 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			Port      int `yaml:"port"`
 			RedirPort int `yaml:"redir-port"`
 			Listeners []struct {
-				Port int    `yaml:"port"`
-				Type string `yaml:"type"`
+				Port      int    `yaml:"port"`
+				Type      string `yaml:"type"`
+				Transport any    `yaml:"transport"`
+				UDP       any    `yaml:"udp"`
 			} `yaml:"listeners"`
 		}
 		if yaml.Unmarshal([]byte(content), &root) != nil {
@@ -259,6 +288,8 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 			}
 			seen[in.Port] = true
 			switch in.Type {
+			case serverconfig.ProtocolMieru, "shadowsocks":
+				result[in.Port], _ = serverconfig.ExplicitListenerProtocol(engine, in.Type, map[string]any{"transport": in.Transport, "udp": in.UDP})
 			case "vless", "vmess", "trojan", "http", "redir", "anytls":
 				result[in.Port] = core.TrafficProtocolTCP
 			case "hysteria2", "hysteria", "tuic":

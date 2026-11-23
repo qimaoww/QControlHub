@@ -58,7 +58,7 @@ func (w *failureResponseWriter) failure(status int, value any) any {
 	// Reading a page is not an execution attempt. Keep the HTTP failure and
 	// its diagnostic ID, but never turn polling or navigation into failed tasks.
 	// This policy applies equally to sessions and API Key responses.
-	if readOnlyMethod(w.request.Method) || w.request.URL.Path == "/api/v1/tasks/failures" {
+	if readOnlyMethod(w.request.Method) || w.request.Pattern == "POST /api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/preview" || w.request.URL.Path == "/api/v1/tasks/failures" {
 		body["failure_retention"] = "not_required"
 		body["stage"] = stage
 		// Internal errors already log the same request ID in writeInternalError.

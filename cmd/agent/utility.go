@@ -60,7 +60,7 @@ func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []strin
 		if err != nil {
 			return err
 		}
-		for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
+		for _, engine := range core.AllEngines() {
 			if source, ok := found[engine]; ok {
 				fmt.Fprintf(os.Stdout, "%s: discovered %s\n", engine, source.Service)
 			}

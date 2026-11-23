@@ -180,7 +180,7 @@ func main() {
 		}
 		return
 	}
-	capabilities := parseEngines(env("QCH_AGENT_ENGINES", "mihomo,xray,sing-box,ss-rust"))
+	capabilities := configuredEngines()
 	enabledSpecs := make(map[core.Engine]agent.EngineSpec, len(capabilities))
 	for _, engine := range capabilities {
 		enabledSpecs[engine] = specs[engine]
@@ -241,8 +241,8 @@ func main() {
 		Version:           version,
 		Labels:            parseLabels(os.Getenv("QCH_AGENT_LABELS")),
 		Capabilities:      capabilities,
-		HeartbeatEvery:    envDuration("QCH_HEARTBEAT_INTERVAL", 15*time.Second),
-		MetricsEvery:      envDuration("QCH_METRICS_INTERVAL", time.Second),
+		HeartbeatEvery:    envDuration("QCH_HEARTBEAT_INTERVAL", time.Duration(core.DefaultPanelSettings().AgentHeartbeatIntervalSeconds)*time.Second),
+		MetricsEvery:      envDuration("QCH_METRICS_INTERVAL", time.Duration(core.DefaultPanelSettings().AgentMetricsIntervalSeconds)*time.Second),
 		AllowHTTP:         envBool("QCH_ALLOW_HTTP", false),
 		AllowInsecureLive: envBool("QCH_ALLOW_INSECURE_LIVE", false),
 		TLSCAFile:         strings.TrimSpace(os.Getenv("QCH_TLS_CA_FILE")),

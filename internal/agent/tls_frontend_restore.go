@@ -88,7 +88,7 @@ func (m *tlsFrontendManager) restoreRuntime(ctx context.Context, _ tlsDeployment
 			if snapshot.mode == "caddy" {
 				output, err = m.runCaddy(ctx, nil, "reload", "--config", path, "--address", "unix/"+filepath.Join(m.state, "caddy-admin.sock"))
 			} else {
-				output, err = run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", path, "-s", "reload")
+				output, err = m.reloadNginx(ctx, path)
 			}
 			if err != nil {
 				return fmt.Errorf("恢复 %s 配置：%w；%s", snapshot.service, err, output)

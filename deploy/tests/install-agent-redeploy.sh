@@ -157,7 +157,7 @@ grep -q '^prepare-ip-quality$' "$QCH_DEPENDENCY_LOG" || { printf '%s\n' 'first i
 grep -q '^update -qq$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: APT metadata was not updated for nftables' >&2; exit 1; }
 grep -q '^install -y --no-install-recommends nftables$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: nftables APT package was not installed' >&2; exit 1; }
 [ -f "$QCH_AGENT_ENV_FILE" ] || { printf '%s\n' 'first install: agent env missing' >&2; exit 1; }
-grep -q '^QCH_AGENT_LABELS=region=cn-east$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: default label missing' >&2; exit 1; }
+grep -q '^QCH_AGENT_LABELS=$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: unexpected inferred label' >&2; exit 1; }
 grep -q '^QCH_AGENT_NAME=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: agent name missing' >&2; exit 1; }
 if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
   printf '%s\n' 'first install: enrollment token remained after confirmed enrollment' >&2
@@ -259,3 +259,9 @@ sh "$installer" uninstall > "$test_root/uninstall.log"
 [ -d "$test_root/state" ] || { printf '%s\n' 'uninstall: state dir should be preserved' >&2; exit 1; }
 
 printf '%s\n' 'install-agent redeploy: OK'
+
+# Explicit labels override inherited values; an explicit empty value clears them.
+QCH_AGENT_LABELS='region=eu-test' sh "$installer" update "$new_control" "$token" > "$test_root/labels-explicit.log"
+assert_env_once QCH_AGENT_LABELS 'region=eu-test'
+QCH_AGENT_LABELS='' sh "$installer" update "$new_control" "$token" > "$test_root/labels-empty.log"
+assert_env_once QCH_AGENT_LABELS ''

@@ -227,9 +227,8 @@ func renameSubStoreNode(rawValue, name string) (string, error) {
 		return "", errors.New("节点名称不能为空、不能超过 100 个字符且不能包含换行")
 	}
 	if config, ok := subStoreSurgeConfig(rawValue); ok {
-		name = strings.TrimSpace(strings.NewReplacer("=", "", ",", "").Replace(name))
-		if name == "" {
-			return "", errors.New("Surge 节点名称删除保留符号后不能为空")
+		if err := serverconfig.ValidateSurgePolicyName(name); err != nil {
+			return "", err
 		}
 		return name + " = " + config, nil
 	}

@@ -110,6 +110,50 @@ func TestCoreLogSharedSessionsAndPrivacy(t *testing.T) {
 			}
 		}
 	}
+	// API Key responses use a separate redaction/serialization path. Verify
+	// the same ownership checks there, including another user's shared instance.
+	for _, client := range []configScopeAPIClient{admin, alice, bob} {
+		var created struct {
+			Secret string `json:"secret"`
+		}
+		client.call("POST", "/settings/api-keys", core.APIKeyInput{Name: "log-isolation", Permissions: []core.Permission{core.PermissionCoreLogsRead}}, http.StatusCreated, &created)
+		keyClient := client
+		keyClient.token = created.Secret
+		var sessionLogs, keyLogs []core.CoreLogEntry
+		client.call("GET", "/core-logs", nil, http.StatusOK, &sessionLogs)
+		keyClient.call("GET", "/core-logs", nil, http.StatusOK, &keyLogs)
+		if len(keyLogs) != len(sessionLogs) {
+			t.Fatal("API Key changed the authorized window")
+		}
+		for i := range sessionLogs {
+			if keyLogs[i].ID != sessionLogs[i].ID || keyLogs[i].OwnerID != sessionLogs[i].OwnerID || keyLogs[i].InstanceID != sessionLogs[i].InstanceID {
+				t.Fatal("API Key crossed an account or instance boundary")
+			}
+		}
+		var sessionSources, keySources []store.CoreLogSource
+		client.call("GET", "/core-log-sources", nil, http.StatusOK, &sessionSources)
+		keyClient.call("GET", "/core-log-sources", nil, http.StatusOK, &keySources)
+		if len(keySources) != len(sessionSources) {
+			t.Fatal("API Key changed the source scope")
+		}
+		for i, source := range sessionSources {
+			if keySources[i].AgentID != source.AgentID || keySources[i].Engine != source.Engine || keySources[i].InstanceID != source.InstanceID || keySources[i].OwnerID != source.OwnerID {
+				t.Fatal("API Key crossed a source ownership boundary")
+			}
+		}
+		foreign := ownA.ID
+		if client.userID == alice.userID {
+			foreign = ownB.ID
+		}
+		keyClient.call("GET", "/core-logs?agent_id="+foreign, nil, http.StatusNotFound, nil)
+		if client.userID != "" {
+			foreignShare := shareIDs[0]
+			if client.userID == alice.userID {
+				foreignShare = shareIDs[1]
+			}
+			keyClient.call("GET", "/core-logs?agent_id="+host.ID+"&instance_id="+foreignShare, nil, http.StatusNotFound, nil)
+		}
+	}
 	for _, query := range []string{"agent_id=" + ownA.ID, "agent_id=" + ownB.ID} {
 		admin.call("GET", "/core-logs?"+query, nil, http.StatusNotFound, nil)
 	}

@@ -18,8 +18,9 @@ import (
 )
 
 type Store struct {
-	connectionSyncMu sync.Mutex
-	connectionSync   map[string]*connectionSnapshot
+	connectionSyncMu   sync.Mutex
+	connectionSyncWork sync.Mutex
+	connectionSync     map[string]*connectionSnapshot
 
 	certificateResolver      certificates.DNSResolver
 	certificateDNSHTTP       *http.Client

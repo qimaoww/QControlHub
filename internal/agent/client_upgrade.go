@@ -42,21 +42,39 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	proxies, proxyErr := c.executor.upgradeProxiesForAgentBuild(ctx, version, core.ActionUpgradeAgent)
 	if err := transaction.commit(); err != nil {
 		return "", err
 	}
 	c.upgradeCommitted = transaction
-	return fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size), nil
+	output := fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size)
+	if proxyErr != nil {
+		return output + "\n托管代理更新未确认：" + core.DiagnosticText(proxyErr.Error()), nil
+	}
+	if proxies != "" {
+		output += "\n" + proxies
+	}
+	return output, nil
 }
 
-// agentBinaryDownloadTimeout bounds the whole signed download, including fast
-// retries, so a slow control-plane link cannot hold an upgrade task open
-// forever. Each attempt shares this budget: a transfer that is progressing
-// slowly is allowed to run, while a quick transient failure triggers a retry.
-const agentBinaryDownloadTimeout = 6 * time.Minute
+func (c *Client) upgradeProxiesOnStartup(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	output, err := c.executor.upgradeProxiesForAgentBuild(ctx, c.config.Version, core.ActionStatus)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("托管代理更新未确认", "error", core.DiagnosticText(err.Error()))
+		}
+		return
+	}
+	if output != "" {
+		slog.Info(output)
+	}
+}
 
 func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (string, string, int64, error) {
-	totalContext, cancel := context.WithTimeout(ctx, agentBinaryDownloadTimeout)
+	totalContext, cancel := context.WithTimeout(ctx, core.AgentBinaryDownloadTimeout)
 	defer cancel()
 	attempts := defaultDownloadAttempts
 	if attempts > maxDownloadAttempts {

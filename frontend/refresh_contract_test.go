@@ -91,9 +91,9 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"if (page && anchor)", "刷新失败，保留上次数据",
 		},
 		"analytics/operations.js": {
-			"hostController?.paint({ m, history: panelHistory, runtime: panelRuntime, status })",
+			"hostController?.paint({ m, history: panelHistory, status })",
 			"if (status === \"denied\") panelHistory = [];",
-			"patch(overviewGrid,", "patch(trafficTotals,",
+			"createLiveCells()", "createTrafficStage(", "createEdgeTelemetryController(",
 			"rowKey: row => row.taskID",
 			"const sequence = ++readSequence",
 			"if (!ctx.current() || sequence !== readSequence) return;",
@@ -107,7 +107,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		},
 		"analytics/dashboard-panel.js": {
 			"patch(headBadges,", "lastRenderSignature", "observedWidth",
-			" · 保留上次采样", "面板资源无读取权限",
+			" · 保留上次采样", "无面板主机指标权限",
 		},
 		"analytics/traffic.js": {
 			"createPoller({", "bindNodeOrdering(ctx, results",

@@ -408,7 +408,7 @@ window.fetch = async (input, options = {}) => {
   }
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
-    if (path === "/traffic-usage") return json({days:[]});
+    if (path === "/traffic-usage") return json({days:testAPI.trafficDays || []});
     if (path === "/traffic-policies") {
       const policies = (testAPI.trafficPolicies || []).map(policy => ({ deployment_confirmed: true, is_current_user: true, ...policy }));
       return json(url.searchParams.get('view') === 'page' ? { policies, agents: testAPI.agents.map(agent => ({id:agent.id,name:agent.name,region_code:agent.labels?.region_code || agent.region_code || '',status:agent.status,can_manage:agent.can_manage,capabilities:agent.capabilities})) } : policies);
@@ -444,6 +444,7 @@ window.fetch = async (input, options = {}) => {
       if (!testAPI.layoutConfigs.has(key)) testAPI.layoutConfigs.set(key, {id:`cfg-layout-${key}`,agent_id:agentID,engine,version:8,name:"节点实际配置",description:"",updated_at:"2026-11-05T10:00:00Z",content:layoutConfig(engine)});
       return json({agent:testAPI.agents.find(agent=>agent.id===agentID),config:testAPI.layoutConfigs.get(key),
         catalog:{fields:[{key:"dns",label:"DNS",scope:"global"}]},present_fields:{dns:true},
+        inbound_rows:["socks-in","http-in"].map((tag,i)=>({tag,target_tag:tag,port:i?8080:1080})),
         inbound_targets:["socks-in","http-in"].map((tag,i)=>({tag,port:i?8080:1080,kind:i?"http":"socks"}))});
     }
     if (path.endsWith("/fields/dns")) return json({key:"dns",version:8,present:true,fragment:'{"servers":["1.1.1.1","8.8.8.8"]}'});
@@ -584,6 +585,11 @@ window.fetch = async (input, options = {}) => {
     if (body.revision !== testAPI.settings.revision) return json({error: "settings revision conflict"}, 409);
     testAPI.settings = { ...body, revision: testAPI.settings.revision + 1 };
     return json(testAPI.settings);
+  }
+  if (method === "GET" && /^\/agents\/[^/]+\/proxies$/.test(path)) {
+    const agent = testAPI.agents.find(item => item.id === path.split("/")[2]);
+    if (!agent || agent.can_manage === false) return json({error:"无权查看节点代理"},403);
+    return json({agent_id:agent.id,status:agent.status,supported:agent.features.includes("managed-proxies-v1"),...agent.managed_proxies,tasks:testAPI.proxyTasks});
   }
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"}, testAPI.agentsFailure === 403 ? 403 : 503);
   if (method === "GET" && path === "/agents") {

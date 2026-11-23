@@ -25,7 +25,8 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
 			OR (t.shared_instance AND (NOT $4::boolean OR ((t.install_if_missing OR t.action='install') AND NOT $6::boolean)))
 			OR (t.shared_instance AND t.action IN ('start','stop','restart','status','read-config','read-managed-config') AND NOT $7::boolean)
-			OR (t.action='uninstall' AND (NOT $5::boolean
+			OR (t.action IN ('check-nginx','update-nginx','check-caddy','update-caddy') AND NOT $8::boolean)
+ OR (t.action='uninstall' AND (NOT $5::boolean
 				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.agent_id=t.agent_id
 					AND s.enabled AND t.engine=ANY(s.engines))
 				OR EXISTS(SELECT 1 FROM agent_shared_instance_ownership state
@@ -46,7 +47,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 		)`,
 		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress),
 		containsFeature(features, core.AgentFeatureSharedCoreInstances), containsFeature(features, core.AgentFeatureCoreUninstall),
-		containsFeature(features, core.AgentFeatureSharedCorePrepare), containsFeature(features, core.AgentFeatureSharedCoreLifecycle))
+		containsFeature(features, core.AgentFeatureSharedCorePrepare), containsFeature(features, core.AgentFeatureSharedCoreLifecycle), containsFeature(features, core.AgentFeatureManagedProxies))
 	return err
 }
 
@@ -56,9 +57,10 @@ const unauthorizedTaskPrincipalSQL = unauthorizedTaskAPIKeySQL + ` OR (t.owner_i
 		AND NOT starts_with(c.owner_id,'token_') AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=c.owner_id))
 	OR EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=t.agent_id
 	WHERE u.id=t.owner_id AND (u.disabled OR (u.role<>'admin' AND
-		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' ELSE 'tasks.execute' END)
-		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp','ip-quality') AND NOT u.permissions ? 'agents.manage')
-		 OR (a.owner_id<>u.id AND
+		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' WHEN t.action IN ('check-caddy','check-nginx') THEN 'agents.read' ELSE 'tasks.execute' END)
+		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp','ip-quality','update-nginx','update-caddy') AND NOT u.permissions ? 'agents.manage')
+		 OR (t.action='migrate-tls' AND (NOT u.permissions ? 'agent-config.read' OR NOT u.permissions ? 'agent-config.write'))
+ OR (a.owner_id<>u.id AND t.action<>'migrate-tls' AND
 			((t.install_if_missing AND NOT t.shared_instance)
 			 OR (t.action NOT IN ('deploy','validate') AND NOT (t.shared_instance AND t.shared_traffic_id<>''
 				AND t.action IN ('start','stop','restart','status','read-config','read-managed-config')) AND NOT (t.action='install' AND t.shared_instance

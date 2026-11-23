@@ -4,7 +4,7 @@ import { assert, waitFor } from "./assertions.mjs";
 export async function testClientConnectionsRuntime(preview = false) {
   const fallback = window.fetch.bind(window), requests = [], locationRequests = [], orderRequests = [], regionRequests = [];
   const now = new Date().toISOString();
-  let releaseLocations, releaseShell, releaseFirstHistory, releaseRegions, holdHistory;
+  let releaseLocations, releaseShell, releaseFirstHistory, releaseRegions, holdHistory, geographyCached = false;
   const regionsReady = new Promise(resolve => { releaseRegions = resolve; });
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
@@ -30,13 +30,14 @@ export async function testClientConnectionsRuntime(preview = false) {
       if (url.searchParams.get("locations") === "only") {
         locationRequests.push(url.searchParams);
         await locationsReady;
+        geographyCached = true;
         return new Response(JSON.stringify({ records: [...rows, ...rows.map(row => ({ ...row, id: row.id + 1 }))] }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       requests.push(url.searchParams);
       if (holdHistory) await holdHistory;
       const older = url.searchParams.get("cursor") === "next-page";
       return new Response(JSON.stringify({
-        records: rows.filter(row => (!url.searchParams.get("agent_id") || row.agent_id === url.searchParams.get("agent_id")) && (!url.searchParams.get("engine") || row.engine === url.searchParams.get("engine"))).map(row => ({ ...row, id: older ? row.id + 1 : row.id, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} })),
+        records: rows.filter(row => (!url.searchParams.get("agent_id") || row.agent_id === url.searchParams.get("agent_id")) && (!url.searchParams.get("engine") || row.engine === url.searchParams.get("engine"))).map(row => ({ ...row, id: older ? row.id + 1 : row.id, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: geographyCached ? row.location : {} })),
         country_codes: [], ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
         sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),

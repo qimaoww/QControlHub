@@ -16,7 +16,7 @@ func (s *Store) ListTasks(ctx context.Context, agentID string, limit int) ([]cor
 
 func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status core.TaskStatus, action core.Action, limit int) ([]core.Task, error) {
 	if limit < 1 {
-		limit = 100
+		limit = core.DefaultPanelSettings().TaskPageSize
 	}
 	if limit > 500 {
 		limit = 500
@@ -124,4 +124,30 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 		err = json.Unmarshal(tcpSettingsJSON, &task.TCPSettings)
 	}
 	return task, err
+}
+
+// ProxyTaskStates reports the latest receipt for each fixed node operation.
+// Keep task IDs, submitters, output and errors behind the task permissions.
+func (s *Store) ProxyTaskStates(ctx context.Context, agentID string) (map[core.Action]core.ProxyTaskState, error) {
+	args := []any{agentID}
+	access := agentAdministrationClause(ctx, "agents.id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT operation.action, receipt.status, receipt.created_at, receipt.finished_at
+		FROM agents CROSS JOIN (VALUES ('check-nginx'),('update-nginx'),('check-caddy'),('update-caddy')) operation(action)
+		CROSS JOIN LATERAL (SELECT status, created_at, finished_at FROM tasks
+			WHERE agent_id=agents.id AND action=operation.action ORDER BY created_at DESC, id DESC LIMIT 1) receipt
+		WHERE agents.id=$1 AND agents.revoked_at IS NULL`+access, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[core.Action]core.ProxyTaskState{}
+	for rows.Next() {
+		var action core.Action
+		var activity core.ProxyTaskState
+		if err := rows.Scan(&action, &activity.Status, &activity.CreatedAt, &activity.FinishedAt); err != nil {
+			return nil, err
+		}
+		result[action] = activity
+	}
+	return result, rows.Err()
 }

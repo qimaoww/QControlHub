@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -48,9 +49,11 @@ func ParseAll(engine core.Engine, content string) []Input {
 			return nil
 		}
 		if input, ok := parseShadowsocksRustEntry(root, shadowsocksRustSingleTag(root)); ok {
+			input.parsedEngine = engine
+			input.ProjectionSection, input.ProjectionIndex = "servers", ssRustRootSourceIndex
 			return []Input{input}
 		}
-		_, entries, ok := shadowsocksRustExtendedEntries(root)
+		section, entries, ok := shadowsocksRustExtendedEntries(root)
 		if !ok {
 			return nil
 		}
@@ -58,6 +61,8 @@ func ParseAll(engine core.Engine, content string) []Input {
 		for index, value := range entries {
 			entry := mapValue(value)
 			if input, ok := parseShadowsocksRustEntry(entry, shadowsocksRustEntryTag(entry, index)); ok {
+				input.parsedEngine = engine
+				input.ProjectionSection, input.ProjectionIndex = section, index
 				input.SSRustDNS = stringValue(root["dns"])
 				input.SSRustIPv6First, _ = root["ipv6_first"].(bool)
 				result = append(result, input)
@@ -83,9 +88,9 @@ func ParseAll(engine core.Engine, content string) []Input {
 	}
 	items, _ := root[listKey].([]any)
 	result := make([]Input, 0, len(items))
-	for _, item := range items {
+	for index, item := range items {
 		candidate := mapValue(item)
-		if engine == core.EngineXray && xhttpGroupOwner(root, stringValue(candidate["tag"])) != "" {
+		if hiddenNativeInbound(engine, root, candidate, managedTag(engine, candidate)) {
 			continue
 		}
 		protocol := protocolKey(stringValue(candidate[protocolField]))
@@ -115,6 +120,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 		}
 		if parsed, ok := parseSingle(engine, string(encoded)); ok {
 			parsed.parsedEngine = engine
+			parsed.ProjectionSection, parsed.ProjectionIndex = listKey, index
 			parsed.SourceOnly = !matchesParsedPreset(engine, parsed)
 			result = append(result, parsed)
 		}
@@ -124,7 +130,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 	// remain source-only and are never silently rewritten.
 	if engine == core.EngineSingBox {
 		endpoints, _ := root["endpoints"].([]any)
-		for _, item := range endpoints {
+		for index, item := range endpoints {
 			candidate := mapValue(item)
 			protocol := protocolKey(stringValue(candidate["type"]))
 			if _, supported := FindProtocol(engine, protocol); !supported {
@@ -135,6 +141,11 @@ func ParseAll(engine core.Engine, content string) []Input {
 				continue
 			}
 			if parsed, ok := parseSingBoxEndpoint(string(single)); ok {
+				if hiddenNativeInbound(engine, root, candidate, parsed.Tag) {
+					continue
+				}
+				parsed.parsedEngine = engine
+				parsed.ProjectionSection, parsed.ProjectionIndex = "endpoints", index
 				parsed.BlockMainlandDestination, parsed.BlockMainlandSource = mainlandSingBoxFlags(root, parsed.Tag)
 				result = append(result, parsed)
 			}
@@ -239,11 +250,7 @@ func completePortForwardInbound(engine core.Engine, inbound map[string]any) bool
 		_, _, ok := splitForwardTarget(stringValue(inbound["target"]))
 		return ok && networkListValue(inbound["network"]) != ""
 	case core.EngineXray:
-		settings := mapValue(inbound["settings"])
-		address, port := stringValue(settings["rewriteAddress"]), intValue(settings["rewritePort"])
-		if address == "" || port == 0 {
-			address, port = stringValue(settings["address"]), intValue(settings["port"])
-		}
+		address, port := xrayForwardTarget(mapValue(inbound["settings"]))
 		return address != "" && port != 0
 	case core.EngineSingBox:
 		return stringValue(inbound["override_address"]) != "" && intValue(inbound["override_port"]) != 0
@@ -269,7 +276,7 @@ func parsedInputValid(input Input) bool {
 	}
 	if input.Protocol == ProtocolPortForward {
 		return input.Tag != "" && input.Port != 0 && input.TargetAddress != "" && input.TargetPort != 0 &&
-			(input.Network == "tcp" || input.Network == "udp" || input.Network == "tcp,udp")
+			slices.Contains(portForwardNetworks, input.Network)
 	}
 	return input.Protocol != "" && input.Tag != "" && input.Port != 0 && input.Credential != ""
 }

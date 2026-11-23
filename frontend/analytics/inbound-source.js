@@ -18,6 +18,7 @@ export async function editInboundSource(ctx, {target, agent, engine, base, works
   ],'保存并部署',async values=>{
     if (!isCurrent()) throw new Error('配置已变化，已保留当前输入，请重新打开入站');
     if (!await preparing('deploy')) return;
+    if (!isCurrent()) throw new Error('配置已变化，已保留当前输入，请重新打开入站');
     const saved = await write(`${base}/server-inbounds`,{operation:'modify',original_tag:target.tag,expected_version:config.version,fragment:values.fragment,intent:'deploy',snapshot_task_id:workspace.snapshot_task_id},box);
     await committed(saved,box);
   });

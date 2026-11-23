@@ -74,7 +74,9 @@ try {
   await call('Page.navigate', { url: `${base}/agents-browser-smoke.html?mode=connections-reload&preview=1#client-connections` }, page);
   await wait(ready); assert.equal(await evaluate(rows), 3);
   const cold = await evaluate('({visibleMs:performance.now(),...connectionFixture.counts()})');
-  await reload(); await wait(ready);
+  await reload(); await wait(`${rows}>0`);
+  const restoredRowsMs = await evaluate("performance.now()");
+  await wait(ready);
   const restored = await evaluate('({visibleMs:performance.now(),...connectionFixture.counts()})');
   assert.equal(restored.reads, cold.reads, 'real reload repeated fresh full history');
   await screenshot('restored-1920x1080');
@@ -152,20 +154,62 @@ try {
   await screenshot('empty-1920x1080');
   await configure({ empty: false }); await refresh(); await wait(ready);
   await configure({ scopeFailure: 503 }); await reload();
-  await wait(`document.querySelector('.a-main')?.textContent.includes('访问范围暂不可用')`);
+  await wait(`document.querySelector('.a-main form')`);
   assert.equal(await evaluate(rows), 0, 'unverified scope exposed stored history');
+  await wait(ready);
+  assert.equal(await evaluate(rows), 1, 'scope service failure blocked the independently authorized history');
+  await configure({ scopeFailure: 504, failure: 504 }); await reload();
+  await wait(`document.querySelector('.a-main')?.textContent.includes('读取失败，请重试') && !document.querySelector('[aria-busy=true]')`);
+  const timedOut = await counts();
+  await evaluate("window.dispatchEvent(new Event('focus'))"); await pause(100);
+  assert.deepEqual(await counts(), timedOut, 'focus restarted a timed-out cold scan');
+  await screenshot('timeout-1920x1080');
+  await configure({ failure: 0 }); await refresh(); await wait(ready);
+  assert.equal(await evaluate(rows), 1, 'manual retry failed to recover the authorized result');
   await configure({ scopeFailure: 0, scope: 2, empty: true }); await reload();
   assert.equal(await evaluate(rows), 0, 'changed authority briefly exposed an old snapshot'); await wait(ready);
   await configure({ scope: 3, empty: false, offset: 332_000 }); await reload();
   assert.equal(await evaluate(rows), 0, 'expired snapshot was painted'); await wait(ready);
-  for (const bad of ['{', '{"version":999}']) {
-    await evaluate(`sessionStorage.setItem('qcontrolhub:connections:v2:index',${JSON.stringify(bad)})`);
-    // Corrupt before startup (pagehide intentionally flushes the live cache).
-    await call('Page.addScriptToEvaluateOnNewDocument', { source: `sessionStorage.setItem('qcontrolhub:connections:v2:index',${JSON.stringify(bad)});` }, page).then(async script => {
-      const before = await counts(); await reload(); await wait(ready); assert.equal((await counts()).reads, before.reads + 1);
-      await call('Page.removeScriptToEvaluateOnNewDocument', { identifier: script.identifier }, page);
-    });
-  }
+  // A malformed durable page must be rejected, while preserving a valid
+  // position and any unrelated account's rows.
+  await evaluate(`new Promise((resolve, reject) => {
+    const open = indexedDB.open("qcontrolhub:connections", 1);
+    open.onerror = reject;
+    open.onsuccess = () => {
+      const tx = open.result.transaction("pages", "readwrite"), store = tx.objectStore("pages");
+      store.openCursor().onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) return;
+        if (cursor.value.kind === "page" && cursor.value.scope.endsWith(":3")) cursor.update({ ...cursor.value, result: { ...cursor.value.result, records: [null] } });
+        cursor.continue();
+      };
+      tx.oncomplete = () => { open.result.close(); resolve(true); };
+      tx.onabort = reject;
+    };
+  })`);
+  const beforeCorruption = await counts(); await reload(); await wait(ready);
+  assert.equal((await counts()).reads, beforeCorruption.reads + 1, "corrupt pages must use an authoritative read");
+  // A valid-looking entry can lie about its stored weight. Reject it
+  // before retaining the payload, then reload the authorized page normally.
+  await evaluate(`new Promise((resolve, reject) => {
+    const open = indexedDB.open("qcontrolhub:connections", 1);
+    open.onerror = reject;
+    open.onsuccess = () => {
+      const tx = open.result.transaction("pages", "readwrite"), store = tx.objectStore("pages");
+      store.openCursor().onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) return;
+        if (cursor.value.kind === "page" && cursor.value.scope.endsWith(":3")) {
+          cursor.update({ ...cursor.value, result: { ...cursor.value.result, metadata: "x".repeat(256 * 1024) }, bytes: 1 });
+        }
+        cursor.continue();
+      };
+      tx.oncomplete = () => { open.result.close(); resolve(true); };
+      tx.onabort = reject;
+    };
+  })`);
+  const beforeOversize = await counts(); await reload(); await wait(ready);
+  assert.equal((await counts()).reads, beforeOversize.reads + 1, "oversized stored page ignored its actual size");
   for (const storage of ['quota', 'disabled']) {
     await configure({ storage }); await reload(); await wait(ready);
     await refresh(); await wait(ready); assert.ok(await evaluate(rows) > 0, 'storage failure prevented API fallback');
@@ -175,7 +219,9 @@ try {
   assert.equal(await evaluate(rows), 0, 'revoked permission retained IP history');
   await configure({ failure: 0 }); await refresh(); await wait(ready);
   await reload(); await wait(ready); // Re-enable session storage after the disabled-storage document.
-  const beforeDouble = await counts(); await refresh(); await refresh(); await wait(ready);
+  const beforeDouble = await counts(), beforeStorage = await evaluate("connectionFixture.storageCounts()");
+  await refresh(); await refresh(); await wait(ready); await pause(30);
+  assert.deepEqual(await evaluate("connectionFixture.storageCounts()"), beforeStorage, "unchanged refresh wrote or serialized cached pages");
   assert.equal((await counts()).checks, beforeDouble.checks + 1, 'repeated force refresh duplicated a change check');
   assert.equal((await counts()).reads, beforeDouble.reads, 'unchanged refresh repeated the full query');
   await evaluate(`document.querySelector('.a-main [name=client_ip]').value='unsubmitted-search';document.querySelector('.a-main [name=client_ip]').focus();document.activeElement.setSelectionRange(2,5);window.savedInput=document.activeElement;`);
@@ -211,7 +257,33 @@ try {
   assert.ok(await evaluate(`[...document.querySelectorAll('td[data-column=节点]')].every(cell=>cell.textContent.includes('Bravo'))`), 'late owner response leaked into a shared account');
   await reload(); await wait(ready);
   assert.ok(await evaluate(`[...document.querySelectorAll('td[data-column=节点]')].every(cell=>cell.textContent.includes('Bravo'))`), 'shared account restored owner history');
-  const report = { cold, restored, staleUpdateReads: updated.reads - filtered.reads, viewports: '1920x1080,3840x2160,1280x900,960x800,600x900,390x844,844x390,768x1024,1024x768; CSS pixels; DPR 1; scale 1; browser emulation' };
+  const storageLifecycle = await evaluate(`(async () => {
+    const { createConnectionCache } = await import("/assets/modules/client-connection-cache.js");
+    const scope = "multi-tab-fixture";
+    const writer = createConnectionCache(), other = createConnectionCache(), reader = createConnectionCache();
+    writer.bind(scope); other.bind(scope);
+    const page = { cache_scope: scope, ips: 2, flows: 2, sources: [], timeline: [],
+      records: ["8.8.8.8", "2001:4860::8844"].map(client_ip => ({ client_ip, agent_id: "alpha", engine: "xray",
+        first_seen: "2026-11-01T00:00:00Z", last_seen: "2026-11-01T00:00:00Z" })) };
+    other.set("history", page, Date.now(), { observedAt: 2 });
+    await other.flush();
+    writer.set("history", { ...page, ips: 0, records: [] }, Date.now(), { observedAt: 1 });
+    await writer.flush();
+    if (reader.get("history")) return "visible before scope validation";
+    await reader.restore("another-account");
+    if (reader.get("history")) return "restored another account";
+    await reader.restore(scope);
+    if (reader.get("history")?.result.ips !== 2) return "late write replaced the newer page";
+    writer.set("history", { ...page, ips: 1, records: page.records.slice(1) }, Date.now(), { observedAt: 3 });
+    await writer.flush(); await reader.restore(scope);
+    if (reader.get("history")?.result.records[0]?.client_ip !== "2001:4860::8844") return "record deletion not persisted";
+    writer.clear(); await writer.flush();
+    const revoked = createConnectionCache();
+    await revoked.restore(scope);
+    return revoked.get("history") ? "revoked page remained durable" : "passed";
+  })()`);
+  assert.equal(storageLifecycle, "passed");
+  const report = { cold, restored, restoredRowsMs, unchangedStorage: { diskWrites: 0, pageSerializations: 0 }, staleUpdateReads: updated.reads - filtered.reads, viewports: '1920x1080,3840x2160,1280x900,960x800,600x900,390x844,844x390,768x1024,1024x768; CSS pixels; DPR 1; scale 1; browser emulation' };
   process.stdout.write(`Connection reload lifecycle passed: ${JSON.stringify(report)}\n`);
   if (artifacts) await writeFile(join(artifacts, 'measurements.json'), JSON.stringify(report, null, 2));
   await call('Browser.close');

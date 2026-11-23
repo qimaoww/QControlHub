@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// Keep manual client parameters and native exports on the same defaults.
-// Callers validate the input before preparing either representation.
+// Keep manual client parameters and Mihomo exports on the same defaults.
+// Call after validation so address families and key material are known.
 func normalizeWireGuardClient(input *Input) {
 	if input.WireGuardServerPublicKey == "" {
 		input.WireGuardServerPublicKey = wireguardServerPublic(input.WireGuardServerPrivateKey)
@@ -29,7 +29,6 @@ func normalizeWireGuardClient(input *Input) {
 }
 
 func wireguardClientFields(input Input) []ClientField {
-	normalizeWireGuardClient(&input)
 	fields := []ClientField{
 		{Label: "客户端私钥", Value: input.WireGuardClientPrivateKey, Secret: true},
 		{Label: "服务端公钥", Value: input.WireGuardServerPublicKey},
@@ -45,20 +44,64 @@ func wireguardClientFields(input Input) []ClientField {
 	)
 }
 
-func wireguardClientConfig(input Input, address string) (string, error) {
-	if err := validateWireGuardInput(input, true); err != nil {
-		return "", err
+func buildWireGuardMihomoYAML(input Input, address, name string) (string, error) {
+	// Mihomo applies explicit allowed-ips only inside peers. Its shorthand
+	// installs a default route for every local address family.
+	peer := map[string]any{
+		"server": address, "port": input.Port, "public-key": input.WireGuardServerPublicKey,
+		"allowed-ips": splitWireGuardList(input.WireGuardAllowedIPs),
 	}
-	normalizeWireGuardClient(&input)
-	endpoint := net.JoinHostPort(address, strconv.Itoa(input.Port))
-	var b strings.Builder
-	b.WriteString("[Interface]\nPrivateKey = " + input.WireGuardClientPrivateKey + "\nAddress = " + input.WireGuardClientAddress + "\nMTU = " + strconv.Itoa(input.WireGuardMTU) + "\n\n[Peer]\nPublicKey = " + input.WireGuardServerPublicKey + "\n")
 	if input.WireGuardPresharedKey != "" {
-		b.WriteString("PresharedKey = " + input.WireGuardPresharedKey + "\n")
+		peer["pre-shared-key"] = input.WireGuardPresharedKey
 	}
-	b.WriteString("AllowedIPs = " + input.WireGuardAllowedIPs + "\nEndpoint = " + endpoint + "\n")
+	proxy := map[string]any{
+		"name": name, "type": ProtocolWireGuard, "server": address, "port": input.Port,
+		"private-key": input.WireGuardClientPrivateKey, "peers": []any{peer},
+		"udp": true, "mtu": input.WireGuardMTU,
+	}
+	for _, cidr := range splitWireGuardList(input.WireGuardClientAddress) {
+		ip, _, _ := strings.Cut(cidr, "/")
+		if strings.Contains(ip, ":") {
+			proxy["ipv6"] = ip
+		} else {
+			proxy["ip"] = ip
+		}
+	}
 	if input.WireGuardKeepalive > 0 {
-		b.WriteString("PersistentKeepalive = " + strconv.Itoa(input.WireGuardKeepalive) + "\n")
+		proxy["persistent-keepalive"] = input.WireGuardKeepalive
 	}
-	return b.String(), nil
+	return marshalSingleLineYAML(proxy)
+}
+
+// Keep the primary profile stable for existing subscriptions. Every device also
+// gets an independently named export, including when another device lacks a private key.
+func buildWireGuardClientProfiles(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if err := validateWireGuardInput(input, false); err != nil {
+		return ClientProfile{}, err
+	}
+	var primary ClientProfile
+	var variants []ClientVariant
+	for i, client := range input.wireGuardClients() {
+		name := strings.TrimSpace(nodeName)
+		if i > 0 {
+			if name == "" {
+				name = input.Tag
+			}
+			deviceIP, _, _ := strings.Cut(splitWireGuardList(client.Address)[0], "/")
+			name += " · " + deviceIP
+		}
+		profile, err := BuildClientProfileNamed(input.withWireGuardClient(client), address, serverName, name)
+		if err != nil {
+			if client.PrivateKey != "" {
+				return ClientProfile{}, err
+			}
+			profile = ClientProfile{Format: "Mihomo WireGuard YAML", URIError: err.Error(), MihomoError: err.Error()}
+		}
+		if i == 0 {
+			primary = profile
+		}
+		variants = append(variants, ClientVariant{Name: client.Address, Profile: profile})
+	}
+	primary.Variants = variants
+	return primary, nil
 }

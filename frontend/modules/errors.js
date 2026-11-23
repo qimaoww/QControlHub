@@ -1,3 +1,4 @@
+import { allEngines } from "./runtime-defaults.js";
 const statusMessages = {
   400: "提交的参数无效，请检查输入后重试。",
   401: "登录已过期，请重新登录。",
@@ -228,7 +229,7 @@ async function performJSON(url, options, {
       error.stage = body.stage;
     }
     if (body?.code === "port_conflict") {
-      if (["mihomo","xray","sing-box","ss-rust"].includes(body.recovery_engine)) error.recoveryEngine = body.recovery_engine;
+      if (allEngines.includes(body.recovery_engine)) error.recoveryEngine = body.recovery_engine;
       error.code = body.code;
       error.field = ["port", "tls_public_port", "xhttp_backend_port", "xhttp_tls_port"].includes(body.field) ? body.field : "";
     }

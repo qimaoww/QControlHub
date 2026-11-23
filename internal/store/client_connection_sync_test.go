@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -145,14 +146,14 @@ func TestClientConnectionSyncPaginationAndCountryCounts(t *testing.T) {
 }
 
 func TestClientConnectionSyncUpgradeKeepsHistory(t *testing.T) {
-	for _, version := range []int{92, 93} {
+	for _, version := range []int{92, 93, 102} {
 		t.Run(fmt.Sprintf("schema-%d", version), func(t *testing.T) {
 			db, ctx, _ := isolatedConfigScopeStore(t)
 			agent := sharedTestAgent(t, db, ctx)
 			if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: "log_aaabcdefabcdef01", Entries: []core.CoreLogEntry{{Engine: core.EngineMihomo, Level: "info", Message: "[TCP] 8.8.8.8:50123 --> 1.1.1.1:443 using DIRECT"}}}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.pool.Exec(ctx, fmt.Sprintf(`DROP TABLE client_connection_changes; DROP TABLE client_connection_revision; DROP INDEX client_connections_group_time_idx; DELETE FROM qcontrolhub_schema_migrations WHERE version>=93; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(%d) ON CONFLICT DO NOTHING`, version)); err != nil {
+			if _, err := db.pool.Exec(ctx, fmt.Sprintf(`DROP TABLE client_connection_history_groups,client_connection_history_cache,client_connection_journal,client_connection_journal_floor; DROP INDEX client_connections_group_time_idx; DELETE FROM qcontrolhub_schema_migrations WHERE version>=93; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(%d) ON CONFLICT DO NOTHING`, version)); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.migrate(ctx); err != nil {
@@ -181,6 +182,7 @@ func TestClientConnectionSyncMeasurements(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	_, owner := sharedTestUser(t, db, ctx, "connection-measure")
 	agent := sharedTestAgent(t, db, owner)
+	others := []string{agent.ID, sharedTestAgent(t, db, owner).ID, sharedTestAgent(t, db, owner).ID}
 	start := time.Now()
 	_, err := db.pool.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,inbound_port,first_seen,last_seen,source)
  SELECT $1,date_trunc('minute',now())-m*interval '1 minute','mihomo','vless','test','tcp',('8.9.'||(i/250)::text||'.'||(1+i%250)::text)::inet,50123,'0.0.0.0',443,443,date_trunc('minute',now())-m*interval '1 minute',date_trunc('minute',now())-m*interval '1 minute'+interval '10 seconds','core_logs' FROM generate_series(1,4000)i CROSS JOIN generate_series(1,40)m`, agent.ID)
@@ -230,11 +232,22 @@ func TestClientConnectionSyncMeasurements(t *testing.T) {
 		}
 	}
 	t.Logf("authorized 160000 observations/4000 groups/100 page; 5 samples median/max: full=%s unchanged=%s one-group=%s", med(full), med(warm), med(delta))
-	where, args := connectionHistoryWhere(owner, q)
+	if _, err := db.pool.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,inbound_port,first_seen,last_seen,source)
+ SELECT ids[1+m%cardinality(ids)],b,'mihomo','vless','test','tcp',CASE WHEN i%2=0 THEN ('2001:4860::'||to_hex(i))::inet ELSE ('8.9.'||(i/250)::text||'.'||(1+i%250)::text)::inet END,
+ 50123,'0.0.0.0',443,443,b,b+interval '10 seconds','core_logs' FROM generate_series(1,4000)i CROSS JOIN generate_series(1,40)m
+ CROSS JOIN (SELECT $1::text[] AS ids) k CROSS JOIN LATERAL (SELECT date_trunc('minute',now())-interval '2 days'-m*interval '17 hours' AS b) time`, others); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `ANALYZE client_connections`); err != nil {
+		t.Fatal(err)
+	}
+	measureConnectionPlans(t, db, owner, q, agent.ID)
+	measureConnectionCacheReads(t, db, owner, q)
+	where, args := connectionGroupWhere(owner, q)
 	data, _ := json.Marshal([]core.ClientConnectionRecord{{AgentID: agent.ID, Engine: core.EngineMihomo, ClientIP: "8.9.0.2"}})
 	args = append(args, data)
 	where += fmt.Sprintf(` AND (c.agent_id,c.engine,c.client_ip) IN (SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text))`, len(args))
-	rows, err := db.pool.Query(ctx, `EXPLAIN (ANALYZE,BUFFERS) `+connectionGroupsSQL(where), args...)
+	rows, err := db.pool.Query(ctx, `EXPLAIN (ANALYZE,BUFFERS) `+connectionGroupsSQL(where, len(args)+1), append(args, connectionSyncGroups+1)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,5 +258,340 @@ func TestClientConnectionSyncMeasurements(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Log(line)
+	}
+}
+
+func measureConnectionPlans(t *testing.T, db *Store, ctx context.Context, q ClientConnectionQuery, agent string) {
+	t.Helper()
+	for _, days := range []int{1, 32} {
+		q.Since = q.Until.Add(-time.Duration(days) * 24 * time.Hour)
+		for _, filtered := range []bool{false, true} {
+			sample := q
+			if filtered {
+				sample.AgentID, sample.Engine, sample.Port = agent, core.EngineMihomo, 443
+			}
+			where, args := connectionGroupWhere(ctx, sample)
+			rows, err := db.pool.Query(ctx, "EXPLAIN (ANALYZE, BUFFERS) "+connectionGroupsSQL(where, len(args)+1), append(args, connectionSyncGroups+1)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("group plan days=%d filtered=%t", days, filtered)
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					t.Fatal(err)
+				}
+				t.Log(line)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			rows.Close()
+		}
+	}
+}
+
+func TestClientConnectionDurableHistoryRepairsOnlyChangedGroups(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent := sharedTestAgent(t, db, ctx)
+	end := time.Now().UTC().Truncate(24 * time.Hour)
+	start := end.Add(-24 * time.Hour)
+	q := ClientConnectionQuery{Since: start, Until: end, GroupByIP: true, SkipTimeline: true, Limit: 10, Bucket: "hour"}
+	insert := func(at time.Time, ip string) {
+		t.Helper()
+		_, err := db.pool.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source)
+			VALUES($1,$2,'mihomo','vless','test','tcp',$3,50000,'0.0.0.0',443,$2,$2,'core_logs')`, agent.ID, at, ip)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert(start, "8.8.8.8")
+	insert(start.Add(time.Minute), "2606:4700::1111")
+	check := func(db *Store, ctx context.Context, q ClientConnectionQuery, token string) core.ClientConnectionHistory {
+		t.Helper()
+		h, used, err := db.SyncClientConnections(ctx, q, "durable", token)
+		if err != nil || !used {
+			t.Fatalf("sync: %t %v", used, err)
+		}
+		return h
+	}
+	first := check(db, ctx, q, "")
+	if first.Flows != 2 || len(first.Records) != 2 {
+		t.Fatalf("bad baseline: %+v", first)
+	}
+	cacheVersion := func() (string, map[string]string) {
+		t.Helper()
+		var generation string
+		if err := db.pool.QueryRow(ctx, `SELECT generation FROM client_connection_history_cache`).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := db.pool.Query(ctx, `SELECT group_key,xmin::text FROM client_connection_history_groups`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		versions := map[string]string{}
+		for rows.Next() {
+			var key, xid string
+			if err := rows.Scan(&key, &xid); err != nil {
+				t.Fatal(err)
+			}
+			versions[key] = xid
+		}
+		if len(versions) != 2 || rows.Err() != nil {
+			t.Fatalf("durable rows: %v %v", versions, rows.Err())
+		}
+		return generation, versions
+	}
+	gen, versions := cacheVersion()
+	lock, err := db.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(ctx)
+	if _, err := lock.Exec(ctx, `LOCK TABLE client_connections IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	secondProcess := &Store{pool: db.pool}
+	quick, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	restored := check(secondProcess, quick, q, "")
+	if restored.Flows != 2 || restored.Delta {
+		t.Fatalf("bad restoration: %+v", restored)
+	}
+	q.NodeOrder = []string{agent.ID}
+	q.CountryCode = "CN"
+	filtered := check(secondProcess, quick, q, restored.SyncToken)
+	if filtered.Delta || filtered.Flows != 0 {
+		t.Fatalf("projection reused wrong token: %+v", filtered)
+	}
+	if err := lock.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if current, groups := cacheVersion(); current != gen || !reflect.DeepEqual(groups, versions) {
+		t.Fatal("unchanged read rewrote history")
+	}
+	if err := db.SaveClientConnectionLocations(ctx, []ClientConnectionLocation{{IP: "8.8.8.8", ClientIPLocation: core.ClientIPLocation{CountryCode: "CN", Province: "广东"}, RetryAfter: end.Add(time.Hour)}}); err != nil {
+		t.Fatal(err)
+	}
+	located := check(secondProcess, ctx, q, filtered.SyncToken)
+	if located.Flows != 1 || len(located.Records) != 1 || !located.Delta {
+		t.Fatalf("missing historical change: %+v", located)
+	}
+	current, groups := cacheVersion()
+	changed := connectionGroupKey(located.Records[0])
+	if current == gen || groups[changed] == versions[changed] {
+		t.Fatal("updated group was not persisted")
+	}
+	for key, xid := range versions {
+		if key != changed && groups[key] != xid {
+			t.Fatal("unrelated group was rewritten")
+		}
+	}
+	if _, err := db.pool.Exec(ctx, `DELETE FROM client_connections WHERE client_ip='8.8.8.8'`); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a retention pass deleting journal rows between durable views.
+	if err := db.pruneClientConnectionCache(ctx, time.Now().Add(connectionJournalTTL+time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := check(&Store{pool: db.pool}, ctx, q, "")
+	if rebuilt.Flows != 0 || len(rebuilt.Records) != 0 || len(rebuilt.CountryCodes) != 0 {
+		t.Fatalf("deleted group survived retention: %+v", rebuilt)
+	}
+}
+
+func TestClientConnectionJournalSeesOutOfOrderCommits(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	one, two := sharedTestAgent(t, db, ctx), sharedTestAgent(t, db, ctx)
+	at := time.Now().UTC().Truncate(time.Minute)
+	q := ClientConnectionQuery{Since: at.Add(-time.Minute), Until: at.Add(time.Hour), GroupByIP: true, SkipTimeline: true, Limit: 10, Bucket: "hour"}
+	read := func(token string) core.ClientConnectionHistory {
+		t.Helper()
+		h, ok, err := db.SyncClientConnections(ctx, q, "journal", token)
+		if err != nil || !ok {
+			t.Fatalf("sync: %t %v", ok, err)
+		}
+		return h
+	}
+	first := read("")
+	early, err := db.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer early.Rollback(ctx)
+	const insert = `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source)
+		VALUES($1,$2,'mihomo','vless','test','tcp',$3,50000,'0.0.0.0',443,$2,$2,'core_logs')`
+	if _, err := early.Exec(ctx, insert, one.ID, at, "8.8.8.8"); err != nil {
+		t.Fatal(err)
+	}
+	bounded, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if _, err := db.pool.Exec(bounded, insert, two.ID, at, "1.1.1.1"); err != nil {
+		t.Fatalf("independent writer blocked: %v", err)
+	}
+	middle := read(first.SyncToken)
+	if !middle.Delta || middle.Flows != 1 || len(middle.Records) != 1 || middle.Records[0].AgentID != two.ID {
+		t.Fatalf("in-flight observation became visible: %+v", middle)
+	}
+	if err := early.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	last := read(middle.SyncToken)
+	if !last.Delta || last.Flows != 2 || len(last.Records) != 1 || last.Records[0].AgentID != one.ID {
+		t.Fatalf("late commit went missing: %+v", last)
+	}
+}
+
+func measureConnectionCacheReads(t *testing.T, db *Store, ctx context.Context, q ClientConnectionQuery) {
+	t.Helper()
+	for _, days := range []int{1, 32} {
+		sample := q
+		// The wider fixture starts two days ago and includes older IPv6 rows.
+		sample.Until = q.Until.UTC().Add(-66 * time.Hour).Truncate(24 * time.Hour).Add(24 * time.Hour)
+		sample.Since = sample.Until.Add(-time.Duration(days) * 24 * time.Hour)
+		const scope = "history-measurement"
+		run := func(store *Store, query ClientConnectionQuery, token string) (core.ClientConnectionHistory, time.Duration) {
+			start := time.Now()
+			h, used, err := store.SyncClientConnections(ctx, query, scope, token)
+			if err != nil || !used {
+				t.Fatalf("sync failed: %t %v", used, err)
+			}
+			return h, time.Since(start)
+		}
+		baseline, cold := run(db, sample, "")
+		if baseline.Flows == 0 || baseline.NextCursor == "" {
+			t.Fatalf("historical fixture is not representative: %d", baseline.Flows)
+		}
+		restored, process := run(&Store{pool: db.pool}, sample, "")
+		if baseline.Flows != restored.Flows {
+			t.Fatal("independent store returned different totals")
+		}
+		paged := sample
+		paged.Cursor = baseline.NextCursor
+		_, page := run(db, paged, "")
+		filtered := sample
+		filtered.CountryCode = "CN"
+		_, country := run(db, filtered, "")
+		_, unchanged := run(db, sample, baseline.SyncToken)
+		start := time.Now()
+		const requests = 8
+		errs := make(chan error, requests)
+		for range requests {
+			go func() {
+				h, used, err := db.SyncClientConnections(ctx, paged, scope, "")
+				if err == nil && (!used || h.Flows != baseline.Flows) {
+					err = fmt.Errorf("invalid parallel page")
+				}
+				errs <- err
+			}()
+		}
+		for range requests {
+			if err := <-errs; err != nil {
+				t.Error(err)
+			}
+		}
+		t.Logf("historical %dd IPs=%d: baseline=%s independent-store=%s page=%s country=%s unchanged=%s concurrent-%d=%s",
+			days, baseline.IPs, cold, process, page, country, unchanged, requests, time.Since(start))
+	}
+}
+
+func TestClientConnectionSyncMemoryBudgetFallback(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent := sharedTestAgent(t, db, ctx)
+	end := time.Now().UTC().Truncate(24 * time.Hour)
+	q := ClientConnectionQuery{Since: end.Add(-24 * time.Hour), Until: end, GroupByIP: true, SkipTimeline: true, Limit: 10, Bucket: "hour"}
+	if _, err := db.pool.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source)
+	 VALUES($1,$2,'mihomo','vless','test','tcp','8.8.8.8',50123,'0.0.0.0',443,$2,$2,'core_logs')`, agent.ID, q.Since); err != nil {
+		t.Fatal(err)
+	}
+	const scope = "budget-fixture"
+	checkFallback := func(s *Store) {
+		t.Helper()
+		if _, used, err := s.SyncClientConnections(ctx, q, scope, ""); used || err != nil {
+			t.Fatalf("expected memory-safe fallback, used=%t err=%v", used, err)
+		}
+		h, err := s.ClientConnectionHistory(ctx, q)
+		if err != nil || h.Flows != 1 || len(h.Records) != 1 || len(h.Records[0].Endpoints) != 1 {
+			t.Fatalf("fallback changed the authorized page: %+v %v", h, err)
+		}
+	}
+	db.connectionSyncWork.Lock()
+	checkFallback(db)
+	db.connectionSyncWork.Unlock()
+	if _, used, err := db.SyncClientConnections(ctx, q, scope, ""); !used || err != nil {
+		t.Fatalf("admission stayed busy after release: %t %v", used, err)
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE client_connection_history_groups
+	  SET data=jsonb_set(data,'{excess}',to_jsonb(repeat('x',$1)),true)`, clientConnectionPageBudget+1); err != nil {
+		t.Fatal(err)
+	}
+	restored := &Store{pool: db.pool}
+	checkFallback(restored)
+	// The second read uses the cooldown rather than opening another cache
+	// build, even when the persisted payload is still over budget.
+	lock, err := db.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(ctx)
+	if _, err := lock.Exec(ctx, `LOCK TABLE client_connection_history_groups IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if _, used, err := restored.SyncClientConnections(short, q, scope, ""); used || err != nil {
+		t.Fatalf("over-budget snapshot was repeatedly loaded: %t %v", used, err)
+	}
+}
+
+func TestClientConnectionEndpointPageBudget(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent := sharedTestAgent(t, db, ctx)
+	at := time.Now().UTC().Truncate(time.Minute)
+	if _, err := db.pool.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source)
+	 SELECT $1,$2,'mihomo','vless','test','tcp','8.8.8.8',50123,'0.0.0.0',port,$2,$2,'core_logs' FROM generate_series(1,$3::int) port`,
+		agent.ID, at, clientConnectionPageBudget/connectionEndpointEstimate+1); err != nil {
+		t.Fatal(err)
+	}
+	q := ClientConnectionQuery{Since: at, Until: at.Add(time.Minute), GroupByIP: true, SkipTimeline: true, Limit: 1, Bucket: "hour"}
+	for _, sync := range []bool{false, true} {
+		if sync {
+			if _, used, err := db.SyncClientConnections(ctx, q, "oversize-page", ""); !used || !errors.Is(err, errClientConnectionPageBudget) {
+				t.Fatalf("sync retained an oversized response: used=%t error=%v", used, err)
+			}
+		} else if _, err := db.ClientConnectionHistory(ctx, q); !errors.Is(err, errClientConnectionPageBudget) {
+			t.Fatalf("fallback retained an oversized response: %v", err)
+		}
+	}
+	q.Port = 443
+	h, err := db.ClientConnectionHistory(ctx, q)
+	if err != nil || len(h.Records) != 1 || len(h.Records[0].Endpoints) != 1 || h.Records[0].Endpoints[0].LocalPort != 443 {
+		t.Fatalf("narrow query did not recover: %+v %v", h, err)
+	}
+}
+
+func TestClientConnectionOversizedColdQueryUsesDatabasePage(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent := sharedTestAgent(t, db, ctx)
+	at := time.Now().UTC().Truncate(time.Minute)
+	n := min(connectionSyncGroups, int(connectionCacheBudget()/2/(2*connectionRecordEstimate))) + 1
+	if _, err := db.pool.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source)
+	 SELECT $1,$2,'mihomo','vless','test','tcp',('2606:4700::'||to_hex(i))::inet,50123,'0.0.0.0',443,$2,$2,'core_logs'
+	 FROM generate_series(1,$3::int) i`, agent.ID, at, n); err != nil {
+		t.Fatal(err)
+	}
+	q := ClientConnectionQuery{Since: at, Until: at.Add(time.Minute), GroupByIP: true, SkipTimeline: true, Limit: 2, Bucket: "hour"}
+	if _, used, err := db.SyncClientConnections(ctx, q, "cold-budget-fixture", ""); used || err != nil {
+		t.Fatalf("oversized snapshot did not bypass cache: %t %v", used, err)
+	}
+	page, err := db.ClientConnectionHistory(ctx, q)
+	if err != nil || page.Flows != int64(n) || page.IPs != int64(n) || len(page.Records) != q.Limit || page.NextCursor == "" {
+		t.Fatalf("bounded database page lost totals or pagination: %+v %v", page, err)
+	}
+	q.Cursor = page.NextCursor
+	next, err := db.ClientConnectionHistory(ctx, q)
+	if err != nil || len(next.Records) != q.Limit || next.Records[0].ClientIP == page.Records[0].ClientIP {
+		t.Fatalf("database fallback cursor did not advance: %+v %v", next, err)
 	}
 }

@@ -9,7 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
@@ -83,8 +85,12 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.As(err, &portConflict):
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":  chineseErrorMessage(http.StatusConflict, err.Error()),
+		status := http.StatusConflict
+		if errors.Is(err, store.ErrInvalid) {
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, map[string]any{
+			"error":  chineseErrorMessage(status, err.Error()),
 			"reason": portConflict.Reason,
 			"code":   "port_conflict", "port": portConflict.Port, "field": portConflict.Field,
 			"recovery_engine": portConflict.RecoveryEngine, "detail": core.RedactDiagnostic(err.Error()),
@@ -120,7 +126,7 @@ func writeInternalError(w http.ResponseWriter, err error) {
 	} else {
 		fields = append(fields, "error", core.RedactDiagnostic(err.Error()))
 	}
-	body := map[string]string{"error": chineseErrorMessage(http.StatusInternalServerError, "internal server error"), "request_id": requestID, "detail": safeInternalDiagnostic(err)}
+	body := map[string]string{"code": "internal_error", "error": chineseErrorMessage(http.StatusInternalServerError, "internal server error"), "request_id": requestID, "detail": safeInternalDiagnostic(err)}
 	var schemaError *store.TaskSchemaError
 	if errors.As(err, &schemaError) {
 		fields = append(fields, "stage", "task_creation", "agent_id", schemaError.AgentID, "action", schemaError.Action)
@@ -140,8 +146,36 @@ func writeInternalError(w http.ResponseWriter, err error) {
 	writeJSON(w, http.StatusInternalServerError, body)
 }
 
+func writeRateLimitError(w http.ResponseWriter, delay time.Duration, message string) {
+	seconds := (delay-1)/time.Second + 1
+	w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
+	writeError(w, http.StatusTooManyRequests, message)
+}
+
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": chineseErrorMessage(status, core.RedactDiagnostic(message)), "detail": core.RedactDiagnostic(message)})
+	body := map[string]string{"error": chineseErrorMessage(status, core.RedactDiagnostic(message)), "detail": core.RedactDiagnostic(message)}
+	switch status {
+	case http.StatusBadRequest:
+		body["code"] = "invalid_input"
+	case http.StatusUnauthorized:
+		body["code"] = "authentication_failed"
+	case http.StatusForbidden:
+		body["code"] = "permission_denied"
+	case http.StatusNotFound:
+		body["code"] = "not_found"
+	case http.StatusConflict:
+		body["code"] = "conflict"
+	case http.StatusTooManyRequests:
+		body["code"] = "rate_limited"
+	case http.StatusServiceUnavailable:
+		body["code"] = "service_unavailable"
+	}
+	id, err := core.NewID("req")
+	if err == nil {
+		w.Header().Set("X-Request-ID", id)
+		body["request_id"] = id
+	}
+	writeJSON(w, status, body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

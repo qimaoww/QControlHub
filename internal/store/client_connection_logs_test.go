@@ -75,7 +75,10 @@ func TestClientConnectionLogMigrationFrom66(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate v66 metadata and legacy Agent history. Logs remain on the panel.
-	if _, err := db.pool.Exec(ctx, `DELETE FROM client_connections;
+	if _, err := db.pool.Exec(ctx, `DROP TRIGGER client_connection_insert_changes ON client_connections;
+ DROP TRIGGER client_connection_update_changes ON client_connections;
+ DROP TRIGGER client_connection_delete_changes ON client_connections;
+ DELETE FROM client_connections;
  ALTER TABLE client_connections DROP COLUMN source;
  ALTER TABLE client_connection_sources DROP COLUMN source;
  ALTER TABLE client_connections DROP CONSTRAINT client_connections_local_port_check;

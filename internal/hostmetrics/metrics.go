@@ -11,16 +11,22 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+type cpuReading struct {
+	at    time.Time
+	total uint64
+	idle  uint64
+	// Positive for cgroup usage in microseconds. Proc counters use ticks.
+	quota float64
+}
+
+type cpuSample struct {
+	reading   cpuReading
+	percent   float64
+	available bool
+}
+
 type metricSample struct {
-	cpuTotal         uint64
-	cpuIdle          uint64
-	cpuAt            time.Time
-	cpuValid         bool
-	cpuPercent       float64
-	cpuPercentValid  bool
-	cgroupCPU        uint64
-	cgroupCPUAt      time.Time
-	cgroupCPUValid   bool
+	cpu              cpuSample
 	networkRX        uint64
 	networkTX        uint64
 	networkKey       string

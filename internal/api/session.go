@@ -61,8 +61,8 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	}
 	key := authn.ClientIP(request, s.trustedProxies)
 	now := time.Now().UTC()
-	if !s.adminLimiter.Allow(key, now) {
-		writeError(w, http.StatusTooManyRequests, "too many authentication failures")
+	if delay := s.adminLimiter.RetryAfter(key, now); delay > 0 {
+		writeRateLimitError(w, delay, "too many authentication failures")
 		return
 	}
 	var input struct {

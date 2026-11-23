@@ -75,16 +75,34 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 	return q, q.Validate()
 }
 
+// Hold the slot until the response has been encoded and written, so slow
+// receivers cannot keep arbitrarily many bounded pages alive in the panel.
+const clientConnectionConcurrentReads = 4
+
 func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if s.clientConnectionReads.Add(1) > clientConnectionConcurrentReads {
+		s.clientConnectionReads.Add(-1)
+		writeError(w, http.StatusTooManyRequests, "客户端连接查询繁忙，请稍后重试。")
+		return
+	}
+	defer s.clientConnectionReads.Add(-1)
+	initialSession, hadSession := s.sessionForRequest(request)
+	if bearerToken(request) == "" && !hadSession {
+		writeError(w, http.StatusUnauthorized, "session expired")
+		return
+	}
 	if value := request.URL.Query().Get("scope_only"); value != "" {
 		if value != "true" {
 			writeError(w, http.StatusBadRequest, "invalid scope_only")
 			return
 		}
-		scope, err := s.clientConnectionScope(request)
+		scope, revision, err := s.clientConnectionScope(request, initialSession, hadSession)
 		if err != nil {
 			writeCoreLogReadError(w, request, err)
+			return
+		}
+		if !s.validateClientConnectionAuthority(w, request, initialSession, hadSession, revision) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"scope": scope})
@@ -107,15 +125,19 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 	query.RecordsOnly = locationMode == "only"
 	// Bind a snapshot to the authority that produced it. A concurrent node
 	// revocation must not stamp old rows with the new, narrower authority.
-	scope, err := s.clientConnectionScope(request)
+	scope, authorityRevision, err := s.clientConnectionScope(request, initialSession, hadSession)
 	if err != nil {
 		writeCoreLogReadError(w, request, err)
 		return
 	}
 	var history core.ClientConnectionHistory
 	var synced bool
-	if request.URL.Query().Get("sync") == "true" {
-		history, synced, err = s.store.SyncClientConnections(request.Context(), query, scope, request.URL.Query().Get("sync_token"))
+	if scope != "" && request.URL.Query().Get("sync") == "true" {
+		token := request.URL.Query().Get("sync_token")
+		if query.RecordsOnly {
+			token = ""
+		}
+		history, synced, err = s.store.SyncClientConnections(request.Context(), query, connectionScopeDigest([]any{scope, authorityRevision}), token)
 	}
 	if !synced && err == nil {
 		history, err = s.store.ClientConnectionHistory(request.Context(), query)
@@ -124,8 +146,14 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 		writeCoreLogReadError(w, request, err)
 		return
 	}
-	if !synced {
+	if query.RecordsOnly && synced {
+		history = core.ClientConnectionHistory{Records: history.Records, NextCursor: history.NextCursor, PageCursor: history.PageCursor, Sources: []core.ClientConnectionSource{}, Timeline: []core.ClientConnectionBucket{}, CountryCodes: []string{}}
+	}
+	if !synced || query.RecordsOnly {
 		s.resolveClientConnectionLocations(request.Context(), history.Records, locationMode == "cached")
+	}
+	if synced && !query.RecordsOnly {
+		s.clientConnectionRetryTimes(request.Context(), history.Records)
 	}
 	if query.CountryCode != "" {
 		// A deferred lookup may reclassify an IP for later queries. This response
@@ -136,47 +164,72 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 			}
 		}
 	}
-	// User disablement, role/permission changes and session expiry can happen
-	// while the history or deferred geography read is in progress.
-	// Drop the middleware's per-request session snapshot before revalidating.
-	request = request.WithContext(context.WithValue(request.Context(), validatedSessionKey{}, nil))
-	request, valid := s.validateSession(w, request)
-	if !valid {
+	if !s.validateClientConnectionAuthority(w, request, initialSession, hadSession, authorityRevision) {
 		return
 	}
-	latest, err := s.clientConnectionScope(request)
-	if err != nil {
-		writeCoreLogReadError(w, request, err)
-		return
+	if history.SyncToken != "" {
+		// The token covers the full projected page; sources have an independent
+		// lifecycle. Only validate after the live session and grants are checked.
+		tag := connectionScopeDigest([]any{scope, history.SyncToken, history.Sources})
+		etag := `W/"` + tag + `"`
+		w.Header().Set("ETag", etag)
+		if history.Delta && history.SyncToken == request.URL.Query().Get("sync_token") && len(history.Records) == 0 && coreLogETagMatches(request.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 	}
-	if latest != scope {
-		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
-		return
-	}
+
 	writeJSON(w, http.StatusOK, struct {
 		core.ClientConnectionHistory
 		CacheScope string `json:"cache_scope"`
 	}{history, scope})
 }
 
-func (s *Server) clientConnectionScope(request *http.Request) (string, error) {
-	// Browser persistence requires an authenticated login session. Bearer API
-	// clients continue to read history but never receive a restorable scope.
-	session, ok := s.sessionForRequest(request)
-	if !ok {
-		return "", nil
+func (s *Server) validateClientConnectionAuthority(w http.ResponseWriter, request *http.Request, initialSession apiSession, hadSession bool, authorityRevision int64) bool {
+	// User disablement, role/permission changes and session expiry can happen
+	// while the history or deferred geography read is in progress.
+	// Drop the middleware's per-request session snapshot before revalidating.
+	request = request.WithContext(context.WithValue(request.Context(), validatedSessionKey{}, nil))
+	request, valid := s.validateSession(w, request)
+	if !valid {
+		return false
 	}
-	nodes, err := s.store.ClientConnectionScope(request.Context())
+	latestSession, present := s.sessionForRequest(request)
+	if hadSession && (!present || connectionSessionAuthority(initialSession) != connectionSessionAuthority(latestSession)) {
+		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
+		return false
+	}
+	latest, err := s.store.ClientConnectionAuthorityRevision(request.Context())
 	if err != nil {
-		return "", err
+		writeCoreLogReadError(w, request, err)
+		return false
 	}
-	// CSRF is an opaque per-login nonce. Only its digest leaves this function;
-	// no credential is put into browser storage. A new login or deployment
-	// cannot inherit another session's history, even with the same username.
-	payload, err := json.Marshal([]any{"connections-v1", session.CSRF, session.UserID, session.ConfigOwnerID, session.Role, session.Permissions, nodes})
-	if err != nil {
-		return "", err
+	if latest != authorityRevision {
+		writeError(w, http.StatusConflict, "访问范围已变化，请重试。")
+		return false
 	}
+	return true
+}
+
+func (s *Server) clientConnectionScope(request *http.Request, session apiSession, hasSession bool) (string, int64, error) {
+	// Bearer clients remain supported without a restorable browser scope.
+	if hasSession && bearerToken(request) == "" {
+		nodes, revision, err := s.store.ClientConnectionAuthority(request.Context())
+		if err != nil {
+			return "", 0, err
+		}
+		return connectionScopeDigest([]any{"connections-v2", connectionSessionAuthority(session), nodes}), revision, nil
+	}
+	revision, err := s.store.ClientConnectionAuthorityRevision(request.Context())
+	return "", revision, err
+}
+
+func connectionSessionAuthority(session apiSession) string {
+	return connectionScopeDigest([]any{session.UserID, session.ConfigOwnerID, session.EnvironmentID, session.AuthRevision, session.Role, session.Permissions})
+}
+
+func connectionScopeDigest(value any) string {
+	payload, _ := json.Marshal(value)
 	hash := sha256.Sum256(payload)
-	return hex.EncodeToString(hash[:]), nil
+	return hex.EncodeToString(hash[:])
 }

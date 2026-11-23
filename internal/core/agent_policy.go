@@ -14,17 +14,28 @@ type AgentPolicy struct {
 }
 
 func (policy AgentPolicy) Validate() error {
-	if !oneOf(int(policy.HeartbeatIntervalSeconds), 10, 15, 30) {
+	options := PanelSettingOptions()
+	if !oneOf(int(policy.HeartbeatIntervalSeconds), options["agent_heartbeat_interval_seconds"]...) {
 		return errors.New("unsupported heartbeat interval")
 	}
-	if !oneOf(int(policy.MetricsIntervalSeconds), 1, 5, 15, 30) {
+	if !oneOf(int(policy.MetricsIntervalSeconds), options["agent_metrics_interval_seconds"]...) {
 		return errors.New("unsupported metrics interval")
 	}
-	if !oneOf(int(policy.CoreLogMaxMiB), 1, 2, 4, 8, 16, 32, 64, 128) {
+	if !oneOf(int(policy.CoreLogMaxMiB), options["agent_core_log_max_mib"]...) {
 		return errors.New("unsupported local core log capacity")
 	}
-	if !oneOf(int(policy.CoreLogRotateCount), 0, 1, 2, 3, 5) {
+	if !oneOf(int(policy.CoreLogRotateCount), options["agent_core_log_rotate_count"]...) {
 		return errors.New("unsupported local core log rotation count")
 	}
 	return nil
+}
+
+// AgentPolicy derives node-local policy from its owner's panel settings.
+func (settings PanelSettings) AgentPolicy() AgentPolicy {
+	return AgentPolicy{
+		HeartbeatIntervalSeconds: uint32(settings.AgentHeartbeatIntervalSeconds),
+		MetricsIntervalSeconds:   uint32(settings.AgentMetricsIntervalSeconds),
+		CoreLogMaxMiB:            uint32(settings.AgentCoreLogMaxMiB),
+		CoreLogRotateCount:       uint32(settings.AgentCoreLogRotateCount),
+	}
 }

@@ -172,8 +172,8 @@ func rewriteModuleCacheImports(t *testing.T, source string) string {
 func TestSPAModulesArePublished(t *testing.T) {
 	for _, name := range []string{
 		"bootstrap.js", "analytics/app.js", "analytics/operations.js",
-		"analytics/dashboard-panel.js", "analytics/dashboard-ranking.js",
-		"analytics/dashboard-probes.js", "analytics/dashboard-topology.js", "analytics/dashboard-topo-shared.js", "analytics/dashboard-map.js", "analytics/pacific-map-data.js",
+		"analytics/dashboard-console.js", "analytics/dashboard-panel.js", "analytics/dashboard-traffic.js",
+		"analytics/dashboard-probes.js", "analytics/dashboard-topology.js", "analytics/dashboard-topo-shared.js", "analytics/dashboard-linkmap.js", "analytics/pacific-map-data.js",
 		"analytics/dashboard-telemetry.js",
 		"analytics/nodes.js", "analytics/client-access.js", "analytics/substore.js",
 		"analytics/configs.js", "analytics/live-config.js", "analytics/config-studio.js",

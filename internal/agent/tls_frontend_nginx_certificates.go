@@ -40,7 +40,7 @@ func (m *tlsFrontendManager) releaseNginxChallengePort(ctx context.Context, rout
 	if err = m.writeConfig(path, renderNginxFrontends(routes, m.root, m.state), false); err != nil {
 		return err
 	}
-	if _, err = run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", path, "-s", "reload"); err != nil {
+	if _, err = m.reloadNginx(ctx, path); err != nil {
 		return err
 	}
 	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -216,7 +216,7 @@ func (m *tlsFrontendManager) refreshNginxCertificates(ctx context.Context, deplo
 		return errors.Join(renewalErr, err)
 	}
 	reload := func(ctx context.Context) error {
-		_, err := run(ctx, managedNginxBinary(), "-p", m.state+"/", "-c", filepath.Join(m.root, "nginx.conf"), "-s", "reload")
+		_, err := m.reloadNginx(ctx, filepath.Join(m.root, "nginx.conf"))
 		return err
 	}
 	_, err = m.validateNginx(ctx, filepath.Join(m.root, "nginx.conf"))

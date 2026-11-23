@@ -18,7 +18,7 @@ import (
 
 const managedCaddyBinary = "/usr/local/lib/qagent/cores/caddy"
 
-func managedNginxBinary() string {
+func systemNginxBinary() string {
 	for _, path := range []string{"/usr/sbin/nginx", "/usr/bin/nginx", "/sbin/nginx"} {
 		if _, err := os.Lstat(path); err == nil {
 			return path
@@ -28,9 +28,21 @@ func managedNginxBinary() string {
 }
 
 func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) error {
-	binary := managedCaddyBinary
+	binary := m.proxyBinary(mode)
 	if mode == "nginx" {
-		binary = managedNginxBinary()
+		binary = m.nginxBinary()
+		_, unit, _ := m.serviceDefinition("nginx", false)
+		if _, err := os.Lstat(unit); errors.Is(err, os.ErrNotExist) {
+			platform, err := nginxHostPlatform()
+			if err != nil {
+				return err
+			}
+			candidate, _, err := fetchOfficialNginx(ctx, platform, "", "install")
+			if err != nil {
+				return err
+			}
+			return m.ensureServiceForBinary(ctx, mode, candidate)
+		}
 	} else {
 		identity, err := managedCoreServiceIdentity()
 		if err != nil {
@@ -58,7 +70,11 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 			return err
 		}
 		if mode == "caddy" {
-			output, err := m.runCaddy(ctx, nil, "list-modules")
+			identity, err := managedCoreServiceIdentity()
+			if err != nil {
+				return err
+			}
+			output, err := m.runCaddy(ctx, &identity, "list-modules")
 			if err != nil {
 				return err
 			}
@@ -73,46 +89,83 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 		return err
 	}
 	if mode == "nginx" {
-		if err := installManagedPackages(ctx, true); err != nil {
-			return err
+		if privateNginxRevision(binary) != "" {
+			platform, err := nginxHostPlatform()
+			if err != nil {
+				return err
+			}
+			candidate, _, err := fetchOfficialNginx(ctx, platform, privateNginxRevision(binary), "install")
+			if err != nil {
+				return err
+			}
+			if candidate != binary {
+				return errors.New("已验证的软件包与服务记录不同，请在维护窗口核对托管 Nginx")
+			}
+			return nil
 		}
-		return validatePrivilegedExecutable(managedNginxBinary())
+		return errors.New("历史托管 Nginx 程序缺失，请核对服务定义")
 	}
+	updater, tag, asset, err := m.caddyCandidate(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := caddyAssetBinary(ctx, updater, asset)
+	if err != nil {
+		return err
+	}
+	if _, err = atomicDeployWithDefaultMetadata(binary, string(data), fileMetadata{mode: 0755}); err != nil {
+		return err
+	}
+	version, err := m.caddyCommand(ctx, binary, "version")
+	if err != nil || firstWord(version) != tag {
+		_ = os.Remove(binary)
+		return fmt.Errorf("Caddy 版本校验失败：%s", version)
+	}
+	_, err = atomicDeploy(binary+".qch-owned", fmt.Sprintf("%x", sha256.Sum256(data)))
+	return err
+}
+
+func (m *tlsFrontendManager) caddyCandidate(ctx context.Context) (*CoreUpdater, string, githubReleaseAsset, error) {
 	updater := m.updater
 	if updater == nil {
 		updater = NewCoreUpdater()
 	}
 	release, err := updater.caddyRelease(ctx)
 	if err != nil {
-		return fmt.Errorf("下载 Caddy 官方发布信息：%w", err)
+		return nil, "", githubReleaseAsset{}, fmt.Errorf("下载 Caddy 官方发布信息：%w", err)
 	}
-	if release.Draft || release.Prerelease || !strings.HasPrefix(release.TagName, "v2.") {
-		return errors.New("Caddy 最新发布不是支持的 v2 稳定版")
+	asset, err := caddyLinuxAsset(release, updater.goarch)
+	return updater, release.TagName, asset, err
+}
+
+func caddyLinuxAsset(release githubRelease, arch string) (githubReleaseAsset, error) {
+	if release.Draft || release.Prerelease || !caddyStableTag.MatchString(release.TagName) {
+		return githubReleaseAsset{}, errors.New("Caddy 发布不是支持的 v2 稳定版")
 	}
-	name := "caddy_" + strings.TrimPrefix(release.TagName, "v") + "_linux_" + updater.goarch + ".tar.gz"
-	var asset githubReleaseAsset
-	for _, candidate := range release.Assets {
-		if candidate.Name == name {
-			asset = candidate
-			break
+	name := "caddy_" + strings.TrimPrefix(release.TagName, "v") + "_linux_" + arch + ".tar.gz"
+	for _, asset := range release.Assets {
+		if asset.Name == name && releaseDigest.MatchString(asset.Digest) && validateReleaseAssetMetadata(asset) == nil &&
+			asset.BrowserDownloadURL == "https://github.com/caddyserver/caddy/releases/download/"+release.TagName+"/"+name {
+			return asset, nil
 		}
 	}
-	if asset.Name == "" || !strings.HasPrefix(asset.Digest, "sha256:") {
-		return fmt.Errorf("Caddy 官方发布缺少 %s 或 SHA256 摘要", name)
-	}
+	return githubReleaseAsset{}, fmt.Errorf("%w：%s", issueAsset, name)
+}
+
+func caddyAssetBinary(ctx context.Context, updater *CoreUpdater, asset githubReleaseAsset) ([]byte, error) {
 	archive, err := updater.downloadAsset(ctx, asset)
 	if err != nil {
-		return fmt.Errorf("下载并校验 Caddy：%w", err)
+		return nil, fmt.Errorf("下载并校验 Caddy：%w", err)
 	}
 	defer os.Remove(archive)
 	file, err := os.Open(archive)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
 	compressed, err := gzip.NewReader(file)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer compressed.Close()
 	reader := tar.NewReader(compressed)
@@ -123,41 +176,24 @@ func (m *tlsFrontendManager) ensureDependency(ctx context.Context, mode string) 
 			break
 		}
 		if readErr != nil {
-			return readErr
+			return nil, readErr
 		}
 		if header.Name != "caddy" {
 			continue
 		}
 		if header.Typeflag != tar.TypeReg || header.Size < 1 || header.Size > 100<<20 {
-			return errors.New("Caddy 压缩包中的程序无效")
+			return nil, errors.New("Caddy 压缩包中的程序无效")
 		}
 		value, err = io.ReadAll(io.LimitReader(reader, 100<<20+1))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		break
 	}
 	if len(value) == 0 {
-		return errors.New("Caddy 压缩包缺少程序")
+		return nil, errors.New("Caddy 压缩包缺少程序")
 	}
-	if err = os.MkdirAll(filepath.Dir(binary), 0755); err != nil {
-		return err
-	}
-	if err = validateProtectedDirectoryChain(filepath.Dir(binary)); err != nil {
-		return err
-	}
-	if _, err = atomicDeployWithDefaultMetadata(binary, string(value), fileMetadata{mode: 0755}); err != nil {
-		return err
-	}
-	if _, err = atomicDeploy(binary+".qch-owned", fmt.Sprintf("%x", sha256.Sum256(value))); err != nil {
-		return err
-	}
-	output, err := runInDirectoryWithEnvironment(ctx, "", "XDG_CONFIG_HOME="+m.state, binary, "version")
-	version := strings.Fields(output)
-	if err != nil || len(version) == 0 || version[0] != release.TagName {
-		return fmt.Errorf("Caddy 安装版本检查失败：%v：%s", err, output)
-	}
-	return nil
+	return value, nil
 }
 
 func installManagedPackages(ctx context.Context, nginx bool) error {
@@ -179,9 +215,6 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 		switch name {
 		case "apt-get":
 			args = []string{"-o", "DPkg::Lock::Timeout=30", "-o", "Acquire::Retries=2", "install", "-y", "--no-install-recommends"}
-		// Debian maintainer scripts must not launch an unmanaged default server.
-		// A pre-existing policy is respected; otherwise install a temporary deny
-		// policy and remove only the exact file created by this helper.
 		case "apk":
 			args = []string{"--wait", "30", "add", "--no-cache"}
 		case "dnf", "yum":
@@ -193,28 +226,15 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 			if output, err := runIPQualityCommand(ctx, binary, []string{"-o", "Acquire::Retries=2", "update"}); err != nil {
 				return fmt.Errorf("更新软件包索引失败：%w：%s", err, output)
 			}
-			policy := "/usr/sbin/policy-rc.d"
-			file, createErr := os.OpenFile(policy, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
-			if createErr == nil {
-				if _, err = file.WriteString("#!/bin/sh\nexit 101\n"); err != nil {
-					file.Close()
-					os.Remove(policy)
-					return err
-				}
-				file.Close()
-				defer os.Remove(policy)
-			} else if !errors.Is(createErr, os.ErrExist) {
-				return createErr
-			} else if nginx {
-				if err := validatePrivilegedExecutable(policy); err != nil {
-					return err
-				}
-				_, policyErr := run(ctx, policy, "nginx", "start")
-				var exit *exec.ExitError
-				if !errors.As(policyErr, &exit) || exit.ExitCode() != 101 {
-					return errors.New("现有 policy-rc.d 未禁止默认服务启动；请先安装 Nginx，面板将创建独立服务")
-				}
+			var actions []string
+			if nginx {
+				actions = []string{"start"}
 			}
+			cleanup, err := protectAptServices(ctx, actions...)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 		}
 		break
 	}
@@ -229,13 +249,54 @@ func installManagedPackages(ctx context.Context, nginx bool) error {
 	return nil
 }
 
+// Debian maintainer scripts must leave the independent system service alone.
+// Preserve administrator policy and remove only the temporary file we own.
+func protectAptServices(ctx context.Context, actions ...string) (func(), error) {
+	const policy = "/usr/sbin/policy-rc.d"
+	file, err := os.OpenFile(policy, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	if errors.Is(err, os.ErrExist) {
+		if len(actions) > 0 {
+			if err := validatePrivilegedExecutable(policy); err != nil {
+				return nil, err
+			}
+		}
+		for _, action := range actions {
+			for _, service := range []string{"nginx", "nginx.service"} {
+				_, policyErr := run(ctx, policy, service, action)
+				var exit *exec.ExitError
+				if !errors.As(policyErr, &exit) || exit.ExitCode() != 101 {
+					return nil, errors.New("现有 policy-rc.d 允许 Nginx 服务操作，请在维护窗口手动更新")
+				}
+			}
+		}
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	created, statErr := file.Stat()
+	cleanup := func() {
+		if current, err := os.Lstat(policy); err == nil && statErr == nil && os.SameFile(created, current) {
+			_ = os.Remove(policy)
+		}
+	}
+	_, writeErr := file.WriteString("#!/bin/sh\nexit 101\n")
+	if err := errors.Join(statErr, writeErr, file.Close()); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return cleanup, nil
+}
+
 func (m *tlsFrontendManager) serviceDefinition(mode string, legacy bool) (string, string, string) {
+	return m.serviceDefinitionForBinary(mode, legacy, m.proxyBinary(mode))
+}
+
+func (m *tlsFrontendManager) serviceDefinitionForBinary(mode string, legacy bool, binary string) (string, string, string) {
 	name := "qagent-tls-" + mode
-	binary := managedCaddyBinary
 	arguments := "run --config " + filepath.Join(m.root, "caddy.conf")
 	if mode == "nginx" {
-		binary = managedNginxBinary()
-		arguments = "-p " + m.state + "/ -c " + filepath.Join(m.root, "nginx.conf")
+		arguments = m.nginxServiceArguments(binary)
 	}
 	var path, content string
 	if m.services.Kind() == ServiceManagerSystemd {
@@ -268,7 +329,11 @@ no_new_privs=true`, 1)
 }
 
 func (m *tlsFrontendManager) ensureService(ctx context.Context, mode string) error {
-	name, path, content := m.serviceDefinition(mode, false)
+	return m.ensureServiceForBinary(ctx, mode, m.proxyBinary(mode))
+}
+
+func (m *tlsFrontendManager) ensureServiceForBinary(ctx context.Context, mode, binary string) error {
+	name, path, content := m.serviceDefinitionForBinary(mode, false, binary)
 	if m.services.Kind() == ServiceManagerSystemd {
 		if err := validateManagedUnitDropIns(ctx, name); err != nil {
 			return err

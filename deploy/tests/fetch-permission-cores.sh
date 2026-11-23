@@ -8,7 +8,7 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 fetch() {
   sh "$(dirname "$0")/fetch-official-asset.sh" "$1" "$stage/$2" "$3" "$4"
 }
-fetch https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1.19.33.gz mihomo.gz 132f6f3edf9a65e62f04853aed3358472e0b2b7666daa8419edfa2ddf5bb6323 663189133
+fetch https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-v1.19.34.gz mihomo.gz 223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc 734505033
 gzip -dc "$stage/mihomo.gz" > "$root/bin/mihomo"
 fetch https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip xray.zip e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214 695486844
 unzip -p "$stage/xray.zip" xray > "$root/bin/xray"
@@ -23,6 +23,8 @@ fetch https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.
 tar -xzf "$stage/sing-box-musl.tar.gz" -C "$stage"
 cp "$stage/sing-box-1.14.4-linux-amd64-musl/sing-box" "$root/musl/sing-box"
 if [ "${2:-}" = managed-tls ]; then
+  fetch https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz old-caddy.tar.gz 727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b 607245028
+  tar -xOzf "$stage/old-caddy.tar.gz" caddy > "$root/bin/caddy"
   chmod 0755 "$root/bin/"* "$root/musl/"*
   exit 0
 fi

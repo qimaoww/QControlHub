@@ -16,11 +16,13 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
+const coreLogReadTimeout = 12 * time.Second
+
 // Include authentication, pool acquisition and row reads in the same deadline.
 // The browser's longer deadline also bounds transfer and JSON parsing.
 func coreLogReadDeadline(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), coreLogReadTimeout)
 		defer cancel()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

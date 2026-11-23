@@ -36,11 +36,17 @@ export function summarizeDashboardNodes(agents, now = Date.now()) {
   return result;
 }
 
+export function dashboardMonthBytes(row, month, direction) {
+  if (!row.day?.startsWith(`${month}-`)) return 0;
+  const dated = Number(row[`${direction}_bytes`] || 0);
+  return dated + Number(row[`month_undated_${direction}_bytes`] || 0);
+}
+
 export function rankDashboardTraffic(rows, month, today = new Date().toISOString().slice(0, 10), agentIDs = []) {
   const totals = new Map(agentIDs.filter(Boolean).map(id => [id, 0]));
   for (const row of rows || []) {
     if (!row.agent_id || !row.day?.startsWith(`${month}-`) || row.day > today) continue;
-    const amount = Number(row.received_bytes || 0) + Number(row.sent_bytes || 0);
+    const amount = dashboardMonthBytes(row, month, 'received') + dashboardMonthBytes(row, month, 'sent');
     if (!Number.isFinite(amount) || amount < 0) continue;
     totals.set(row.agent_id, (totals.get(row.agent_id) || 0) + amount);
   }
@@ -64,13 +70,21 @@ export function aggregateDashboardTrafficDays(rows, month) {
     used_bytes: 0,
     peak_receive_bps: 0,
     peak_send_bps: 0,
+    rows: 0,
   }]));
   (rows || []).forEach((row) => {
     const current = totals.get(row.day);
     if (!current) return;
+    current.rows++;
     current.received_bytes += Number(row.received_bytes || 0);
     current.sent_bytes += Number(row.sent_bytes || 0);
     current.used_bytes += Number(row.used_bytes || 0);
+    if (row.peak_sampled) current.peak_sampled = true;
+    if (row.undated_since) {
+      if (!current.undated_since || row.undated_since < current.undated_since) current.undated_since = row.undated_since;
+      current.undated_received_bytes = (current.undated_received_bytes || 0) + (row.undated_received_bytes || 0);
+      current.undated_sent_bytes = (current.undated_sent_bytes || 0) + (row.undated_sent_bytes || 0);
+    }
     current.peak_receive_bps = Math.max(current.peak_receive_bps, Number(row.peak_receive_bps || 0));
     current.peak_send_bps = Math.max(current.peak_send_bps, Number(row.peak_send_bps || 0));
   });
@@ -105,6 +119,131 @@ export function summarizeDashboardTrafficPeaks(days, now = new Date()) {
     peakReceiveBPS: elapsedDays.reduce((best, day) => Math.max(best, Number(day.peak_receive_bps) || 0), 0),
     peakSendBPS: elapsedDays.reduce((best, day) => Math.max(best, Number(day.peak_send_bps) || 0), 0),
   };
+}
+
+const UTC_DAY_MS = 86400000;
+const utcDayShift = (day, offset) => new Date(Date.parse(`${day}T00:00:00Z`) + offset * UTC_DAY_MS).toISOString().slice(0, 10);
+const nonNegativeAmount = (value) => {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+};
+
+// Monday 00:00 UTC of the natural week that contains now.
+export function dashboardTrafficWeekStart(now = new Date()) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  return utcDayShift(today, -((weekday + 6) % 7));
+}
+
+// Months whose persisted daily rows are needed for the current natural
+// periods: the current UTC month, preceded by the previous one only while
+// the natural week started in it.
+export function dashboardTrafficPeriodMonths(now = new Date()) {
+  const month = new Date(now).toISOString().slice(0, 7);
+  const weekMonth = dashboardTrafficWeekStart(now).slice(0, 7);
+  return weekMonth === month ? [month] : [weekMonth, month];
+}
+
+// Today, natural week and natural month totals in UTC, summed from persisted
+// per-port daily rows. rows counts the persisted rows inside a period: zero
+// rows means nothing was collected, which is not the same as a measured zero.
+// Rows repeated for the same port and day are counted once.
+export function summarizeDashboardTrafficPeriods(rows, now = new Date()) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const weekStart = dashboardTrafficWeekStart(now);
+  const daily = new Map();
+  const seen = new Set();
+  for (const row of rows || []) {
+    const day = String(row?.day || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day > today) continue;
+    const received = nonNegativeAmount(row.received_bytes), sent = nonNegativeAmount(row.sent_bytes);
+    if (received == null || sent == null) continue;
+    const identity = row.policy_id ? `${row.policy_id}|${day}` : "";
+    if (identity && seen.has(identity)) continue;
+    if (identity) seen.add(identity);
+    const entry = daily.get(day) || { day, received: 0, sent: 0, total: 0, rows: 0 };
+    entry.received += received; entry.sent += sent; entry.total += received + sent; entry.rows++;
+    daily.set(day, entry);
+  }
+  const period = (start, days) => {
+    const result = { start, end: today, received: 0, sent: 0, total: 0, rows: 0, series: [] };
+    for (const day of days) {
+      const entry = daily.get(day), future = day > today;
+      result.series.push({ day, total: entry?.total || 0, rows: entry?.rows || 0, future });
+      if (future || !entry) continue;
+      result.received += entry.received; result.sent += entry.sent; result.total += entry.total; result.rows += entry.rows;
+    }
+    return result;
+  };
+  return {
+    today: period(today, [today]),
+    week: period(weekStart, Array.from({ length: 7 }, (_, index) => utcDayShift(weekStart, index))),
+    month: period(`${month}-01`, dashboardTrafficMonthDays(month)),
+    months: dashboardTrafficPeriodMonths(now),
+  };
+}
+
+// Day axis of the traffic stage. The current UTC month is preceded by the
+// days of the natural week that fall in the previous month, so today, this
+// week and this month sit on one axis. A past month shows its own days only.
+export function dashboardTrafficAxis(month, now = new Date()) {
+  const days = dashboardTrafficMonthDays(month);
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (!days.length || month !== today.slice(0, 7)) return days;
+  const lead = [];
+  for (let day = dashboardTrafficWeekStart(now); day < days[0]; day = utcDayShift(day, 1)) lead.push(day);
+  return [...lead, ...days];
+}
+
+// Inclusive UTC day range of one stage period. A past month is always read as
+// a whole month, whatever natural period is selected.
+export function dashboardTrafficRange(period, month, now = new Date()) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const days = dashboardTrafficMonthDays(month);
+  if (month !== today.slice(0, 7)) return { start: days[0] || "", end: days.at(-1) || "" };
+  if (period === "today") return { start: today, end: today };
+  if (period === "week") return { start: dashboardTrafficWeekStart(now), end: today };
+  return { start: `${month}-01`, end: today };
+}
+
+// Per-day totals of the persisted rows on an axis. Rows repeated for the
+// same port and day are counted once. A day without a row stays empty,
+// which is not the same as a measured zero.
+export function buildDashboardTrafficGrid(rows, axis, now = new Date()) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const index = new Map(axis.map((day, position) => [day, position]));
+  const days = axis.map(day => ({ day, received: 0, sent: 0, total: 0, rows: 0, peakReceiveBPS: 0, peakSendBPS: 0, future: day > today }));
+  const seen = new Set();
+  for (const row of rows || []) {
+    const position = index.get(row?.day);
+    if (position == null || days[position].future) continue;
+    const received = nonNegativeAmount(row.received_bytes), sent = nonNegativeAmount(row.sent_bytes);
+    if (received == null || sent == null) continue;
+    const identity = row.policy_id ? `${row.policy_id}|${row.day}` : "";
+    if (identity && seen.has(identity)) continue;
+    if (identity) seen.add(identity);
+    const entry = days[position];
+    entry.received += received; entry.sent += sent; entry.total += received + sent; entry.rows++;
+    entry.peakReceiveBPS = Math.max(entry.peakReceiveBPS, Number(row.peak_receive_bps) || 0);
+    entry.peakSendBPS = Math.max(entry.peakSendBPS, Number(row.peak_send_bps) || 0);
+  }
+  return { days, dayPeak: Math.max(0, ...days.map(day => day.total)) };
+}
+
+// Figures of one inclusive day range of a grid: totals and the busiest
+// day. Days without a row are left out.
+export function summarizeDashboardTrafficRange(days, range) {
+  const result = { received: 0, sent: 0, total: 0, rows: 0, elapsed: 0, collected: 0, peakDay: "", peakBytes: 0 };
+  for (const day of days || []) {
+    if (day.future || day.day < range.start || day.day > range.end) continue;
+    result.elapsed++;
+    if (!day.rows) continue;
+    result.collected++;
+    result.rows += day.rows; result.received += day.received; result.sent += day.sent; result.total += day.total;
+    if (!result.peakDay || day.total > result.peakBytes) { result.peakDay = day.day; result.peakBytes = day.total; }
+  }
+  return result;
 }
 
 export const taskActivity = (items, limit = 7) => {
@@ -232,6 +371,13 @@ function buildPolicyAgentRollup(policies = [], agentMeta = new Map(), scope = "a
   return { byAgent, hasCrossOwner };
 }
 
+// A ranking normally covers the elapsed days of one UTC month. An explicit
+// inclusive day range replaces that, so a natural week that spans two months
+// is ranked as one period.
+const inRankingRange = (day, range, month, today) => range
+  ? Boolean(day) && day >= range.start && day <= range.end
+  : Boolean(day?.startsWith(`${month}-`)) && day <= today;
+
 export function rankDashboardTrafficView({
   period = "month",
   rows = [],
@@ -243,6 +389,7 @@ export function rankDashboardTrafficView({
   scope = "all",
   limit = "5",
   orderIDs = [],
+  range = null,
 } = {}) {
   const agentMeta = buildAgentMetaMap(agents, pageAgents);
   const { byAgent: policyMap, hasCrossOwner: policyCrossOwner } = buildPolicyAgentRollup(policies, agentMeta, scope);
@@ -272,7 +419,7 @@ export function rankDashboardTrafficView({
       }
     }
     for (const row of rows || []) {
-      if (!row?.agent_id || !row.day?.startsWith(`${month}-`) || row.day > today) continue;
+      if (!row?.agent_id || !inRankingRange(row.day, range, month, today)) continue;
       if (scope === "current" && allowedAgents.size && !allowedAgents.has(row.agent_id)) continue;
       const rx = finiteNonNegative(Number(row.received_bytes)) ? Number(row.received_bytes) : 0;
       const tx = finiteNonNegative(Number(row.sent_bytes)) ? Number(row.sent_bytes) : 0;

@@ -12,6 +12,14 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
+const (
+	clientLocationLookupTimeout = 3 * time.Second
+	clientLocationWorkers       = 8
+	clientLocationNegativeTTL   = 5 * time.Minute
+	clientLocationProvinceTTL   = 6 * time.Hour
+	clientLocationKnownTTL      = 48 * time.Hour
+)
+
 // Enrichment happens after authorization and never blocks Agent ingestion.
 // One shared deadline bounds cold-cache latency regardless of page size.
 func (s *Server) resolveClientConnectionLocations(ctx context.Context, records []core.ClientConnectionRecord, cacheOnly bool) {
@@ -43,13 +51,14 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 	for i := range records {
 		if item, ok := cached[records[i].ClientIP]; ok {
 			records[i].Location = item.ClientIPLocation
+			records[i].LocationRetryAt = &item.RetryAfter
 		}
 	}
 	if cacheOnly {
 		return
 	}
 	now := time.Now().UTC()
-	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	lookupCtx, cancel := context.WithTimeout(ctx, clientLocationLookupTimeout)
 	defer cancel()
 	jobs := make(chan string, len(ips))
 	for _, ip := range ips {
@@ -61,7 +70,7 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	updates := make([]store.ClientConnectionLocation, 0, len(ips))
-	for range 8 {
+	for range min(clientLocationWorkers, len(jobs)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -70,20 +79,21 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 					return
 				}
 				region, err := s.geoip.Lookup(lookupCtx, netip.MustParseAddr(ip))
-				item := store.ClientConnectionLocation{IP: ip, RetryAfter: now.Add(5 * time.Minute)}
+				item := store.ClientConnectionLocation{IP: ip, RetryAfter: now.Add(clientLocationNegativeTTL)}
 				if err == nil {
 					item.ClientIPLocation = core.ClientIPLocation{CountryCode: region.ISOCode, Country: region.Name, Province: region.Province}
 					if region.ISOCode == "CN" && region.Province == "" {
-						item.RetryAfter = now.Add(6 * time.Hour)
+						item.RetryAfter = now.Add(clientLocationProvinceTTL)
 					} else {
-						item.RetryAfter = now.Add(48 * time.Hour)
+						item.RetryAfter = now.Add(clientLocationKnownTTL)
 					}
 				}
 				mu.Lock()
-				if err == nil {
-					cached[ip] = item
-				}
 				updates = append(updates, item)
+				if item.CountryCode == "" {
+					item.ClientIPLocation = cached[ip].ClientIPLocation
+				}
+				cached[ip] = item
 				mu.Unlock()
 			}
 		}()
@@ -95,6 +105,7 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 	for i := range records {
 		if item, ok := cached[records[i].ClientIP]; ok {
 			records[i].Location = item.ClientIPLocation
+			records[i].LocationRetryAt = &item.RetryAfter
 		}
 	}
 }
@@ -105,5 +116,32 @@ func needsClientLocationLookup(item store.ClientConnectionLocation, cached bool,
 	}
 	// Entries written before province fallbacks used a 48-hour TTL even when
 	// their CN province was empty. Refresh them once after deployment.
-	return item.CountryCode == "CN" && item.Province == "" && item.RetryAfter.Sub(now) > 6*time.Hour
+	return item.CountryCode == "CN" && item.Province == "" && item.RetryAfter.Sub(now) > clientLocationProvinceTTL
+}
+
+// Read only cooldowns for returned IPs with incomplete geography. On an
+// unchanged sync response there are no records and no lookup query to make.
+func (s *Server) clientConnectionRetryTimes(ctx context.Context, records []core.ClientConnectionRecord) {
+	ips := make([]string, 0, len(records))
+	seen := make(map[string]bool)
+	for _, record := range records {
+		l := record.Location
+		if !l.NonPublic && (l.CountryCode == "" || l.CountryCode == "CN" && l.Province == "") && !seen[record.ClientIP] {
+			seen[record.ClientIP] = true
+			ips = append(ips, record.ClientIP)
+		}
+	}
+	if len(ips) == 0 {
+		return
+	}
+	cooldowns, err := s.store.ClientConnectionLocations(ctx, ips)
+	if err != nil {
+		slog.Debug("read client location cooldowns", "error", err)
+		return
+	}
+	for i := range records {
+		if item, ok := cooldowns[records[i].ClientIP]; ok && !needsClientLocationLookup(item, true, time.Now().UTC()) {
+			records[i].LocationRetryAt = &item.RetryAfter
+		}
+	}
 }

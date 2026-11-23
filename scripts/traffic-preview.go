@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -118,7 +119,9 @@ func main() {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFile(w, r, filepath.Join(root, "index.html"))
 	})
-	server := &http.Server{Addr: "127.0.0.1:55592", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	must(err)
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { <-ctx.Done(); _ = server.Close() }()
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -137,8 +140,8 @@ func main() {
 	}()
 	raw, _ := json.MarshalIndent(map[string]any{"users": ids, "agents": nodes}, "", "  ")
 	must(os.WriteFile("output/playwright/traffic-owner-bulk/fixture.json", raw, 0600))
-	log.Print("fixture ready http://127.0.0.1:55592; simulated Agent results")
-	if e := server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
+	log.Printf("fixture ready http://%s; simulated Agent results", listener.Addr())
+	if e := server.Serve(listener); e != nil && e != http.ErrServerClosed {
 		log.Fatal(e)
 	}
 }

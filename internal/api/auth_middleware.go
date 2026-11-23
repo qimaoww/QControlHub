@@ -45,7 +45,7 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 			// The Key receives a redacted representation without those validators.
 			request = request.Clone(request.Context())
 			request.Header.Del("If-None-Match")
-			response := &apiKeyResponseWriter{ResponseWriter: w, secret: bearerToken(request), revealSecrets: s.sessionAllows(request, core.PermissionSecretsRead) || request.Pattern == "GET /api/v1/openapi.json"}
+			response := &apiKeyResponseWriter{ResponseWriter: w, request: request, secret: bearerToken(request), revealSecrets: s.sessionAllows(request, core.PermissionSecretsRead) || request.Pattern == "GET /api/v1/openapi.json"}
 			// Retain a failure only after the rejected business transaction has
 			// rolled back, so its returned diagnostic ID remains queryable.
 			response.failure = func(status int, value any) any {
@@ -98,9 +98,11 @@ func (s *Server) requirePermissions(permissions []core.Permission, anyPermission
 		hasBearer := bearerToken(request) != ""
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
-		if hasBearer && !s.adminLimiter.Allow(key, now) {
-			writeError(w, http.StatusTooManyRequests, "too many authentication failures")
-			return
+		if hasBearer {
+			if delay := s.adminLimiter.RetryAfter(key, now); delay > 0 {
+				writeRateLimitError(w, delay, "too many authentication failures")
+				return
+			}
 		}
 		role, ok := s.sessionRole(request)
 		if !ok {
@@ -232,8 +234,8 @@ func (s *Server) agent(next http.Handler) http.Handler {
 			key += ":" + id
 		}
 		now := time.Now().UTC()
-		if !s.agentLimiter.Allow(key, now) {
-			writeError(w, http.StatusTooManyRequests, "too many failed agent authentication attempts")
+		if delay := s.agentLimiter.RetryAfter(key, now); delay > 0 {
+			writeRateLimitError(w, delay, "too many failed agent authentication attempts")
 			return
 		}
 		if !validAgentID(id) || authn.ValidateRequestHeaders(request, now) != nil {

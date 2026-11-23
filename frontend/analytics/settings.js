@@ -1,3 +1,4 @@
+import { allEngines as engineIDs, panelSettingOptions } from "../modules/runtime-defaults.js";
 import { readRegion, loadingTable } from "./loading.js";
 import { userPermissions } from "../modules/user-model.js";
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, list, pathID, notice, copyText, link } from "./ui.js";
@@ -5,24 +6,23 @@ import { date } from "./operations.js";
 import { siteBrandingSettings } from "./site-branding.js";
 
 const numericFields = [
-  ["task_page_size", "任务每页条数", [50, 100, 500]],
-  ["task_poll_interval_ms", "任务刷新间隔（毫秒）", [600, 1000, 2000, 5000]],
-  ["agent_heartbeat_interval_seconds", "节点心跳间隔（秒）", [10, 15, 30]],
-  ["agent_metrics_interval_seconds", "指标上报间隔（秒）", [1, 5, 15, 30]],
-  ["agent_offline_threshold_seconds", "离线阈值（秒）", [45, 60, 90, 180]],
-  ["task_stale_timeout_seconds", "任务超时（秒）", [60, 120, 300, 600]],
-  ["install_task_stale_timeout_seconds", "安装任务超时（秒）", [180, 360, 600, 900]],
-  ["task_max_attempts", "最大尝试次数", [1, 3, 5]],
-  ["public_ip_probe_interval_seconds", "公网地址探测间隔（秒）", [300, 900, 3600]],
-  ["core_log_retention_days", "内核日志保留天数", [1, 3, 7, 14, 30]],
-  ["agent_core_log_max_mib", "节点单个日志上限（MiB）", [1, 2, 4, 8, 16, 32, 64, 128]],
-  ["agent_core_log_rotate_count", "节点日志轮转份数", [0, 1, 2, 3, 5]],
-  ["metric_retention_days", "指标保留天数", [7, 14, 30]],
-  ["audit_retention_days", "审计保留天数", [[0, "不清理"], 30, 90, 180]],
-  ["task_retention_days", "任务保留天数", [[0, "不清理"], 30, 90, 180]],
-  ["config_revision_retention", "配置历史保留份数", [[0, "不清理"], 50, 100]],
+  ["task_page_size", "任务每页条数", panelSettingOptions.task_page_size],
+  ["task_poll_interval_ms", "任务刷新间隔（毫秒）", panelSettingOptions.task_poll_interval_ms],
+  ["agent_heartbeat_interval_seconds", "节点心跳间隔（秒）", panelSettingOptions.agent_heartbeat_interval_seconds],
+  ["agent_metrics_interval_seconds", "指标上报间隔（秒）", panelSettingOptions.agent_metrics_interval_seconds],
+  ["agent_offline_threshold_seconds", "离线阈值（秒）", panelSettingOptions.agent_offline_threshold_seconds],
+  ["task_stale_timeout_seconds", "任务超时（秒）", panelSettingOptions.task_stale_timeout_seconds],
+  ["install_task_stale_timeout_seconds", "安装任务超时（秒）", panelSettingOptions.install_task_stale_timeout_seconds],
+  ["task_max_attempts", "最大尝试次数", panelSettingOptions.task_max_attempts],
+  ["public_ip_probe_interval_seconds", "公网地址探测间隔（秒）", panelSettingOptions.public_ip_probe_interval_seconds],
+  ["core_log_retention_days", "内核日志保留天数", panelSettingOptions.core_log_retention_days],
+  ["agent_core_log_max_mib", "节点单个日志上限（MiB）", panelSettingOptions.agent_core_log_max_mib],
+  ["agent_core_log_rotate_count", "节点日志轮转份数", panelSettingOptions.agent_core_log_rotate_count],
+  ["metric_retention_days", "指标保留天数", panelSettingOptions.metric_retention_days],
+  ["audit_retention_days", "审计保留天数", panelSettingOptions.audit_retention_days.map(value => value === 0 ? [0, "不清理"] : value)],
+  ["task_retention_days", "任务保留天数", panelSettingOptions.task_retention_days.map(value => value === 0 ? [0, "不清理"] : value)],
+  ["config_revision_retention", "配置历史保留份数", panelSettingOptions.config_revision_retention.map(value => value === 0 ? [0, "不清理"] : value)],
 ];
-const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
 
 export async function settingsPage(ctx) {
   let settings = {}, ready = false;

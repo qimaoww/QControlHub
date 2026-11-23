@@ -2,11 +2,134 @@ package serverconfig
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestHandwrittenPresetEditsRetainNativeValues(t *testing.T) {
+	for _, tc := range []struct {
+		engine core.Engine
+		source string
+	}{
+		{core.EngineXray, `{"inbounds":[{"tag":"edge","port":"21001","protocol":"vmess","settings":{"clients":[{"id":"123e4567-e89b-42d3-a456-426614174001"},{"id":"123e4567-e89b-42d3-a456-426614174002"}]},"sniffing":{"enabled":false,"future":9007199254740993}}]}`},
+		{core.EngineSingBox, `{"inbounds":[{"tag":"edge","listen":"127.0.0.1","listen_port":21001,"type":"vmess","users":[{"uuid":"123e4567-e89b-42d3-a456-426614174001"}],"transport":{"type":"ws","path":"/native"},"tls":{"enabled":false,"min_version":"1.3","reality":{"enabled":false}}}]}`},
+		{core.EngineMihomo, "listeners: [{name: edge, type: snell, port: 21001, psk: fixture-snell-v6, version: 6, mode: unshaped, udp: false}]\n"},
+		{core.EngineShadowsocksRust, `{"server":"::","server_port":21001,"method":"aes-128-gcm","password":"only-for-this-test","no_delay":false,"timeout":0,"future":9007199254740993}`},
+		{core.EngineShadowsocksRust, `{"shadowsocks":[{"name":"edge","address":"::","port":21001,"method":"aes-128-gcm","password":"only-for-this-test","no_delay":false},{"server":"127.0.0.1","server_port":21003,"method":"none","password":""}],"ipv6_first":false}`},
+	} {
+		t.Run(string(tc.engine), func(t *testing.T) {
+			original, ok := Parse(tc.engine, tc.source)
+			if !ok || !CanEditNativePreset(tc.engine, original) {
+				t.Fatal("handwritten source has no editable preset")
+			}
+			input := original
+			input.Port = 21002
+			generated, err := GenerateNativePresetEdit(tc.engine, input, original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var updated string
+			if tc.engine == core.EngineShadowsocksRust {
+				updated, err = MutateSSRustPort(tc.source, generated, original.Tag, "modify")
+			} else {
+				updated, err = MutateGenerated(tc.engine, tc.source, generated, original.Tag, "modify")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.Replace(tc.source, "21001", "21002", 1)
+			if tc.engine == core.EngineXray {
+				// An explicit port edit may use canonical numeric syntax.
+				want = strings.Replace(want, `"21002"`, "21002", 1)
+			}
+			expected, _ := managedDocument(tc.engine, want)
+			actual, err := managedDocument(tc.engine, updated)
+			if err != nil || !reflect.DeepEqual(expected, actual) {
+				t.Fatal("one-field edit changed unrelated native values")
+			}
+			if tc.engine == core.EngineShadowsocksRust && strings.Contains(tc.source, `"address"`) &&
+				(!strings.Contains(updated, `"port": 21002`) || strings.Contains(updated, `"server_port": 21002`)) {
+				t.Fatal("SS Rust aliases were rewritten or duplicated")
+			}
+			reopened, ok := Parse(tc.engine, updated)
+			if !ok || !CanEditNativePreset(tc.engine, reopened) || reopened.Port != input.Port || reopened.Protocol != original.Protocol {
+				t.Fatal("updated source did not reopen the same preset")
+			}
+		})
+	}
+}
+
+func TestXrayPresetAliasesRetainTheirNativeFields(t *testing.T) {
+	const source = `{"inbounds":[{"tag":"edge","port":21001,"protocol":"dokodemo-door","settings":{"network":"tcp","address":"example.test","port":80,"followRedirect":false}}]}`
+	before, ok := Parse(core.EngineXray, source)
+	if !ok || !CanEditNativePreset(core.EngineXray, before) || before.Protocol != ProtocolPortForward || before.TargetPort != 80 {
+		t.Fatal("legacy native forwarding fields did not identify the preset")
+	}
+	after := before
+	after.TargetPort = 8080
+	generated, err := GenerateNativePresetEdit(core.EngineXray, after, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := MutateGenerated(core.EngineXray, source, generated, before.Tag, "modify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := managedDocument(core.EngineXray, updated)
+	expected, _ := managedDocument(core.EngineXray, strings.Replace(source, `"port":80`, `"port":8080`, 1))
+	if err != nil || !reflect.DeepEqual(expected, actual) {
+		t.Fatal("forwarding edit missed the active legacy key or changed neighboring fields")
+	}
+}
+
+func TestPresetEditPreservesAbsentSnellOptions(t *testing.T) {
+	const source = `listeners: [{name: first, type: snell, listen: 127.0.0.1, port: 24001, version: 6, psk: abcdefghijkl}, {name: second, type: snell, port: 24002, version: 6, psk: abcdefghijkm, udp: false}]`
+	input, ok := Parse(core.EngineMihomo, source)
+	if !ok || input.SourceOnly {
+		t.Fatal("handwritten Snell listener not editable")
+	}
+	input.Port = 24003
+	generated, err := Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := MutateGenerated(core.EngineMihomo, source, generated, "first", "modify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := managedDocument(core.EngineMihomo, strings.Replace(source, "24001", "24003", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := managedDocument(core.EngineMihomo, result)
+	if err != nil || !reflect.DeepEqual(got["listeners"], want["listeners"]) {
+		t.Fatalf("edited listeners = %v; want %v (%v)", got["listeners"], want["listeners"], err)
+	}
+}
+
+func TestNativeOutboundPatchDoesNotMaterializeFormDefaults(t *testing.T) {
+	const source = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"extension":9007199254740993,"username":null,"bind_interface":"eth7"}`
+	const baseline = `{"type":"socks","tag":"node","server":"old.example","server_port":1080,"version":"5","username":""}`
+	updated := strings.Replace(baseline, `"old.example"`, `"new.example","explicit":null,"bind_interface":null`, 1)
+	result, err := PatchNativePreset(core.EngineSingBox, source, baseline, updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result), &got); err != nil {
+		t.Fatal(err)
+	}
+	expected := strings.NewReplacer(`"old.example"`, `"new.example","explicit":null`, `"eth7"`, `null`).Replace(source)
+	if err := json.Unmarshal([]byte(expected), &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("patched fragment = %s", result)
+	}
+}
 
 func TestSpecialPresetEditsRetainNativeContent(t *testing.T) {
 	for _, pair := range []struct {

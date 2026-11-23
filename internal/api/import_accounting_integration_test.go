@@ -143,7 +143,11 @@ func TestImportedAccountingSurvivesEditingAndSharedIsolation(t *testing.T) {
 			if after.ID != saved.ID || after.Content != saved.Content || after.Version != saved.Version || private.Config.ID == saved.ID || !private.Task.SharedInstance {
 				t.Fatal("shared conversion modified host ownership")
 			}
-			assertPlan(private.Config, 1)
+			original, err := serverconfig.FormatConfigSource(engine, privateSource)
+			plan, planErr := serverconfig.PrepareIndependentEgress(engine, private.Config.Content)
+			if err != nil || planErr != nil || private.Config.Content != original || len(plan.Ports) != 1 || plan.Ports[0].Port != 22001 {
+				t.Fatal("shared source changed or lost its independently metered port")
+			}
 		})
 	}
 }

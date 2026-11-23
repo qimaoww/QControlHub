@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (s *Store) PruneTasks(ctx context.Context, olderThan time.Time) (int64, error) {
@@ -86,7 +89,7 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		settings, err := s.PanelSettings(account)
 		if err != nil {
 			failures = append(failures, err)
-			longestLogRetention = 30 // Never delete logs under an unreadable policy.
+			longestLogRetention = slices.Max(core.PanelSettingOptions()["core_log_retention_days"]) // Keep the longest allowed history under an unreadable policy.
 			continue
 		}
 		if settings.CoreLogRetentionDays > longestLogRetention {
@@ -120,8 +123,7 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		failures = append(failures, err)
 	}
 	if prune {
-		_, changesError := s.pool.Exec(ctx, `DELETE FROM client_connection_changes WHERE changed_at < now() - interval '2 days'`)
-		failures = append(failures, changesError)
+		failures = append(failures, s.pruneClientConnectionCache(ctx, now))
 		failures = append(failures, s.PruneClientConnectionLocations(ctx))
 		cutoff := now.Add(-time.Duration(longestLogRetention) * 24 * time.Hour)
 		_, err = s.PruneCoreLogPartitions(ctx, cutoff)

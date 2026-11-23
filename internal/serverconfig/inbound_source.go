@@ -13,12 +13,12 @@ import (
 // Resolve only a visible, uniquely named inbound in this authorized source.
 // Native fragments retain custom users, transport fields and exact JSON numbers.
 func InboundSource(engine core.Engine, source, tag string) (string, string, error) {
-	objects, err := ManagedObjects(engine, source, ManagedState{})
+	root, err := managedDocument(engine, source)
 	if err != nil {
 		return "", "", err
 	}
 	section := ""
-	for _, object := range objects {
+	for _, object := range managedObjects(engine, root, ManagedState{}) {
 		if object.Inbound && object.Tag == tag {
 			if section != "" {
 				return "", "", errors.New("入站名称不唯一")
@@ -28,10 +28,6 @@ func InboundSource(engine core.Engine, source, tag string) (string, string, erro
 	}
 	if section == "" {
 		return "", "", errors.New("入站不存在或由系统管理")
-	}
-	root, err := managedDocument(engine, source)
-	if err != nil {
-		return "", "", err
 	}
 	if engine == core.EngineShadowsocksRust && root["server_port"] != nil {
 		var formatted bytes.Buffer

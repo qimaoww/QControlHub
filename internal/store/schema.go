@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 105
+const currentSchemaVersion = 108
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS agents (
 	-- updated on its own schedule and cannot live inside the Agent's snapshot:
 	-- a later push would have overwritten it.
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS observed_public_ip text NOT NULL DEFAULT '';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS observed_public_ip_at timestamptz;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS observed_public_ip_changed_at timestamptz;
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS sharing_revision bigint NOT NULL DEFAULT 1;
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
@@ -277,8 +279,8 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text REFERENCES agents(id),
-    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure')),
-	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure') AND engine='')),
+    action varchar(20) NOT NULL CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','migrate-tls','check-nginx','update-nginx','check-caddy','update-caddy','configure-tcp','ip-quality','network-diagnostic','panel-failure')),
+	    engine varchar(20) NOT NULL CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','migrate-tls','check-nginx','update-nginx','check-caddy','update-caddy','configure-tcp','ip-quality','network-diagnostic','panel-failure') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
@@ -294,6 +296,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     finished_at timestamptz
 );
 
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS managed_proxies jsonb;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS install_if_missing boolean NOT NULL DEFAULT false;
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_install_if_missing_check;
@@ -309,7 +312,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','migrate-tls','check-nginx','update-nginx','check-caddy','update-caddy','configure-tcp','ip-quality','network-diagnostic','panel-failure'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -317,10 +320,15 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_engine_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_engine_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality','network-diagnostic','panel-failure') AND engine=''));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','migrate-tls','check-nginx','update-nginx','check-caddy','update-caddy','configure-tcp','ip-quality','network-diagnostic','panel-failure') AND engine=''));
 
 -- Reports inherit the task's durable ownership, lifecycle and retention.
 -- Large provider payloads stay out of ordinary task/status polling.
+CREATE TABLE IF NOT EXISTS tls_migrations (
+ task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+ plan_id text NOT NULL, preview jsonb NOT NULL, execution jsonb NOT NULL,
+ phase text NOT NULL DEFAULT '', result jsonb, UNIQUE(plan_id,task_id)
+);
 CREATE TABLE IF NOT EXISTS ip_quality_reports (
     task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     result jsonb NOT NULL CHECK (jsonb_typeof(result)='object' AND octet_length(result::text)<=262144)
@@ -725,6 +733,9 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_accounting (
   sent_bytes bigint NOT NULL CHECK (sent_bytes >= 0),
   PRIMARY KEY (policy_id,reset_generation,usage_date,source)
 );
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS undated_since date;
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS undated_received_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_received_bytes >= 0);
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS undated_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_sent_bytes >= 0);
 CREATE TABLE IF NOT EXISTS port_traffic_accounting_epochs (
   policy_id text NOT NULL REFERENCES port_traffic_policies(id) ON DELETE CASCADE,
   reset_generation bigint NOT NULL,
@@ -810,6 +821,12 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 	last_reported_at timestamptz NOT NULL,
 	PRIMARY KEY (policy_id,reset_generation,usage_date)
 );
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS undated_since date;
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS undated_received_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_received_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS undated_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (undated_sent_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS month_undated_received_bytes bigint NOT NULL DEFAULT 0 CHECK (month_undated_received_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS month_undated_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (month_undated_sent_bytes >= 0);
+ALTER TABLE port_traffic_daily_usage ADD COLUMN IF NOT EXISTS peak_sampled boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_date_idx ON port_traffic_daily_usage(usage_date,agent_id);
@@ -982,38 +999,108 @@ CREATE TABLE IF NOT EXISTS client_connection_locations (
  retry_after timestamptz NOT NULL
 );
 
--- A committed counter and coalesced dirty keys, independent of observation IDs
--- and event time. Statement triggers cover updates, late uploads and pruning.
-CREATE TABLE IF NOT EXISTS client_connection_revision (
- id integer PRIMARY KEY CHECK(id=1), revision bigint NOT NULL
+-- Journal rows are visible atomically with their observations. Use the
+-- top-level transaction ID with pg_visible_in_snapshot, since sequence order
+-- by itself cannot tell whether an earlier transaction has committed.
+CREATE TABLE IF NOT EXISTS client_connection_journal (
+ xid xid8 NOT NULL, agent_id text NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
+ day date NOT NULL, changed_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(xid,agent_id,engine,client_ip,day)
 );
-INSERT INTO client_connection_revision VALUES(1,1) ON CONFLICT DO NOTHING;
-CREATE TABLE IF NOT EXISTS client_connection_changes (
- agent_id text NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
- revision bigint NOT NULL, changed_at timestamptz NOT NULL DEFAULT now(),
- PRIMARY KEY(agent_id,engine,client_ip)
+CREATE INDEX IF NOT EXISTS client_connection_journal_expiry_idx ON client_connection_journal(changed_at);
+CREATE TABLE IF NOT EXISTS client_connection_journal_floor (
+ id integer PRIMARY KEY CHECK(id=1), xid xid8 NOT NULL
 );
-CREATE INDEX IF NOT EXISTS client_connection_changes_revision_idx ON client_connection_changes(revision);
+INSERT INTO client_connection_journal_floor VALUES(1,'0') ON CONFLICT DO NOTHING;
 CREATE INDEX IF NOT EXISTS client_connections_group_time_idx ON client_connections(agent_id,engine,client_ip,bucket);
+
+-- Only authority changes update this guard; heartbeats and log ingestion
+-- never take the revision row lock. Detect changes across the response read.
+CREATE TABLE IF NOT EXISTS client_connection_authority (
+ id integer PRIMARY KEY CHECK(id=1), revision bigint NOT NULL, installation uuid NOT NULL
+);
+INSERT INTO client_connection_authority VALUES(1,1,gen_random_uuid()) ON CONFLICT DO NOTHING;
+CREATE OR REPLACE FUNCTION track_client_connection_authority() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ UPDATE client_connection_authority SET revision=revision+1 WHERE id=1;
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS client_connection_agent_added_or_removed ON agents;
+CREATE TRIGGER client_connection_agent_added_or_removed AFTER INSERT OR DELETE ON agents
+ FOR EACH STATEMENT EXECUTE FUNCTION track_client_connection_authority();
+DROP TRIGGER IF EXISTS client_connection_agent_authority ON agents;
+CREATE TRIGGER client_connection_agent_authority AFTER UPDATE OF name,owner_id,admin_hidden,revoked_at ON agents
+ FOR EACH ROW WHEN ((OLD.name,OLD.owner_id,OLD.admin_hidden,OLD.revoked_at)
+   IS DISTINCT FROM (NEW.name,NEW.owner_id,NEW.admin_hidden,NEW.revoked_at))
+ EXECUTE FUNCTION track_client_connection_authority();
+
+CREATE TABLE IF NOT EXISTS client_connection_history_cache (
+ key text PRIMARY KEY, snapshot pg_snapshot NOT NULL, generation text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS client_connection_history_cache_expiry_idx ON client_connection_history_cache(updated_at);
+CREATE TABLE IF NOT EXISTS client_connection_history_groups (
+ cache_key text NOT NULL REFERENCES client_connection_history_cache(key) ON DELETE CASCADE,
+ group_key text NOT NULL, data jsonb NOT NULL, PRIMARY KEY(cache_key,group_key)
+);
+-- A pending day reads through to observations. Retained data is discovered
+-- one indexed day at a time, outside the schema migration.
+CREATE TABLE IF NOT EXISTS client_connection_rollup_scan (
+ id integer PRIMARY KEY CHECK(id=1), next_day timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS client_connection_rollup_days (
+ agent_id text NOT NULL, day timestamptz NOT NULL, state text NOT NULL DEFAULT 'pending'
+ CHECK(state IN ('pending','ready','raw')), PRIMARY KEY(agent_id,day)
+);
+CREATE INDEX IF NOT EXISTS client_connection_rollup_pending ON client_connection_rollup_days(day,agent_id) WHERE state='pending';
+CREATE TABLE IF NOT EXISTS client_connection_rollup_masks (
+ agent_id text NOT NULL, day timestamptz NOT NULL, engine text NOT NULL, client_ip inet NOT NULL,
+ protocol text NOT NULL,inbound text NOT NULL,transport text NOT NULL,local_ip inet NOT NULL,local_port integer NOT NULL,
+ port integer NOT NULL,block integer NOT NULL,mask bit varying NOT NULL,
+ id bigint NOT NULL,first_seen timestamptz NOT NULL,last_seen timestamptz NOT NULL,
+ FOREIGN KEY(agent_id,day) REFERENCES client_connection_rollup_days(agent_id,day) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS client_connection_rollup_masks_day ON client_connection_rollup_masks(agent_id,day,engine,client_ip);
+CREATE TABLE IF NOT EXISTS client_connection_rollup_times (
+ agent_id text NOT NULL,day timestamptz NOT NULL,engine text NOT NULL,client_ip inet NOT NULL,
+ grain text NOT NULL,minutes smallint[] NOT NULL,flows bigint[] NOT NULL,
+ PRIMARY KEY(agent_id,day,engine,client_ip,grain),
+ FOREIGN KEY(agent_id,day) REFERENCES client_connection_rollup_days(agent_id,day) ON DELETE CASCADE
+);
 CREATE OR REPLACE FUNCTION track_client_connection_changes() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE keys_sql text;
 BEGIN
  IF TG_TABLE_NAME='client_connection_locations' THEN
   IF TG_OP='UPDATE' THEN
-   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,n.client_ip FROM changed_new n JOIN changed_old o USING(client_ip) WHERE (n.country_code,n.country,n.province) IS DISTINCT FROM (o.country_code,o.country,o.province)';
+   keys_sql := 'SELECT n.client_ip FROM changed_new n JOIN changed_old o USING(client_ip) WHERE (n.country_code,n.country,n.province) IS DISTINCT FROM (o.country_code,o.country,o.province)';
   ELSIF TG_OP='INSERT' THEN
-   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,client_ip FROM changed_new';
+   keys_sql := 'SELECT client_ip FROM changed_new WHERE country_code<>''''';
   ELSE
-   keys_sql := 'SELECT ''''::text agent_id,''''::text engine,client_ip FROM changed_old';
+   keys_sql := 'SELECT client_ip FROM changed_old WHERE country_code<>''''';
   END IF;
- ELSIF TG_OP='UPDATE' THEN
-  keys_sql := 'SELECT n.agent_id,n.engine,n.client_ip FROM changed_new n JOIN changed_old o USING(id) WHERE n IS DISTINCT FROM o UNION SELECT o.agent_id,o.engine,o.client_ip FROM changed_old o JOIN changed_new n USING(id) WHERE n IS DISTINCT FROM o';
- ELSIF TG_OP='INSERT' THEN
-  keys_sql := 'SELECT DISTINCT agent_id,engine,client_ip FROM changed_new';
- ELSE
-  keys_sql := 'SELECT DISTINCT agent_id,engine,client_ip FROM changed_old';
+  EXECUTE 'INSERT INTO client_connection_journal (xid,agent_id,engine,client_ip,day)
+   SELECT pg_current_xact_id(),'''','''',client_ip,''-infinity''::date FROM ('||keys_sql||') keys ON CONFLICT DO NOTHING';
+  RETURN NULL;
  END IF;
- EXECUTE 'WITH keys AS ('||keys_sql||'), bumped AS (UPDATE client_connection_revision SET revision=revision+1 WHERE id=1 AND EXISTS(SELECT 1 FROM keys) RETURNING revision) INSERT INTO client_connection_changes(agent_id,engine,client_ip,revision) SELECT DISTINCT agent_id,engine,client_ip,revision FROM keys CROSS JOIN bumped ON CONFLICT(agent_id,engine,client_ip) DO UPDATE SET revision=EXCLUDED.revision,changed_at=now()';
+ IF TG_OP='UPDATE' THEN
+  keys_sql := 'SELECT n.agent_id,n.engine,n.client_ip,n.bucket FROM changed_new n JOIN changed_old o USING(id) WHERE n.source=''core_logs'' AND n IS DISTINCT FROM o
+   UNION ALL SELECT o.agent_id,o.engine,o.client_ip,o.bucket FROM changed_old o JOIN changed_new n USING(id)
+   WHERE o.source=''core_logs'' AND n IS DISTINCT FROM o AND (n.agent_id,n.engine,n.client_ip,n.bucket,n.source) IS DISTINCT FROM (o.agent_id,o.engine,o.client_ip,o.bucket,o.source)';
+ ELSIF TG_OP='INSERT' THEN
+  keys_sql := 'SELECT agent_id,engine,client_ip,bucket FROM changed_new WHERE source=''core_logs''';
+ ELSE
+  keys_sql := 'SELECT agent_id,engine,client_ip,bucket FROM changed_old WHERE source=''core_logs''';
+ END IF;
+ -- The first change to a group in this transaction also invalidates its
+ -- node/day. Publication and invalidation share the same row lock.
+ EXECUTE 'WITH logged AS (
+   INSERT INTO client_connection_journal(xid,agent_id,engine,client_ip,day)
+   SELECT pg_current_xact_id(),agent_id,engine,client_ip,day FROM
+   (SELECT DISTINCT agent_id,engine,client_ip,(bucket AT TIME ZONE ''UTC'')::date AS day FROM ('||keys_sql||') keys) grouped
+   ON CONFLICT DO NOTHING RETURNING agent_id,day
+  )
+  INSERT INTO client_connection_rollup_days AS d(agent_id,day)
+   SELECT DISTINCT agent_id,day::timestamp AT TIME ZONE ''UTC'' FROM logged ORDER BY 1,2
+   ON CONFLICT(agent_id,day) DO UPDATE SET state=''pending'' WHERE d.state<>''pending''';
  RETURN NULL;
 END $$;
 DROP TRIGGER IF EXISTS client_connection_insert_changes ON client_connections;

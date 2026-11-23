@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -36,6 +37,7 @@ type apiKeyResponseWriter struct {
 	http.ResponseWriter
 	body          bytes.Buffer
 	status        int
+	request       *http.Request
 	secret        string
 	revealSecrets bool
 	failure       func(int, any) any
@@ -53,18 +55,51 @@ func (w *apiKeyResponseWriter) Write(p []byte) (int, error) {
 	return w.body.Write(p)
 }
 func (w *apiKeyResponseWriter) finish() int {
+	defer func() {
+		// Do not retain credentials or a partial response after completion.
+		w.secret = ""
+		w.body.Reset()
+	}()
 	if w.status == 0 {
 		w.status = 200
 	}
+	ctx := context.Background()
+	if w.request != nil && readOnlyMethod(w.request.Method) {
+		ctx = w.request.Context()
+	}
+	readError := func(err error) int {
+		w.Header().Del("Content-Length")
+		w.Header().Del("ETag")
+		w.Header().Set("X-QControlHub-Auth-Type", "api_key")
+		writeCoreLogReadError(w.ResponseWriter, w.request, err)
+		if err == context.Canceled {
+			return 499
+		}
+		return http.StatusGatewayTimeout
+	}
+	if err := ctx.Err(); err != nil && w.status < 400 {
+		return readError(err)
+	}
 	data := w.body.Bytes()
-	if len(data) > 0 {
+	embeddedZIP := w.request != nil && w.request.Pattern == "GET /api/v1/management-skill" && w.status == http.StatusOK
+	if len(data) > 0 && !embeddedZIP {
 		var value any
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.UseNumber()
 		if err := decoder.Decode(&value); err == nil {
-			safe := core.RedactDiagnosticValue(value)
-			if w.revealSecrets {
-				safe = value
+			// Preserve an already produced error after its deadline, but never
+			// spend unbounded time redacting a successful expired read.
+			redactionContext := ctx
+			if w.status >= 400 {
+				redactionContext = context.Background()
+			}
+			safe := value
+			if !w.revealSecrets {
+				var err error
+				safe, err = core.RedactDiagnosticValueContext(redactionContext, value)
+				if err != nil {
+					return readError(err)
+				}
 			}
 			if w.failure != nil && w.status >= 400 {
 				safe = w.failure(w.status, safe)
@@ -84,14 +119,14 @@ func (w *apiKeyResponseWriter) finish() int {
 		// Last line of defense for reflected request text in legacy handlers.
 		data = bytes.ReplaceAll(data, []byte(w.secret), []byte("[redacted]"))
 	}
+	if err := ctx.Err(); err != nil && w.status < 400 {
+		return readError(err)
+	}
 	w.Header().Del("Content-Length")
 	w.Header().Del("ETag")
 	w.Header().Set("X-QControlHub-Auth-Type", "api_key")
 	w.ResponseWriter.WriteHeader(w.status)
 	_, _ = w.ResponseWriter.Write(data)
-	// Do not retain credentials in a writer after the request.
-	w.secret = ""
-	w.body.Reset()
 	return w.status
 }
 

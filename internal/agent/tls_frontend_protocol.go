@@ -17,10 +17,11 @@ import (
 
 // Verify the configured route and backend's transport handshake after TLS.
 // Authentication/egress traffic is covered by the exported-client live matrix.
-func probeFrontendProtocol(ctx context.Context, f core.TLSFrontend, config *tls.Config) error {
-	if f.Transport == "xhttp" && f.LocalOnly {
+func probeFrontendProtocol(ctx context.Context, f core.TLSFrontend, config *tls.Config, verifyLocalBackend ...bool) error {
+	if f.Transport == "xhttp" && f.LocalOnly && (len(verifyLocalBackend) == 0 || !verifyLocalBackend[0]) {
 		return nil
 	}
+
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(f.PublicPort))

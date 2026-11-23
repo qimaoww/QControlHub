@@ -1,3 +1,4 @@
+import { allEngines as engines } from "../modules/runtime-defaults.js";
 import { patch } from "./live-dom.js";
 import { readRegion, loadingTable, dialogContext } from "./loading.js";
 import { configDeployBlockReason, configDeployConfirmation } from "../modules/core-install-state.js";
@@ -10,7 +11,6 @@ import { sourcePreview } from './json-editor.js';
 import { node, button, actions, stack, grid, section, table, badge, field, code, muted, pathID, list, notice } from "./ui.js";
 import { date, taskDetail } from "./operations.js";
 
-const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const initial = engine => configDefaults[engine];
 
 

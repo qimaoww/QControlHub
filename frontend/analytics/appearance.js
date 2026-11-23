@@ -1,3 +1,4 @@
+import { panelDefaults, panelSettingOptions } from "../modules/runtime-defaults.js";
 // Appearance belongs to this runtime and is reset with its authenticated session.
 let preferences = {};
 let dateFormatter, datePreference, dateBrowserZone, dateOffset, relativeFormatter;
@@ -5,7 +6,7 @@ const dateFields = { year: "numeric", month: "numeric", day: "numeric", hour: "n
 export function applyAppearance(settings = {}) {
   preferences = settings;
   dateFormatter = relativeFormatter = undefined;
-  const scale = [90, 100, 110].includes(Number(settings.ui_font_scale)) ? Number(settings.ui_font_scale) : 100;
+  const scale = panelSettingOptions.ui_font_scale.includes(Number(settings.ui_font_scale)) ? Number(settings.ui_font_scale) : panelDefaults.ui_font_scale;
   document.documentElement.style.fontSize = `${scale}%`;
 }
 export function formatDate(value) {

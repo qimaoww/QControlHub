@@ -55,8 +55,8 @@ read_existing_agent_env() {
 read_existing_agent_env
 
 final_name=${name_arg:-${existing_name:-$default_name}}
-final_labels=${existing_labels:-region=cn-east}
-final_engines=${existing_engines:-mihomo,xray,sing-box,ss-rust}
+final_labels=${QCH_AGENT_LABELS-$existing_labels}
+final_engines=${existing_engines:-$qch_default_agent_engines}
 final_state=${existing_state:-$agent_state_file}
 validate_environment_value QCH_AGENT_NAME "$final_name"
 validate_environment_value QCH_AGENT_LABELS "$final_labels"

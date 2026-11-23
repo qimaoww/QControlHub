@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,31 @@ var (
 )
 
 func Generate(engine core.Engine, input Input) (string, error) {
+	return generate(engine, input, true)
+}
+
+// The server only needs the peer's public key. A native WireGuard server
+// can keep its existing peer while editing listener fields with the form.
+func GenerateNativePresetEdit(engine core.Engine, input, original Input) (string, error) {
+	if original.Protocol != ProtocolWireGuard || input.Protocol != ProtocolWireGuard {
+		return Generate(engine, input)
+	}
+	if len(original.WireGuardAdditionalClients) > 0 && input.WireGuardAdditionalClients == nil {
+		return "", errors.New("请重新读取完整的 WireGuard 客户端列表")
+	}
+	existing := map[string]bool{}
+	for _, client := range original.wireGuardClients() {
+		existing[client.PublicKey] = true
+	}
+	for _, client := range input.wireGuardClients() {
+		if client.PrivateKey == "" && !existing[client.PublicKey] {
+			return "", errors.New("新增 WireGuard 客户端须提供匹配的客户端私钥")
+		}
+	}
+	return generate(engine, input, false)
+}
+
+func generate(engine core.Engine, input Input, requireWireGuardClient bool) (string, error) {
 	if input.SourceOnly {
 		return "", errors.New("此配置无法安全使用预设，请使用完整入站配置")
 	}
@@ -79,19 +105,20 @@ func Generate(engine core.Engine, input Input) (string, error) {
 		if input.TargetPort < 1 || input.TargetPort > 65535 {
 			return "", errors.New("目标端口必须在 1 到 65535 之间")
 		}
-		if input.Network != "tcp" && input.Network != "udp" && input.Network != "tcp,udp" {
+		if !slices.Contains(protocol.ForwardNetworks, input.Network) {
 			return "", errors.New("转发协议必须是 TCP、UDP 或 TCP + UDP")
 		}
 	} else {
 		if input.Protocol == ProtocolWireGuard {
-			if err := validateWireGuardInput(input, true); err != nil {
+			if err := validateWireGuardInput(input, requireWireGuardClient); err != nil {
 				return "", err
 			}
 			if input.BlockMainlandSource {
 				return "", errors.New("WireGuard 路由只能识别隧道内源地址，公网来源限制须在节点防火墙配置")
 			}
 		} else {
-			if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
+			optionalName := engine == core.EngineXray || engine == core.EngineSingBox && input.Protocol != ProtocolSocks
+			if !protocol.IgnoresUsername && (len(input.Username) > 64 || !optionalName && strings.TrimSpace(input.Username) == "") {
 				return "", errors.New("用户名不能为空且不能超过 64 个字符")
 			}
 			if err := validateCredential(input); err != nil {
@@ -257,6 +284,9 @@ func validateCredential(input Input) error {
 			return errors.New("TUIC 用户密码必须在 16 到 128 个字符之间")
 		}
 		return nil
+	}
+	if isSnellProtocol(input.Protocol) {
+		return validateSnellPSK(input)
 	}
 	if len(input.Credential) < 16 || len(input.Credential) > 128 {
 		return errors.New("服务端用户密码必须在 16 到 128 个字符之间")

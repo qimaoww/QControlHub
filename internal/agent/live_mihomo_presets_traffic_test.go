@@ -55,6 +55,10 @@ func TestMihomoSnellAndSudokuPresetsTransferRealTraffic(t *testing.T) {
 		edit           func(*serverconfig.Input)
 	}{
 		{name: "snell-v5", protocol: serverconfig.ProtocolSnell},
+		{name: "snell-v6", protocol: serverconfig.ProtocolSnellV6},
+		{name: "snell-v6-unshaped", protocol: serverconfig.ProtocolSnellV6Unshaped},
+		{name: "snell-v6-shadow", protocol: serverconfig.ProtocolSnellV6ShadowTLS},
+		{name: "snell-v6-unshaped-shadow", protocol: serverconfig.ProtocolSnellV6UnshapedShadowTLS},
 		{name: "snell-shadow-tls-v3", protocol: serverconfig.ProtocolSnellShadowTLS},
 		{name: "snell-shadow-tls-blank-alpn", protocol: serverconfig.ProtocolSnellShadowTLS, edit: func(input *serverconfig.Input) {
 			input.SnellShadowTLSALPN = ""
@@ -88,7 +92,7 @@ func TestMihomoSnellAndSudokuPresetsTransferRealTraffic(t *testing.T) {
 			}
 			input.Listen = "127.0.0.1"
 			input.Port = availableTCPPort(t)
-			if key == serverconfig.ProtocolSnellShadowTLS {
+			if protocol.SnellShadowTLS {
 				input.SnellObfsHost = "example.com"
 				input.SnellShadowTLSHandshake = cover.Listener.Addr().String()
 			}

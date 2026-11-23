@@ -17,7 +17,7 @@ import (
 )
 
 func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
-	for _, action := range []string{"hide-node", "disable-user", "logout"} {
+	for _, action := range []string{"hide-node", "disable-user", "logout", "environment-logout"} {
 		t.Run(action, func(t *testing.T) {
 			db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
 			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "scope-race", core.EngineMihomo)
@@ -38,7 +38,7 @@ func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"country_code":"US"}`)), Header: make(http.Header)}, nil
 			})}}).Handler()
 			username, secret := "alice", "config scope password fixture"
-			if action == "hide-node" {
+			if action == "hide-node" || action == "environment-logout" {
 				username, secret = "admin", admin.token
 			}
 			client, _ := managementLogin(t, handler, username, secret, http.StatusOK)
@@ -64,7 +64,7 @@ func TestClientConnectionCacheScopeRejectsConcurrentRevocation(t *testing.T) {
 				if _, err := db.SetUserDisabled(ctx, alice.userID, true); err != nil {
 					t.Error(err)
 				}
-			case "logout":
+			case "logout", "environment-logout":
 				client.call("POST", "/auth/logout", nil, http.StatusNoContent, nil)
 			}
 			close(release)
@@ -91,8 +91,8 @@ func TestClientConnectionCacheScope(t *testing.T) {
 		}
 		return result.Scope
 	}
-	// Environment-token logins have a genuine per-login scope too; unlike
-	// preference IDs, it never falls back to a username or role string.
+	// Environment-token logins also bind to an opaque authenticated
+	// principal rather than a username or role string.
 	administrator, _ := managementLogin(t, admin.handler, "admin", "config-scope-administrator-fixture", http.StatusOK)
 	a0, b0, admin0 := getScope(alice), getScope(bob), getScope(administrator)
 	if a0 == b0 || a0 == admin0 {
@@ -122,9 +122,12 @@ func TestClientConnectionCacheScope(t *testing.T) {
 		t.Fatal("owner-hidden node did not invalidate the administrator alone")
 	}
 	otherLogin, _ := managementLogin(t, alice.handler, "alice", "config scope password fixture", http.StatusOK)
-	if getScope(otherLogin) == a1 {
-		t.Fatal("another login inherited the original session cache authority")
+	if getScope(otherLogin) != a1 {
+		t.Fatal("same account and live authority lost its cache scope on session renewal")
 	}
+	wrongSession := otherLogin
+	wrongSession.csrf = alice.csrf
+	wrongSession.call("GET", "/client-connections?scope_only=true", nil, http.StatusUnauthorized, nil)
 	alice.call("POST", "/auth/logout", nil, http.StatusNoContent, nil)
 	alice.call("GET", "/client-connections?scope_only=true", nil, http.StatusUnauthorized, nil)
 	if _, err := db.SetUserDisabled(ctx, bob.userID, true); err != nil {

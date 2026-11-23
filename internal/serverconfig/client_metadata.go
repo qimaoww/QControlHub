@@ -12,32 +12,35 @@ import (
 )
 
 type clientMetadata struct {
-	Connection                *clientConnectionMetadata         `json:"client_connection,omitempty"`
-	WebSocket                 *webSocketClientMetadata          `json:"websocket_client,omitempty"`
-	NativeTLS                 *core.NodeTLSCertificateReference `json:"native_tls,omitempty"`
-	PanelCertificateID        string                            `json:"panel_certificate_id,omitempty"`
-	PanelCertificateName      string                            `json:"panel_certificate_name,omitempty"`
-	ExternalFrontend          *core.TLSFrontend                 `json:"external_tls_frontend,omitempty"`
-	XHTTP                     *xhttpMetadata                    `json:"xhttp,omitempty"`
-	TLSALPN                   string                            `json:"managed_tls_alpn,omitempty"`
-	TLSAuthorityKey           string                            `json:"tls_authority_key,omitempty"`
-	Frontend                  *core.TLSFrontend                 `json:"tls_frontend,omitempty"`
-	TLSClientCertificate      string                            `json:"tls_client_certificate,omitempty"`
-	Version                   int                               `json:"version"`
-	Protocol                  string                            `json:"protocol"`
-	SnellReuse                bool                              `json:"snell_reuse,omitempty"`
-	SnellObfsHost             string                            `json:"snell_obfs_host,omitempty"`
-	SnellClientFingerprint    string                            `json:"snell_client_fingerprint,omitempty"`
-	SnellShadowTLSALPN        string                            `json:"snell_shadow_tls_alpn,omitempty"`
-	SudokuClientKey           string                            `json:"sudoku_client_key,omitempty"`
-	SudokuHTTPMaskMode        string                            `json:"sudoku_httpmask_mode,omitempty"`
-	SudokuHTTPMaskTLS         bool                              `json:"sudoku_httpmask_tls,omitempty"`
-	SudokuHTTPMaskHost        string                            `json:"sudoku_httpmask_host,omitempty"`
-	SudokuMultiplex           string                            `json:"sudoku_multiplex,omitempty"`
-	WireGuardClientPrivateKey string                            `json:"wireguard_client_private_key,omitempty"`
-	WireGuardClientPublicKey  string                            `json:"wireguard_client_public_key,omitempty"`
-	WireGuardAllowedIPs       string                            `json:"wireguard_allowed_ips,omitempty"`
-	WireGuardKeepalive        *int                              `json:"wireguard_keepalive,omitempty"`
+	Connection                 *clientConnectionMetadata         `json:"client_connection,omitempty"`
+	WebSocket                  *webSocketClientMetadata          `json:"websocket_client,omitempty"`
+	NativeTLS                  *core.NodeTLSCertificateReference `json:"native_tls,omitempty"`
+	PanelCertificateID         string                            `json:"panel_certificate_id,omitempty"`
+	PanelCertificateName       string                            `json:"panel_certificate_name,omitempty"`
+	ExternalFrontend           *core.TLSFrontend                 `json:"external_tls_frontend,omitempty"`
+	XHTTP                      *xhttpMetadata                    `json:"xhttp,omitempty"`
+	TLSALPN                    string                            `json:"managed_tls_alpn,omitempty"`
+	TLSAuthorityKey            string                            `json:"tls_authority_key,omitempty"`
+	Frontend                   *core.TLSFrontend                 `json:"tls_frontend,omitempty"`
+	TLSClientCertificate       string                            `json:"tls_client_certificate,omitempty"`
+	Version                    int                               `json:"version"`
+	Protocol                   string                            `json:"protocol"`
+	SnellBinding               string                            `json:"snell_binding,omitempty"`
+	NativeBinding              string                            `json:"native_binding,omitempty"`
+	SnellReuse                 bool                              `json:"snell_reuse,omitempty"`
+	SnellObfsHost              string                            `json:"snell_obfs_host,omitempty"`
+	SnellClientFingerprint     string                            `json:"snell_client_fingerprint,omitempty"`
+	SnellShadowTLSALPN         string                            `json:"snell_shadow_tls_alpn,omitempty"`
+	SudokuClientKey            string                            `json:"sudoku_client_key,omitempty"`
+	SudokuHTTPMaskMode         string                            `json:"sudoku_httpmask_mode,omitempty"`
+	SudokuHTTPMaskTLS          bool                              `json:"sudoku_httpmask_tls,omitempty"`
+	SudokuHTTPMaskHost         string                            `json:"sudoku_httpmask_host,omitempty"`
+	SudokuMultiplex            string                            `json:"sudoku_multiplex,omitempty"`
+	WireGuardClientPrivateKey  string                            `json:"wireguard_client_private_key,omitempty"`
+	WireGuardClientPublicKey   string                            `json:"wireguard_client_public_key,omitempty"`
+	WireGuardClientPrivateKeys map[string]string                 `json:"wireguard_client_private_keys,omitempty"`
+	WireGuardAllowedIPs        string                            `json:"wireguard_allowed_ips,omitempty"`
+	WireGuardKeepalive         *int                              `json:"wireguard_keepalive,omitempty"`
 }
 
 // Xray and Mihomo do not encode a client WS Host in their server listener.
@@ -64,6 +67,9 @@ func webSocketClientIdentity(input Input) webSocketClientMetadata {
 // versioned storage. Never copy server private material or unrelated protocols.
 func MarshalClientMetadata(input Input) (string, error) {
 	metadata := clientMetadata{Version: 1, Protocol: input.Protocol}
+	if input.Transport != "xhttp" {
+		metadata.NativeBinding = clientConnectionBinding(input)
+	}
 	clientSNI := ""
 	if names := xhttpRealityNames(input); input.RealityEnabled && len(names) > 0 && names[0] != input.RealityServerName {
 		clientSNI = input.RealityServerName
@@ -93,8 +99,9 @@ func MarshalClientMetadata(input Input) (string, error) {
 		return string(encoded), err
 	}
 	switch input.Protocol {
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 		normalizeSnellInput(&input)
+		metadata.SnellBinding = snellMetadataBinding(input)
 		metadata.SnellReuse, metadata.SnellObfsHost = input.SnellReuse, input.SnellObfsHost
 		metadata.SnellClientFingerprint, metadata.SnellShadowTLSALPN = input.SnellClientFingerprint, input.SnellShadowTLSALPN
 	case ProtocolSudoku:
@@ -104,6 +111,12 @@ func MarshalClientMetadata(input Input) (string, error) {
 		metadata.SudokuMultiplex = input.SudokuMultiplex
 	case ProtocolWireGuard:
 		metadata.WireGuardClientPrivateKey, metadata.WireGuardClientPublicKey = input.WireGuardClientPrivateKey, input.WireGuardClientPublicKey
+		if len(input.WireGuardAdditionalClients) > 0 {
+			metadata.WireGuardClientPrivateKeys = map[string]string{}
+			for _, peer := range input.WireGuardAdditionalClients {
+				metadata.WireGuardClientPrivateKeys[peer.PublicKey] = peer.PrivateKey
+			}
+		}
 		metadata.WireGuardAllowedIPs, metadata.WireGuardKeepalive = input.WireGuardAllowedIPs, &input.WireGuardKeepalive
 	default:
 		_, preset := singBoxPresetFor(input.Protocol)
@@ -134,6 +147,20 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if metadata.Version != 1 {
 		return errors.New("unsupported client metadata version")
 	}
+	bindingInput := *input
+	if input.Protocol == ProtocolWireGuard && metadata.Protocol == ProtocolWireGuard {
+		// Preserve the original endpoint binding when source edits reorder peers.
+		for _, peer := range input.wireGuardClients() {
+			if _, known := metadata.WireGuardClientPrivateKeys[peer.PublicKey]; known || peer.PublicKey == metadata.WireGuardClientPublicKey {
+				bindingInput.WireGuardClientPublicKey = metadata.WireGuardClientPublicKey
+				break
+			}
+		}
+	}
+	binding := clientConnectionBinding(bindingInput)
+	if metadata.NativeBinding != "" && metadata.NativeBinding != binding {
+		return nil
+	}
 	// A source edit can reuse a tag for another protocol or rotate a peer.
 	// Stale metadata must neither overwrite source nor break the workspace.
 	if metadata.XHTTP != nil && input.Transport == "xhttp" {
@@ -154,7 +181,7 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if nativeProtocol(metadata.Protocol) != nativeProtocol(input.Protocol) {
 		return nil
 	}
-	if connection := metadata.Connection; connection != nil && connection.Binding == clientConnectionBinding(*input) {
+	if connection := metadata.Connection; connection != nil && connection.Binding == binding {
 		input.ClientAddress, input.ClientPort, input.ClientHost, input.TLSClientALPN = connection.Address, connection.Port, connection.Host, connection.ALPN
 		if connection.RealitySNI != "" && input.RealityEnabled && slices.Contains(xhttpRealityNames(*input), connection.RealitySNI) {
 			input.RealityServerName = connection.RealitySNI
@@ -164,7 +191,7 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 	if metadata.ExternalFrontend != nil {
 		f = metadata.ExternalFrontend
 	}
-	if f != nil && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
+	if f != nil && input.Tag == f.Tag && input.Listen == "127.0.0.1" && input.Port == f.BackendPort && input.Transport == f.Transport && input.TransportPath == f.Path && !input.TLSEnabled && !input.RealityEnabled {
 		input.TLSMode, input.TLSPublicPort, input.TLSServerName = f.Mode, f.PublicPort, f.Domain
 		input.TLSACMEEmail, input.TLSStaticHTML = f.ACMEEmail, f.StaticHTML
 		input.CertificatePath, input.PrivateKeyPath = f.CertificatePath, f.PrivateKeyPath
@@ -197,7 +224,10 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 		input.Protocol = metadata.Protocol
 	}
 	switch input.Protocol {
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
+		if metadata.SnellBinding != "" && metadata.SnellBinding != snellMetadataBinding(*input) {
+			return nil
+		}
 		input.SnellReuse, input.SnellObfsHost = metadata.SnellReuse, metadata.SnellObfsHost
 		input.SnellClientFingerprint, input.SnellShadowTLSALPN = metadata.SnellClientFingerprint, metadata.SnellShadowTLSALPN
 	case ProtocolSudoku:
@@ -205,16 +235,33 @@ func ApplyClientMetadata(input *Input, encoded string) error {
 		input.SudokuHTTPMaskTLS, input.SudokuHTTPMaskHost = metadata.SudokuHTTPMaskTLS, metadata.SudokuHTTPMaskHost
 		input.SudokuMultiplex = metadata.SudokuMultiplex
 	case ProtocolWireGuard:
-		if metadata.WireGuardClientPublicKey != input.WireGuardClientPublicKey ||
-			wireguardServerPublic(metadata.WireGuardClientPrivateKey) != input.WireGuardClientPublicKey {
-			return nil
+		privateKey := func(public string) string {
+			private := metadata.WireGuardClientPrivateKeys[public]
+			if public == metadata.WireGuardClientPublicKey {
+				private = metadata.WireGuardClientPrivateKey
+			}
+			if private != "" && wireguardServerPublic(private) == public {
+				return private
+			}
+			return ""
+		}
+		input.WireGuardClientPrivateKey = privateKey(input.WireGuardClientPublicKey)
+		for i := range input.WireGuardAdditionalClients {
+			client := &input.WireGuardAdditionalClients[i]
+			client.PrivateKey = privateKey(client.PublicKey)
 		}
 		// Source remains authoritative for public keys, PSK, addresses and MTU.
-		input.WireGuardClientPrivateKey = metadata.WireGuardClientPrivateKey
 		input.WireGuardAllowedIPs = metadata.WireGuardAllowedIPs
 		if metadata.WireGuardKeepalive != nil {
 			input.WireGuardKeepalive = *metadata.WireGuardKeepalive
 		}
 	}
 	return nil
+}
+
+func snellMetadataBinding(input Input) string {
+	fields := []any{clientConnectionBinding(input), input.SnellVersion, input.SnellMode, input.SnellObfsMode,
+		input.SnellShadowTLSVersion, input.SnellShadowTLSPassword, input.SnellShadowTLSUser, input.SnellShadowTLSHandshake, input.SnellShadowTLSProxy}
+	encoded, _ := json.Marshal(fields)
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }

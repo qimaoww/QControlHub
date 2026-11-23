@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func generateShadowsocksRust(input Input) (string, error) {
@@ -16,23 +18,26 @@ func generateShadowsocksRust(input Input) (string, error) {
 	if input.SSRustOutboundBindAddr != "" && net.ParseIP(input.SSRustOutboundBindAddr) == nil {
 		return "", errors.New("出站绑定地址必须是 IP 地址")
 	}
-	root := map[string]any{
+	server := map[string]any{
 		"id":          input.Tag,
 		"server":      input.Listen,
 		"server_port": input.Port,
 		"password":    input.Credential,
 		"method":      input.Method,
-		"mode":        "tcp_and_udp",
-		"timeout":     300,
-		"no_delay":    true,
-		"fast_open":   false,
-		"ipv6_first":  input.SSRustIPv6First,
+	}
+	if input.SSRustOutboundBindAddr != "" {
+		server["outbound_bind_addr"] = input.SSRustOutboundBindAddr
+	}
+	root := map[string]any{
+		"servers":    []any{server},
+		"mode":       "tcp_and_udp",
+		"timeout":    300,
+		"no_delay":   true,
+		"fast_open":  false,
+		"ipv6_first": input.SSRustIPv6First,
 	}
 	if input.SSRustDNS != "" {
 		root["dns"] = input.SSRustDNS
-	}
-	if input.SSRustOutboundBindAddr != "" {
-		root["outbound_bind_addr"] = input.SSRustOutboundBindAddr
 	}
 	value, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
@@ -65,12 +70,33 @@ func parseShadowsocksRust(content string) (Input, bool) {
 }
 
 func shadowsocksRustSingleTag(root map[string]any) string {
+	if name := strings.TrimSpace(shadowsocksRustName(root)); name != "" {
+		return name
+	}
+	return "ss-rust"
+}
+
+func shadowsocksRustName(root map[string]any) string {
 	for _, key := range []string{"id", "remarks", "name"} {
-		if value := strings.TrimSpace(stringValue(root[key])); value != "" {
+		if value := stringValue(root[key]); strings.TrimSpace(value) != "" {
 			return value
 		}
 	}
-	return "ss-rust"
+	return ""
+}
+
+func shadowsocksRustListen(root map[string]any) string {
+	if root["server"] != nil {
+		return stringValue(root["server"])
+	}
+	return stringValue(root["address"])
+}
+
+func shadowsocksRustPort(root map[string]any) any {
+	if root["server_port"] != nil {
+		return root["server_port"]
+	}
+	return root["port"]
 }
 
 // InheritShadowsocksRustGlobals seeds new inbound plans from the current root
@@ -84,22 +110,30 @@ func InheritShadowsocksRustGlobals(input Input, content string) Input {
 	return input
 }
 
+func shadowsocksRustProtocol(method string) string {
+	if strings.HasPrefix(method, "2022-") {
+		return ProtocolSS2022
+	}
+	return ProtocolShadowsocks
+}
+
 func parseShadowsocksRustEntry(root map[string]any, tag string) (Input, bool) {
 	if root == nil {
 		return Input{}, false
 	}
 	method, password := stringValue(root["method"]), stringValue(root["password"])
-	protocol := ProtocolShadowsocks
-	if strings.HasPrefix(method, "2022-") {
-		protocol = ProtocolSS2022
-	}
 	input := Input{
-		Protocol: protocol, Tag: tag, Listen: stringValue(root["server"]),
-		Port: intValue(root["server_port"]), Username: "default", Credential: password,
+		Protocol: shadowsocksRustProtocol(method), Tag: tag, Listen: shadowsocksRustListen(root),
+		Port: intValue(shadowsocksRustPort(root)), Username: "default", Credential: password,
 		Method: method, Transport: "raw",
 		SSRustDNS: stringValue(root["dns"]), SSRustOutboundBindAddr: stringValue(root["outbound_bind_addr"]),
 	}
 	input.SSRustIPv6First, _ = root["ipv6_first"].(bool)
+	users, _ := root["users"].([]any)
+	input.presetUnsupported = stringValue(root["plugin"]) != "" || len(users) > 0 || boolValue(root["disabled"])
+	input.presetUnsupported = input.presetUnsupported || root["address"] != nil && root["server"] != nil || root["port"] != nil && root["server_port"] != nil
+	input.clientUnsupported = input.presetUnsupported
+	input.SourceOnly = !matchesParsedPreset(core.EngineShadowsocksRust, input)
 	return input, input.Listen != "" && input.Port != 0 && input.Credential != "" && method != ""
 }
 

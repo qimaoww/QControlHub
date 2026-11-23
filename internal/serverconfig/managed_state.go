@@ -336,6 +336,10 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 	if err != nil {
 		return nil, err
 	}
+	return managedObjects(engine, root, state), nil
+}
+
+func managedObjects(engine core.Engine, root map[string]any, state ManagedState) []ManagedObject {
 	disabled := map[ManagedResource]bool{}
 	for _, ref := range state.Disabled {
 		disabled[ref] = true
@@ -359,7 +363,7 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 			if tag == "" || strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-") {
 				continue
 			}
-			if engine == core.EngineXray && inbound && (xrayInternalAPIInbound(root, object) || xhttpGroupOwner(root, tag) != "") {
+			if inbound && hiddenNativeInbound(engine, root, object, tag) {
 				continue
 			}
 			kind, listen, port, network := stringValue(object["type"]), stringValue(object["listen"]), trafficPortNumber(object["listen_port"]), ""
@@ -371,8 +375,8 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 				port = trafficPortNumber(object["port"])
 			case core.EngineShadowsocksRust:
 				kind = "shadowsocks"
-				listen = stringValue(object["server"])
-				port = trafficPortNumber(object["server_port"])
+				listen = shadowsocksRustListen(object)
+				port = trafficPortNumber(shadowsocksRustPort(object))
 				network = stringValue(object["mode"])
 				if network == "" {
 					network = stringValue(root["mode"])
@@ -385,14 +389,7 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 				// Unknown protocols remain unspecified instead of claiming TCP/UDP.
 				network = string(trafficEntryProtocol(engine, object, kind, ""))
 			}
-			switch network {
-			case "tcp", "tcp_only":
-				network = "TCP"
-			case "udp", "udp_only":
-				network = "UDP"
-			case "both", "tcp_and_udp":
-				network = "TCP / UDP"
-			}
+			network = nativeNetworkLabel(network)
 			if !inbound {
 				listen = ""
 				port = 0
@@ -401,7 +398,7 @@ func ManagedObjects(engine core.Engine, content string, state ManagedState) ([]M
 			result = append(result, ManagedObject{Section: section, Tag: tag, Kind: kind, Listen: listen, Port: port, Network: network, Inbound: inbound, Enabled: !disabled[ManagedResource{section, tag}]})
 		}
 	}
-	return result, nil
+	return result
 }
 
 // Legacy SS Rust lists can name entries by position. An unlabelled disabled

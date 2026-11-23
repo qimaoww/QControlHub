@@ -33,8 +33,9 @@ type ClientConnectionEndpoint struct {
 }
 
 type ClientConnectionRecord struct {
-	Endpoints []ClientConnectionEndpoint `json:"endpoints,omitempty"`
-	Location  ClientIPLocation           `json:"location"`
+	Endpoints       []ClientConnectionEndpoint `json:"endpoints,omitempty"`
+	Location        ClientIPLocation           `json:"location"`
+	LocationRetryAt *time.Time                 `json:"location_retry_at,omitempty"`
 	ClientConnection
 	ID        int64     `json:"id"`
 	AgentID   string    `json:"agent_id"`
