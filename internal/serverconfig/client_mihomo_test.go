@@ -79,7 +79,7 @@ func TestMihomoShadowTLSALPNNormalization(t *testing.T) {
 func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 	for _, engine := range core.AllEngines() {
 		for _, protocol := range Protocols(engine) {
-			if protocol.PortForward || protocol.UsesEndpoint || (engine == core.EngineXray && protocol.UsesWireGuard) {
+			if protocol.PortForward || (protocol.UsesEndpoint && !protocol.UsesWireGuard) {
 				continue
 			}
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
@@ -190,7 +190,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 				if proxy["type"] != wantType {
 					t.Fatalf("proxy type = %v, want %s", proxy["type"], wantType)
 				}
-				for _, secret := range []string{input.RealityPrivateKey, input.RealityMLDSA65Seed, input.VLESSDecryption, input.PrivateKeyPath, input.CertificatePath} {
+				for _, secret := range []string{input.WireGuardServerPrivateKey, input.RealityPrivateKey, input.RealityMLDSA65Seed, input.VLESSDecryption, input.PrivateKeyPath, input.CertificatePath} {
 					if secret != "" && strings.Contains(profile.Mihomo, secret) {
 						t.Fatal("server-only private key or file path leaked into subscription")
 					}

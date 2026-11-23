@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestWireGuardMetadataKeepsSourceAuthoritative(t *testing.T) {
@@ -55,9 +56,19 @@ func TestWireGuardMetadataKeepsSourceAuthoritative(t *testing.T) {
 				t.Fatal("disabled keepalive must remain an explicit zero in the API JSON")
 			}
 			profile, err := BuildClientProfile(parsed, "2001:db8::1", "")
-			if err != nil || !strings.Contains(profile.URI, "Endpoint = [2001:db8::1]:") ||
-				strings.Contains(profile.URI, "PersistentKeepalive") || strings.Contains(profile.URI, input.WireGuardServerPrivateKey) {
-				t.Fatalf("native client export failed: %v", err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var proxy struct {
+				Peers []struct {
+					Server string
+					Port   int
+				}
+			}
+			if err := yaml.Unmarshal([]byte(profile.URI), &proxy); err != nil || len(proxy.Peers) != 1 ||
+				proxy.Peers[0].Server != "2001:db8::1" || proxy.Peers[0].Port != input.Port ||
+				strings.Contains(profile.URI, "persistent-keepalive") || strings.Contains(profile.URI, input.WireGuardServerPrivateKey) {
+				t.Fatal("incorrect WireGuard export after reloading metadata")
 			}
 			replacement, err := NewPlan(protocol)
 			if err != nil {

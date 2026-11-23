@@ -97,7 +97,7 @@ func TestWorkspaceClientExportNativeFormatsAndEngineIdentity(t *testing.T) {
 		{core.EngineMihomo, serverconfig.ProtocolMieru, "Mihomo Mieru YAML"},
 		{core.EngineXray, serverconfig.ProtocolVLESS, "VLESS URI"},
 		{core.EngineXray, serverconfig.ProtocolVLESSXHTTP, "Xray client JSON"},
-		{core.EngineSingBox, serverconfig.ProtocolWireGuard, "WireGuard native config"},
+		{core.EngineSingBox, serverconfig.ProtocolWireGuard, "Mihomo WireGuard YAML"},
 		{core.EngineShadowsocksRust, serverconfig.ProtocolSS2022, "Shadowsocks SIP002 URI"},
 	}
 	var previousPath string
@@ -140,8 +140,8 @@ func TestWorkspaceClientExportNativeFormatsAndEngineIdentity(t *testing.T) {
 			if result.Format != test.format || result.Content == "" {
 				t.Fatalf("unexpected format %q", result.Format)
 			}
-			if test.protocol == serverconfig.ProtocolWireGuard && (!strings.Contains(result.Content, "[Interface]") || !strings.Contains(result.Content, input.WireGuardClientPrivateKey)) {
-				t.Fatal("incomplete native WireGuard export")
+			if test.protocol == serverconfig.ProtocolWireGuard && (!strings.Contains(result.Content, "type: wireguard") || !strings.Contains(result.Content, input.WireGuardClientPrivateKey)) {
+				t.Fatal("incomplete Mihomo WireGuard export")
 			}
 			if test.protocol == serverconfig.ProtocolSnell && !strings.Contains(result.Content, "= snell, native.example.test, 21001") {
 				t.Fatal("invalid Surge export")
