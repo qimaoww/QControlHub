@@ -26,6 +26,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	if isSnellProtocol(input.Protocol) && input.presetUnsupported {
 		return ClientProfile{}, errors.New("此 Snell 配置包含预设无法完整表达的原生参数，暂不支持客户端导出")
 	}
+	if input.Protocol == ProtocolWireGuard && len(input.WireGuardAdditionalClients) > 0 {
+		return buildWireGuardClientProfiles(input, address, serverName, nodeName)
+	}
 	if err := validateClientConnection(input); err != nil {
 		return ClientProfile{}, err
 	}

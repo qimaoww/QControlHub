@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"go.yaml.in/yaml/v4"
 )
 
 // Optional, real-core regression. It creates only user-space WireGuard
@@ -36,102 +37,175 @@ func TestWireGuardNativeCoreRoundTrip(t *testing.T) {
 					t.Skip("requires QCH_TEST_XRAY_BIN")
 				}
 			}
-			protocol, _ := FindProtocol(engine, ProtocolWireGuard)
-			input, err := NewPlan(protocol)
-			if err != nil {
-				t.Fatal(err)
-			}
-			socket, err := net.ListenPacket("udp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			input.Port = socket.LocalAddr().(*net.UDPAddr).Port
-			_ = socket.Close()
-			if engine == core.EngineXray {
-				input.Listen = "127.0.0.1"
-			}
-			payload := strings.Repeat("WireGuard native loopback regression\n", 2048)
-			target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				if string(body) != payload {
-					http.Error(w, "request payload mismatch", http.StatusBadRequest)
-					return
-				}
-				_, _ = io.WriteString(w, payload)
-			}))
-			// gVisor deliberately drops tunneled 127/8 destinations as martian
-			// packets. Bind to an address owned by this host instead; no packet
-			// leaves the host and no system interface/route is changed.
-			_ = target.Listener.Close()
-			target.Listener = wireGuardLocalHTTPListener(t)
-			target.Start()
-			defer target.Close()
-			content, err := Generate(engine, input)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if engine == core.EngineXray {
-				content = allowXrayFixtureTarget(t, content, target.URL)
-			}
-			plan, err := PrepareIndependentEgress(engine, content)
-			if err != nil {
-				t.Fatal(err)
-			}
-			startWireGuardTestCore(t, engine, serverBinary, plan.Content)
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			socksPort := listener.Addr().(*net.TCPAddr).Port
-			_ = listener.Close()
-			client := map[string]any{
-				"log":      map[string]any{"level": "error"},
-				"inbounds": []any{map[string]any{"type": "socks", "tag": "test-client", "listen": "127.0.0.1", "listen_port": socksPort}},
-				"endpoints": []any{map[string]any{
-					"type": "wireguard", "tag": "wg-client", "system": false, "mtu": input.WireGuardMTU,
-					"address": splitWireGuardList(input.WireGuardClientAddress), "private_key": input.WireGuardClientPrivateKey,
-					"peers": []any{map[string]any{
-						"address": "127.0.0.1", "port": input.Port, "public_key": input.WireGuardServerPublicKey,
-						"pre_shared_key": input.WireGuardPresharedKey, "allowed_ips": []string{"0.0.0.0/0"},
-					}},
-				}},
-				"route": map[string]any{"final": "wg-client"},
-			}
-			raw, _ := json.Marshal(client)
-			startWireGuardTestCore(t, core.EngineSingBox, clientBinary, string(raw))
-			socksAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(socksPort))
-			deadline := time.Now().Add(5 * time.Second)
-			for {
-				conn, err := net.DialTimeout("tcp", socksAddress, 100*time.Millisecond)
-				if err == nil {
-					_ = conn.Close()
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("native SOCKS client did not start: %v", err)
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
-			proxyURL, _ := url.Parse("socks5://" + socksAddress)
-			transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-			defer transport.CloseIdleConnections()
-			httpClient := &http.Client{Transport: transport, Timeout: 10 * time.Second}
-			response, err := httpClient.Post(target.URL, "text/plain", strings.NewReader(payload))
-			if err != nil {
-				t.Fatalf("traffic through the generated WireGuard server failed: %v", err)
-			}
-			defer response.Body.Close()
-			body, err := io.ReadAll(response.Body)
-			if err != nil || response.StatusCode != http.StatusOK || string(body) != payload {
-				t.Fatalf("native WireGuard transfer corrupted bytes: status=%d error=%v", response.StatusCode, err)
-			}
-			_ = response.Body.Close()
-			transport.CloseIdleConnections()
-			if engine == core.EngineXray && plan.Source == "core-api" {
-				assertWireGuardXrayCounters(t, serverBinary, plan, input.Tag, len(payload))
+			t.Run("sing-box clients", func(t *testing.T) {
+				wireGuardClientRoundTrip(t, engine, serverBinary, core.EngineSingBox, clientBinary)
+			})
+			if binary := os.Getenv("QCH_TEST_MIHOMO_BIN"); binary != "" {
+				t.Run("Mihomo clients", func(t *testing.T) {
+					wireGuardClientRoundTrip(t, engine, serverBinary, core.EngineMihomo, binary)
+				})
 			}
 		})
 	}
+}
+
+func wireGuardClientRoundTrip(t *testing.T, engine core.Engine, serverBinary string, clientEngine core.Engine, clientBinary string) {
+	t.Helper()
+	protocol, _ := FindProtocol(engine, ProtocolWireGuard)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Port = socket.LocalAddr().(*net.UDPAddr).Port
+	_ = socket.Close()
+	if engine == core.EngineXray {
+		input.Listen = "127.0.0.1"
+	}
+	payload := strings.Repeat("WireGuard native loopback regression\n", 2048)
+	target := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != payload {
+			http.Error(w, "request payload mismatch", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, payload)
+	}))
+	// gVisor deliberately drops tunneled 127/8 destinations as martian
+	// packets. Bind to an address owned by this host instead; no packet
+	// leaves the host and no system interface/route is changed.
+	_ = target.Listener.Close()
+	target.Listener = wireGuardLocalHTTPListener(t)
+	target.Start()
+	defer target.Close()
+	input, err = AddWireGuardClient(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := Generate(engine, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine == core.EngineXray {
+		content = allowXrayFixtureTarget(t, content, target.URL)
+	}
+	plan, err := PrepareIndependentEgress(engine, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startWireGuardTestCore(t, engine, serverBinary, plan.Content)
+	if clientEngine == core.EngineSingBox {
+		t.Run("concurrent clients", func(t *testing.T) {
+			for _, peer := range input.wireGuardClients() {
+				client := input.withWireGuardClient(peer)
+				t.Run(peer.Address, func(t *testing.T) {
+					t.Parallel()
+					testWireGuardTransfer(t, clientBinary, client, target.URL, payload)
+				})
+			}
+		})
+	} else {
+		profile, err := BuildClientProfile(input, "127.0.0.1", "")
+		if err != nil || len(profile.Variants) != 2 {
+			t.Fatal("missing device exports", err)
+		}
+		t.Run("concurrent Mihomo exports", func(t *testing.T) {
+			for _, device := range profile.Variants {
+				t.Run(device.Name, func(t *testing.T) {
+					t.Parallel()
+					var proxy map[string]any
+					if err := yaml.Unmarshal([]byte(device.Profile.Mihomo), &proxy); err != nil {
+						t.Fatal(err)
+					}
+					port := singBoxFreePort(t)
+					config, err := yaml.Marshal(map[string]any{
+						"socks-port": port, "proxies": []any{proxy}, "rules": []string{"MATCH," + proxy["name"].(string)},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					readLog := nativeWSOriginRun(t, core.EngineMihomo, clientBinary, string(config), port, "")
+					t.Cleanup(func() {
+						if t.Failed() {
+							t.Log(readLog())
+						}
+					})
+					testWireGuardSOCKS(t, port, target.URL, payload)
+				})
+			}
+		})
+	}
+	if !t.Failed() && engine == core.EngineXray && plan.Source == "core-api" {
+		assertWireGuardXrayCounters(t, serverBinary, plan, input.Tag, len(payload))
+	}
+}
+
+func testWireGuardTransfer(t *testing.T, clientBinary string, input Input, targetURL, payload string) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	socksPort := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	client := map[string]any{
+		"log":      map[string]any{"level": "error"},
+		"inbounds": []any{map[string]any{"type": "socks", "tag": "test-client", "listen": "127.0.0.1", "listen_port": socksPort}},
+		"endpoints": []any{map[string]any{
+			"type": "wireguard", "tag": "wg-client", "system": false, "mtu": input.WireGuardMTU,
+			"address": splitWireGuardList(input.WireGuardClientAddress), "private_key": input.WireGuardClientPrivateKey,
+			"peers": []any{map[string]any{
+				"address": "127.0.0.1", "port": input.Port, "public_key": input.WireGuardServerPublicKey,
+				"pre_shared_key": input.WireGuardPresharedKey, "allowed_ips": []string{"0.0.0.0/0"},
+			}},
+		}},
+		"route": map[string]any{"final": "wg-client"},
+	}
+	raw, _ := json.Marshal(client)
+	startWireGuardTestCore(t, core.EngineSingBox, clientBinary, string(raw))
+	testWireGuardSOCKS(t, socksPort, targetURL, payload)
+}
+
+func testWireGuardSOCKS(t *testing.T, socksPort int, targetURL, payload string) {
+	t.Helper()
+	socksAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(socksPort))
+	proxyURL, _ := url.Parse("socks5://" + socksAddress)
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	defer transport.CloseIdleConnections()
+	httpClient := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	// A listening SOCKS socket can precede core and tunnel readiness. Wait
+	// for the fixture HTTP server through this exact peer before testing data.
+	ready := &http.Client{Transport: transport, Timeout: time.Second}
+	for deadline := time.Now().Add(12 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		response, err := ready.Head(targetURL)
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusNoContent {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("WireGuard client did not reach the readiness endpoint: %v", err)
+		}
+	}
+	response, err := httpClient.Post(targetURL, "text/plain", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("traffic through the generated WireGuard server failed: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != payload {
+		t.Fatalf("native WireGuard transfer corrupted bytes: status=%d error=%v", response.StatusCode, err)
+	}
+	_ = response.Body.Close()
+	transport.CloseIdleConnections()
 }
 
 func assertWireGuardXrayCounters(t *testing.T, binary string, plan AccountingPlan, inbound string, payloadBytes int) {

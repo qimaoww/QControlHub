@@ -514,6 +514,9 @@ func querySchema(path, key string) object {
 	return s
 }
 func queryDescription(path, key string) string {
+	if key == "wireguard_client" {
+		return "选择此入站内的 WireGuard 客户端公钥（标准 Base64，按 URL 编码），仅导出该设备的配置。"
+	}
 	if path == "/api/v1/client-connections" {
 		switch key {
 		case "since":

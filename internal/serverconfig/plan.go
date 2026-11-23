@@ -317,6 +317,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.Network = current.Network
 	}
 	if protocol.Key == ProtocolWireGuard {
+		plan.WireGuardAdditionalClients = current.WireGuardAdditionalClients
 		plan.WireGuardServerAddress = current.WireGuardServerAddress
 		plan.WireGuardClientAddress, plan.WireGuardAllowedIPs = current.WireGuardClientAddress, current.WireGuardAllowedIPs
 		plan.WireGuardMTU, plan.WireGuardKeepalive = current.WireGuardMTU, current.WireGuardKeepalive

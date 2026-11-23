@@ -11,6 +11,10 @@ import (
 // exclusively from registrations and the capability registry.
 func (g *generator) annotateField(name string, field object) {
 	switch name {
+	case "wireguard_additional_clients":
+		field["description"] = "首个客户端使用既有 wireguard_client_* 字段。此列表保存额外设备，每个公钥及隧道地址须唯一。修改多客户端入站时传完整列表，空数组移除全部额外设备。"
+	case "add_wireguard_client":
+		field["description"] = "传入当前 WireGuard input，在草稿中追加一个独立客户端，保留监听参数和已有密钥。"
 	case "tls_mode":
 		field["enum"] = []string{"", "native", "nginx", "caddy", "external"}
 		field["description"] = "空或 native 使用原生配置。Xray/Mihomo 独立 VLESS XHTTP TLS 支持 native、nginx、caddy。sing-box TLS WebSocket/HTTPUpgrade 支持托管或 external，HTTP/H2 托管仅 Caddy。托管后端绑定 127.0.0.1，不支持 REALITY；external 自行管理证书。面板证书按引用授权。"

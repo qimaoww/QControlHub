@@ -31,8 +31,22 @@ func Generate(engine core.Engine, input Input) (string, error) {
 // The server only needs the peer's public key. A native WireGuard server
 // can keep its existing peer while editing listener fields with the form.
 func GenerateNativePresetEdit(engine core.Engine, input, original Input) (string, error) {
-	samePeer := original.Protocol == ProtocolWireGuard && input.WireGuardClientPublicKey == original.WireGuardClientPublicKey
-	return generate(engine, input, !samePeer)
+	if original.Protocol != ProtocolWireGuard || input.Protocol != ProtocolWireGuard {
+		return Generate(engine, input)
+	}
+	if len(original.WireGuardAdditionalClients) > 0 && input.WireGuardAdditionalClients == nil {
+		return "", errors.New("请重新读取完整的 WireGuard 客户端列表")
+	}
+	existing := map[string]bool{}
+	for _, client := range original.wireGuardClients() {
+		existing[client.PublicKey] = true
+	}
+	for _, client := range input.wireGuardClients() {
+		if client.PrivateKey == "" && !existing[client.PublicKey] {
+			return "", errors.New("新增 WireGuard 客户端须提供匹配的客户端私钥")
+		}
+	}
+	return generate(engine, input, false)
 }
 
 func generate(engine core.Engine, input Input, requireWireGuardClient bool) (string, error) {

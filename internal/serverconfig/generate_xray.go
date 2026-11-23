@@ -14,11 +14,15 @@ func generateXray(input Input) (string, error) {
 	switch input.Protocol {
 	case ProtocolWireGuard:
 		inbound["protocol"] = "wireguard"
-		peer := map[string]any{"publicKey": input.WireGuardClientPublicKey, "allowedIPs": splitWireGuardList(input.WireGuardClientAddress), "email": input.Username, "level": 0}
-		if input.WireGuardPresharedKey != "" {
-			peer["preSharedKey"] = input.WireGuardPresharedKey
+		var peers []any
+		for _, client := range input.wireGuardClients() {
+			peer := map[string]any{"publicKey": client.PublicKey, "allowedIPs": splitWireGuardList(client.Address), "email": client.Email, "level": 0}
+			if client.PresharedKey != "" {
+				peer["preSharedKey"] = client.PresharedKey
+			}
+			peers = append(peers, peer)
 		}
-		inbound["settings"] = map[string]any{"secretKey": input.WireGuardServerPrivateKey, "peers": []any{peer}, "mtu": input.WireGuardMTU}
+		inbound["settings"] = map[string]any{"secretKey": input.WireGuardServerPrivateKey, "peers": peers, "mtu": input.WireGuardMTU}
 	case ProtocolSS2022:
 		inbound["protocol"] = "shadowsocks"
 		inbound["settings"] = map[string]any{

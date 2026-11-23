@@ -213,12 +213,22 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
     if (!entry) throw new Error('入站或配置已变化，请重新读取后再设置访问限制。');
     editInboundAccess(ctx, { agent, engine, entry, siblings: entries, beforeDeploy, onSaved: committed });
   }
-  async function copyInbound(input, selection) {
+  async function copyInbound(input, selection, peerKey) {
     requireSelection(selection);
     const workspace = current, draft = getDraft();
     const active = () => ctx.current() && current === workspace && draft === getDraft();
     if (!workspace.client_source) throw new Error('请重新读取配置后复制入站连接');
+    if (input.wireguard_additional_clients?.length && !peerKey) {
+      const peers = [[input.wireguard_client_public_key, input.wireguard_client_address], ...input.wireguard_additional_clients.map(peer => [peer.public_key, peer.address])];
+      const form = ctx.form([field('客户端地址', 'peer', peers[0][0], { options: peers })], '复制', async values => {
+        await copyInbound(input, selection, values.peer);
+        box.close();
+      });
+      const box = ctx.dialog('复制 WireGuard 客户端配置', form);
+      return;
+    }
     const query = new URLSearchParams({ source: workspace.client_source, tag: input.tag, port: input.port, protocol: input.protocol });
+    if (peerKey) query.set('wireguard_client', peerKey);
     if (workspace.snapshot_task_id) query.set('snapshot', workspace.snapshot_task_id);
     const result = await ctx.api(`${base}/client-access?${query}`);
     if (!active()) throw new DOMException('配置目标已变化', 'AbortError');
@@ -287,8 +297,40 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       for (const control of form.querySelectorAll('[name]')) if (!control.disabled && (control.type !== 'checkbox' || control.checked)) values.set(control.name, control.value);
       if (unnamed && !values.get('tag')) values.set('tag', row.target_tag);
       const result = { ...baseline, ...readServerPlanInput(form, protocol, values) };
+      if (protocol.uses_wireguard) {
+        result.wireguard_additional_clients = (baseline.wireguard_additional_clients || []).map((peer, i) => ({
+          ...peer, ...Object.fromEntries(['address','private_key','public_key','preshared_key'].map(key => [key, values.get(`wg_${i}_${key}`) || ''])),
+        }));
+      }
       if (!protocol.supports_udp_443_block) delete result.block_udp_443;
       return result;
+    }
+    function wireGuardClientSections(plan) {
+      const clients = plan.wireguard_additional_clients || [];
+      const sections = clients.map((peer, i) => {
+        const fields = [['address', '客户端地址'], ['private_key', '客户端私钥'], ['public_key', '客户端公钥'], ['preshared_key', '预共享密钥']];
+        const inputs = fields.map(([key,label]) => field(label, `wg_${i}_${key}`, peer[key] || '', {
+          required: key === 'address' || key === 'public_key',
+          ...(['private_key','preshared_key'].includes(key) ? { type:'password', autocomplete:'new-password' } : {}),
+        }));
+        const remove = button('移除客户端', () => {
+          const draft = read();
+          draft.wireguard_additional_clients.splice(i, 1);
+          render(draft);
+          form.dispatchEvent(new Event('input', { bubbles:true }));
+        });
+        return group(`客户端 ${i+2} · ${peer.address}`, stack(grid(...inputs), actions(remove)), true);
+      });
+      const add = button('添加客户端', event => void ctx.mutate(event.currentTarget, async () => {
+        const draft = read(), selected = protocol, version = revision;
+        const next = await ctx.api(`${base}/plans`, {method:'POST', body:{protocol:selected.key, input:draft, add_wireguard_client:true}});
+        if (!ctx.current() || !box.isConnected || protocol !== selected) return;
+        if (version !== revision || JSON.stringify(draft) !== JSON.stringify(read())) throw new Error('参数已修改，请重新添加客户端');
+        render({...draft, wireguard_additional_clients:next.wireguard_additional_clients});
+        form.dispatchEvent(new Event('input', { bubbles:true }));
+        form.elements.namedItem(`wg_${clients.length}_address`)?.focus();
+      }));
+      return [...sections, actions(add)];
     }
     function render(plan) {
       baseline=plan;
@@ -319,6 +361,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       if(engine==='ss-rust')special.push('ss_rust_dns','ss_rust_outbound_bind_addr','ss_rust_ipv6_first');
       if(protocol.credential_hint)sections.push(muted(protocol.credential_hint));
       if(special.length)sections.push(group('协议参数',node('div',{className:'a-form-grid'},special.map(control)),true));
+      if (protocol.uses_wireguard) sections.push(...wireGuardClientSections(plan));
       sections.push(group('客户端与路由',node('div',{className:'a-form-grid'},['client_address','client_port','client_host',...(engine==='mihomo'?['listener_routing_mark','listener_rule','listener_proxy']:[])].map(control))));
       area.replaceChildren(...sections);
       if (unnamed && plan.tag === row.target_tag) {
