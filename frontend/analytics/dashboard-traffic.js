@@ -384,18 +384,32 @@ function laneInspect(item, bytes, canNodes) {
 }
 
 // Compact 2-line leaderboard row (name + total on line 1, thin 4px share bar on line 2).
-function laneNode(ctx, item, context) {
+function laneNode(ctx, item, context, rank = 0) {
   const meta = item.agent || { id: item.agentID, name: item.agentID, region_code: "" };
   const name = meta.name || item.agentID || "关联节点";
-  const open = context.open === item.agentID;
+  const inModal = Boolean(context.inModal);
+  const open = inModal && context.open === item.agentID;
+  const rankBadge = inModal && rank > 0
+    ? span(`a-flux-rank-num${rank <= 3 ? " is-top" : ""}`, String(rank))
+    : null;
   const toggle = node("button", {
-    type: "button", className: "a-flux-lane-name", "aria-expanded": String(open), "data-lane": item.agentID, title: name,
-  }, nodeRegionFlag(ctx, meta), span("a-flux-lane-text", name));
+    type: "button",
+    className: "a-flux-lane-name",
+    "aria-expanded": inModal ? String(open) : null,
+    "aria-haspopup": inModal ? null : "dialog",
+    "data-lane": item.agentID,
+    title: name,
+  }, rankBadge, nodeRegionFlag(ctx, meta), span("a-flux-lane-text", name));
   const bar = keyed(`bar-${context.barWidth}-${item.received}-${item.sent}-${context.scale}`, laneBar(item, context.scale, context.barWidth));
+  const valBlock = inModal
+    ? el("div", "a-flux-lane-metrics",
+        el("span", "a-flux-lane-duplex", ...duplex(item.received, item.sent, context.bytes)),
+        node("strong", { className: "a-flux-lane-val", "data-refresh-key": "val" }, context.bytes(item.used)))
+    : node("strong", { className: "a-flux-lane-val", "data-refresh-key": "val" }, context.bytes(item.used));
   const row = el("div", "a-flux-lane-row",
     el("div", "a-flux-lane-top",
       node("div", { className: "a-flux-lane-id", "data-refresh-key": "id" }, toggle, laneTag(item)),
-      node("strong", { className: "a-flux-lane-val", "data-refresh-key": "val" }, context.bytes(item.used))),
+      valBlock),
     node("div", { className: "a-flux-lane-track-wrap", "data-refresh-key": "track" }, bar));
   return node("li", { className: "a-flux-lane", "data-refresh-key": item.agentID, "data-open": open ? "true" : null },
     row, open ? laneInspect(item, context.bytes, context.canNodes) : null);
@@ -591,18 +605,64 @@ function paintPlot(stage) {
   if (focused >= 0 && focused < days.length) hitOf(stage, focused)?.focus({ preventScroll: true });
 }
 
-function paintLanes(stage) {
+function rangeContextText(view, period) {
+  const single = view.range.start === view.range.end;
+  const spanText = single ? shortDay(view.range.start) : `${shortDay(view.range.start)} 至 ${shortDay(view.range.end)}`;
+  const prefix = view.live ? periodLabel(period) : view.month;
+  return `${prefix} · ${spanText}（UTC）`;
+}
+
+function rankTraffic(stage, limit) {
   const view = stage.view;
-  if (!view) return;
   const raw = stage.getPolicies();
   const policies = Array.isArray(raw) ? raw : list(raw?.policies);
   const agents = stage.getAgents();
   const ranked = rankDashboardTrafficView({
     rows: rowsOf(view.sources.map(item => item.value)), month: view.month, today: view.today, range: view.range,
     agents, policies, pageAgents: Array.isArray(raw) ? NO_ITEMS : list(raw?.agents),
-    scope: stage.scopeSelect.value || "all", limit: stage.unfolded ? "all" : String(LANE_FOLD), orderIDs: stage.getOrderIDs(),
+    scope: stage.scopeSelect.value || "all", limit, orderIDs: stage.getOrderIDs(),
   });
-  const known = policies.length > 0 || agents.length > 0;
+  return { ranked, known: policies.length > 0 || agents.length > 0 };
+}
+
+function paintRankDialog(stage) {
+  if (!stage.rankDialog?.open || !stage.view) return;
+  const ready = Boolean(stage.view.sources.at(-1).value);
+  const { ranked } = rankTraffic(stage, "all");
+  const items = ready ? ranked.items.slice(0, LANE_CAP) : NO_ITEMS;
+  const rest = ranked.items.length - items.length;
+  stage.rankMeta.textContent = `${rangeContextText(stage.view, stage.period)} · 共 ${ranked.totalCount} 个节点`;
+  const context = { barWidth: 560, open: stage.modalOpen, bytes: stage.bytes, canNodes: stage.canNodes, scale: ranked.maxUsed, inModal: true };
+  patch(stage.rankModalList, node("ol", { className: "a-flux-lane-list a-flux-rank-modal-list", "aria-label": "全部节点流量排行" },
+    items.map((item, idx) => laneNode(stage.ctx, item, context, idx + 1))));
+  stage.rankModalList.hidden = !items.length;
+  stage.rankModalEmpty.hidden = items.length > 0;
+  stage.rankModalMore.hidden = rest <= 0;
+  stage.rankModalMore.textContent = rest > 0 ? `另有 ${rest} 个节点` : "";
+}
+
+function paintNodeDialog(stage) {
+  if (!stage.nodeDialog?.open || !stage.view || !stage.nodeDialogID) return;
+  const { ranked } = rankTraffic(stage, "all");
+  const item = ranked.items.find(entry => entry.agentID === stage.nodeDialogID);
+  if (!item) return;
+  const meta = item.agent || { id: item.agentID, name: item.agentID, region_code: "" };
+  const bar = laneBar(item, ranked.maxUsed, 440);
+  patch(stage.nodeDialogBody, el("div", "a-flux-node-modal-body",
+    el("div", "a-flux-node-modal-head",
+      el("div", "a-flux-node-modal-id",
+        nodeRegionFlag(stage.ctx, meta),
+        span("a-con-label", rangeContextText(stage.view, stage.period)),
+        laneTag(item)),
+      node("strong", { className: "a-flux-node-modal-total" }, stage.bytes(item.used))),
+    el("div", "a-flux-lane-track-wrap", bar),
+    laneInspect(item, stage.bytes, stage.canNodes)));
+}
+
+function paintLanes(stage) {
+  const view = stage.view;
+  if (!view) return;
+  const { ranked, known } = rankTraffic(stage, String(LANE_FOLD));
   if (known && !ranked.hasCrossOwner && stage.scopeSelect.value !== "all") {
     stage.scopeSelect.value = "all";
     paintLanes(stage);
@@ -610,34 +670,29 @@ function paintLanes(stage) {
   }
   stage.scopeField.hidden = !ranked.hasCrossOwner;
   const ready = Boolean(view.sources.at(-1).value);
-  const items = ready ? ranked.items.slice(0, LANE_CAP) : NO_ITEMS;
+  const items = ready ? ranked.items.slice(0, LANE_FOLD) : NO_ITEMS;
   const barW = Math.max(180, stage.sideWidth ? stage.sideWidth - 36 : 320);
-  const stamp = JSON.stringify([ready, barW, view.range, stage.unfolded, ranked.totalCount, ranked.maxUsed, items.map(item => laneSignature(item, stage.open))]);
-  if (stamp === stage.laneStamp) return;
-  stage.laneStamp = stamp;
+  const stamp = JSON.stringify([ready, barW, view.range, ranked.totalCount, ranked.maxUsed, items.map(item => laneSignature(item, ""))]);
+  if (stamp !== stage.laneStamp) {
+    stage.laneStamp = stamp;
+    const context = { barWidth: barW, open: "", bytes: stage.bytes, canNodes: stage.canNodes, scale: ranked.maxUsed, inModal: false };
+    patch(stage.laneList, node("ol", { className: "a-flux-lane-list", "aria-label": "节点流量排行" }, items.map(item => laneNode(stage.ctx, item, context))));
+    stage.laneList.hidden = !items.length;
+    stage.lanesEmpty.hidden = items.length > 0;
+    if (!items.length) {
+      const mainState = view.sources.at(-1)?.state;
+      stage.lanesEmpty.textContent = !ready
+        ? (PERIOD_STATES[mainState] || "读取中…")
+        : "当前周期暂无节点流量记录";
+    }
 
-  const context = { barWidth: barW, open: stage.open, bytes: stage.bytes, canNodes: stage.canNodes, scale: ranked.maxUsed };
-  const listClass = stage.unfolded ? "a-flux-lane-list is-unfolded" : "a-flux-lane-list";
-  patch(stage.laneList, node("ol", { className: listClass, "aria-label": "节点流量排行" }, items.map(item => laneNode(stage.ctx, item, context))));
-  stage.laneList.hidden = !items.length;
-  stage.lanesEmpty.hidden = items.length > 0;
-  if (!items.length) {
-    const mainState = view.sources.at(-1)?.state;
-    stage.lanesEmpty.textContent = !ready
-      ? (PERIOD_STATES[mainState] || "读取中…")
-      : "当前周期暂无节点流量记录";
+    const foldable = ranked.totalCount > LANE_FOLD;
+    stage.lanesTitle.textContent = foldable ? `节点排行 Top ${LANE_FOLD}` : "节点排行";
+    stage.fold.hidden = !foldable;
+    stage.fold.textContent = `全部 ${ranked.totalCount} 个`;
   }
-
-  const foldable = ranked.totalCount > LANE_FOLD;
-  stage.lanesTitle.textContent = stage.unfolded
-    ? `节点排行 · ${items.length}`
-    : (ranked.totalCount > LANE_FOLD ? `节点排行 Top ${LANE_FOLD}` : "节点排行");
-  stage.fold.hidden = !foldable;
-  stage.fold.textContent = stage.unfolded ? "收起" : `全部 ${ranked.totalCount} 个`;
-  stage.fold.setAttribute("aria-expanded", String(stage.unfolded));
-  const rest = ranked.items.length - items.length;
-  stage.more.hidden = rest <= 0;
-  stage.more.textContent = rest > 0 ? `另有 ${rest}` : "";
+  paintRankDialog(stage);
+  paintNodeDialog(stage);
 }
 
 function applyCursor(stage) {
@@ -750,28 +805,40 @@ function plotClick(stage, event) {
   togglePin(stage, hit ? Number(hit.dataset.day) : indexAt(stage, stage.plotHost, event.clientX));
 }
 
+function openNodeDialog(stage, agentID) {
+  if (!stage.view || !agentID) return;
+  const { ranked } = rankTraffic(stage, "all");
+  const item = ranked.items.find(entry => entry.agentID === agentID);
+  if (!item) return;
+  const name = item.agent?.name || item.agentID || "关联节点";
+  stage.nodeDialogID = agentID;
+  stage.nodeDialog?.close();
+  stage.nodeDialogBody = el("div", "a-flux-node-modal-body");
+  stage.nodeDialog = stage.ctx.dialog(`${name} · 流量详情`, stage.nodeDialogBody);
+  paintNodeDialog(stage);
+}
+
+function openRankDialog(stage) {
+  if (stage.rankDialog?.open || !stage.view) return;
+  stage.modalOpen = "";
+  const legend = el("div", "a-flux-legend", legendKey("is-rx", "接收"), legendKey("is-tx", "发送"));
+  const head = el("div", "a-flux-rank-modal-head", stage.rankMeta, legend);
+  const body = stack(head, stage.rankModalList, stage.rankModalEmpty, actions(stage.rankModalMore, link("流量管理", "#traffic")));
+  stage.rankDialog = stage.ctx.dialog("节点流量排行", body, { wide: true });
+  paintRankDialog(stage);
+}
+
 function laneClick(stage, event) {
   const toggle = event.target.closest?.(".a-flux-lane-row")?.querySelector("[data-lane]");
   if (!toggle) return;
-  stage.open = stage.open === toggle.dataset.lane ? "" : toggle.dataset.lane;
-  paintLanes(stage);
+  openNodeDialog(stage, toggle.dataset.lane);
 }
 
-function toggleFold(stage) {
-  stage.unfolded = !stage.unfolded;
-  stage.foldTouched = true;
-  stage.ctx.preferences?.patch?.("dashboard", { traffic_rank_limit: stage.unfolded ? "all" : String(LANE_FOLD) });
-  paintLanes(stage);
-}
-
-function restoreFold(stage) {
-  const preferences = stage.ctx.preferences;
-  if (!preferences?.ready) return;
-  preferences.ready().then(() => {
-    if (stage.foldTouched || !stage.ctx.current()) return;
-    stage.unfolded = preferences.get("dashboard")?.traffic_rank_limit === "all";
-    paintLanes(stage);
-  }).catch(() => null);
+function modalLaneClick(stage, event) {
+  const toggle = event.target.closest?.(".a-flux-lane-row")?.querySelector("[data-lane]");
+  if (!toggle) return;
+  stage.modalOpen = stage.modalOpen === toggle.dataset.lane ? "" : toggle.dataset.lane;
+  paintRankDialog(stage);
 }
 
 function selectPeriod(stage, value) {
@@ -839,13 +906,17 @@ function bindStage(stage) {
   plotHost.addEventListener("focusout", () => setHover(stage, -1), { signal });
   plotHost.addEventListener("keydown", (event) => plotKey(stage, event), { signal });
   stage.laneList.addEventListener("click", (event) => laneClick(stage, event), { signal });
-  stage.fold.addEventListener("click", () => toggleFold(stage), { signal });
+  stage.rankModalList.addEventListener("click", (event) => modalLaneClick(stage, event), { signal });
+  stage.fold.addEventListener("click", () => openRankDialog(stage), { signal });
   stage.monthInput.addEventListener("change", () => changeMonth(stage), { signal });
   bindPreferenceFields(ctx, "dashboard", [stage.monthField], { restore: () => changeMonth(stage) });
   stage.scopeSelect.addEventListener("change", () => paintLanes(stage), { signal });
   bindPreferenceFields(ctx, "dashboard", [stage.scopeField], { restore: () => paintLanes(stage) });
-  restoreFold(stage);
-  signal.addEventListener("abort", () => stage.dialog?.close(), { once: true });
+  signal.addEventListener("abort", () => {
+    stage.dialog?.close();
+    stage.rankDialog?.close();
+    stage.nodeDialog?.close();
+  }, { once: true });
 }
 
 const DETAIL_COLUMNS = ["日期", "接收", "发送", "合计", "接收峰值", "发送峰值"];
@@ -857,8 +928,9 @@ function buildStage(ctx, options) {
     ctx, ...options,
     period: PERIODS.some(entry => entry[0] === saved) ? saved : "month",
     canNodes: ctx.can("agents.read"),
-    width: 0, sideWidth: 0, dayCoords: [], plottedDays: [], hover: -1, pinned: -1, rove: -1, open: "",
-    view: null, activeSource: null, dialog: null, unfolded: false, foldTouched: false,
+    width: 0, sideWidth: 0, dayCoords: [], plottedDays: [], hover: -1, pinned: -1, rove: -1,
+    modalOpen: "", nodeDialogID: "",
+    view: null, activeSource: null, dialog: null, rankDialog: null, nodeDialog: null, nodeDialogBody: null,
     plotStamp: "", laneStamp: "", detailStamp: "", gridCache: null,
   };
   stage.tabs = PERIODS.map(entry => createPeriodTab(entry, value => selectPeriod(stage, value)));
@@ -867,13 +939,19 @@ function buildStage(ctx, options) {
   stage.mainPane = el("div", "a-flux-main", stage.summaryHost, stage.plotHost);
 
   stage.lanesTitle = span("a-flux-side-title", `节点排行 Top ${LANE_FOLD}`);
-  stage.fold = node("button", { type: "button", className: "a-con-jump", "aria-expanded": "false", hidden: true });
-  stage.more = node("a", { className: "a-con-jump", href: "#traffic", hidden: true });
-  stage.lanesHead = el("div", "a-flux-lanes-head", stage.lanesTitle, el("div", "a-flux-lanes-actions", stage.fold, stage.more));
+  stage.fold = node("button", { type: "button", className: "a-con-jump", "aria-haspopup": "dialog", hidden: true });
+  stage.lanesHead = el("div", "a-flux-lanes-head", stage.lanesTitle, el("div", "a-flux-lanes-actions", stage.fold));
   stage.laneList = node("ol", { className: "a-flux-lane-list", "aria-label": "节点流量排行" });
   stage.lanesEmpty = el("p", "a-flux-lanes-empty a-muted", "读取中…");
   stage.lanesEmpty.hidden = true;
   stage.sidePane = el("div", "a-flux-side", stage.lanesHead, stage.laneList, stage.lanesEmpty);
+
+  stage.rankMeta = el("span", "a-muted");
+  stage.rankModalList = node("ol", { className: "a-flux-lane-list a-flux-rank-modal-list", "aria-label": "全部节点流量排行" });
+  stage.rankModalEmpty = el("p", "a-flux-lanes-empty a-muted", "当前周期暂无节点流量记录");
+  stage.rankModalEmpty.hidden = true;
+  stage.rankModalMore = el("span", "a-con-note");
+  stage.rankModalMore.hidden = true;
 
   stage.note = node("span", { className: "a-con-token", role: "status", hidden: true });
   stage.voidKey = legendKey("is-void", "未采集");
