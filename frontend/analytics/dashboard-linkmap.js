@@ -588,6 +588,28 @@ function boundsOf(points) {
   return { x: fixed(left), y: fixed(top), width: fixed(Math.max(...xs) + 10 - left), height: fixed(Math.max(...ys) + 10 - top) };
 }
 
+function joinPointPaths(segments, reverse = false) {
+  const ordered = reverse ? [...segments].reverse() : segments;
+  let d = "";
+  let prev = null;
+  for (const seg of ordered) {
+    if (!seg?.length) continue;
+    const pts = reverse ? [...seg].reverse() : seg;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (!prev) {
+        d += `M${fixed(p.x)} ${fixed(p.y)}`;
+      } else {
+        const gap = Math.hypot(p.x - prev.x, p.y - prev.y);
+        if (gap < 0.2) continue;
+        d += `${gap > 14 ? "M" : "L"}${fixed(p.x)} ${fixed(p.y)}`;
+      }
+      prev = p;
+    }
+  }
+  return d;
+}
+
 // Single bounded great-circle arch with proportional short-hop rise and true 3D lateral sway.
 function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0 } = {}) {
   const mid = unit3(mix3(a, 1, b, 1));
@@ -595,13 +617,13 @@ function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0
   const omega = Math.acos(clamp(dot3(a, b), -1, 1));
   const from = project(view, a), to = project(view, b), ground = project(view, mid);
   const span = Math.hypot(to.x - from.x, to.y - from.y);
-  const minRise = Math.min(12, Math.max(3.5, span * 0.32));
+  const minRise = Math.min(12 * altitudeScale, Math.max(3.0, span * 0.28 * altitudeScale));
   const baseRise = clamp(span * 0.23 * altitudeScale, minRise, 70);
-  const rise = Math.max(Math.min(9, span * 0.28), Math.min(baseRise, Math.max(12, ground.y - 18)));
+  const rise = Math.max(Math.min(8 * altitudeScale, span * 0.24 * altitudeScale), Math.min(baseRise, Math.max(12, ground.y - 18)));
   const upness = Math.sqrt(Math.max(0, 1 - dot3(mid, view.front) ** 2));
   const rawMaxLift = omega > 1.7 ? 0.24 : omega > 1.2 ? 0.34 : 0.46;
   const maxLift = strictLimb ? Math.min(rawMaxLift, 0.14) : rawMaxLift;
-  let lift = clamp(rise / (view.radius * Math.max(upness, 0.36)), 0.016, maxLift);
+  let lift = clamp(rise / (view.radius * Math.max(upness, 0.36)), 0.012, maxLift);
 
   let outer = arcPoints(view, a, b, lift, sway);
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -622,6 +644,7 @@ function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0
     path: built.d,
     forwardWake: revBuilt.d,
     reverseWake: built.d,
+    visible: built.visible,
     track: trkBuilt.d,
     hit: built.d,
     apex,
@@ -638,15 +661,25 @@ function lensShape(from, to) {
   const flip = dx < 0 || (dx === 0 && dy > 0) ? -1 : 1;
   const nx = flip * dy / length * bow, ny = -flip * dx / length * bow;
   const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
+  const ctrlX = mx + 2 * nx, ctrlY = my + 2 * ny;
   const start = `${fixed(from.x)} ${fixed(from.y)}`, end = `${fixed(to.x)} ${fixed(to.y)}`;
-  const ctrl = `${fixed(mx + 2 * nx)} ${fixed(my + 2 * ny)}`;
+  const ctrl = `${fixed(ctrlX)} ${fixed(ctrlY)}`;
   const path = `M${start}Q${ctrl} ${end}`;
   const apex = { x: mx + nx, y: my + ny };
+  const visible = [];
+  for (let i = 0; i <= 18; i++) {
+    const t = i / 18, mt = 1 - t;
+    visible.push({
+      x: mt * mt * from.x + 2 * mt * t * ctrlX + t * t * to.x,
+      y: mt * mt * from.y + 2 * mt * t * ctrlY + t * t * to.y,
+    });
+  }
   return {
     span: length,
     path,
     forwardWake: `M${end}Q${ctrl} ${start}`,
     reverseWake: path,
+    visible,
     track: "",
     hit: path,
     apex,
@@ -740,26 +773,28 @@ function renderConduitLayers({
   isBroken = false,
   isAlertHop = false,
   tierClass = "is-l1",
+  isChainHop = false,
 }) {
   if (!shape?.path) return NO_VALUES;
   const out = [];
   const tier = isL1 ? "is-l1" : tierClass;
   const shortCls = !isL1 && shape.span < 48 ? " is-short" : "";
+  const chainCls = isL1 && isChainHop ? " is-chain-hop" : "";
   const baseRailCls = isL1
-    ? `a-lm-rail ${lineColor}${isBroken ? " is-broken" : ""}`.trim()
+    ? `a-lm-rail ${lineColor}${isBroken ? " is-broken" : ""}${chainCls}`.trim()
     : `a-lm-fleet-rail ${tierClass} ${lineColor}${isBroken ? " is-broken" : ""}${isAlertHop ? " is-alert-hop" : ""}`.trim();
 
   if (isL1 && shape.track) {
-    out.push(createSVGEl("path", { d: shape.track, class: "a-lm-track" }));
+    out.push(createSVGEl("path", { d: shape.track, class: `a-lm-track${chainCls}` }));
   }
   if (isL1) {
-    out.push(createSVGEl("path", { d: shape.path, class: "a-lm-halo" }));
+    out.push(createSVGEl("path", { d: shape.path, class: `a-lm-halo${chainCls}` }));
   } else {
     out.push(createSVGEl("path", { d: shape.path, class: `a-lm-conduit-halo ${tier}${shortCls}`.trim() }));
   }
   out.push(
     createSVGEl("path", { d: shape.path, class: `${baseRailCls} is-conduit-outer${shortCls}` }),
-    createSVGEl("path", { d: shape.path, class: `a-lm-line-cut ${tier} ${lineColor}${isBroken ? " is-broken" : ""}${shortCls}`.trim() }),
+    createSVGEl("path", { d: shape.path, class: `a-lm-line-cut ${tier} ${lineColor}${isBroken ? " is-broken" : ""}${shortCls}${chainCls}`.trim() }),
   );
   if (isL1 && lineColor === "is-tone-warn" && !isBroken) {
     out.push(createSVGEl("path", { d: shape.path, class: "a-lm-conduit-warn-dash" }));
@@ -837,6 +872,72 @@ function focusState(focusKey) {
   };
 }
 
+// Continuous multi-hop fiber-optic relay comet gliding unbroken across consecutive reachable hops.
+function renderChainRelayWaves(scene, hopRecords) {
+  const { group, metricDir = "both", arcGlowId = "" } = scene;
+  const glowAttr = arcGlowId ? { filter: `url(#${arcGlowId})` } : {};
+  const layer = createSVGEl("g", { class: "a-lm-chain-waves", "aria-hidden": "true", "data-refresh-key": "lm-chain-waves" });
+
+  const emitDirRuns = (isRev) => {
+    const runs = [];
+    let cur = [];
+    for (const rec of hopRecords) {
+      const dir = isRev ? rec.hop.reverse : rec.hop.forward;
+      const enabled = isRev ? rec.showRev : rec.showFwd;
+      const ok = enabled && isDirReachable(dir) && rec.shape?.visible?.length >= 2;
+      if (ok) {
+        cur.push({ rec, dir });
+      } else if (cur.length) {
+        runs.push(cur);
+        cur = [];
+      }
+    }
+    if (cur.length) runs.push(cur);
+
+    for (const run of runs) {
+      const d = joinPointPaths(run.map(item => item.rec.shape.visible), !isRev);
+      if (!d) continue;
+      const avgMS = run.reduce((sum, item) => sum + (item.dir.avgMS || 0), 0) / run.length;
+      const probing = run.some(item => group.running && item.rec.hop.ready);
+      const pace = (probing || avgMS <= 55) ? "is-quick" : avgMS <= 145 ? "is-steady" : "is-slow";
+      const hasWarn = run.some(item => markToneForDir(item.dir) === "warn");
+      const toneCls = hasWarn ? "is-tone-warn" : "is-tone-accent";
+      const revCls = isRev ? " is-rev" : "";
+
+      if (!isRev) {
+        layer.append(
+          createSVGEl("path", {
+            d,
+            pathLength: 100,
+            class: `a-lm-chain-glow ${pace} ${toneCls}`.trim(),
+            ...glowAttr,
+          }),
+        );
+      }
+      layer.append(
+        createSVGEl("path", {
+          d,
+          pathLength: 100,
+          class: `a-lm-chain-beam ${pace} ${toneCls}${revCls}`.trim(),
+        }),
+      );
+      if (!isRev) {
+        layer.append(
+          createSVGEl("path", {
+            d,
+            pathLength: 100,
+            class: `a-lm-chain-head ${pace} ${toneCls}`.trim(),
+          }),
+        );
+      }
+    }
+  };
+
+  if (metricDir !== "reverse") emitDirRuns(false);
+  if (metricDir !== "forward") emitDirRuns(true);
+  return layer;
+}
+
 function hopElement(scene, hop, index) {
   const {
     view,
@@ -844,13 +945,15 @@ function hopElement(scene, hop, index) {
     spots,
     vectors,
     focus,
+    isMultiHop = false,
+    useChainWave = false,
     metricDir = "both",
     arcGlowId = "",
   } = scene;
   const from = spots[index], to = spots[index + 1];
   const showFwd = metricDir !== "reverse";
   const showRev = hop.bidirectional && metricDir !== "forward";
-  const shape = (from.on && to.on ? archShape(view, vectors[index], vectors[index + 1]) : null) || lensShape(from, to);
+  const shape = (from.on && to.on ? archShape(view, vectors[index], vectors[index + 1], { altitudeScale: isMultiHop ? 0.62 : 1 }) : null) || lensShape(from, to);
   const flags = { running: group.running, ready: hop.ready };
   const key = `hop:${index}`;
   const outbound = formatDirBadgeMetric(hop.forward, flags);
@@ -864,7 +967,7 @@ function hopElement(scene, hop, index) {
       : outbound;
 
   const element = createSVGEl("g", {
-    class: focus.dimHop(index) ? "a-lm-hop is-dim" : "a-lm-hop",
+    class: `${focus.dimHop(index) ? "a-lm-hop is-dim" : "a-lm-hop"}${isMultiHop ? " is-chain-hop" : ""}`,
     tabindex: 0,
     role: "button",
     "aria-pressed": String(focus.key === key),
@@ -887,28 +990,31 @@ function hopElement(scene, hop, index) {
     isBroken: combinedMark === "bad",
     isAlertHop: Boolean(combinedMark),
     tierClass: "is-l1",
+    isChainHop: isMultiHop,
   }));
-  element.append(...renderLaserSweepLayers({
-    shape,
-    group,
-    hop,
-    showFwd,
-    showRev,
-    forwardTone,
-    reverseTone,
-    lineColor,
-    isL1: true,
-    isBroken: combinedMark === "bad",
-    staggerSlot: index,
-    arcGlowId,
-  }));
+  if (!useChainWave || combinedMark === "bad") {
+    element.append(...renderLaserSweepLayers({
+      shape,
+      group,
+      hop,
+      showFwd: !useChainWave && showFwd,
+      showRev: !useChainWave && showRev,
+      forwardTone,
+      reverseTone,
+      lineColor,
+      isL1: true,
+      isBroken: combinedMark === "bad",
+      staggerSlot: isMultiHop ? ((STAGGER_SLOTS - (index % STAGGER_SLOTS)) % STAGGER_SLOTS) : index,
+      arcGlowId,
+    }));
+  }
   if (combinedMark) element.append(...railMark(shape.apex, combinedMark, { compact: shape.span < 44 }));
   const pill = hopPillElement(shape.apex, pillText, view, lineColor, Boolean(combinedMark), {
     avoidBoxes: scene.pillAvoidBoxes,
   });
   if (pill) element.append(pill);
   element.append(createSVGEl("path", { d: shape.hit, class: "a-lm-hit is-line" }));
-  return element;
+  return { element, hop, shape, showFwd, showRev };
 }
 
 function pipElement(item, x, y, size = PIP) {
@@ -1251,13 +1357,18 @@ export function renderLinkMap(group, {
   const flags = located.map(entry => entry.flag);
   const spots = place(view, vectors, group.nodes);
   const bd = backdrop(view, draft, idPrefix);
+  const isMultiHop = (group.hops?.length || 0) >= 2;
+  const focus = focusState(focusKey);
+  const useChainWave = isMultiHop && !focus.key;
   const scene = {
     view,
     group,
     vectors,
     flags,
     spots,
-    focus: focusState(focusKey),
+    focus,
+    isMultiHop,
+    useChainWave,
     metricDir,
     arcGlowId: bd.arcGlowId,
   };
@@ -1274,7 +1385,9 @@ export function renderLinkMap(group, {
   scene.pillAvoidBoxes = occupied;
 
   const hops = createSVGEl("g", { "data-refresh-key": "lm-hops" });
-  hops.append(...group.hops.map((hop, index) => hopElement(scene, hop, index)));
+  const hopRecords = group.hops.map((hop, index) => hopElement(scene, hop, index));
+  hops.append(...hopRecords.map(rec => rec.element));
+  if (useChainWave) hops.append(renderChainRelayWaves(scene, hopRecords));
 
   svg.append(bd.defs, bd.globe, hops, nodes);
   return svg;
@@ -1724,7 +1837,7 @@ export function renderFleetLinkMap(groups, {
       lineColor: lineCol,
       isL1: true,
       isBroken: combinedMark === "bad",
-      staggerSlot: hopIdx,
+      staggerSlot: group.hops.length >= 2 ? ((STAGGER_SLOTS - (hopIdx % STAGGER_SLOTS)) % STAGGER_SLOTS) : hopIdx,
       arcGlowId: bd.arcGlowId,
     }));
     if (combinedMark) el.append(...railMark(shape.apex, combinedMark, { compact: shape.span < 44 }));

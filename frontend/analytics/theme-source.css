@@ -1715,20 +1715,27 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
 .a-lm-hop.is-dim, .a-lm-node.is-dim { opacity: 0.3; }
 .a-lm-fleet-hop.is-dim { opacity: 0.22; }
 .a-lm-track { fill: none; stroke: #94a3b8; stroke-width: 0.95; stroke-dasharray: 1 3.5; stroke-linecap: round; opacity: 0.56; pointer-events: none; }
+.a-lm-track.is-chain-hop { stroke-width: 0.9; stroke-dasharray: 1 3; opacity: 0.44; }
 .a-lm-halo { fill: none; stroke: var(--paper); stroke-width: 6.2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.86; pointer-events: none; }
+.a-lm-halo.is-chain-hop { stroke-width: 4.9; opacity: 0.88; }
 .a-lm-conduit-halo { fill: none; stroke: var(--paper); stroke-width: 3.9; stroke-linecap: round; stroke-linejoin: round; opacity: 0.82; pointer-events: none; transition: opacity 160ms var(--a-ease-state); }
 .a-lm-conduit-halo.is-l2 { stroke-width: 4.5; opacity: 0.88; }
 .a-lm-conduit-halo.is-short { stroke-width: 3.1; }
 .a-lm-conduit-halo.is-dim { opacity: 0; }
 
 /* Architectural Hollow Twin-Wall Conduits (all visual strokes pointer-events: none to keep 0px hover jitter) */
-.a-lm-rail { fill: none; stroke: #059669; stroke-width: 4.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; transition: stroke-width 180ms var(--a-ease-state); }
+.a-lm-rail { fill: none; stroke: #059669; stroke-width: 4.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; transition: stroke-width 180ms var(--a-ease-state), opacity 180ms var(--a-ease-state); }
+.a-lm-rail.is-conduit-outer.is-chain-hop { stroke-width: 3.5; opacity: 0.92; }
 .a-lm-rail.is-conduit-outer.is-broken { stroke-width: 4.3; stroke-dasharray: 10 5; stroke-linecap: butt; opacity: 0.95; }
 .a-lm-rail.is-conduit-outer.is-tone-idle { stroke-width: 3.9; stroke-dasharray: 5 3; stroke-linecap: butt; opacity: 0.64; }
 .a-lm-hop:hover .a-lm-rail.is-conduit-outer,
 .a-lm-hop[aria-pressed="true"] .a-lm-rail.is-conduit-outer { stroke-width: 5.3; }
+.a-lm-hop.is-chain-hop:hover .a-lm-rail.is-conduit-outer,
+.a-lm-hop.is-chain-hop[aria-pressed="true"] .a-lm-rail.is-conduit-outer { stroke-width: 4.5; opacity: 1; }
 .a-lm-hop:hover .a-lm-line-cut.is-l1,
 .a-lm-hop[aria-pressed="true"] .a-lm-line-cut.is-l1 { stroke-width: 2.45; }
+.a-lm-hop.is-chain-hop:hover .a-lm-line-cut.is-l1,
+.a-lm-hop.is-chain-hop[aria-pressed="true"] .a-lm-line-cut.is-l1 { stroke-width: 2.05; }
 
 .a-lm-fleet-rail { fill: none; stroke: #2b9e78; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; opacity: 0.76; pointer-events: none; transition: stroke-width 160ms var(--a-ease-state), opacity 160ms var(--a-ease-state); }
 .a-lm-fleet-rail.is-conduit-outer.is-tone-quiet { stroke: #2b9e78; opacity: 0.76; }
@@ -1742,6 +1749,7 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
 .a-lm-fleet-hop:hover .a-lm-line-cut:not(.is-l1) { stroke-width: 1.2; opacity: 0.96; }
 
 .a-lm-line-cut { fill: none; stroke: #ecfdf5; stroke-width: 2.1; stroke-linecap: round; pointer-events: none; transition: stroke-width 180ms var(--a-ease-state), opacity 180ms var(--a-ease-state); }
+.a-lm-line-cut.is-chain-hop { stroke-width: 1.5; }
 .a-lm-line-cut.is-tone-quiet { stroke: #f0fdf7; opacity: 0.88; }
 .a-lm-line-cut.is-tone-warn { stroke: #fffbeb; }
 .a-lm-line-cut.is-tone-bad { stroke: #fef2f2; }
@@ -1810,6 +1818,19 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
 
 .a-lm-wave-fault { fill: none; stroke: #ef4444; stroke-width: 2.15; stroke-dasharray: 10 5; stroke-linecap: butt; opacity: 0.74; }
 .a-lm-wave-fault.is-ambient { stroke-width: 1.5; stroke-dasharray: 9 5; opacity: 0.62; }
+
+/* Continuous multi-hop fiber-optic relay comet */
+.a-lm-chain-glow,
+.a-lm-chain-beam,
+.a-lm-chain-head { display: none; fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.a-lm-chain-glow { stroke: #10b981; stroke-width: 5.2; stroke-dasharray: 20 100; opacity: 0.28; }
+.a-lm-chain-beam { stroke: #10b981; stroke-width: 1.85; stroke-dasharray: 12 108; opacity: 0.96; }
+.a-lm-chain-head { stroke: #ecfdf5; stroke-width: 1.3; stroke-dasharray: 3.2 116.8; opacity: 0.95; }
+.a-lm-chain-beam.is-rev { stroke: #34d399; stroke-width: 1.25; stroke-dasharray: 8 112; opacity: 0.52; }
+.a-lm-chain-glow.is-tone-warn,
+.a-lm-chain-beam.is-tone-warn { stroke: #f59e0b; }
+.a-lm-chain-beam.is-tone-warn.is-rev { stroke: #fbbf24; }
+.a-lm-chain-head.is-tone-warn { stroke: #fef3c7; }
 
 /* Pure-CSS hover/focus latency pills */
 .a-lm-hop-pill {
@@ -1919,6 +1940,10 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
   from { stroke-dashoffset: 0; }
   to { stroke-dashoffset: 100; }
 }
+@keyframes a-lm-chain-flow {
+  from { stroke-dashoffset: 20; }
+  to { stroke-dashoffset: 140; }
+}
 @keyframes a-lm-breathe {
   0%, 100% { opacity: 0.9; }
   50% { opacity: 1; }
@@ -1935,6 +1960,16 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
   :root:not([data-theme-motion="off"]) .a-lm .a-lm-ping { display: inline; animation: a-lm-ping 2.6s ease-out infinite; }
   :root:not([data-theme-motion="off"]) .a-lm-wave-glow,
   :root:not([data-theme-motion="off"]) .a-lm-wave-band { display: inline; animation: a-lm-wave 3.15s ease-in-out infinite; }
+  :root:not([data-theme-motion="off"]) .a-lm-chain-glow,
+  :root:not([data-theme-motion="off"]) .a-lm-chain-beam,
+  :root:not([data-theme-motion="off"]) .a-lm-chain-head { display: inline; animation: a-lm-chain-flow 3.3s linear infinite; }
+  :root:not([data-theme-motion="off"]) .a-lm-chain-glow.is-quick,
+  :root:not([data-theme-motion="off"]) .a-lm-chain-beam.is-quick,
+  :root:not([data-theme-motion="off"]) .a-lm-chain-head.is-quick { animation-duration: 2.6s; }
+  :root:not([data-theme-motion="off"]) .a-lm-chain-glow.is-slow,
+  :root:not([data-theme-motion="off"]) .a-lm-chain-beam.is-slow,
+  :root:not([data-theme-motion="off"]) .a-lm-chain-head.is-slow { animation-duration: 4.1s; }
+  :root:not([data-theme-motion="off"]) .a-lm-chain-beam.is-rev { animation-duration: 3.8s; animation-delay: -1.7s; }
   :root:not([data-theme-motion="off"]) .a-lm-wave-glow.is-steady,
   :root:not([data-theme-motion="off"]) .a-lm-wave-band.is-steady { animation-duration: 2.5s; }
   :root:not([data-theme-motion="off"]) .a-lm-wave-glow.is-quick,
