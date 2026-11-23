@@ -71,7 +71,17 @@ type Protocol struct {
 	UsesEndpoint         bool         `json:"uses_endpoint,omitempty"`
 }
 
+type WireGuardClient struct {
+	PublicKey    string `json:"public_key"`
+	PrivateKey   string `json:"private_key,omitempty"`
+	PresharedKey string `json:"preshared_key,omitempty"`
+	Address      string `json:"address"`
+	Email        string `json:"email,omitempty"`
+}
+
 type Input struct {
+	WireGuardAdditionalClients []WireGuardClient `json:"wireguard_additional_clients,omitempty"`
+
 	ProjectionSection string `json:"-"`
 	ProjectionIndex   int    `json:"-"`
 	// SourceOnly marks a native projection that has no safe catalog preset.
@@ -363,7 +373,7 @@ func Protocols(engine core.Engine) []Protocol {
 	}
 	if engine == core.EngineXray {
 		protocols = append(protocols, xhttpProtocols()...)
-		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，单客户端预设。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
+		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，可添加多个客户端。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
 	}
 	if engine == core.EngineSingBox {
 		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard 端点", Badge: "WG", Description: "sing-box 1.11+ 用户态 WireGuard 端点，监听所有接口；需要 with_wireguard 与 with_gvisor。客户端私钥仅保存在加密元数据中。", Docs: base + "endpoint/wireguard/", DefaultPort: 51820, DefaultListen: "::", Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, UsesEndpoint: true, IgnoresUsername: true})

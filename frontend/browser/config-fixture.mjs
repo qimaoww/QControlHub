@@ -213,6 +213,9 @@ export async function createConfigFixture(engine, options = {}) {
       if (test.planGate) await test.planGate;
       if (test.planError) throw Object.assign(new Error("协议方案读取失败"), {status:503});
       const entry = entries.find(item => item.protocol.key === body.protocol);
+      if (body.add_wireguard_client) {
+        return {...structuredClone(body.input), wireguard_additional_clients:[...(body.input.wireguard_additional_clients || []), structuredClone(entry.additional_client)]};
+      }
       const generated = body.input && entry.regenerated_plan || entry.plan;
       return {...structuredClone(entry.plan), ...body.input,
         ...Object.fromEntries(generatedPlanFields.filter(key=>Object.hasOwn(generated,key)).map(key=>[key,generated[key]])),

@@ -16,9 +16,10 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Protocol     string              `json:"protocol"`
-		GeneratePort bool                `json:"generate_port"`
-		Input        *serverconfig.Input `json:"input"`
+		Protocol           string              `json:"protocol"`
+		AddWireGuardClient bool                `json:"add_wireguard_client"`
+		GeneratePort       bool                `json:"generate_port"`
+		Input              *serverconfig.Input `json:"input"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -37,7 +38,13 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		plan serverconfig.Input
 		err  error
 	)
-	if input.Input == nil {
+	if input.AddWireGuardClient {
+		if !protocol.UsesWireGuard || input.Input == nil || input.Input.Protocol != protocol.Key {
+			writeError(w, http.StatusBadRequest, "请选择 WireGuard 入站后添加客户端")
+			return
+		}
+		plan, err = serverconfig.AddWireGuardClient(engine, *input.Input)
+	} else if input.Input == nil {
 		plan, err = serverconfig.NewPlan(protocol)
 		if err == nil && engine == core.EngineShadowsocksRust {
 			config, configErr := s.store.AgentConfig(request.Context(), agent.ID, engine)

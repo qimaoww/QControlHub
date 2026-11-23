@@ -14,13 +14,14 @@ import (
 
 func main() {
 	type entry struct {
-		Engine          core.Engine                 `json:"engine"`
-		Protocol        serverconfig.Protocol       `json:"protocol"`
-		Plan            serverconfig.Input          `json:"plan"`
-		Profile         *serverconfig.ClientProfile `json:"profile,omitempty"`
-		MihomoYAML      string                      `json:"mihomo_yaml,omitempty"`
-		SavedPlan       *serverconfig.Input         `json:"saved_plan,omitempty"`
-		RegeneratedPlan *serverconfig.Input         `json:"regenerated_plan,omitempty"`
+		AdditionalClient *serverconfig.WireGuardClient `json:"additional_client,omitempty"`
+		Engine           core.Engine                   `json:"engine"`
+		Protocol         serverconfig.Protocol         `json:"protocol"`
+		Plan             serverconfig.Input            `json:"plan"`
+		Profile          *serverconfig.ClientProfile   `json:"profile,omitempty"`
+		MihomoYAML       string                        `json:"mihomo_yaml,omitempty"`
+		SavedPlan        *serverconfig.Input           `json:"saved_plan,omitempty"`
+		RegeneratedPlan  *serverconfig.Input           `json:"regenerated_plan,omitempty"`
 	}
 	var catalog []entry
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
@@ -62,6 +63,11 @@ func main() {
 				}
 			}
 			if protocol.Key == serverconfig.ProtocolWireGuard {
+				multi, err := serverconfig.AddWireGuardClient(engine, plan)
+				if err != nil {
+					panic(err)
+				}
+				fixture.AdditionalClient = &multi.WireGuardAdditionalClients[0]
 				// Exercise the real Go wire format: a JS-only zero would hide
 				// an accidentally omitted field and the form's default of 25.
 				saved := plan

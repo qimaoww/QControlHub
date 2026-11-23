@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 			base := "/api/v1/agents/" + agent.ID + "/configs/" + string(engine)
 			version := 0
 			var current core.Config
+			var sourceToken string
 			call := func(operation, original string, input serverconfig.Input, expected, status int) configMutationResult {
 				t.Helper()
 				body, _ := json.Marshal(map[string]any{
@@ -89,11 +91,13 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 				t.Helper()
 				response := revisionAPIRequest(t, handler, token, http.MethodGet, base+"/workspace", nil)
 				var workspace struct {
+					Source   string            `json:"client_source"`
 					Inbounds []json.RawMessage `json:"inbounds"`
 				}
 				if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &workspace) != nil {
 					t.Fatalf("workspace: status=%d", response.Code)
 				}
+				sourceToken = workspace.Source
 				for _, raw := range workspace.Inbounds {
 					var input serverconfig.Input
 					if err := json.Unmarshal(raw, &input); err != nil {
@@ -143,6 +147,29 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 			if restored.WireGuardClientPrivateKey != input.WireGuardClientPrivateKey || restored.WireGuardKeepalive != 0 {
 				t.Fatal("workspace did not hydrate the exact client metadata")
 			}
+			// Add a device to the persisted single-client preset through the public plan API.
+			restored.ClientAddress, restored.ClientPort = "relay.example.test", 22004
+			addBody, _ := json.Marshal(map[string]any{"protocol": protocol.Key, "input": restored, "add_wireguard_client": true})
+			added := revisionAPIRequest(t, handler, token, http.MethodPost, base+"/plans", addBody)
+			var multi serverconfig.Input
+			if added.Code != http.StatusCreated || json.Unmarshal(added.Body.Bytes(), &multi) != nil || len(multi.WireGuardAdditionalClients) != 1 {
+				t.Fatal("could not extend saved plan", added.Code)
+			}
+			peer := multi.WireGuardAdditionalClients[0]
+			call("modify", input.Tag, multi, version, http.StatusOK)
+			restored = workspaceInput(input.Tag)
+			if len(restored.WireGuardAdditionalClients) != 1 || restored.WireGuardAdditionalClients[0] != peer || restored.WireGuardClientPrivateKey != input.WireGuardClientPrivateKey || strings.Contains(current.Content, peer.PrivateKey) {
+				t.Fatal("saved peer metadata failed to round-trip")
+			}
+			for _, device := range []struct{ public, private, other string }{{input.WireGuardClientPublicKey, input.WireGuardClientPrivateKey, peer.PrivateKey}, {peer.PublicKey, peer.PrivateKey, input.WireGuardClientPrivateKey}} {
+				query := url.Values{"tag": {input.Tag}, "source": {sourceToken}, "protocol": {input.Protocol}, "port": {strconv.Itoa(input.Port)}, "wireguard_client": {device.public}}
+				exported := revisionAPIRequest(t, handler, token, http.MethodGet, base+"/client-access?"+query.Encode(), nil)
+				var response struct{ Content string }
+				if exported.Code != 200 || json.Unmarshal(exported.Body.Bytes(), &response) != nil || !strings.Contains(response.Content, device.private) || strings.Contains(response.Content, device.other) || strings.Count(response.Content, restored.ClientAddress) != 2 {
+					t.Fatalf("per-device relay export failed: %d", exported.Code)
+				}
+			}
+			call("modify", input.Tag, input, version, http.StatusBadRequest) // A legacy writer must not remove a peer by omission.
 			var encrypted string
 			if err := sql.QueryRow(ctx, `SELECT content FROM config_client_metadata WHERE config_id=$1 AND config_version=$2 AND profile_tag=$3`,
 				current.ID, version, input.Tag).Scan(&encrypted); err != nil || strings.Contains(encrypted, input.WireGuardClientPrivateKey) {
@@ -175,6 +202,7 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			next.Tag, next.Port = "renamed", 21003
+			next.WireGuardAdditionalClients = restored.WireGuardAdditionalClients
 			// This trigger fails after config, revision and metadata writes.
 			if _, err := sql.Exec(ctx, `CREATE OR REPLACE FUNCTION reject_wireguard_task() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test WireGuard task failure'; END $$;
 				CREATE TRIGGER reject_wireguard_task BEFORE INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION reject_wireguard_task()`); err != nil {
@@ -243,6 +271,48 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 			if plan, err := serverconfig.PrepareIndependentEgress(engine, current.Content); err != nil || plan.Source != "disabled" {
 				t.Fatalf("final deletion left an undeployable configuration: %v", err)
 			}
+		})
+	}
+}
+
+func TestSharedWireGuardClientExport(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineSingBox, core.EngineXray} {
+		t.Run(string(engine), func(t *testing.T) {
+			db, ctx, admin, owner, shared := newConfigScopeAPIFixture(t)
+			agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, owner, "wg-shared", engine)
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			base := "/agents/" + agent.ID + "/configs/" + string(engine)
+			var single, multi serverconfig.Input
+			port, err := serverconfig.RandomListenPort()
+			if err != nil {
+				t.Fatal(err)
+			}
+			grantConfigScopeAPIAgent(t, ctx, db, agent, shared, port)
+			shared.call("POST", base+"/plans", map[string]string{"protocol": serverconfig.ProtocolWireGuard}, 201, &single)
+			single.Port, single.ClientAddress = port, "relay.example.test"
+			shared.call("POST", base+"/plans", map[string]any{"protocol": single.Protocol, "input": single, "add_wireguard_client": true}, 201, &multi)
+			var saved configMutationResult
+			shared.call("POST", base+"/server-inbounds", map[string]any{"operation": "add", "expected_version": 0, "intent": "deploy", "input": multi}, 200, &saved)
+			if !saved.Task.SharedInstance {
+				t.Fatal("shared WireGuard deploy targeted the host")
+			}
+			completeConfigScopeAPITask(t, ctx, db, saved.Task)
+			var workspace agentConfigWorkspaceResource
+			shared.call("GET", base+"/workspace", nil, 200, &workspace)
+			if len(workspace.Inbounds) != 1 || len(workspace.Inbounds[0].WireGuardAdditionalClients) != 1 {
+				t.Fatal("missing shared preset clients")
+			}
+			peer := multi.WireGuardAdditionalClients[0]
+			path := workspaceExportPath(base, workspace) + "&wireguard_client=" + url.QueryEscape(peer.PublicKey)
+			var exported struct{ Content string }
+			shared.call("GET", path, nil, 200, &exported)
+			if !strings.Contains(exported.Content, peer.PrivateKey) || strings.Contains(exported.Content, single.WireGuardClientPrivateKey) {
+				t.Fatal("incorrect shared device identity")
+			}
+			owner.call("GET", path, nil, 409, nil)
+			admin.call("GET", path, nil, 409, nil)
 		})
 	}
 }

@@ -5851,6 +5851,13 @@
           "vless_encryption": {
             "type": "string"
           },
+          "wireguard_additional_clients": {
+            "description": "首个客户端使用既有 wireguard_client_* 字段。此列表保存额外设备，每个公钥及隧道地址须唯一。修改多客户端入站时传完整列表，空数组移除全部额外设备。",
+            "items": {
+              "$ref": "#/components/schemas/serverconfig_WireGuardClient"
+            },
+            "type": "array"
+          },
           "wireguard_allowed_ips": {
             "type": "string"
           },
@@ -6155,6 +6162,27 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "serverconfig_WireGuardClient": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "preshared_key": {
+            "type": "string"
+          },
+          "private_key": {
+            "type": "string"
+          },
+          "public_key": {
             "type": "string"
           }
         },
@@ -8546,6 +8574,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "选择此入站内的 WireGuard 客户端公钥（标准 Base64，按 URL 编码），仅导出该设备的配置。",
+            "in": "query",
+            "name": "wireguard_client",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10325,6 +10362,7 @@
           "content": {
             "application/json": {
               "example": {
+                "add_wireguard_client": false,
                 "generate_port": false,
                 "input": {
                   "block_mainland_destination": false,
@@ -10431,6 +10469,15 @@
                   "username": "example",
                   "vless_decryption": "example",
                   "vless_encryption": "example",
+                  "wireguard_additional_clients": [
+                    {
+                      "address": null,
+                      "email": null,
+                      "preshared_key": null,
+                      "private_key": null,
+                      "public_key": null
+                    }
+                  ],
                   "wireguard_allowed_ips": "example",
                   "wireguard_client_address": "example",
                   "wireguard_client_private_key": "example",
@@ -10456,6 +10503,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "add_wireguard_client": {
+                    "description": "传入当前 WireGuard input，在草稿中追加一个独立客户端，保留监听参数和已有密钥。",
+                    "type": "boolean"
+                  },
                   "generate_port": {
                     "type": "boolean"
                   },
@@ -10588,6 +10639,15 @@
                   "username": "example",
                   "vless_decryption": "example",
                   "vless_encryption": "example",
+                  "wireguard_additional_clients": [
+                    {
+                      "address": "example",
+                      "email": "example",
+                      "preshared_key": "example",
+                      "private_key": "example",
+                      "public_key": "example"
+                    }
+                  ],
                   "wireguard_allowed_ips": "example",
                   "wireguard_client_address": "example",
                   "wireguard_client_private_key": "example",
@@ -12267,6 +12327,9 @@
                       "username": "example",
                       "vless_decryption": "example",
                       "vless_encryption": "example",
+                      "wireguard_additional_clients": [
+                        null
+                      ],
                       "wireguard_allowed_ips": "example",
                       "wireguard_client_address": "example",
                       "wireguard_client_private_key": "example",
@@ -12694,6 +12757,9 @@
                       "username": "example",
                       "vless_decryption": "example",
                       "vless_encryption": "example",
+                      "wireguard_additional_clients": [
+                        null
+                      ],
                       "wireguard_allowed_ips": "example",
                       "wireguard_client_address": "example",
                       "wireguard_client_private_key": "example",

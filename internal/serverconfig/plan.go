@@ -144,7 +144,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 			return Input{}, err
 		}
 		input.WireGuardClientAddress = "10.66.66.2/32"
-		input.WireGuardServerAddress = "10.66.66.1/24"
+		input.WireGuardServerAddress = defaultWireGuardServerAddress
 		input.WireGuardAllowedIPs = "0.0.0.0/0"
 		input.WireGuardMTU, input.WireGuardKeepalive = 1420, 25
 		input.Username = "qch-" + suffix
@@ -317,6 +317,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.Network = current.Network
 	}
 	if protocol.Key == ProtocolWireGuard {
+		plan.WireGuardAdditionalClients = current.WireGuardAdditionalClients
 		plan.WireGuardServerAddress = current.WireGuardServerAddress
 		plan.WireGuardClientAddress, plan.WireGuardAllowedIPs = current.WireGuardClientAddress, current.WireGuardAllowedIPs
 		plan.WireGuardMTU, plan.WireGuardKeepalive = current.WireGuardMTU, current.WireGuardKeepalive

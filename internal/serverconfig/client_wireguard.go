@@ -72,3 +72,36 @@ func buildWireGuardMihomoYAML(input Input, address, name string) (string, error)
 	}
 	return marshalSingleLineYAML(proxy)
 }
+
+// Keep the primary profile stable for existing subscriptions. Every device also
+// gets an independently named export, including when another device lacks a private key.
+func buildWireGuardClientProfiles(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if err := validateWireGuardInput(input, false); err != nil {
+		return ClientProfile{}, err
+	}
+	var primary ClientProfile
+	var variants []ClientVariant
+	for i, client := range input.wireGuardClients() {
+		name := strings.TrimSpace(nodeName)
+		if i > 0 {
+			if name == "" {
+				name = input.Tag
+			}
+			deviceIP, _, _ := strings.Cut(splitWireGuardList(client.Address)[0], "/")
+			name += " · " + deviceIP
+		}
+		profile, err := BuildClientProfileNamed(input.withWireGuardClient(client), address, serverName, name)
+		if err != nil {
+			if client.PrivateKey != "" {
+				return ClientProfile{}, err
+			}
+			profile = ClientProfile{Format: "Mihomo WireGuard YAML", URIError: err.Error(), MihomoError: err.Error()}
+		}
+		if i == 0 {
+			primary = profile
+		}
+		variants = append(variants, ClientVariant{Name: client.Address, Profile: profile})
+	}
+	primary.Variants = variants
+	return primary, nil
+}

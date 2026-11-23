@@ -104,7 +104,7 @@ func (s *Server) exportWorkspaceInbound(w http.ResponseWriter, r *http.Request) 
 		writeError(w, 409, "无法唯一确定此入站，请重新读取并核对")
 		return
 	}
-	export, err := s.workspaceExporter(r.Context(), agent, config, snapshot == "")
+	export, err := s.workspaceExporter(r.Context(), agent, config, snapshot == "", r.URL.Query().Get("wireguard_client"))
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -178,7 +178,7 @@ func (s *Server) describeInboundActions(r *http.Request, agent core.Agent, confi
 		}
 		if export == nil {
 			var err error
-			export, err = s.workspaceExporter(r.Context(), agent, config, includePreferences)
+			export, err = s.workspaceExporter(r.Context(), agent, config, includePreferences, "")
 			if err != nil {
 				return err
 			}
@@ -189,7 +189,7 @@ func (s *Server) describeInboundActions(r *http.Request, agent core.Agent, confi
 	return nil
 }
 
-func (s *Server) workspaceExporter(ctx context.Context, agent core.Agent, config core.Config, includePreferences bool) (func(serverconfig.Input) (string, string, error), error) {
+func (s *Server) workspaceExporter(ctx context.Context, agent core.Agent, config core.Config, includePreferences bool, peerKey string) (func(serverconfig.Input) (string, string, error), error) {
 	preferences := map[string]string{}
 	if includePreferences && config.ID != "" {
 		var err error
@@ -206,6 +206,20 @@ func (s *Server) workspaceExporter(ctx context.Context, agent core.Agent, config
 		if err != nil {
 			return "", "", err
 		}
+		if peerKey != "" {
+			if input.Protocol != serverconfig.ProtocolWireGuard {
+				return "", "", errors.New("请选择 WireGuard 客户端")
+			}
+			if peerKey != input.WireGuardClientPublicKey {
+				for i, peer := range input.WireGuardAdditionalClients {
+					if peer.PublicKey == peerKey {
+						return workspaceClientExport(item.Profile.Variants[i+1].Profile)
+					}
+				}
+				return "", "", errors.New("WireGuard 客户端已变化，请重新读取入站")
+			}
+			item.Profile.Variants = nil
+		}
 		return workspaceClientExport(item.Profile)
 	}, nil
 }
@@ -213,6 +227,14 @@ func (s *Server) workspaceExporter(ctx context.Context, agent core.Agent, config
 // Variants are alternatives, not independent inbounds. Export every unique
 // alternative exactly once, retaining native formats when a URI is incomplete.
 func workspaceClientExport(profile serverconfig.ClientProfile) (string, string, error) {
+	if profile.Format == "Mihomo WireGuard YAML" && len(profile.Variants) > 0 {
+		for _, variant := range profile.Variants {
+			if variant.Profile.URI != "" {
+				return workspaceClientExport(variant.Profile)
+			}
+		}
+		return "", "", errors.New("缺少 WireGuard 客户端私钥")
+	}
 	if len(profile.Variants) > 0 {
 		// A group containing native Xray alternatives must remain one valid
 		// client document, rather than concatenated JSON documents or a mix of
