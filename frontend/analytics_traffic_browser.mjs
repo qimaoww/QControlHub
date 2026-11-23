@@ -50,7 +50,7 @@ export async function checkAnalyticsTraffic({ page, mode, fixture, evaluate, wai
   assert.ok(await evaluate(page, "document.querySelector('dialog[open]').textContent.includes('统计口径')"));
   await act( "const input=document.querySelector('dialog[open] [name=month]');input.value='2025-01';input.dispatchEvent(new Event('change',{bubbles:true}))");
   await wait(page, "!document.querySelector('[aria-busy=true]')");
-  assert.ok(await evaluate(page, "!document.querySelector('dialog[open] [role=alert]')"));
+  assert.ok(await evaluate(page, "!document.querySelector('dialog[open] [role=alert]')"), await evaluate(page, "document.querySelector('dialog[open]')?.innerText"));
   await screenshot(page, 'analytics-traffic-history'); await close();
 
   await click(policy.quota_enabled === false ? '设置配额' : '编辑配额', row);

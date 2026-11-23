@@ -236,12 +236,14 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	if installAge < age {
 		installAge = age
 	}
-	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout), intervalString(core.ManagedTLSLeaseTimeout)}
+	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout), intervalString(core.ManagedTLSLeaseTimeout), intervalString(core.AgentUpgradeLeaseTimeout)}
 	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
- WITH stale AS (SELECT id,attempt FROM tasks
+ WITH stale AS (SELECT id,attempt,(attempt >= $3 AND action<>'migrate-tls') AS exhausted FROM tasks
  WHERE action<>'network-diagnostic' AND status='running' AND started_at < now() - CASE
  WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval)
+ WHEN action IN ('migrate-tls','check-nginx','update-nginx','check-caddy','update-caddy') THEN GREATEST($1::interval,$5::interval)
+ WHEN action='upgrade-agent' THEN GREATEST($1::interval,$6::interval)
  WHEN install_if_missing AND engine IN ('sing-box','xray') THEN GREATEST($2::interval,$5::interval)
  WHEN action='install' OR install_if_missing THEN $2::interval
  WHEN engine IN ('sing-box','xray') AND action IN ('validate','deploy','start','restart')
@@ -250,13 +252,13 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
  retained AS (INSERT INTO task_diagnostics(task_id,attempt,output,error,source)
  SELECT id,attempt,'','执行租约已过期，尚未收到 Agent 结果；上次执行结果不确定。','lease-expired' FROM stale ON CONFLICT DO NOTHING)
  UPDATE tasks SET
-			status=CASE WHEN attempt >= $3 THEN 'failed' ELSE 'pending' END,
-			error=CASE WHEN attempt >= $3 THEN 'agent did not report a result before the execution lease expired' ELSE error END,
-			finished_at=CASE WHEN attempt >= $3 THEN now() ELSE NULL END,
-			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
-			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
+			status=CASE WHEN stale.exhausted THEN 'failed' ELSE 'pending' END,
+			error=CASE WHEN stale.exhausted THEN 'agent did not report a result before the execution lease expired' ELSE error END,
+			finished_at=CASE WHEN stale.exhausted THEN now() ELSE NULL END,
+			started_at=CASE WHEN stale.exhausted THEN started_at ELSE NULL END,
+			config_content=CASE WHEN stale.exhausted THEN NULL ELSE config_content END,
 			lease_id=NULL
- WHERE id IN (SELECT id FROM stale)`, args...)
+ FROM stale WHERE tasks.id=stale.id`, args...)
 
 	return err
 }
@@ -282,6 +284,9 @@ func (s *Store) openTaskExecutionTx(ctx context.Context, tx pgx.Tx, task *core.T
 	}
 	if denied {
 		return ErrForbidden
+	}
+	if task.Action == core.ActionMigrateTLS {
+		return s.openTLSMigrationTx(ctx, tx, task, features)
 	}
 	if !task.Action.AgentLevel() {
 		var runtime map[core.Engine]core.RuntimeState

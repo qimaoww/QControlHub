@@ -15,17 +15,22 @@ import (
 )
 
 type tlsFrontendRequest struct {
-	DeferCleanup  bool                           `json:"defer_cleanup,omitempty"`
-	NativeHandoff string                         `json:"native_handoff,omitempty"`
-	Service       string                         `json:"service"`
-	Kind          string                         `json:"kind"`
-	Action        core.Action                    `json:"action"`
-	Stage         bool                           `json:"stage"`
-	Frontends     []core.TLSFrontend             `json:"frontends"`
-	Certificates  bool                           `json:"certificates,omitempty"`
-	Deadline      time.Time                      `json:"deadline,omitempty"`
-	SyncSource    *core.ManagedCertificateSource `json:"sync_source,omitempty"`
-	ConfigContent string                         `json:"config_content,omitempty"`
+	Migration      *core.TLSMigration             `json:"migration,omitempty"`
+	ObserveProxies bool                           `json:"observe_proxies,omitempty"`
+	ProxyRequestAt time.Time                      `json:"proxy_request_at,omitzero"`
+	ProxyBuild     string                         `json:"proxy_build,omitempty"`
+	NginxUpgrade   string                         `json:"nginx_upgrade,omitempty"`
+	DeferCleanup   bool                           `json:"defer_cleanup,omitempty"`
+	NativeHandoff  string                         `json:"native_handoff,omitempty"`
+	Service        string                         `json:"service"`
+	Kind           string                         `json:"kind"`
+	Action         core.Action                    `json:"action"`
+	Stage          bool                           `json:"stage"`
+	Frontends      []core.TLSFrontend             `json:"frontends"`
+	Certificates   bool                           `json:"certificates,omitempty"`
+	Deadline       time.Time                      `json:"deadline,omitempty"`
+	SyncSource     *core.ManagedCertificateSource `json:"sync_source,omitempty"`
+	ConfigContent  string                         `json:"config_content,omitempty"`
 }
 
 var tlsRequestName = regexp.MustCompile(`^[a-f0-9]{24}\.json$`)
@@ -90,6 +95,11 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 		_, err = atomicDeploy(filepath.Join(directory, name+".result"), string(encoded))
 		return err
 	}
+	if !request.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, request.Deadline)
+		defer cancel()
+	}
 	lock, err := acquireIPQualityDependencyLock(ctx, "/run/qagent-managed-tls")
 	if err != nil {
 		return err
@@ -103,10 +113,34 @@ func RunTLSFrontendRequest(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	if !request.Deadline.IsZero() {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, request.Deadline)
-		defer cancel()
+	if err := manager.recoverTLSMigration(ctx); err != nil {
+		return err
+	}
+	if request.Action == core.ActionMigrateTLS {
+		return manager.migrateTLS(ctx, request.Migration)
+	}
+	if request.ObserveProxies {
+		for _, mode := range []string{"nginx", "caddy"} {
+			if err := manager.saveProxyObservation(ctx, mode, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if mode := request.Action.ProxyComponent(); mode != "" {
+		return manager.proxyOperation(ctx, mode, request.Action, request.ProxyBuild, true, request.ProxyRequestAt)
+	}
+	if request.NginxUpgrade != "" {
+		if (request.Action != core.ActionStatus && request.Action != core.ActionUpgradeAgent) || request.Stage || request.Certificates || request.NativeHandoff != "" || len(request.Frontends) != 0 {
+			return errors.New("invalid managed Nginx upgrade request")
+		}
+		var results []error
+		for _, mode := range []string{"nginx", "caddy"} {
+			if err := manager.proxyOperation(ctx, mode, request.Action, request.NginxUpgrade, request.Action == core.ActionUpgradeAgent, time.Time{}); err != nil {
+				results = append(results, err)
+			}
+		}
+		return errors.Join(results...)
 	}
 	if request.NativeHandoff != "" {
 		return manager.nativeHandoff(ctx, request.Service, request.ConfigContent, request.NativeHandoff, request.Frontends)

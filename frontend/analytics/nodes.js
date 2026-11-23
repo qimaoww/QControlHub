@@ -1,3 +1,4 @@
+import { nodeProxyManager } from './node-proxies.js';
 import { bindPreferenceFields } from "./preferences.js";
 import { pageSizePreference, recordPages } from './page-size.js';
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
@@ -532,7 +533,33 @@ export async function nodesPage(ctx) {
       nodeForm.querySelector('fieldset').append(details);
       nodeForm.querySelector('[type=submit]').disabled = !manage;
     }
-    const nodePanel = stack(nodeForm || details, allocation, operations);
+    const proxies = agent.can_manage !== false && nodeProxyManager(ctx, agent,
+      () => ctx.current() && box.open && settingsScope() === openedScope && agents.includes(agent), () => box.close());
+    if (proxies) settingsUpdates.push(proxies.render);
+    let occupancy;
+    if (ctx.can('agent-config.read')) {
+      const portField = field('公网 TCP 端口', 'tls_public_port', '443', { type: 'number', min: 1, max: 65535, required: true });
+      const result = node('div', { role: 'status', 'aria-live': 'polite' });
+      const input = portField.querySelector('input');
+      const query = button('查询占用', async () => {
+        if (!input.reportValidity()) return;
+        const port = input.valueAsNumber;
+        query.disabled = true;
+        result.textContent = '正在查询';
+        try {
+          const data = await ctx.api(`${base}/tls-ports/${port}`);
+          if (!box.open || !ctx.current() || settingsScope() !== openedScope) return;
+          const states = { partial: '部分占用不可见或检查不完整', visible_in_use: '当前可见实例占用', observed_free: '最近监听观测确认空闲', unconfirmed: '缺少可确认空闲的监听观测' };
+          result.textContent = `${port} · 可见 TLS 路径 ${data.visible_routes} 条 · ${states[data.state] || '证据不足'}`;
+        } catch (error) {
+          if (box.open && ctx.current()) result.textContent = '端口占用查询失败';
+        } finally {
+          query.disabled = false;
+        }
+      });
+      occupancy = section('TLS 端口占用', node('div', { className: 'a-card-body a-stack' }, portField, actions(query), result));
+    }
+    const nodePanel = stack(nodeForm || details, allocation, proxies?.element, occupancy, operations);
     nodePanel.dataset.settingsPanel = 'node'; nodePanel.setAttribute('role', 'region'); nodePanel.setAttribute('aria-label', '节点设置');
     let activePanel = 'node';
     const scrollPositions = { node: 0, core: 0 };
@@ -548,6 +575,7 @@ export async function nodesPage(ctx) {
     const navigation = actions(nodeTab, coreTab);
     navigation.dataset.settingsNavigation = ''; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', '设置分区');
     const box = ctx.dialog(`${agent.name} · 节点设置`, stack(navigation, nodePanel, corePanel), { wide: true });
+    if (proxies) box.addEventListener('close', proxies.dispose, { once: true });
     const nodeDirty = () => address?.dirty() || zone?.dirty() || nodeForm?.elements.name && nodeForm.elements.name.value !== savedName || nodeForm?.elements.admin_hidden && nodeForm.elements.admin_hidden.checked !== savedVisibility;
     box.onRequestClose = async () => {
       if (nodeDirty() && !await ctx.confirm('存在未保存的设置更改，确定关闭？', '放弃更改')) return;

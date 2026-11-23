@@ -66,7 +66,7 @@ func TestRenameSubStoreNode(t *testing.T) {
 		t.Fatalf("renamed Surge Snell = %q, %v", surge, err)
 	}
 	cleanedSurge, err := renameSubStoreNode(surge, "东,京=Snell")
-	if err != nil || subStoreNodeName(cleanedSurge) != "东京Snell" {
+	if err == nil || cleanedSurge != "" {
 		t.Fatalf("sanitized Surge name = %q, %v", cleanedSurge, err)
 	}
 

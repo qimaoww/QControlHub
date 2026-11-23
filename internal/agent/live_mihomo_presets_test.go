@@ -33,6 +33,9 @@ func liveMihomoPresetCases(t *testing.T) []liveMihomoPresetCase {
 	}
 	cases := []liveMihomoPresetCase{{name: "snell-v5", input: newPlan(serverconfig.ProtocolSnell)}}
 	cases = append(cases, liveMihomoPresetCase{name: "snell-shadow-tls-v3", input: newPlan(serverconfig.ProtocolSnellShadowTLS)})
+	for _, key := range []string{serverconfig.ProtocolSnellV6, serverconfig.ProtocolSnellV6Unshaped, serverconfig.ProtocolSnellV6ShadowTLS, serverconfig.ProtocolSnellV6UnshapedShadowTLS} {
+		cases = append(cases, liveMihomoPresetCase{name: key, input: newPlan(key)})
+	}
 	for _, mode := range []string{"stream", "poll", "auto", "ws"} {
 		input := newPlan(serverconfig.ProtocolSudoku)
 		input.SudokuHTTPMaskMode = mode
@@ -99,7 +102,7 @@ func TestCompleteMihomoPresetClientMatrixWithLiveCore(t *testing.T) {
 				t.Fatal(err)
 			}
 			var proxy map[string]any
-			if err := yaml.Unmarshal([]byte(profile.URI), &proxy); err != nil {
+			if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
 				t.Fatal(err)
 			}
 			content, err := yaml.Marshal(map[string]any{
@@ -110,7 +113,7 @@ func TestCompleteMihomoPresetClientMatrixWithLiveCore(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			output, err := executor.Execute(ctx, core.Task{Action: core.ActionValidate, Engine: core.EngineMihomo, ConfigContent: string(content)})
+			output, err := executor.validateSnapshot(ctx, core.EngineMihomo, executor.Specs[core.EngineMihomo], string(content))
 			if err != nil {
 				t.Fatalf("official Mihomo rejected client preset: %v\n%s\n%s", err, output, content)
 			}

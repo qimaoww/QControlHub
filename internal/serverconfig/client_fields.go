@@ -99,10 +99,19 @@ func clientFields(input Input, address, serverName string) []ClientField {
 	}
 	if isSnellProtocol(input.Protocol) {
 		fields = append(fields,
+			ClientField{Label: "Snell 版本", Value: strconv.Itoa(input.SnellVersion)},
+			ClientField{Label: "复用连接", Value: strconv.FormatBool(input.SnellReuse)},
 			ClientField{Label: "UDP over TCP", Value: strconv.FormatBool(input.SnellUDP)},
 			ClientField{Label: "TCP Fast Open", Value: "true"},
 			ClientField{Label: "伪装模式", Value: input.SnellObfsMode},
 		)
+		if input.SnellVersion == 6 {
+			fields = append(fields, ClientField{Label: "Snell mode", Value: input.SnellMode})
+		}
+		if input.SnellObfsMode == SnellObfsShadowTLS {
+			fields = append(fields, ClientField{Label: "ShadowTLS SNI", Value: input.SnellObfsHost},
+				ClientField{Label: "ShadowTLS 密码", Value: input.SnellShadowTLSPassword, Secret: true})
+		}
 	}
 	if input.Protocol == ProtocolSudoku {
 		fields = append(fields,

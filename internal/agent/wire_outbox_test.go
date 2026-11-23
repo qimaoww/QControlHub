@@ -58,6 +58,32 @@ func TestWireOutboxPriorityAndCoalescing(t *testing.T) {
 	}
 }
 
+func TestCompactInterfaceClearOnWire(t *testing.T) {
+	state := newCompactTelemetryState()
+	for _, step := range []struct {
+		interfaces []core.HostNetworkInterface
+		want       string
+	}{
+		{[]core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.0.2.2"}}}, `[{"name":"eth0","addresses":["192.0.2.2"]}]`},
+		{nil, ""}, {[]core.HostNetworkInterface{}, "[]"}, {[]core.HostNetworkInterface{}, ""},
+	} {
+		frame := state.CompactMetrics(core.WireMessage{Type: core.WireMetrics, Metrics: &core.HostMetrics{NetworkInterfaces: step.interfaces}})
+		raw, err := json.Marshal(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire struct {
+			Metrics map[string]json.RawMessage `json:"metrics"`
+		}
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(wire.Metrics["network_interfaces"]); got != step.want {
+			t.Fatalf("network_interfaces = %q, want %q", got, step.want)
+		}
+	}
+}
+
 func TestCompactTelemetryStateDiffing(t *testing.T) {
 	state := newCompactTelemetryState()
 	now := time.Now().UTC().Truncate(time.Second)

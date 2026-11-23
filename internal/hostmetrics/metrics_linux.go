@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -36,31 +37,38 @@ func cpuUsagePercent(previousTotal, previousIdle, total, idle uint64) (float64, 
 	return float64(totalDelta-idleDelta) * 100 / float64(totalDelta), true
 }
 
-// sampledCPUPercent rejects sub-window deltas. The one-second metrics ticker
-// and the full-heartbeat ticker occasionally fire back-to-back; a single
-// scheduler tick in that tiny interval otherwise appears as a false 100% host
-// spike. The last complete sample remains visible until a stable window is
-// available.
-func sampledCPUPercent(previous metricSample, total, idle uint64, now time.Time) (float64, bool, bool) {
-	if !previous.cpuValid {
-		return 0, false, true
+// Heartbeats and metrics pushes share this baseline. Only a complete
+// window from the same counter source and CPU capacity can produce a rate.
+func (sample *cpuSample) record(current cpuReading) {
+	previous := sample.reading
+	if previous.at.IsZero() || previous.quota != current.quota {
+		*sample = cpuSample{reading: current}
+		return
 	}
-	if !previous.cpuAt.IsZero() && now.Sub(previous.cpuAt) < minimumCPUSampleWindow {
-		return previous.cpuPercent, previous.cpuPercentValid, false
+	elapsed := current.at.Sub(previous.at)
+	if elapsed < minimumCPUSampleWindow {
+		return
 	}
-	percent, ok := cpuUsagePercent(previous.cpuTotal, previous.cpuIdle, total, idle)
-	if !ok {
-		return previous.cpuPercent, previous.cpuPercentValid, true
+	sample.reading = current
+	if current.quota > 0 {
+		if current.total >= previous.total {
+			capacity := elapsed.Seconds() * 1_000_000 * current.quota
+			sample.percent = math.Min(100, float64(current.total-previous.total)*100/capacity)
+			sample.available = true
+		}
+		return
 	}
-	return percent, true, true
+	if percent, ok := cpuUsagePercent(previous.total, previous.idle, current.total, current.idle); ok {
+		sample.percent, sample.available = percent, true
+	}
 }
 
 func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMetrics, metricSample, error) {
 	if err := ctx.Err(); err != nil {
 		return core.HostMetrics{}, previous, err
 	}
-	now := time.Now().UTC()
-	metrics := core.HostMetrics{CollectedAt: now}
+	now := time.Now()
+	metrics := core.HostMetrics{CollectedAt: now.UTC()}
 	next := previous
 	problems := make([]error, 0, 4)
 
@@ -70,15 +78,7 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 		if parseErr != nil {
 			problems = append(problems, parseErr)
 		} else {
-			percent, available, advance := sampledCPUPercent(previous, total, idle, now)
-			if advance {
-				next.cpuTotal, next.cpuIdle, next.cpuAt, next.cpuValid = total, idle, now, true
-			}
-			if available {
-				metrics.CPUAvailable = true
-				metrics.CPUPercent = percent
-				next.cpuPercent, next.cpuPercentValid = percent, true
-			}
+			next.cpu.record(cpuReading{at: now, total: total, idle: idle})
 			cpuRead = true
 		}
 	} else {
@@ -87,31 +87,14 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 	if !cpuRead {
 		usage, err := cgroupCPUUsage()
 		if err == nil {
-			advance := !previous.cgroupCPUValid || now.Sub(previous.cgroupCPUAt) >= minimumCPUSampleWindow
-			if advance {
-				next.cgroupCPU, next.cgroupCPUAt, next.cgroupCPUValid = usage, now, true
-			}
-			if !advance && previous.cpuPercentValid {
-				metrics.CPUAvailable = true
-				metrics.CPUPercent = previous.cpuPercent
-			} else if previous.cgroupCPUValid && usage >= previous.cgroupCPU && now.After(previous.cgroupCPUAt) {
-				quota := cgroupCPUQuota()
-				seconds := now.Sub(previous.cgroupCPUAt).Seconds()
-				if seconds > 0 && quota > 0 {
-					metrics.CPUAvailable = true
-					metrics.CPUPercent = float64(usage-previous.cgroupCPU) / (seconds * 1_000_000 * quota) * 100
-					if metrics.CPUPercent > 100 {
-						metrics.CPUPercent = 100
-					}
-					next.cpuPercent, next.cpuPercentValid = metrics.CPUPercent, true
-				}
-			} else if previous.cpuPercentValid {
-				metrics.CPUAvailable = true
-				metrics.CPUPercent = previous.cpuPercent
-			}
+			next.cpu.record(cpuReading{at: now, total: usage, quota: cgroupCPUQuota()})
+			cpuRead = true
 		} else {
 			problems = append(problems, fmt.Errorf("read cgroup CPU metrics: %w", err))
 		}
+	}
+	if cpuRead {
+		metrics.CPUPercent, metrics.CPUAvailable = next.cpu.percent, next.cpu.available
 	}
 
 	memoryRead := false
@@ -208,7 +191,7 @@ func collectNetworkInterfacesCached(previous *metricSample, next *metricSample, 
 	next.interfaceDetails = details
 	next.interfacesKey = key
 	next.interfacesAt = now
-	next.interfacesValid = true
+	next.interfacesValid = detailsErr == nil
 	return interfaces, details, key, false, detailsErr
 }
 

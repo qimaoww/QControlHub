@@ -20,6 +20,15 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if input.clientUnsupported {
+		return ClientProfile{}, errors.New("此入站需要原生客户端参数，暂不支持导出")
+	}
+	if isSnellProtocol(input.Protocol) && input.presetUnsupported {
+		return ClientProfile{}, errors.New("此 Snell 配置包含预设无法完整表达的原生参数，暂不支持客户端导出")
+	}
+	if input.Protocol == ProtocolWireGuard && len(input.WireGuardAdditionalClients) > 0 {
+		return buildWireGuardClientProfiles(input, address, serverName, nodeName)
+	}
 	if err := validateClientConnection(input); err != nil {
 		return ClientProfile{}, err
 	}
@@ -90,6 +99,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		if err := validateWireGuardInput(input, true); err != nil {
 			return ClientProfile{}, err
 		}
+		normalizeWireGuardClient(&input)
 	} else if input.Protocol == ProtocolTailscale {
 		return ClientProfile{}, errors.New("Tailscale 登录状态生命周期尚未接入，暂不提供客户端配置")
 	} else if input.Protocol == ProtocolOpenVPNServer {
@@ -138,12 +148,14 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 
 	switch input.Protocol {
 	case ProtocolWireGuard:
-		profile.Format = "WireGuard native config"
-		profile.URI, err = wireguardClientConfig(input, address)
+		profile.Format = "Mihomo WireGuard YAML"
+		profile.Mihomo, err = buildWireGuardMihomoYAML(input, address, fragment)
 		if err != nil {
 			return ClientProfile{}, err
 		}
-		profile.SubscriptionCompatible = false
+		profile.URI = profile.Mihomo
+		profile.SubscriptionCompatible = true
+		return profile, nil
 	case ProtocolShadowsocks, ProtocolSS2022:
 		identity := base64.RawURLEncoding.EncodeToString([]byte(input.Method + ":" + input.Credential))
 		profile.Format = "Shadowsocks SIP002 URI"
@@ -183,13 +195,16 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.Format = "VLESS URI"
 		profile.URI = clientURL("vless", url.User(input.Credential), host, query, fragment)
 		profile.SubscriptionCompatible = true
-	case ProtocolSnell, ProtocolSnellShadowTLS:
+	case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 		profile.Format = "Surge Snell"
-		if input.Protocol == ProtocolSnellShadowTLS {
+		if input.SnellObfsMode == SnellObfsShadowTLS {
 			profile.Format = "Surge Snell + ShadowTLS"
 		}
-		profile.URI = buildSnellSurgeConfig(input, address, fragment)
-		profile.SubscriptionCompatible = true
+		profile.URI, err = buildSnellSurgeConfig(input, address, fragment)
+		profile.SubscriptionCompatible = err == nil
+		if err != nil {
+			profile.URIError = err.Error()
+		}
 	case ProtocolMieru:
 		profile.Format = "Mihomo Mieru YAML"
 		profile.URI, err = buildMieruMihomoYAML(input, address, fragment)
@@ -317,6 +332,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		// URL export remains available for protocols whose security options
 		// cannot be represented by Mihomo without losing information.
 		profile.MihomoError = err.Error()
+	}
+	if isSnellProtocol(input.Protocol) && profile.URIError != "" && profile.MihomoError == "" {
+		profile.Format, profile.URI, profile.SubscriptionCompatible = "Mihomo Snell YAML", profile.Mihomo, true
 	}
 	if nativeReason != "" {
 		profile.URIError = nativeReason

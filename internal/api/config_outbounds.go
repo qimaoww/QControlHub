@@ -26,7 +26,7 @@ func (s *Server) getManagedOutbound(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
 			return
 		}
-		config.Content, err = s.store.ReadTaskConfigSnapshot(r.Context(), snapshot, agent.ID, engine)
+		config.Content, err = s.store.ReadWorkspaceTaskConfigSnapshot(r.Context(), snapshot, agent.ID, engine)
 		if err != nil {
 			writeStoreError(w, err)
 			return
@@ -102,7 +102,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
 			return
 		}
-		snapshot, readErr := s.store.ReadTaskConfigSnapshot(r.Context(), input.SnapshotTaskID, agent.ID, engine)
+		snapshot, readErr := s.store.ReadWorkspaceTaskConfigSnapshot(r.Context(), input.SnapshotTaskID, agent.ID, engine)
 		if readErr != nil {
 			writeStoreError(w, readErr)
 			return
@@ -185,7 +185,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		}
 		config.Content = plan.Content
 	}
-	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{ReuseUnchangedBinding: input.Operation == "bind", TaskID: r.Header.Get("X-Config-Task-ID"), InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &state})
+	saved, task, err := s.store.SaveAgentConfigAndTask(r.Context(), config, input.Version, store.ConfigMutationOptions{ReuseUnchangedBinding: input.Operation == "bind", TaskID: r.Header.Get("X-Config-Task-ID"), InstallIfMissing: input.InstallIfMissing, ExpectedInstanceID: input.ExpectedInstanceID, Action: input.Intent, ManagementState: &state, ClientMetadata: snapshotMetadataReset(input.SnapshotTaskID)})
 	if err != nil {
 		writeStoreError(w, err)
 		return

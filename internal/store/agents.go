@@ -63,21 +63,30 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 	return agents, s.overlaySharedInstanceRuntime(ctx, agents)
 }
 
-const listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
+var listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
 
-const agentOfflineThresholdSQL = `(CASE WHEN agents.owner_id='' THEN (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
-	ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer FROM user_panel_settings WHERE owner_id=agents.owner_id),45) END)`
+// Both expressions are store-owned SQL, never request input.
+func agentOfflineThresholdForOwnerSQL(owner, root string) string {
+	return fmt.Sprintf(`(CASE WHEN %[1]s='' THEN %[2]s
+		ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer
+			FROM user_panel_settings WHERE owner_id=%[1]s),%[3]d) END)`,
+		owner, root, core.DefaultPanelSettings().AgentOfflineThresholdSeconds)
+}
 
-const agentColumnsSQL = `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
+const rootOfflineThresholdSQL = `(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)`
+
+var agentOfflineThresholdSQL = agentOfflineThresholdForOwnerSQL("agents.owner_id", rootOfflineThresholdSQL)
+
+var agentColumnsSQL = `
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,observed_public_ip_at,observed_public_ip_changed_at,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
 				time_zone_mode,time_zone,applied_time_zone,time_zone_status,time_zone_error,time_zone_revision,time_zone_auto_address_hash,
 				last_seen,enrolled_at,
-				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id,admin_hidden`
+				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id,admin_hidden,managed_proxies`
 
 const agentSelectFromSQL = ` FROM agents WHERE revoked_at IS NULL`
 
-const listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
+var listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
 
 func scopedAgentsSQL(ctx context.Context, args *[]any) string {
 	if scopeForConfig(ctx).Admin {
@@ -99,7 +108,7 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 		var timeZoneMode, timeZone, appliedTimeZone, timeZoneStatus, timeZoneError, timeZoneAddressHash string
 		var timeZoneRevision int64
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &timeZoneMode, &timeZone, &appliedTimeZone, &timeZoneStatus, &timeZoneError, &timeZoneRevision, &timeZoneAddressHash, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &agent.ObservedPublicIPAt, &agent.ObservedPublicIPChangedAt, &metricsState, &timeZoneMode, &timeZone, &appliedTimeZone, &timeZoneStatus, &timeZoneError, &timeZoneRevision, &timeZoneAddressHash, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.ManagedProxies, &agent.SharedEngines); err != nil {
 			return nil, err
 		}
 		agent.TimeZone = core.AgentTimeZoneState{Mode: timeZoneMode, TimeZone: timeZone, AppliedTimeZone: appliedTimeZone, Status: timeZoneStatus, Error: timeZoneError, Revision: timeZoneRevision, AutoAddressHash: timeZoneAddressHash}

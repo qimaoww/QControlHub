@@ -137,7 +137,7 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 	if dispatched.Type != core.WireTask || dispatched.Task == nil || dispatched.Task.ID != task.ID {
 		t.Fatalf("legacy next message = %+v; want task %s and no managed config", dispatched, task.ID)
 	}
-	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "198.35.26.96", core.PublicIPProbeSourceAgent, "", "", []string{})
+	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "198.35.26.96", "", "", "", []string{})
 }
 
 func TestWSSManagedAgentPolicyDeliversValidPolicyWithPostgreSQL(t *testing.T) {
@@ -177,6 +177,16 @@ func TestWSSManagedAgentPolicyDeliversValidPolicyWithPostgreSQL(t *testing.T) {
 
 func dialPublicIPProbeWSS(t *testing.T, ctx context.Context, base, agentID string, privateKey ed25519.PrivateKey) *websocket.Conn {
 	t.Helper()
+	connection := dialPolicySocket(t, ctx, base, agentID, privateKey)
+	var hello core.WireMessage
+	if err := wsjson.Read(ctx, connection, &hello); err != nil || hello.Type != core.WireHello || hello.PublicIPProbe != nil {
+		t.Fatalf("initial capability-neutral hello = %+v, %v", hello, err)
+	}
+	return connection
+}
+
+func dialPolicySocket(t *testing.T, ctx context.Context, base, agentID string, privateKey ed25519.PrivateKey) *websocket.Conn {
+	t.Helper()
 	websocketURL := "ws" + strings.TrimPrefix(base, "http") + "/agent/v1/connect"
 	handshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)
 	if err := authn.SignRequest(handshake, nil, agentID, privateKey, time.Now().UTC()); err != nil {
@@ -192,11 +202,61 @@ func dialPublicIPProbeWSS(t *testing.T, ctx context.Context, base, agentID strin
 		}
 		t.Fatalf("dial WSS: %v", err)
 	}
-	var hello core.WireMessage
-	if err := wsjson.Read(ctx, connection, &hello); err != nil || hello.Type != core.WireHello || hello.PublicIPProbe != nil {
-		t.Fatalf("initial capability-neutral hello = %+v, %v", hello, err)
-	}
 	return connection
+}
+
+func TestWSSPolicyRefreshDuringHandshake(t *testing.T) {
+	url := os.Getenv("QCH_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := store.Open(ctx, url, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	server := New(db, Config{AdminToken: strings.Repeat("m", 48)})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	id, key := enrollWSSTestSourceAgent(t, ctx, httpServer.URL, url, db, "handshake-refresh")
+	control, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close(ctx)
+	tx, err := control.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `LOCK TABLE panel_settings IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	socket := dialPolicySocket(t, ctx, httpServer.URL, id, key)
+	defer socket.CloseNow()
+	for {
+		var waiting bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM pg_stat_activity WHERE pg_backend_pid() = ANY(pg_blocking_pids(pid)))`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// A session that has not advertised hot reload must reconnect on refresh.
+	server.RefreshAgentPolicy(id)
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var hello core.WireMessage
+	if err := wsjson.Read(ctx, socket, &hello); err == nil || websocket.CloseStatus(err) < 0 {
+		t.Fatalf("invalidated handshake returned type=%q err=%v", hello.Type, err)
+	}
+	fresh := dialPublicIPProbeWSS(t, ctx, httpServer.URL, id, key)
+	defer fresh.CloseNow()
 }
 
 func waitRawPublicIPProbeRowAPI(t *testing.T, ctx context.Context, databaseURL, agentID, ipv4, ipv4Source, ipv6, ipv6Source string, features []string) {

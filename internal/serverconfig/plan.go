@@ -95,11 +95,10 @@ func NewPlan(protocol Protocol) (Input, error) {
 		}
 	}
 	if isSnellProtocol(protocol.Key) {
-		input.SnellVersion = 5
+		normalizeSnellInput(&input)
 		input.SnellUDP = true
 		input.SnellReuse = true
-		input.SnellObfsMode = SnellObfsNone
-		if protocol.Key == ProtocolSnellShadowTLS {
+		if protocol.SnellShadowTLS {
 			input.SnellObfsMode = SnellObfsShadowTLS
 			input.SnellObfsHost = "www.microsoft.com"
 			input.SnellClientFingerprint = "chrome"
@@ -145,7 +144,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 			return Input{}, err
 		}
 		input.WireGuardClientAddress = "10.66.66.2/32"
-		input.WireGuardServerAddress = "10.66.66.1/24"
+		input.WireGuardServerAddress = defaultWireGuardServerAddress
 		input.WireGuardAllowedIPs = "0.0.0.0/0"
 		input.WireGuardMTU, input.WireGuardKeepalive = 1420, 25
 		input.Username = "qch-" + suffix
@@ -190,6 +189,12 @@ func NewPlan(protocol Protocol) (Input, error) {
 // RegeneratePlan creates fresh random plan values while retaining the current
 // operator-selected settings that are not themselves generated parameters.
 func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
+	if isSnellProtocol(protocol.Key) {
+		current.Protocol = protocol.Key
+		if err := validateSnellPresetIdentity(current); err != nil {
+			return Input{}, fmt.Errorf("%w: %v", ErrInvalidPlanInput, err)
+		}
+	}
 	plan, err := NewPlan(protocol)
 	if err != nil {
 		return Input{}, err
@@ -267,10 +272,8 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		}
 	}
 	if isSnellProtocol(protocol.Key) {
-		plan.SnellVersion = 5
 		plan.SnellUDP = current.SnellUDP
 		plan.SnellReuse = current.SnellReuse
-		plan.SnellObfsMode = SnellObfsNone
 		plan.SnellObfsHost = current.SnellObfsHost
 		plan.SnellClientFingerprint = current.SnellClientFingerprint
 		plan.SnellShadowTLSVersion = current.SnellShadowTLSVersion
@@ -278,10 +281,11 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.SnellShadowTLSHandshake = current.SnellShadowTLSHandshake
 		plan.SnellShadowTLSProxy = current.SnellShadowTLSProxy
 		plan.SnellShadowTLSALPN = current.SnellShadowTLSALPN
-		if protocol.Key == ProtocolSnellShadowTLS {
+		if protocol.SnellShadowTLS {
 			plan.SnellObfsMode = SnellObfsShadowTLS
 			plan.SnellShadowTLSVersion = 3
 		}
+		normalizeSnellInput(&plan)
 	}
 	if protocol.Key == ProtocolSudoku {
 		plan.SudokuClientKey, plan.Credential, err = newSudokuKeyPair()
@@ -313,6 +317,7 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.Network = current.Network
 	}
 	if protocol.Key == ProtocolWireGuard {
+		plan.WireGuardAdditionalClients = current.WireGuardAdditionalClients
 		plan.WireGuardServerAddress = current.WireGuardServerAddress
 		plan.WireGuardClientAddress, plan.WireGuardAllowedIPs = current.WireGuardClientAddress, current.WireGuardAllowedIPs
 		plan.WireGuardMTU, plan.WireGuardKeepalive = current.WireGuardMTU, current.WireGuardKeepalive

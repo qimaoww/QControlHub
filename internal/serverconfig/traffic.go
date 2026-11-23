@@ -63,21 +63,22 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 		}
 	case core.EngineShadowsocksRust:
 		mode := trafficProtocol(root["mode"], core.TrafficProtocolBoth)
-		if entries, ok := root["servers"].([]any); ok {
+		_, entries, ok := shadowsocksRustExtendedEntries(root)
+		if ok {
 			for index, value := range entries {
 				entry, _ := value.(map[string]any)
 				if entry == nil {
 					continue
 				}
-				port := trafficPortNumber(entry["server_port"])
+				port := trafficPortNumber(shadowsocksRustPort(entry))
 				if port == 0 {
 					continue
 				}
 				name := trafficEndpointName(entry["name"], entry["method"], "Shadowsocks "+strconv.Itoa(index+1))
 				result = append(result, trafficEndpoint(engine, name, port, trafficProtocol(entry["mode"], mode)))
 			}
-		} else if port := trafficPortNumber(root["server_port"]); port > 0 {
-			result = append(result, trafficEndpoint(engine, trafficEndpointName(root["name"], root["method"], "Shadowsocks"), port, mode))
+		} else if port := trafficPortNumber(shadowsocksRustPort(root)); port > 0 {
+			result = append(result, trafficEndpoint(engine, trafficEndpointName(root["name"], root["remarks"], root["method"], "Shadowsocks"), port, mode))
 		}
 	}
 	return normalizeTrafficEndpoints(result)
@@ -130,11 +131,8 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 // transport from a remote server port.
 func trafficEntryProtocol(engine core.Engine, entry map[string]any, kind string, fallback core.TrafficProtocol) core.TrafficProtocol {
 	protocol := trafficProtocol(entry["network"], trafficProtocolForKind(kind, fallback))
-	if engine == core.EngineMihomo && kind == ProtocolMieru {
-		protocol = trafficProtocol(entry["transport"], protocol)
-	}
-	if engine == core.EngineSingBox && stringValue(mapValue(entry["transport"])["type"]) == "quic" {
-		protocol = core.TrafficProtocolUDP
+	if outer, handled := ExplicitListenerProtocol(engine, kind, entry); handled {
+		return outer
 	}
 	if engine == core.EngineXray {
 		if settings, ok := entry["settings"].(map[string]any); ok {
@@ -154,6 +152,47 @@ func trafficEntryProtocol(engine core.Engine, entry map[string]any, kind string,
 		}
 	}
 	return protocol
+}
+
+// ExplicitListenerProtocol interprets transport fields shared by discovery and
+// accounting. The caller must still verify active deployment and port ownership.
+func ExplicitListenerProtocol(engine core.Engine, kind string, entry map[string]any) (core.TrafficProtocol, bool) {
+	switch engine {
+	case core.EngineMihomo:
+		switch kind {
+		case ProtocolMieru:
+			switch entry["transport"] {
+			case "TCP":
+				return core.TrafficProtocolTCP, true
+			case "UDP":
+				return core.TrafficProtocolUDP, true
+			}
+			return core.TrafficProtocolBoth, true
+		case "shadowsocks":
+			if entry["udp"] == false {
+				return core.TrafficProtocolTCP, true
+			}
+			return core.TrafficProtocolBoth, true
+		}
+	case core.EngineSingBox:
+		if mapValue(entry["transport"])["type"] == "quic" {
+			switch kind {
+			case "vmess", "vless", "trojan":
+				return core.TrafficProtocolUDP, true
+			}
+			return core.TrafficProtocolBoth, true
+		}
+	case core.EngineXray:
+		if kind == "socks" {
+			stream := mapValue(entry["streamSettings"])
+			network := stream["network"]
+			if mapValue(entry["settings"])["udp"] == false && (network == nil || network == "raw" || network == "tcp") {
+				return core.TrafficProtocolTCP, true
+			}
+			return core.TrafficProtocolBoth, true
+		}
+	}
+	return "", false
 }
 
 func trafficEndpoint(engine core.Engine, name string, port int, protocol core.TrafficProtocol) core.PortTrafficEndpoint {

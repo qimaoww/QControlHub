@@ -18,7 +18,7 @@ const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,ti
 	public_ip_probe_interval_seconds,core_log_minimum_level,core_log_retention_days,agent_core_log_max_mib,
 	agent_core_log_rotate_count,metric_retention_days,audit_retention_days,task_retention_days,config_revision_retention,
 	webhook_url,notify_task_failed,notify_agent_offline,notify_agent_online,notify_traffic_quota,updated_at,
-	COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb),cnip_source,client_connection_retention_days,acme_email`
+	default_agent_engines,cnip_source,client_connection_retention_days,acme_email`
 
 func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 	var value core.PanelSettings
@@ -31,6 +31,9 @@ func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 		&value.WebhookURL, &value.NotifyTaskFailed, &value.NotifyAgentOffline, &value.NotifyAgentOnline, &value.NotifyTrafficQuota, &value.UpdatedAt,
 		&value.DefaultAgentEngines, &value.CNIPSource, &value.ClientConnectionRetentionDays, &value.ACMEEmail,
 	)
+	if err == nil && value.DefaultAgentEngines == nil {
+		value.DefaultAgentEngines = core.AllEngines()
+	}
 	return value, err
 }
 
@@ -55,7 +58,7 @@ func (s *Store) panelSettingsForOwner(ctx context.Context, executor storeExecuto
 		if err != nil {
 			return core.PanelSettings{}, err
 		}
-		settings := core.PanelSettings{ClientConnectionRetentionDays: core.DefaultPanelSettings().ClientConnectionRetentionDays}
+		settings := core.DefaultPanelSettings()
 		if err := json.Unmarshal([]byte(content), &settings); err != nil {
 			return core.PanelSettings{}, err
 		}

@@ -108,7 +108,7 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		// a clean slate rather than inheriting stale probe results.
 		_, err = tx.Exec(ctx, `
 			UPDATE agents SET name=$2,version=$3,os=$4,arch=$5,capabilities=$6,features=$7,labels=$8,runtime=$9,
-				observed_public_ip='',public_key=$10,last_seen=$11,enrolled_at=$12,revoked_at=NULL
+				observed_public_ip='',observed_public_ip_at=NULL,observed_public_ip_changed_at=NULL,public_key=$10,last_seen=$11,enrolled_at=$12,revoked_at=NULL
 			WHERE id=$1`, id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
 			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt)
 		if err == nil {

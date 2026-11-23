@@ -6,276 +6,215 @@
           "application/json": {
             "example": {
               "error": "参数或业务校验失败",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "参数或业务校验失败"
+        "description": "参数或业务校验失败",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error401": {
         "content": {
           "application/json": {
             "example": {
               "error": "凭据无效、停用、到期、撤销或创建者失效",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "凭据无效、停用、到期、撤销或创建者失效"
+        "description": "凭据无效、停用、到期、撤销或创建者失效",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error403": {
         "content": {
           "application/json": {
             "example": {
               "error": "模式、权限、来源或资源授权拒绝",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "模式、权限、来源或资源授权拒绝"
+        "description": "模式、权限、来源或资源授权拒绝",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error404": {
         "content": {
           "application/json": {
             "example": {
               "error": "资源不存在或不可见",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "资源不存在或不可见"
+        "description": "资源不存在或不可见",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error409": {
         "content": {
           "application/json": {
             "example": {
               "error": "并发变更或状态冲突；重新读取并保留草稿",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "并发变更或状态冲突；重新读取并保留草稿"
+        "description": "并发变更或状态冲突；重新读取并保留草稿",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error429": {
         "content": {
           "application/json": {
             "example": {
               "error": "限流；按 Retry-After 有限等待",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "限流；按 Retry-After 有限等待"
+        "description": "限流；按 Retry-After 有限等待",
+        "headers": {
+          "Retry-After": {
+            "description": "认证或注册限流的剩余等待秒数，向上取整。其他繁忙响应可能省略。",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       },
       "error500": {
         "content": {
           "application/json": {
             "example": {
               "error": "内部错误；记录 X-Request-ID 或 request_id",
-              "request_id": "req_example"
+              "request_id": "req_0123456789abcdef"
             },
             "schema": {
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "failure_retention": {
-                  "enum": [
-                    "not_required",
-                    "saved",
-                    "failed"
-                  ],
-                  "type": "string"
-                },
-                "request_id": {
-                  "type": "string"
-                },
-                "stage": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "error"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/APIError"
             }
           }
         },
-        "description": "内部错误；记录 X-Request-ID 或 request_id"
+        "description": "内部错误；记录 X-Request-ID 或 request_id",
+        "headers": {
+          "X-Request-ID": {
+            "description": "面板生成的排错标识，可与 JSON 的 request_id 核对。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
       }
     },
     "schemas": {
+      "APIError": {
+        "properties": {
+          "code": {
+            "description": "稳定错误类别，例如 invalid_input、permission_denied、port_conflict、rate_limited。",
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "failure_retention": {
+            "enum": [
+              "not_required",
+              "saved",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "failure_saved": {
+            "type": "boolean"
+          },
+          "failure_task_id": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "reason": {
+            "description": "业务原因，例如 stale_plan、stale_version、proxy_type_conflict。",
+            "type": "string"
+          },
+          "recovery_engine": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "api_agentConfigWorkspaceResource": {
         "additionalProperties": false,
         "properties": {
@@ -311,6 +250,12 @@
           },
           "deployment": {
             "$ref": "#/components/schemas/store_ConfigManagementDeployment"
+          },
+          "inbound_rows": {
+            "items": {
+              "$ref": "#/components/schemas/api_configInboundRowResource"
+            },
+            "type": "array"
           },
           "inbound_targets": {
             "items": {
@@ -355,6 +300,81 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "api_apiKeyAuthorization": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoints": {
+            "description": "满足此 Key 模式与权限的 METHOD /path 模板。访问具体资源时仍验证归属。",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "凭据的到期时间，null 表示无到期时间。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ip_allowlist": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/core_APIKeyMode"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "description": "当前有效权限。",
+            "items": {
+              "$ref": "#/components/schemas/core_Permission"
+            },
+            "type": "array"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "source_ip": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "prefix",
+          "permissions",
+          "ip_allowlist",
+          "expires_at",
+          "workspace_id",
+          "user_id",
+          "source_ip",
+          "endpoints"
+        ],
         "type": "object"
       },
       "api_clientAccessAddressOption": {
@@ -564,6 +584,52 @@
         },
         "type": "object"
       },
+      "api_configInboundRowResource": {
+        "additionalProperties": false,
+        "properties": {
+          "client_export": {
+            "type": "boolean"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "port_spec": {
+            "type": "string"
+          },
+          "preset_editable": {
+            "type": "boolean"
+          },
+          "projection_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol_label": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "target_tag": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "api_configInboundTargetResource": {
         "additionalProperties": false,
         "properties": {
@@ -601,6 +667,33 @@
           "expected_version": {
             "minimum": 1,
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "api_nodeProxyReport": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "caddy": {
+            "$ref": "#/components/schemas/core_ProxyStatus"
+          },
+          "nginx": {
+            "$ref": "#/components/schemas/core_ProxyStatus"
+          },
+          "status": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "tasks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/core_ProxyTaskState"
+            },
+            "type": "object"
           }
         },
         "type": "object"
@@ -951,6 +1044,8 @@
       },
       "core_Action": {
         "enum": [
+          "check-caddy",
+          "check-nginx",
           "configure-tcp",
           "deploy",
           "disable-bbr",
@@ -958,6 +1053,7 @@
           "import-existing",
           "install",
           "ip-quality",
+          "migrate-tls",
           "network-diagnostic",
           "panel-failure",
           "read-config",
@@ -967,6 +1063,8 @@
           "status",
           "stop",
           "uninstall",
+          "update-caddy",
+          "update-nginx",
           "upgrade-agent",
           "validate"
         ],
@@ -1025,11 +1123,39 @@
             "format": "date-time",
             "type": "string"
           },
+          "managed_proxies": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/core_ProxyStatus"
+            },
+            "type": "object"
+          },
           "metrics": {
             "$ref": "#/components/schemas/core_HostMetrics"
           },
           "name": {
             "type": "string"
+          },
+          "observed_public_ip_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_public_ip_changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "os": {
             "type": "string"
@@ -2044,6 +2170,17 @@
           },
           "location": {
             "$ref": "#/components/schemas/core_ClientIPLocation"
+          },
+          "location_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "protocol": {
             "type": "string"
@@ -3181,10 +3318,26 @@
           "public_ipv4": {
             "type": "string"
           },
+          "public_ipv4_changed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "public_ipv4_observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "public_ipv4_source": {
             "type": "string"
           },
           "public_ipv6": {
+            "type": "string"
+          },
+          "public_ipv6_changed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "public_ipv6_observed_at": {
+            "format": "date-time",
             "type": "string"
           },
           "public_ipv6_source": {
@@ -3777,11 +3930,20 @@
             "format": "date-time",
             "type": "string"
           },
+          "month_undated_received_bytes": {
+            "type": "integer"
+          },
+          "month_undated_sent_bytes": {
+            "type": "integer"
+          },
           "name": {
             "type": "string"
           },
           "peak_receive_bps": {
             "type": "integer"
+          },
+          "peak_sampled": {
+            "type": "boolean"
           },
           "peak_send_bps": {
             "type": "integer"
@@ -3803,6 +3965,15 @@
           },
           "sent_bytes": {
             "type": "integer"
+          },
+          "undated_received_bytes": {
+            "type": "integer"
+          },
+          "undated_sent_bytes": {
+            "type": "integer"
+          },
+          "undated_since": {
+            "type": "string"
           },
           "used_bytes": {
             "type": "integer"
@@ -4118,6 +4289,100 @@
           },
           "port": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "core_ProxyStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "check_attempt_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "check_error": {
+            "type": "string"
+          },
+          "check_request_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "installed": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "listeners": {
+            "type": "integer"
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "newer_installed": {
+            "type": "boolean"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "running": {
+            "type": "string"
+          },
+          "shared_instances": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "update_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "update_error": {
+            "type": "string"
+          },
+          "update_request_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "update_started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "update_state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_ProxyTaskState": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/core_TaskStatus"
           }
         },
         "type": "object"
@@ -4599,6 +4864,80 @@
         },
         "type": "object"
       },
+      "core_TLSMigration": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "default": "read_only",
+            "description": "省略为 read_only；读写模式不自动增加业务权限。",
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/core_TLSMigrationRoute"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "core_TLSMigrationRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_port": {
+            "type": "integer"
+          },
+          "certificate_id": {
+            "type": "string"
+          },
+          "certificate_version": {
+            "type": "integer"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "from": {
+            "type": "string"
+          },
+          "grant_generation": {
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "core_TLSRouteVerification": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "type": "string"
+          },
+          "recovery": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_Task": {
         "additionalProperties": false,
         "properties": {
@@ -4723,6 +5062,16 @@
               "$ref": "#/components/schemas/core_TLSFrontend"
             },
             "type": "array"
+          },
+          "tls_migration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_TLSMigration"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object"
@@ -5730,6 +6079,9 @@
           "snell_client_fingerprint": {
             "type": "string"
           },
+          "snell_mode": {
+            "type": "string"
+          },
           "snell_obfs_host": {
             "type": "string"
           },
@@ -5851,6 +6203,14 @@
             "type": "boolean"
           },
           "tls_mode": {
+            "description": "空或 native 使用原生配置。Xray/Mihomo 独立 VLESS XHTTP TLS 支持 native、nginx、caddy。sing-box TLS WebSocket/HTTPUpgrade 支持托管或 external，HTTP/H2 托管仅 Caddy。托管后端绑定 127.0.0.1，不支持 REALITY；external 自行管理证书。面板证书按引用授权。",
+            "enum": [
+              "",
+              "native",
+              "nginx",
+              "caddy",
+              "external"
+            ],
             "type": "string"
           },
           "tls_public_port": {
@@ -5882,6 +6242,13 @@
           },
           "vless_encryption": {
             "type": "string"
+          },
+          "wireguard_additional_clients": {
+            "description": "首个客户端使用既有 wireguard_client_* 字段。此列表保存额外设备，每个公钥及隧道地址须唯一。修改多客户端入站时传完整列表，空数组移除全部额外设备。",
+            "items": {
+              "$ref": "#/components/schemas/serverconfig_WireGuardClient"
+            },
+            "type": "array"
           },
           "wireguard_allowed_ips": {
             "type": "string"
@@ -6036,10 +6403,43 @@
         },
         "type": "object"
       },
+      "serverconfig_NativeInbound": {
+        "additionalProperties": false,
+        "properties": {
+          "listen": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "port_spec": {
+            "type": "string"
+          },
+          "protocol_label": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "target_tag": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "serverconfig_Protocol": {
         "additionalProperties": false,
         "properties": {
           "badge": {
+            "type": "string"
+          },
+          "credential_hint": {
             "type": "string"
           },
           "credential_label": {
@@ -6059,6 +6459,12 @@
           },
           "docs": {
             "type": "string"
+          },
+          "forward_networks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "group": {
             "type": "string"
@@ -6086,6 +6492,15 @@
           },
           "secondary_credential_label": {
             "type": "string"
+          },
+          "snell_mode": {
+            "type": "string"
+          },
+          "snell_shadow_tls": {
+            "type": "boolean"
+          },
+          "snell_version": {
+            "type": "integer"
           },
           "static_pages": {
             "items": {
@@ -6139,6 +6554,27 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "serverconfig_WireGuardClient": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "preshared_key": {
+            "type": "string"
+          },
+          "private_key": {
+            "type": "string"
+          },
+          "public_key": {
             "type": "string"
           }
         },
@@ -6358,6 +6794,281 @@
           "revision": {
             "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
             "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "store_TLSFrontendMember": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_port": {
+            "type": "integer"
+          },
+          "certificate_id": {
+            "type": "string"
+          },
+          "certificate_version": {
+            "type": "integer"
+          },
+          "config_id": {
+            "type": "string"
+          },
+          "deployed_version": {
+            "type": "integer"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "from": {
+            "type": "string"
+          },
+          "grant_generation": {
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "version": {
+            "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "store_TLSFrontendPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "connection_interruption_possible": {
+            "type": "boolean"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/store_TLSFrontendMember"
+            },
+            "type": "array"
+          },
+          "plan_id": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "public_port": {
+            "type": "integer"
+          },
+          "runtime_checks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "blocked",
+              "runtime_evidence_required"
+            ],
+            "type": "string"
+          },
+          "target_mode": {
+            "enum": [
+              "nginx",
+              "caddy"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "store_TLSFrontendSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_instance_id": {
+            "description": "必填，主实例为空字符串，共享实例为实际 shr_ ID。省略和 null 均拒绝。",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target_mode": {
+            "enum": [
+              "nginx",
+              "caddy"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "store_TLSMigrationOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/store_TLSFrontendPreview"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/store_TLSMigrationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "rolled_back",
+              "recovery_incomplete",
+              "pending",
+              "running",
+              "verifying",
+              "rolling_back",
+              "canceled",
+              "unchanged"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "plan"
+        ],
+        "type": "object"
+      },
+      "store_TLSMigrationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/store_TLSPathResult"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "rolled_back",
+              "recovery_incomplete"
+            ],
+            "type": "string"
+          },
+          "step": {
+            "enum": [
+              "preflight",
+              "handoff",
+              "verify",
+              "restore",
+              "complete"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "step",
+          "paths"
+        ],
+        "type": "object"
+      },
+      "store_TLSPathResult": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "enum": [
+              "unknown",
+              "failed",
+              "succeeded"
+            ],
+            "type": "string"
+          },
+          "config_id": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "recovery": {
+            "enum": [
+              "unknown",
+              "failed",
+              "succeeded"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate",
+          "recovery",
+          "config_id",
+          "instance_id",
+          "engine",
+          "tag",
+          "path"
+        ],
+        "type": "object"
+      },
+      "store_TLSPortSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "public_port": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "unconfirmed",
+              "partial",
+              "visible_in_use",
+              "observed_free"
+            ],
+            "type": "string"
+          },
+          "visible_routes": {
             "type": "integer"
           }
         },
@@ -6869,7 +7580,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -6943,7 +7654,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -8249,6 +8966,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "选择此入站内的 WireGuard 客户端公钥（标准 Base64，按 URL 编码），仅导出该设备的配置。",
+            "in": "query",
+            "name": "wireguard_client",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8257,17 +8983,13 @@
               "application/json": {
                 "example": {
                   "content": "mixed-port: 21001",
-                  "format": "example",
+                  "format": null,
                   "source": null
                 },
                 "schema": {
                   "properties": {
-                    "content": {
-                      "type": "string"
-                    },
-                    "format": {
-                      "type": "string"
-                    },
+                    "content": {},
+                    "format": {},
                     "source": {}
                   },
                   "type": "object"
@@ -8601,7 +9323,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -8675,7 +9397,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -9064,7 +9792,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -9142,7 +9870,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -9355,7 +10091,7 @@
                 ],
                 "expected_instance_id": "example",
                 "install_if_missing": false,
-                "intent": "configure-tcp",
+                "intent": "check-caddy",
                 "outbound_tag": "example",
                 "replacement_tag": "example",
                 "version": 1
@@ -9424,7 +10160,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -9502,7 +10238,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 },
                 "schema": {
@@ -9611,7 +10355,7 @@
                 "inbound_port": 1,
                 "inbound_tag": "example",
                 "install_if_missing": false,
-                "intent": "configure-tcp",
+                "intent": "check-caddy",
                 "operation": "example",
                 "preset_base": "example",
                 "replacement_tag": "example",
@@ -9699,7 +10443,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -9773,7 +10517,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -10004,6 +10754,7 @@
           "content": {
             "application/json": {
               "example": {
+                "add_wireguard_client": false,
                 "generate_port": false,
                 "input": {
                   "block_mainland_destination": false,
@@ -10058,6 +10809,7 @@
                   "reality_target": "example",
                   "secondary_credential": "example",
                   "snell_client_fingerprint": "example",
+                  "snell_mode": "example",
                   "snell_obfs_host": "example",
                   "snell_obfs_mode": "example",
                   "snell_reuse": false,
@@ -10098,7 +10850,7 @@
                   "tls_client_alpn": "example",
                   "tls_client_certificate": "example",
                   "tls_enabled": false,
-                  "tls_mode": "example",
+                  "tls_mode": "",
                   "tls_public_port": 1,
                   "tls_server_name": "example",
                   "tls_static_html": "example",
@@ -10109,6 +10861,15 @@
                   "username": "example",
                   "vless_decryption": "example",
                   "vless_encryption": "example",
+                  "wireguard_additional_clients": [
+                    {
+                      "address": null,
+                      "email": null,
+                      "preshared_key": null,
+                      "private_key": null,
+                      "public_key": null
+                    }
+                  ],
                   "wireguard_allowed_ips": "example",
                   "wireguard_client_address": "example",
                   "wireguard_client_private_key": "example",
@@ -10134,6 +10895,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "add_wireguard_client": {
+                    "description": "传入当前 WireGuard input，在草稿中追加一个独立客户端，保留监听参数和已有密钥。",
+                    "type": "boolean"
+                  },
                   "generate_port": {
                     "type": "boolean"
                   },
@@ -10214,6 +10979,7 @@
                   "reality_target": "example",
                   "secondary_credential": "example",
                   "snell_client_fingerprint": "example",
+                  "snell_mode": "example",
                   "snell_obfs_host": "example",
                   "snell_obfs_mode": "example",
                   "snell_reuse": false,
@@ -10254,7 +11020,7 @@
                   "tls_client_alpn": "example",
                   "tls_client_certificate": "example",
                   "tls_enabled": false,
-                  "tls_mode": "example",
+                  "tls_mode": "",
                   "tls_public_port": 1,
                   "tls_server_name": "example",
                   "tls_static_html": "example",
@@ -10265,6 +11031,15 @@
                   "username": "example",
                   "vless_decryption": "example",
                   "vless_encryption": "example",
+                  "wireguard_additional_clients": [
+                    {
+                      "address": "example",
+                      "email": "example",
+                      "preshared_key": "example",
+                      "private_key": "example",
+                      "public_key": "example"
+                    }
+                  ],
                   "wireguard_allowed_ips": "example",
                   "wireguard_client_address": "example",
                   "wireguard_client_private_key": "example",
@@ -10347,7 +11122,7 @@
     },
     "/api/v1/agents/{id}/configs/{engine}/server-inbounds": {
       "post": {
-        "description": "保存当前授权工作区配置，必要时同时受理异步任务；按返回配置和任务 ID 查询结果。snapshot 引用还要求 tasks.read，不能引用他人配置/证书。",
+        "description": "add 创建入站，modify 编辑现有入站，delete 删除入站。validate 和 deploy 均保存配置并受理异步任务。按 task.id 查询 /tasks/{id}，终态与已部署版本需分别核对。",
         "operationId": "saveServerInbound_api_v1_agents_{id}_configs_{engine}_server-inbounds",
         "parameters": [
           {
@@ -10375,142 +11150,11 @@
           "content": {
             "application/json": {
               "example": {
-                "description": "example",
-                "disable_mutable_api": false,
-                "expected_instance_id": "example",
+                "expected_instance_id": "",
                 "expected_version": 1,
-                "fragment": "example",
-                "input": {
-                  "block_mainland_destination": false,
-                  "block_mainland_source": false,
-                  "block_udp_443": false,
-                  "certificate_path": "example",
-                  "client_address": "example",
-                  "client_host": "example",
-                  "client_port": 1,
-                  "credential": "example",
-                  "flow": "example",
-                  "listen": "example",
-                  "listener_proxy": "example",
-                  "listener_routing_mark": 1,
-                  "listener_rule": "example",
-                  "method": "example",
-                  "mieru_custom_pattern": {
-                    "low_entropy_mode": 1,
-                    "mask_rotation": "example",
-                    "max_sleep_ms": 1,
-                    "nonce_apply_to_all_udp": false,
-                    "nonce_fixed_hex": "example",
-                    "nonce_max_len": 1,
-                    "nonce_min_len": 1,
-                    "nonce_type": "example",
-                    "padding_end": 1,
-                    "padding_middle": 1,
-                    "tcp_fragment": false
-                  },
-                  "mieru_traffic_pattern": "example",
-                  "mieru_transport": "example",
-                  "network": "example",
-                  "openvpn_address": "example",
-                  "openvpn_client_ca_path": "example",
-                  "openvpn_password": "example",
-                  "openvpn_server_certificate_path": "example",
-                  "openvpn_server_key_path": "example",
-                  "openvpn_username": "example",
-                  "panel_certificate_id": "example",
-                  "port": 1,
-                  "private_key_path": "example",
-                  "protocol": "example",
-                  "reality_enabled": false,
-                  "reality_min_client_ver": "example",
-                  "reality_mldsa65_seed": "example",
-                  "reality_mldsa65_verify": "example",
-                  "reality_private_key": "example",
-                  "reality_public_key": "example",
-                  "reality_server_name": "example",
-                  "reality_server_names": "example",
-                  "reality_short_id": "example",
-                  "reality_target": "example",
-                  "secondary_credential": "example",
-                  "snell_client_fingerprint": "example",
-                  "snell_obfs_host": "example",
-                  "snell_obfs_mode": "example",
-                  "snell_reuse": false,
-                  "snell_shadow_tls_alpn": "example",
-                  "snell_shadow_tls_handshake": "example",
-                  "snell_shadow_tls_password": "example",
-                  "snell_shadow_tls_proxy": "example",
-                  "snell_shadow_tls_user": "example",
-                  "snell_shadow_tls_version": 1,
-                  "snell_udp": false,
-                  "snell_version": 1,
-                  "source_only": false,
-                  "ss_rust_dns": "example",
-                  "ss_rust_ipv6_first": false,
-                  "ss_rust_outbound_bind_addr": "example",
-                  "sudoku_client_key": "example",
-                  "sudoku_enable_pure_downlink": false,
-                  "sudoku_fallback": "example",
-                  "sudoku_handshake_timeout": 1,
-                  "sudoku_httpmask_enabled": false,
-                  "sudoku_httpmask_host": "example",
-                  "sudoku_httpmask_mode": "example",
-                  "sudoku_httpmask_path_root": "example",
-                  "sudoku_httpmask_tls": false,
-                  "sudoku_multiplex": "example",
-                  "sudoku_padding_max": 1,
-                  "sudoku_padding_min": 1,
-                  "sudoku_table_type": "example",
-                  "tag": "example",
-                  "tailscale_auth_key": "example",
-                  "tailscale_control_url": "example",
-                  "tailscale_hostname": "example",
-                  "tailscale_state_directory": "example",
-                  "target_address": "example",
-                  "target_port": 1,
-                  "tls_acme_email": "example",
-                  "tls_alpn": "example",
-                  "tls_client_alpn": "example",
-                  "tls_client_certificate": "example",
-                  "tls_enabled": false,
-                  "tls_mode": "example",
-                  "tls_public_port": 1,
-                  "tls_server_name": "example",
-                  "tls_static_html": "example",
-                  "transport": "example",
-                  "transport_host": "example",
-                  "transport_http_method": "example",
-                  "transport_path": "example",
-                  "username": "example",
-                  "vless_decryption": "example",
-                  "vless_encryption": "example",
-                  "wireguard_allowed_ips": "example",
-                  "wireguard_client_address": "example",
-                  "wireguard_client_private_key": "example",
-                  "wireguard_client_public_key": "example",
-                  "wireguard_keepalive": 1,
-                  "wireguard_mtu": 1,
-                  "wireguard_preshared_key": "example",
-                  "wireguard_server_address": "example",
-                  "wireguard_server_private_key": "example",
-                  "wireguard_server_public_key": "example",
-                  "xhttp_backend_port": 1,
-                  "xhttp_cdn": "example",
-                  "xhttp_extra": "example",
-                  "xhttp_mode": "example",
-                  "xhttp_server_extra": "example",
-                  "xhttp_tls_address": "example",
-                  "xhttp_tls_client_port": 1,
-                  "xhttp_tls_host": "example",
-                  "xhttp_tls_port": 1
-                },
-                "install_if_missing": false,
-                "intent": "example",
-                "name": "example",
-                "operation": "example",
-                "original_tag": "example",
-                "preserve_ss_rust_globals": false,
-                "snapshot_task_id": "example"
+                "intent": "validate",
+                "operation": "delete",
+                "original_tag": "retired-listener"
               },
               "schema": {
                 "additionalProperties": false,
@@ -10522,18 +11166,15 @@
                     "type": "boolean"
                   },
                   "expected_instance_id": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "必须提供实际目标实例；配置任务主实例用空字符串，共享实例用实际 shr_… ID；不自动选择。"
+                    "description": "空字符串校验主实例，shr_ ID 校验共享实例。旧接口省略或 null 时按授权隐式选择。显式 ID 不匹配返回 409。",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "expected_version": {
-                    "minimum": 1,
+                    "description": "首次创建为 0。已有配置中新增、修改或删除均提交当前保存版本，过期返回 409。",
+                    "minimum": 0,
                     "type": "integer"
                   },
                   "fragment": {
@@ -10544,10 +11185,19 @@
                       {
                         "type": "null"
                       }
-                    ]
+                    ],
+                    "description": "仅 modify 允许。原生片段替换，要求 original_tag，不与预设 input 同时提交。"
                   },
                   "input": {
-                    "$ref": "#/components/schemas/serverconfig_Input"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/serverconfig_Input"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "add 或结构化 modify 使用完整预设输入；凭据必须通过协议校验。"
                   },
                   "install_if_missing": {
                     "default": false,
@@ -10555,15 +11205,26 @@
                     "type": "boolean"
                   },
                   "intent": {
+                    "description": "两种操作均保存配置、创建版本和任务。validate 校验候选，deploy 校验并尝试部署。",
+                    "enum": [
+                      "validate",
+                      "deploy"
+                    ],
                     "type": "string"
                   },
                   "name": {
                     "type": "string"
                   },
                   "operation": {
+                    "enum": [
+                      "add",
+                      "modify",
+                      "delete"
+                    ],
                     "type": "string"
                   },
                   "original_tag": {
+                    "description": "modify 和 delete 提供当前唯一的目标标识；add 省略或为空。",
                     "type": "string"
                   },
                   "preserve_ss_rust_globals": {
@@ -10573,6 +11234,11 @@
                     "type": "string"
                   }
                 },
+                "required": [
+                  "operation",
+                  "intent",
+                  "expected_version"
+                ],
                 "type": "object"
               }
             }
@@ -10597,7 +11263,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -10671,7 +11337,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -10852,6 +11524,442 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/migrate": {
+      "post": {
+        "description": "提供预览的 plan_id、自选 tsk_ 加 16 位十六进制关联标识，及相同的实例、版本和模式。202 表示已受理。端口交接可能中断长连接和新连接，按节点 tls-migrations/{task} 查询各路径的真实数据往返和恢复结果。仅整组通过才发布新版本。无变化返回 unchanged。",
+        "operationId": "submitTLSMigration_api_v1_agents_{id}_configs_{engine}_server-inbounds_{tag}_tls-frontend_migrate",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "tag",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "expected_instance_id": "",
+                "expected_version": 1,
+                "plan_id": "0000000000000000000000000000000000000000000000000000000000000000",
+                "target_mode": "caddy",
+                "task_id": "tsk_0123456789abcdef"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_instance_id": {
+                    "description": "必填，主实例为空字符串，共享实例为实际 shr_ ID。省略和 null 均拒绝。",
+                    "type": "string"
+                  },
+                  "expected_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "plan_id": {
+                    "description": "预览返回的计划标识。",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "target_mode": {
+                    "enum": [
+                      "nginx",
+                      "caddy"
+                    ],
+                    "type": "string"
+                  },
+                  "task_id": {
+                    "description": "调用方预先保存的操作 ID，用于断线查询与重复提交核对。",
+                    "pattern": "^tsk_[0-9a-f]{16}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target_mode",
+                  "expected_version",
+                  "expected_instance_id",
+                  "plan_id",
+                  "task_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "plan": {
+                    "agent_id": "agt_0000000000000001",
+                    "blockers": [],
+                    "connection_interruption_possible": true,
+                    "members": [
+                      {
+                        "backend_port": 23456,
+                        "certificate_id": "crt_0000000000000001",
+                        "certificate_version": 1,
+                        "config_id": "cfg_0000000000000001",
+                        "deployed_version": 1,
+                        "domain": "edge.example.test",
+                        "engine": "xray",
+                        "from": "nginx",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "tag": "site",
+                        "to": "caddy",
+                        "transport": "xhttp",
+                        "version": 1
+                      }
+                    ],
+                    "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "public_port": 443,
+                    "runtime_checks": [
+                      "agent_listener_ownership_ipv4_ipv6",
+                      "proxy_config_and_service",
+                      "original_client_round_trip",
+                      "restore_original_paths"
+                    ],
+                    "status": "runtime_evidence_required",
+                    "target_mode": "caddy"
+                  },
+                  "result": {
+                    "paths": [
+                      {
+                        "candidate": "succeeded",
+                        "config_id": "cfg_0000000000000001",
+                        "engine": "xray",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "recovery": "unknown",
+                        "tag": "site"
+                      }
+                    ],
+                    "state": "succeeded",
+                    "step": "complete"
+                  },
+                  "state": "succeeded",
+                  "task_id": "tsk_0123456789abcdef"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSMigrationOperation"
+                }
+              }
+            },
+            "description": "目标已生效，或复用已有终态操作。"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "plan": {
+                    "agent_id": "agt_0000000000000001",
+                    "blockers": [],
+                    "connection_interruption_possible": true,
+                    "members": [
+                      {
+                        "backend_port": 23456,
+                        "certificate_id": "crt_0000000000000001",
+                        "certificate_version": 1,
+                        "config_id": "cfg_0000000000000001",
+                        "deployed_version": 1,
+                        "domain": "edge.example.test",
+                        "engine": "xray",
+                        "from": "nginx",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "tag": "site",
+                        "to": "caddy",
+                        "transport": "xhttp",
+                        "version": 1
+                      }
+                    ],
+                    "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "public_port": 443,
+                    "runtime_checks": [
+                      "agent_listener_ownership_ipv4_ipv6",
+                      "proxy_config_and_service",
+                      "original_client_round_trip",
+                      "restore_original_paths"
+                    ],
+                    "status": "runtime_evidence_required",
+                    "target_mode": "caddy"
+                  },
+                  "state": "pending",
+                  "task_id": "tsk_0123456789abcdef"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSMigrationOperation"
+                }
+              }
+            },
+            "description": "已受理。根据 Location 查询原操作。",
+            "headers": {
+              "Location": {
+                "description": "同源迁移状态地址，查询需要配置读取与任务读取权限。",
+                "required": true,
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "迁移已预览的 TLS 公网端口组",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "agent-config.write",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "agent-config.write",
+            "tasks.execute"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/configs/{engine}/server-inbounds/{tag}/tls-frontend/preview": {
+      "post": {
+        "description": "按唯一入站定位公网端口。只读返回可见成员的当前及目标模式、保存与部署版本、阻碍和待执行阶段核验项。无保存、签发、安装或服务变更。",
+        "operationId": "previewTLSFrontend_api_v1_agents_{id}_configs_{engine}_server-inbounds_{tag}_tls-frontend_preview",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "engine",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "tag",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "expected_instance_id": "",
+                "expected_version": 1,
+                "target_mode": "caddy"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_instance_id": {
+                    "description": "必填，主实例为空字符串，共享实例为实际 shr_ ID。省略和 null 均拒绝。",
+                    "type": "string"
+                  },
+                  "expected_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "target_mode": {
+                    "enum": [
+                      "nginx",
+                      "caddy"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target_mode",
+                  "expected_version",
+                  "expected_instance_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "agent_id": "agt_0000000000000001",
+                  "blockers": [],
+                  "connection_interruption_possible": true,
+                  "members": [
+                    {
+                      "backend_port": 23456,
+                      "certificate_id": "crt_0000000000000001",
+                      "certificate_version": 1,
+                      "config_id": "cfg_0000000000000001",
+                      "deployed_version": 1,
+                      "domain": "edge.example.test",
+                      "engine": "xray",
+                      "from": "nginx",
+                      "instance_id": "",
+                      "path": "/stream",
+                      "tag": "site",
+                      "to": "caddy",
+                      "transport": "xhttp",
+                      "version": 1
+                    }
+                  ],
+                  "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "public_port": 443,
+                  "runtime_checks": [
+                    "agent_listener_ownership_ipv4_ipv6",
+                    "proxy_config_and_service",
+                    "original_client_round_trip",
+                    "restore_original_paths"
+                  ],
+                  "status": "runtime_evidence_required",
+                  "target_mode": "caddy"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSFrontendPreview"
+                }
+              }
+            },
+            "description": "预览包含保存版本、部署版本、阻碍及待 Agent 核实项。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "预览同一节点公网端口的 TLS 前端变更",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/agents/{id}/configs/{engine}/source": {
       "post": {
         "description": "保存当前授权工作区配置，必要时同时受理异步任务；按返回配置和任务 ID 查询结果。snapshot 引用还要求 tasks.read，不能引用他人配置/证书。",
@@ -10893,6 +12001,7 @@
                 "intent": "example",
                 "name": "example",
                 "owner_id": "example",
+                "snapshot_task_id": "example",
                 "updated_at": "2026-11-10T12:00:00Z",
                 "version": 1
               },
@@ -10945,6 +12054,9 @@
                     "description": "身份与资源归属由服务端决定；API Key 不得修改账户身份或指定其他所有者。",
                     "type": "string"
                   },
+                  "snapshot_task_id": {
+                    "type": "string"
+                  },
                   "updated_at": {
                     "format": "date-time",
                     "type": "string"
@@ -10979,7 +12091,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -11053,7 +12165,13 @@
                         "tag": null,
                         "transport": null
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": null,
+                      "port": null,
+                      "routes": null
+                    }
                   }
                 },
                 "schema": {
@@ -11164,6 +12282,7 @@
                   "id": "resource_example",
                   "labels": {},
                   "last_seen": "2026-11-10T12:00:00Z",
+                  "managed_proxies": {},
                   "metrics": {
                     "bbr": {
                       "available": null,
@@ -11210,11 +12329,17 @@
                     "network_tx_bytes": 1,
                     "observed_public_ip": "example",
                     "public_ipv4": "example",
+                    "public_ipv4_changed_at": "2026-11-10T12:00:00Z",
+                    "public_ipv4_observed_at": "2026-11-10T12:00:00Z",
                     "public_ipv4_source": "example",
                     "public_ipv6": "example",
+                    "public_ipv6_changed_at": "2026-11-10T12:00:00Z",
+                    "public_ipv6_observed_at": "2026-11-10T12:00:00Z",
                     "public_ipv6_source": "example"
                   },
                   "name": "example",
+                  "observed_public_ip_at": "2026-11-10T12:00:00Z",
+                  "observed_public_ip_changed_at": "2026-11-10T12:00:00Z",
                   "os": "example",
                   "region_code": "example",
                   "runtime": {},
@@ -11380,6 +12505,7 @@
                     "id": "resource_example",
                     "labels": {},
                     "last_seen": "2026-11-10T12:00:00Z",
+                    "managed_proxies": {},
                     "metrics": {
                       "bbr": null,
                       "clock_sync": null,
@@ -11404,11 +12530,17 @@
                       "network_tx_bytes": 1,
                       "observed_public_ip": "example",
                       "public_ipv4": "example",
+                      "public_ipv4_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv4_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv4_source": "example",
                       "public_ipv6": "example",
+                      "public_ipv6_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv6_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv6_source": "example"
                     },
                     "name": "example",
+                    "observed_public_ip_at": "2026-11-10T12:00:00Z",
+                    "observed_public_ip_changed_at": "2026-11-10T12:00:00Z",
                     "os": "example",
                     "region_code": "example",
                     "runtime": {},
@@ -11471,6 +12603,21 @@
                     "task_id": "example",
                     "task_status": "example"
                   },
+                  "inbound_rows": [
+                    {
+                      "client_export": false,
+                      "listen": "example",
+                      "network": "example",
+                      "port": 1,
+                      "port_spec": "example",
+                      "preset_editable": false,
+                      "projection_index": 1,
+                      "protocol_label": "example",
+                      "section": "example",
+                      "tag": "example",
+                      "target_tag": "example"
+                    }
+                  ],
                   "inbound_targets": [
                     {
                       "kind": "example",
@@ -11520,6 +12667,7 @@
                       "reality_target": "example",
                       "secondary_credential": "example",
                       "snell_client_fingerprint": "example",
+                      "snell_mode": "example",
                       "snell_obfs_host": "example",
                       "snell_obfs_mode": "example",
                       "snell_reuse": false,
@@ -11560,7 +12708,7 @@
                       "tls_client_alpn": "example",
                       "tls_client_certificate": "example",
                       "tls_enabled": false,
-                      "tls_mode": "example",
+                      "tls_mode": "",
                       "tls_public_port": 1,
                       "tls_server_name": "example",
                       "tls_static_html": "example",
@@ -11571,6 +12719,9 @@
                       "username": "example",
                       "vless_decryption": "example",
                       "vless_encryption": "example",
+                      "wireguard_additional_clients": [
+                        null
+                      ],
                       "wireguard_allowed_ips": "example",
                       "wireguard_client_address": "example",
                       "wireguard_client_private_key": "example",
@@ -11617,12 +12768,16 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
                       "default_tls": false,
                       "description": "example",
                       "docs": "example",
+                      "forward_networks": [
+                        "example"
+                      ],
                       "group": "example",
                       "ignores_username": false,
                       "key": "example",
@@ -11633,6 +12788,9 @@
                       "port_forward": false,
                       "requires_tls": false,
                       "secondary_credential_label": "example",
+                      "snell_mode": "example",
+                      "snell_shadow_tls": false,
+                      "snell_version": 1,
                       "static_pages": [
                         null
                       ],
@@ -11777,6 +12935,7 @@
                     "id": "resource_example",
                     "labels": {},
                     "last_seen": "2026-11-10T12:00:00Z",
+                    "managed_proxies": {},
                     "metrics": {
                       "bbr": null,
                       "clock_sync": null,
@@ -11801,11 +12960,17 @@
                       "network_tx_bytes": 1,
                       "observed_public_ip": "example",
                       "public_ipv4": "example",
+                      "public_ipv4_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv4_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv4_source": "example",
                       "public_ipv6": "example",
+                      "public_ipv6_changed_at": "2026-11-10T12:00:00Z",
+                      "public_ipv6_observed_at": "2026-11-10T12:00:00Z",
                       "public_ipv6_source": "example"
                     },
                     "name": "example",
+                    "observed_public_ip_at": "2026-11-10T12:00:00Z",
+                    "observed_public_ip_changed_at": "2026-11-10T12:00:00Z",
                     "os": "example",
                     "region_code": "example",
                     "runtime": {},
@@ -11868,6 +13033,21 @@
                     "task_id": "example",
                     "task_status": "example"
                   },
+                  "inbound_rows": [
+                    {
+                      "client_export": false,
+                      "listen": "example",
+                      "network": "example",
+                      "port": 1,
+                      "port_spec": "example",
+                      "preset_editable": false,
+                      "projection_index": 1,
+                      "protocol_label": "example",
+                      "section": "example",
+                      "tag": "example",
+                      "target_tag": "example"
+                    }
+                  ],
                   "inbound_targets": [
                     {
                       "kind": "example",
@@ -11917,6 +13097,7 @@
                       "reality_target": "example",
                       "secondary_credential": "example",
                       "snell_client_fingerprint": "example",
+                      "snell_mode": "example",
                       "snell_obfs_host": "example",
                       "snell_obfs_mode": "example",
                       "snell_reuse": false,
@@ -11957,7 +13138,7 @@
                       "tls_client_alpn": "example",
                       "tls_client_certificate": "example",
                       "tls_enabled": false,
-                      "tls_mode": "example",
+                      "tls_mode": "",
                       "tls_public_port": 1,
                       "tls_server_name": "example",
                       "tls_static_html": "example",
@@ -11968,6 +13149,9 @@
                       "username": "example",
                       "vless_decryption": "example",
                       "vless_encryption": "example",
+                      "wireguard_additional_clients": [
+                        null
+                      ],
                       "wireguard_allowed_ips": "example",
                       "wireguard_client_address": "example",
                       "wireguard_client_private_key": "example",
@@ -12014,12 +13198,16 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
                       "default_tls": false,
                       "description": "example",
                       "docs": "example",
+                      "forward_networks": [
+                        "example"
+                      ],
                       "group": "example",
                       "ignores_username": false,
                       "key": "example",
@@ -12030,6 +13218,9 @@
                       "port_forward": false,
                       "requires_tls": false,
                       "secondary_credential_label": "example",
+                      "snell_mode": "example",
+                      "snell_shadow_tls": false,
+                      "snell_version": 1,
                       "static_pages": [
                         null
                       ],
@@ -12574,6 +13765,500 @@
           "any": false,
           "permissions": [
             "agents.manage"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/proxies": {
+      "get": {
+        "description": "读取节点已上报的运行版本、磁盘版本、官方候选、检查时间和影响范围。supported=false 表示需升级 QAgent。读取缓存不会联系上游。",
+        "operationId": "getManagedProxies_api_v1_agents_{id}_proxies",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "agent_id": "example",
+                  "caddy": {
+                    "check_attempt_at": "2026-11-10T12:00:00Z",
+                    "check_error": "example",
+                    "check_request_at": "2026-11-10T12:00:00Z",
+                    "checked_at": "2026-11-10T12:00:00Z",
+                    "installed": "example",
+                    "latest": "example",
+                    "listeners": 1,
+                    "managed": false,
+                    "newer_installed": false,
+                    "observed_at": "2026-11-10T12:00:00Z",
+                    "outcome": "example",
+                    "running": "example",
+                    "shared_instances": 1,
+                    "state": "example",
+                    "update_at": "2026-11-10T12:00:00Z",
+                    "update_error": "example",
+                    "update_request_at": "2026-11-10T12:00:00Z",
+                    "update_started_at": "2026-11-10T12:00:00Z",
+                    "update_state": "example"
+                  },
+                  "nginx": {
+                    "check_attempt_at": "2026-11-10T12:00:00Z",
+                    "check_error": "example",
+                    "check_request_at": "2026-11-10T12:00:00Z",
+                    "checked_at": "2026-11-10T12:00:00Z",
+                    "installed": "example",
+                    "latest": "example",
+                    "listeners": 1,
+                    "managed": false,
+                    "newer_installed": false,
+                    "observed_at": "2026-11-10T12:00:00Z",
+                    "outcome": "example",
+                    "running": "example",
+                    "shared_instances": 1,
+                    "state": "example",
+                    "update_at": "2026-11-10T12:00:00Z",
+                    "update_error": "example",
+                    "update_request_at": "2026-11-10T12:00:00Z",
+                    "update_started_at": "2026-11-10T12:00:00Z",
+                    "update_state": "example"
+                  },
+                  "status": "example",
+                  "supported": false,
+                  "tasks": {}
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/api_nodeProxyReport"
+                }
+              }
+            },
+            "description": "节点代理上报"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "读取节点 Nginx/Caddy 状态",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/proxies/{component}/check": {
+      "post": {
+        "description": "component 可选 nginx、caddy。创建版本查询任务，仅需节点读取权限。API Key 创建任务须使用读写模式。检查不改变节点服务。",
+        "operationId": "checkManagedProxy_api_v1_agents_{id}_proxies_{component}_check",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "enum": [
+                "nginx",
+                "caddy"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "action": "check-caddy",
+                  "agent_id": "example",
+                  "attempt": 1,
+                  "certificates": [
+                    {
+                      "certificate": "example",
+                      "id": "resource_example",
+                      "private_key": "example",
+                      "version": 1
+                    }
+                  ],
+                  "cnip_source": {
+                    "format": "example",
+                    "ipv4_url": "example",
+                    "ipv6_url": "example"
+                  },
+                  "config_content": "example",
+                  "config_id": "example",
+                  "config_version": 1,
+                  "core_source": "example",
+                  "core_version": "example",
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "engine": "mihomo",
+                  "error": "example",
+                  "existing_source_id": "example",
+                  "finished_at": "2026-11-10T12:00:00Z",
+                  "id": "resource_example",
+                  "import_source_digest": "example",
+                  "install_if_missing": false,
+                  "lease_id": "example",
+                  "mainland_access_policies": [
+                    {
+                      "agent_id": "example",
+                      "block_mainland_destination": false,
+                      "block_mainland_source": false,
+                      "cnip_prefixes": [
+                        "example"
+                      ],
+                      "config_version": 1,
+                      "engine": "mihomo",
+                      "kind": "example",
+                      "port": 1,
+                      "tag": "example"
+                    }
+                  ],
+                  "output": "example",
+                  "reused": false,
+                  "shared_instance": false,
+                  "shared_traffic_id": "example",
+                  "started_at": "2026-11-10T12:00:00Z",
+                  "status": "pending",
+                  "submission_id": "example",
+                  "tcp_settings": {},
+                  "tls_frontends": [
+                    {
+                      "acme_email": "example",
+                      "automatic_certificate": false,
+                      "backend_port": 1,
+                      "certificate": "example",
+                      "certificate_path": "example",
+                      "domain": "example",
+                      "host": "example",
+                      "local_only": false,
+                      "method": "example",
+                      "mode": "example",
+                      "path": "example",
+                      "private_key": "example",
+                      "private_key_path": "example",
+                      "public_port": 1,
+                      "reality_name": "example",
+                      "reality_names": [
+                        "example"
+                      ],
+                      "shared_ingress_generation": 1,
+                      "static_html": "example",
+                      "tag": "example",
+                      "transport": "example"
+                    }
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_Task"
+                }
+              }
+            },
+            "description": "已受理或复用的任务"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "检查节点 Nginx/Caddy 官方版本",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/proxies/{component}/update": {
+      "post": {
+        "description": "component 可选 nginx、caddy。更新前读取托管监听和共享实例数量。切换可能短暂断连。通过 GET /tasks/{id} 跟踪任务，再读取节点代理状态核对运行版本。",
+        "operationId": "updateManagedProxy_api_v1_agents_{id}_proxies_{component}_update",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "enum": [
+                "nginx",
+                "caddy"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "action": "check-caddy",
+                  "agent_id": "example",
+                  "attempt": 1,
+                  "certificates": [
+                    {
+                      "certificate": "example",
+                      "id": "resource_example",
+                      "private_key": "example",
+                      "version": 1
+                    }
+                  ],
+                  "cnip_source": {
+                    "format": "example",
+                    "ipv4_url": "example",
+                    "ipv6_url": "example"
+                  },
+                  "config_content": "example",
+                  "config_id": "example",
+                  "config_version": 1,
+                  "core_source": "example",
+                  "core_version": "example",
+                  "created_at": "2026-11-10T12:00:00Z",
+                  "engine": "mihomo",
+                  "error": "example",
+                  "existing_source_id": "example",
+                  "finished_at": "2026-11-10T12:00:00Z",
+                  "id": "resource_example",
+                  "import_source_digest": "example",
+                  "install_if_missing": false,
+                  "lease_id": "example",
+                  "mainland_access_policies": [
+                    {
+                      "agent_id": "example",
+                      "block_mainland_destination": false,
+                      "block_mainland_source": false,
+                      "cnip_prefixes": [
+                        "example"
+                      ],
+                      "config_version": 1,
+                      "engine": "mihomo",
+                      "kind": "example",
+                      "port": 1,
+                      "tag": "example"
+                    }
+                  ],
+                  "output": "example",
+                  "reused": false,
+                  "shared_instance": false,
+                  "shared_traffic_id": "example",
+                  "started_at": "2026-11-10T12:00:00Z",
+                  "status": "pending",
+                  "submission_id": "example",
+                  "tcp_settings": {},
+                  "tls_frontends": [
+                    {
+                      "acme_email": "example",
+                      "automatic_certificate": false,
+                      "backend_port": 1,
+                      "certificate": "example",
+                      "certificate_path": "example",
+                      "domain": "example",
+                      "host": "example",
+                      "local_only": false,
+                      "method": "example",
+                      "mode": "example",
+                      "path": "example",
+                      "private_key": "example",
+                      "private_key_path": "example",
+                      "public_port": 1,
+                      "reality_name": "example",
+                      "reality_names": [
+                        "example"
+                      ],
+                      "shared_ingress_generation": 1,
+                      "static_html": "example",
+                      "tag": "example",
+                      "transport": "example"
+                    }
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/core_Task"
+                }
+              }
+            },
+            "description": "已受理或复用的任务"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "更新节点托管 Nginx/Caddy",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "write",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "agents.manage",
+            "tasks.execute"
+          ],
+          "write": true
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agents.read",
+            "agents.manage",
+            "tasks.execute"
           ]
         },
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
@@ -13316,6 +15001,247 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       }
     },
+    "/api/v1/agents/{id}/tls-migrations/{task}": {
+      "get": {
+        "description": "result.paths 每行含配置 ID、实例 ID、引擎、入站标识和路径，与 plan.members 同序。succeeded 表示该路径已核实数据往返及后端归属。unknown 表示证据不足。rolled_back 要求原路径全部通过；recovery_incomplete 需要核对 step 和各路径。",
+        "operationId": "getTLSMigration_api_v1_agents_{id}_tls-migrations_{task}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "plan": {
+                    "agent_id": "agt_0000000000000001",
+                    "blockers": [],
+                    "connection_interruption_possible": true,
+                    "members": [
+                      {
+                        "backend_port": 23456,
+                        "certificate_id": "crt_0000000000000001",
+                        "certificate_version": 1,
+                        "config_id": "cfg_0000000000000001",
+                        "deployed_version": 1,
+                        "domain": "edge.example.test",
+                        "engine": "xray",
+                        "from": "nginx",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "tag": "site",
+                        "to": "caddy",
+                        "transport": "xhttp",
+                        "version": 1
+                      }
+                    ],
+                    "plan_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "public_port": 443,
+                    "runtime_checks": [
+                      "agent_listener_ownership_ipv4_ipv6",
+                      "proxy_config_and_service",
+                      "original_client_round_trip",
+                      "restore_original_paths"
+                    ],
+                    "status": "runtime_evidence_required",
+                    "target_mode": "caddy"
+                  },
+                  "result": {
+                    "code": "business_validation_failed",
+                    "paths": [
+                      {
+                        "candidate": "failed",
+                        "config_id": "cfg_0000000000000001",
+                        "engine": "xray",
+                        "instance_id": "",
+                        "path": "/stream",
+                        "recovery": "succeeded",
+                        "tag": "site"
+                      }
+                    ],
+                    "state": "rolled_back",
+                    "step": "restore"
+                  },
+                  "state": "rolled_back",
+                  "task_id": "tsk_0123456789abcdef"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSMigrationOperation"
+                }
+              }
+            },
+            "description": "原操作在当前授权范围内的状态和逐路径验证结果。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询 TLS 迁移与逐路径恢复结果",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "tasks.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read",
+            "tasks.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
+    "/api/v1/agents/{id}/tls-ports/{port}": {
+      "get": {
+        "description": "visible_routes 仅统计当前授权实例。partial 表示存在不可见占用或检查不完整。observed_free 要求 15 秒内完成且未被后续变更失效的节点监听观测。unconfirmed 表示缺少证据。",
+        "operationId": "getTLSPortOccupancy_api_v1_agents_{id}_tls-ports_{port}",
+        "parameters": [
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "实际资源标识，按 URL 编码；不能以名称代替 ID。",
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "agent_id": "agt_0000000000000001",
+                  "public_port": 443,
+                  "state": "partial",
+                  "visible_routes": 0
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/store_TLSPortSummary"
+                }
+              }
+            },
+            "description": "可见路径数量及端口观测结论。"
+          },
+          "400": {
+            "$ref": "#/components/responses/error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/error409"
+          },
+          "429": {
+            "$ref": "#/components/responses/error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/error500"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "environmentToken": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "查询节点的可见 TLS 路径数与端口占用证据",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
+        "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [
+            "agent-config.read"
+          ],
+          "write": false
+        },
+        "x-permissions": {
+          "any": false,
+          "permissions": [
+            "agent-config.read"
+          ]
+        },
+        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+      }
+    },
     "/api/v1/agents/{id}/visibility": {
       "put": {
         "operationId": "putAgentVisibility_api_v1_agents_{id}_visibility",
@@ -13436,52 +15362,28 @@
               "application/json": {
                 "example": {
                   "endpoints": [
-                    "example"
+                    "GET /api/v1/api-key",
+                    "GET /api/v1/openapi.json"
                   ],
                   "expires_at": null,
-                  "id": "resource_example",
-                  "ip_allowlist": null,
-                  "mode": null,
-                  "name": "example",
+                  "id": "key_0000000000000001",
+                  "ip_allowlist": [],
+                  "mode": "read_only",
+                  "name": "test-reader",
                   "permissions": [
-                    "agent-access.read"
+                    "agent-config.read"
                   ],
-                  "prefix": null,
-                  "source_ip": null,
-                  "user_id": "example",
-                  "workspace_id": null
+                  "prefix": "qch_key_demo",
+                  "source_ip": "192.0.2.1",
+                  "user_id": "usr_0000000000000001",
+                  "workspace_id": "usr_0000000000000001"
                 },
                 "schema": {
-                  "properties": {
-                    "endpoints": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    "expires_at": {},
-                    "id": {},
-                    "ip_allowlist": {},
-                    "mode": {},
-                    "name": {},
-                    "permissions": {
-                      "items": {
-                        "$ref": "#/components/schemas/core_Permission"
-                      },
-                      "type": "array"
-                    },
-                    "prefix": {},
-                    "source_ip": {},
-                    "user_id": {
-                      "type": "string"
-                    },
-                    "workspace_id": {}
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/api_apiKeyAuthorization"
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "当前 Key 的有效授权与可调用路由模板。具体资源仍需单独授权。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -13507,18 +15409,12 @@
         },
         "security": [
           {
-            "session": []
-          },
-          {
-            "environmentToken": []
-          },
-          {
             "apiKey": []
           }
         ],
         "summary": "查询自身有效授权",
         "x-api-key": true,
-        "x-authentication": "session_or_api_key",
+        "x-authentication": "api_key",
         "x-effect": "read",
         "x-key-policy": {
           "any": false,
@@ -13529,7 +15425,7 @@
           "any": false,
           "permissions": []
         },
-        "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
+        "x-resource-scope": "仅返回当前请求使用的 API Key 及创建者的有效授权。"
       }
     },
     "/api/v1/audit": {
@@ -16692,6 +18588,15 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "与同一查询的 sync_token 一起提交上次响应的 ETag。",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -16739,6 +18644,7 @@
                         "non_public": false,
                         "province": "example"
                       },
+                      "location_retry_at": "2026-11-10T12:00:00Z",
                       "protocol": "example",
                       "transport": "example"
                     }
@@ -16824,7 +18730,26 @@
                 }
               }
             },
-            "description": "业务结果；异步受理须继续查询任务或资源状态。"
+            "description": "业务结果；异步受理须继续查询任务或资源状态。",
+            "headers": {
+              "ETag": {
+                "description": "当前授权分页结果的验证值。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "已核验权限，分页结果未变。",
+            "headers": {
+              "ETag": {
+                "description": "当前授权分页结果的验证值。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -16956,12 +18881,16 @@
                   "protocols": [
                     {
                       "badge": "example",
+                      "credential_hint": "example",
                       "credential_label": "example",
                       "default_listen": "example",
                       "default_port": 1,
                       "default_tls": false,
                       "description": "example",
                       "docs": "example",
+                      "forward_networks": [
+                        "example"
+                      ],
                       "group": "example",
                       "ignores_username": false,
                       "key": "example",
@@ -16972,6 +18901,9 @@
                       "port_forward": false,
                       "requires_tls": false,
                       "secondary_credential_label": "example",
+                      "snell_mode": "example",
+                      "snell_shadow_tls": false,
+                      "snell_version": 1,
                       "static_pages": [
                         null
                       ],
@@ -17863,7 +19795,7 @@
           "content": {
             "application/json": {
               "example": {
-                "action": "configure-tcp",
+                "action": "check-caddy",
                 "agent_id": "example",
                 "expected_config_version": 1,
                 "expected_instance_id": "example",
@@ -17916,7 +19848,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -17994,7 +19926,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -18007,7 +19947,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -18085,7 +20025,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -20415,7 +22363,6 @@
           "200": {
             "content": {
               "application/zip": {
-                "example": "example",
                 "schema": {
                   "format": "binary",
                   "type": "string"
@@ -20452,12 +22399,20 @@
           },
           {
             "environmentToken": []
+          },
+          {
+            "apiKey": []
           }
         ],
         "summary": "下载管理 Skill",
-        "x-api-key": false,
-        "x-authentication": "session",
+        "x-api-key": true,
+        "x-authentication": "session_or_api_key",
         "x-effect": "read",
+        "x-key-policy": {
+          "any": false,
+          "permissions": [],
+          "write": false
+        },
         "x-permissions": {
           "any": false,
           "permissions": []
@@ -21203,7 +23158,20 @@
         "operationId": "getAPIContract_api_v1_openapi.json",
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "required": [
+                    "openapi",
+                    "info",
+                    "paths",
+                    "components"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "此面板构建发布的完整 OpenAPI 文档。"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -22459,6 +24427,7 @@
                     "agent": "example",
                     "engine": "",
                     "manage": false,
+                    "month": "example",
                     "scope": "current",
                     "search": "example",
                     "status": "",
@@ -22840,10 +24809,16 @@
                               "restart",
                               "status",
                               "upgrade-agent",
+                              "network-diagnostic",
                               "ip-quality",
                               "enable-bbr",
                               "disable-bbr",
+                              "migrate-tls",
                               "configure-tcp",
+                              "check-nginx",
+                              "update-nginx",
+                              "check-caddy",
+                              "update-caddy",
                               "panel-failure"
                             ],
                             "type": "string"
@@ -22956,7 +24931,7 @@
                       },
                       "traffic": {
                         "additionalProperties": false,
-                        "maxProperties": 8,
+                        "maxProperties": 9,
                         "minProperties": 1,
                         "properties": {
                           "advanced": {
@@ -22979,6 +24954,11 @@
                           },
                           "manage": {
                             "type": "boolean"
+                          },
+                          "month": {
+                            "maxLength": 7,
+                            "pattern": "^\\d{4}-\\d{2}$",
+                            "type": "string"
                           },
                           "scope": {
                             "enum": [
@@ -24226,7 +26206,7 @@
         "x-resource-scope": "工作区绑定创建者；配置、任务、证书按真实 owner_id 隔离。节点管理不授予他人配置或证书。共享实例须使用真实实例 ID，引用和批量目标逐项校验。"
       },
       "put": {
-        "operationId": "siteBranding_api_v1_settings_branding",
+        "operationId": "updateSiteBranding_api_v1_settings_branding",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26457,7 +28437,7 @@
               "application/json": {
                 "example": [
                   {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -26535,7 +28515,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 ],
                 "schema": {
@@ -26658,7 +28646,7 @@
               "application/json": {
                 "example": [
                   {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -26736,7 +28724,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 ],
                 "schema": {
@@ -26808,7 +28804,7 @@
           "content": {
             "application/json": {
               "example": {
-                "action": "configure-tcp",
+                "action": "check-caddy",
                 "agent_id": "example",
                 "config_id": "example",
                 "core_source": "example",
@@ -26884,7 +28880,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -26962,7 +28958,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -26975,7 +28979,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -27053,7 +29057,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -27373,7 +29385,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -27451,7 +29463,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -27785,7 +29805,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -27863,7 +29883,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 },
                 "schema": {
@@ -27954,7 +29982,7 @@
             "content": {
               "application/json": {
                 "example": {
-                  "action": "configure-tcp",
+                  "action": "check-caddy",
                   "agent_id": "example",
                   "attempt": 1,
                   "certificates": [
@@ -28032,7 +30060,15 @@
                       "tag": "example",
                       "transport": "example"
                     }
-                  ]
+                  ],
+                  "tls_migration": {
+                    "id": "resource_example",
+                    "mode": "example",
+                    "port": 1,
+                    "routes": [
+                      null
+                    ]
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/core_Task"
@@ -28128,7 +30164,7 @@
                     "version": 1
                   },
                   "task": {
-                    "action": "configure-tcp",
+                    "action": "check-caddy",
                     "agent_id": "example",
                     "attempt": 1,
                     "certificates": [
@@ -28206,7 +30242,15 @@
                         "tag": "example",
                         "transport": "example"
                       }
-                    ]
+                    ],
+                    "tls_migration": {
+                      "id": "resource_example",
+                      "mode": "example",
+                      "port": 1,
+                      "routes": [
+                        null
+                      ]
+                    }
                   }
                 },
                 "schema": {
@@ -29966,8 +32010,11 @@
                       "engine": "mihomo",
                       "first_reported_at": "2026-11-10T12:00:00Z",
                       "last_reported_at": "2026-11-10T12:00:00Z",
+                      "month_undated_received_bytes": 1,
+                      "month_undated_sent_bytes": 1,
                       "name": "example",
                       "peak_receive_bps": 1,
+                      "peak_sampled": false,
                       "peak_send_bps": 1,
                       "policy_id": "example",
                       "port": 1,
@@ -29975,6 +32022,9 @@
                       "received_bytes": 1,
                       "sample_count": 1,
                       "sent_bytes": 1,
+                      "undated_received_bytes": 1,
+                      "undated_sent_bytes": 1,
+                      "undated_since": "example",
                       "used_bytes": 1
                     }
                   ],

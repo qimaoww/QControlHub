@@ -240,6 +240,29 @@ qch_stage_gzip_binary() {
   "$qch_gzip_binary" "$@"
 }
 
+# Follow the same stable channel as the Agent updater. Resolve the archive from
+# release metadata instead of embedding a release number in the installer.
+qch_mihomo_stable_url() {
+  jq -er '
+    select(.draft == false and .prerelease == false)
+    | .tag_name as $tag
+    | select($tag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+    | ("https://github.com/MetaCubeX/mihomo/releases/download/" + $tag + "/mihomo-linux-amd64-v1-" + $tag + ".gz") as $url
+    | [.assets[] | select(.browser_download_url == $url)]
+    | if length == 1 then .[0].browser_download_url else error("missing or ambiguous stable Mihomo asset") end
+  ' "$1"
+}
+
+qch_mihomo_version_matches() {
+  printf '%s\n' "$1" | awk -v tag="$2" '
+    NR == 1 {
+      version = ($2 == "Meta" ? $3 : $2)
+      valid = ($1 == "Mihomo" && version == tag)
+    }
+    END { exit !valid }
+  '
+}
+
 # A nonzero version probe stays fatal unless every line is the GNU loader's
 # missing GLIBC version diagnostic for this exact candidate.
 qch_ssrust_missing_glibc() {
@@ -286,7 +309,6 @@ for tool in awk curl find gunzip install jq sha256sum tar timeout unzip xz; do
   command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "missing tool: $tool" >&2; exit 1; }
 done
 
-mihomo_gz="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1-v1.19.33.gz"
 xray_zip="https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip"
 singbox_tgz="https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz"
 ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.25.0/shadowsocks-v1.25.0.x86_64-unknown-linux-${linux_libc}.tar.xz"
@@ -296,6 +318,9 @@ trap 'rm -rf "$work"' EXIT
 trap 'exit 130' HUP INT TERM
 core_dir=/usr/local/lib/qagent/cores
 install -d -o root -g root -m 0755 "$core_dir"
+qch_github_download 'https://api.github.com/repos/MetaCubeX/mihomo/releases/latest' "$work/mihomo-latest.json" 2097152 20
+mihomo_gz=$(qch_mihomo_stable_url "$work/mihomo-latest.json")
+mihomo_tag=$(jq -er '.tag_name' "$work/mihomo-latest.json")
 
 # Query the same metadata channel as the Go updater; no checksum fallback is
 # allowed when GitHub omits a digest. Verify every archive before replacing any
@@ -327,8 +352,9 @@ atomic_install() {
   mv -f "$staged" "$core_dir/$2" || { rm -f "$staged"; return 1; }
 }
 
-echo '== mihomo v1.19.33 =='
+printf '== mihomo %s ==\n' "$mihomo_tag"
 version_output=$(qch_stage_gzip_binary "$work/mihomo.gz" "$work/mihomo" -v)
+qch_mihomo_version_matches "$version_output" "$mihomo_tag" || { printf '%s\n' 'Mihomo binary version does not match the selected stable release' >&2; exit 1; }
 printf '%s\n' "$version_output" | head -n1
 
 echo '== xray v26.10.31 =='

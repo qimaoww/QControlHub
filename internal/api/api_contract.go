@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"embed"
+	"io"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -46,6 +47,19 @@ func (s *Server) downloadManagementSkill(w http.ResponseWriter, r *http.Request)
 		_, err = entry.Write(data)
 		return err
 	})
+	// Ship the contract from the same build as the helper. It supplies trusted
+	// field and endpoint names without echoing text from arbitrary responses.
+	if err == nil {
+		var contract []byte
+		contract, err = apiProductFiles.ReadFile("contract/openapi.json")
+		if err == nil {
+			var entry io.Writer
+			entry, err = archive.Create("qcontrolhub-manager/references/openapi.json")
+			if err == nil {
+				_, err = entry.Write(contract)
+			}
+		}
+	}
 	if err == nil {
 		err = archive.Close()
 	}

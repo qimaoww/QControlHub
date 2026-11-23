@@ -1,12 +1,13 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -51,10 +52,16 @@ func (cursor connectionIPCursor) encode() string {
 }
 
 func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, where string, args []any) ([]core.ClientConnectionRecord, string, string, error) {
+	prefix, from := "", " FROM client_connections c JOIN agents a ON a.id=c.agent_id"+where
 	params := append([]any{}, args...)
+	if useConnectionRollups(q) {
+		r := connectionRollupRanges(ctx, q, nil)
+		prefix, from, params = r.records(), " FROM observations c JOIN agents a ON a.id=c.agent_id", r.args
+	}
 	params = append(params, q.NodeOrder)
 	rank := fmt.Sprintf(`COALESCE(array_position($%d::text[],c.agent_id),2147483647)`, len(params))
 	const endpoint = `ARRAY[a.name::text,c.agent_id::text,c.engine::text] COLLATE "C"`
+	pagePorts := useConnectionRollups(q) && !q.RecordsOnly
 	having := ""
 	if q.Cursor != "" {
 		cursor, err := decodeConnectionIPCursor(q.Cursor)
@@ -71,24 +78,48 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 	params = append(params, q.Limit+1)
 	// Apply the cursor to whole IP groups. IP provides a deterministic tie-break
 	// independent of connection arrival times and IDs.
-	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+rank+`,`+endpoint+`
- FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+`
- GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+rank+`,`+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
+	selectPorts := ""
+	if pagePorts {
+		// Fetch ports with the page's bounds. A second probe per selected
+		// group would traverse both raw boundaries and retained days again.
+		selectPorts = fmt.Sprintf(",CASE WHEN count(DISTINCT c.port)<= %d THEN array_agg(DISTINCT c.port ORDER BY c.port) END", clientConnectionPageBudget/connectionEndpointEstimate)
+	}
+	rows, err := tx.Query(ctx, prefix+`SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+rank+`,`+endpoint+selectPorts+
+		from+` GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+rank+`,`+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
 	if err != nil {
 		return nil, "", "", err
 	}
 	records := []core.ClientConnectionRecord{}
 	keys := []connectionIPCursor{}
+	remaining := int64(clientConnectionPageBudget)
 	for rows.Next() {
 		var r core.ClientConnectionRecord
 		var key connectionIPCursor
-		if err := rows.Scan(&r.ID, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &key.Rank, &key.Endpoint); err != nil {
+		var ports []int32
+		fields := []any{&r.ID, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &key.Rank, &key.Endpoint}
+		if pagePorts {
+			fields = append(fields, &ports)
+		}
+		if err := rows.Scan(fields...); err != nil {
 			rows.Close()
 			return nil, "", "", err
 		}
 		key.IP = r.ClientIP
 		key.Scope = "node_engine_ip"
 		r.AgentName, r.AgentID, r.Engine = key.Endpoint[0], key.Endpoint[1], core.Engine(key.Endpoint[2])
+		if pagePorts && len(records) < q.Limit {
+			prototype := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine}
+			remaining -= connectionRecordBytes(r) + int64(len(ports))*connectionEndpointBytes(prototype)
+			if ports == nil || remaining < 0 {
+				rows.Close()
+				return nil, "", "", errClientConnectionPageBudget
+			}
+			r.Endpoints = make([]core.ClientConnectionEndpoint, 0, len(ports))
+			for _, port := range ports {
+				prototype.LocalPort = int(port)
+				r.Endpoints = append(r.Endpoints, prototype)
+			}
+		}
 		keys = append(keys, key)
 		records = append(records, r)
 	}
@@ -105,7 +136,7 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 		keys[0].Inclusive = true
 		page = keys[0].encode()
 	}
-	if q.RecordsOnly || len(records) == 0 {
+	if q.RecordsOnly || pagePorts || len(records) == 0 {
 		return records, next, page, nil
 	}
 	if err := s.clientConnectionIPEndpoints(ctx, tx, records, where, args); err != nil {
@@ -115,70 +146,44 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 }
 
 func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, records []core.ClientConnectionRecord, where string, args []any) error {
-	type groupKey struct {
-		AgentID string      `json:"agent_id"`
-		Engine  core.Engine `json:"engine"`
-		IP      string      `json:"client_ip"`
-	}
-	groups := make([]groupKey, len(records))
-	index := map[groupKey]int{}
+	groups := make([]connectionLookupKey, len(records))
+	index := make(map[connectionLookupKey]int, len(records))
 	for i, r := range records {
-		groups[i] = groupKey{r.AgentID, r.Engine, r.ClientIP}
+		groups[i] = connectionLookup(r)
 		index[groups[i]] = i
 	}
-	payload, err := json.Marshal(groups)
+	params := append([]any{}, args...)
+	where, params = connectionWantedGroups(where, params, groups)
+	sql := "SELECT DISTINCT host(c.client_ip),c.agent_id,c.engine,COALESCE(c.inbound_port,c.local_port) FROM client_connections c JOIN agents a ON a.id=c.agent_id" + where
+	params = append(params, clientConnectionPageBudget/connectionEndpointEstimate+1)
+	rows, err := tx.Query(ctx, sql+fmt.Sprintf(" LIMIT $%d", len(params)), params...)
 	if err != nil {
 		return err
 	}
-	params := append(append([]any{}, args...), payload)
-	// Listener ports were captured when observations entered the database.
-	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),c.agent_id,a.name,c.engine,COALESCE(c.inbound_port,c.local_port)
- FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+fmt.Sprintf(`
- AND (c.agent_id,c.engine,c.client_ip) IN (
-  SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text)
- ) GROUP BY c.client_ip,c.agent_id,a.name,c.engine,COALESCE(c.inbound_port,c.local_port)`, len(params)), params...)
-	if err != nil {
-		return err
+	defer rows.Close()
+	remaining := int64(clientConnectionPageBudget)
+	for _, r := range records {
+		remaining -= connectionRecordBytes(r)
 	}
-	observations := []core.ClientConnectionRecord{}
 	for rows.Next() {
-		var r core.ClientConnectionRecord
-		if err := rows.Scan(&r.ID, &r.ClientIP, &r.AgentID, &r.AgentName, &r.Engine, &r.LocalPort); err != nil {
-			rows.Close()
+		var key connectionLookupKey
+		var port int
+		if err := rows.Scan(&key.ClientIP, &key.AgentID, &key.Engine, &port); err != nil {
 			return err
 		}
-		observations = append(observations, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	seen := make([]map[core.ClientConnectionEndpoint]bool, len(records))
-	for _, r := range observations {
-		i := index[groupKey{r.AgentID, r.Engine, r.ClientIP}]
-		endpoint := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: r.LocalPort}
-		if seen[i] == nil {
-			seen[i] = map[core.ClientConnectionEndpoint]bool{}
+		i := index[key]
+		r := &records[i]
+		endpoint := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: port}
+		remaining -= connectionEndpointBytes(endpoint)
+		if remaining < 0 {
+			return errClientConnectionPageBudget
 		}
-		if !seen[i][endpoint] {
-			records[i].Endpoints = append(records[i].Endpoints, endpoint)
-			seen[i][endpoint] = true
-		}
+		r.Endpoints = append(r.Endpoints, endpoint)
 	}
 	for i := range records {
-		sort.Slice(records[i].Endpoints, func(a, b int) bool {
-			x, y := records[i].Endpoints[a], records[i].Endpoints[b]
-			if x.Engine != y.Engine {
-				return x.Engine < y.Engine
-			}
-			if x.AgentName != y.AgentName {
-				return x.AgentName < y.AgentName
-			}
-			if x.AgentID != y.AgentID {
-				return x.AgentID < y.AgentID
-			}
-			return x.LocalPort < y.LocalPort
+		slices.SortFunc(records[i].Endpoints, func(a, b core.ClientConnectionEndpoint) int {
+			return cmp.Compare(a.LocalPort, b.LocalPort)
 		})
 	}
-	return nil
+	return rows.Err()
 }

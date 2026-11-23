@@ -34,7 +34,7 @@ func (e *Executor) validateCoreUpdateCandidate(ctx context.Context, engine core.
 	var args []string
 	switch engine {
 	case core.EngineMihomo:
-		if err := validateMihomoXHTTPCapabilities(ctx, binary, content); err != nil {
+		if err := validateMihomoCapabilities(ctx, binary, content); err != nil {
 			return err
 		}
 		environment = "SAFE_PATHS=" + filepath.Dir(spec.ConfigPath) + ":/etc/qcontrolhub/tls"

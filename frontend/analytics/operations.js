@@ -1,3 +1,5 @@
+import { panelDefaults, panelSettingOptions, taskFilterActions } from "../modules/runtime-defaults.js";
+import { createPoller } from "../modules/poller.js";
 import { bindPreferenceFields } from "./preferences.js";
 import { readRegion, loadingTable, dialogContext, preparedDialog } from "./loading.js";
 import { quotaInvitations } from "./invitations.js";
@@ -18,6 +20,22 @@ export const bytes = value => {
   const exponent = amount ? Math.max(0, Math.min(4, Math.floor(Math.log(amount) / Math.log(1024)))) : 0;
   return `${byteFormatters[exponent ? 1 : 0].format(amount / 1024 ** exponent)}\u00a0${["B", "KB", "MB", "GB", "TB"][exponent]}`;
 };
+export const trafficDayColumns = ['日期（UTC）', '接收', '发送', '合计', '接收采样峰值', '发送采样峰值'];
+
+export function trafficDayRows(days) {
+  return days.flatMap(day => {
+    const sampled = day.peak_sampled || day.peak_receive_bps > 0 || day.peak_send_bps > 0;
+    const peak = value => sampled ? `${bytes(value)}/s` : '—';
+    const rows = [[day.day, bytes(day.received_bytes), bytes(day.sent_bytes), bytes(day.used_bytes), peak(day.peak_receive_bps), peak(day.peak_send_bps)]];
+    if (day.undated_since) {
+      const rx = day.undated_received_bytes || 0, tx = day.undated_sent_bytes || 0;
+      const start = day.undated_since === '0001-01-01' ? '起始未知' : day.undated_since;
+      rows.push([`${start} 至 ${day.day}（日期待定）`, bytes(rx), bytes(tx), bytes(rx + tx), '—', '—']);
+    }
+    return rows;
+  });
+}
+
 export const date = formatDate;
 export const status = value => badge(({ online: "在线", offline: "离线", active: "运行中", inactive: "已停止", unknown: "未知", activating: "启动中", deactivating: "停止中", pending: "准备中", running: "执行中", succeeded: "成功", failed: "失败", canceled: "已取消", accepted: "已接受", rejected: "已拒绝" })[value] || value || "未知",
   ["online", "active", "succeeded", "accepted"].includes(value) ? "ok" : ["pending", "running"].includes(value) ? "warn" : ["offline", "failed"].includes(value) ? "bad" : "");
@@ -25,7 +43,7 @@ export const actionName = value => ({
   validate: "校验配置", deploy: "部署并重启", start: "启动服务", stop: "停止服务", restart: "重启服务", status: "查询状态",
   install: "安装内核", uninstall: "卸载内核", "read-config": "读取可导入配置", "read-managed-config": "读取托管配置",
   "panel-failure":"面板失败", "import-existing": "导入现有服务", "upgrade-agent": "升级 Agent", "enable-bbr": "启用 BBR",
-  "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
+  "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "check-nginx":"检查 Nginx", "update-nginx":"更新 Nginx", "check-caddy":"检查 Caddy", "update-caddy":"更新 Caddy", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
 })[value] || value;
 
 import { createLiveCells, createStatusLine, quantityParts } from "./dashboard-console.js";
@@ -506,10 +524,10 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
     context, timing, failure, diagnosis, previousAttempts, output);
   const box = ctx.dialog(title, content, { wide: true });
   box.classList.add("a-task-dialog");
-  let timer, reading = false;
+  let reading = false;
   const controller = new AbortController();
   const signal = AbortSignal.any([ctx.signal, controller.signal]);
-  const stop = () => { clearTimeout(timer); controller.abort(); };
+  const stop = () => { detailPoller.stop(); controller.abort(); };
   const active = () => ctx.current() && box.open;
   const refresh = button("刷新结果", () => void initialRead.load());
   refresh.addEventListener('mutationend', () => { refresh.disabled = task.status === 'denied'; });
@@ -598,26 +616,33 @@ export function taskDetail(ctx, taskID, {title = "任务详情", targetAgent} = 
       throw error;
     } finally { reading = false; }
   }
-  async function poll() {
-    try { if (!document.hidden && active()) await read({ automatic: true }); }
-    catch (error) { if (active() && error.name !== "AbortError") failure.textContent = error.message; }
-    finally { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); }
-  }
+  // Terminal receipts still reauthorize access; this detail cadence is independent
+  // of the account's task-list refresh preference.
+  const detailPoller = createPoller({
+    isActive: () => active() && task.status !== 'denied', coalesce: false, delay: () => 2000,
+    async run() {
+      try { if (!document.hidden) await read({ automatic: true }); }
+      catch (error) { if (active() && error.name !== 'AbortError') failure.textContent = error.message; }
+    },
+  });
   box.addEventListener("close", () => { stop(); ctx.signal.removeEventListener("abort", stop); }, {once:true});
   ctx.signal.addEventListener("abort", stop, {once:true});
   const initialRead = readRegion(dialogContext(ctx, box), '任务详情', () => read(), () => {});
   content.prepend(initialRead.element);
-  void initialRead.load().finally(() => { if (active() && task.status !== 'denied') timer=setTimeout(poll,2000); });
+  void initialRead.load().finally(() => detailPoller.start());
 }
 
 export async function tasksPage(ctx) {
-  const pageSize = ctx.state.data.settings?.task_page_size;
-  const filters = ctx.state.data.taskFilters || { limit: String([50, 100, 500].includes(pageSize) ? pageSize : 100) };
+  const defaultPageSize = () => {
+    const value = ctx.state.data.settings?.task_page_size;
+    return panelSettingOptions.task_page_size.includes(value) ? value : panelDefaults.task_page_size;
+  };
+  const filters = ctx.state.data.taskFilters || { limit: String(defaultPageSize()) };
   let settingsLoadedAt = ctx.state.data.settings ? Date.now() : -Infinity;
   let preferencesAdopted = Boolean(ctx.state.data.settings || ctx.state.data.taskFilters), queryTouched = false;
   const pollDelay = () => {
     const value = ctx.state.data.settings?.task_poll_interval_ms;
-    return [600, 1000, 2000, 5000].includes(value) ? value : 1000;
+    return panelSettingOptions.task_poll_interval_ms.includes(value) ? value : panelDefaults.task_poll_interval_ms;
   };
   let readSequence = 0, filtering = false, tasksLoaded = false;
   let agents = [], agentsLoadedAt = -Infinity, lastTasks = [], agentsPending, agentsVerified = false;
@@ -643,8 +668,8 @@ export async function tasksPage(ctx) {
     node("div", { className: "a-form-grid" },
       field("状态", "status", filters.status || "", { options: [["", "全部"], ["pending", "准备中"], ["running", "执行中"], ["succeeded", "成功"], ["failed", "失败"], ["canceled", "已取消"]] }),
       agentField,
-      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...["validate", "deploy", "install", "uninstall", "start", "stop", "restart", "status", "upgrade-agent", "network-diagnostic", "ip-quality", "enable-bbr", "disable-bbr", "configure-tcp", "panel-failure"].map(action => [action, actionName(action)])] }),
-      field("条数", "limit", filters.limit || "100", { type: "number", min: 1, max: 500 })),
+      field("操作", "action", filters.action || "", { options: [["", "全部操作"], ...taskFilterActions.map(action => [action, actionName(action)])] }),
+      field("条数", "limit", filters.limit ?? String(panelDefaults.task_page_size), { type: "number", min: 1, max: 500 })),
   ], async (values, _, request) => {
     const sequence = ++readSequence; filtering = true;
     try {
@@ -652,7 +677,7 @@ export async function tasksPage(ctx) {
       if (!request.current() || sequence !== readSequence) return;
       ctx.state.data.taskFilters = values; draw(tasks);
     } finally { if (sequence === readSequence) filtering = false; }
-  }, { status: "", agent_id: "", action: "", limit: "100" });
+  }, () => ({ status: "", agent_id: "", action: "", limit: String(defaultPageSize()) }));
   const preferenceFields = bindPreferenceFields(ctx, 'tasks', [filter], { restore: () => {
     preferencesAdopted = true; queryTouched = true;
     ctx.state.data.taskFilters = Object.fromEntries(new FormData(filter));
@@ -754,7 +779,7 @@ export async function tasksPage(ctx) {
           if (!ctx.current()) return;
           if (!preferencesAdopted) {
             preferencesAdopted = true;
-            if (!queryTouched && !ctx.state.data.taskFilters && [50, 100, 500].includes(settings.task_page_size)) {
+            if (!queryTouched && !ctx.state.data.taskFilters && panelSettingOptions.task_page_size.includes(settings.task_page_size)) {
               filters.limit = filter.elements.limit.value = String(settings.task_page_size);
               filter.requestSubmit();
             }

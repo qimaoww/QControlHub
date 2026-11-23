@@ -96,3 +96,10 @@ func envList(key string) []string {
 	}
 	return out
 }
+
+func configuredEngines() []core.Engine {
+	if value := strings.TrimSpace(os.Getenv("QCH_AGENT_ENGINES")); value != "" {
+		return parseEngines(value)
+	}
+	return core.AllEngines()
+}

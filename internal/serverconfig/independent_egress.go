@@ -160,7 +160,11 @@ func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
 			return false
 		}
 	case core.EngineShadowsocksRust:
-		listKey, allowed = "servers", "servers mode timeout no_delay fast_open keep_alive dns ipv6_first ipv6_only acl workers outbound_bind_addr outbound_bind_interface nofile tcp_keep_alive tcp_nodelay udp_timeout udp_max_associations udp_mtu"
+		listKey = "servers"
+		if _, alias := root["shadowsocks"]; alias {
+			listKey = "shadowsocks"
+		}
+		allowed = listKey + " mode timeout no_delay fast_open keep_alive dns ipv6_first ipv6_only acl workers outbound_bind_addr outbound_bind_interface nofile tcp_keep_alive tcp_nodelay udp_timeout udp_max_associations udp_mtu"
 	default:
 		return false
 	}
@@ -196,7 +200,7 @@ func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
 // differently cased routing field bypass checks performed on a map. Names in
 // opaque user maps are left alone unless they shadow a security-sensitive key.
 func validateAccountingFieldNames(value any) error {
-	canonical := strings.Fields("inbounds outbounds endpoints routing route rules action inboundTag inbound outboundTag outbound balancerTag balancers final reverse api services listen port listen_port listen_ports server_port servers tag protocol type settings streamSettings sockopt dialerProxy proxySettings detour mux multiplex smux allocate fallbacks routing_mark outbound_fwmark plugin manager_address local_address local_port mode listeners name rule proxy tun tunnels external-controller external-controller-tls external-controller-unix external-controller-pipe experimental clash_api")
+	canonical := strings.Fields("inbounds outbounds endpoints routing route rules action inboundTag inbound outboundTag outbound balancerTag balancers final reverse api services listen port listen_port listen_ports server_port servers shadowsocks address remarks tag protocol type settings streamSettings sockopt dialerProxy proxySettings detour mux multiplex smux allocate fallbacks routing_mark outbound_fwmark plugin manager_address local_address local_port mode listeners name rule proxy tun tunnels external-controller external-controller-tls external-controller-unix external-controller-pipe experimental clash_api")
 	var visit func(any) error
 	visit = func(value any) error {
 		switch item := value.(type) {

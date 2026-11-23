@@ -23,7 +23,7 @@ type HostMetrics struct {
 	NetworkTXBytes       uint64                 `json:"network_tx_bytes"`
 	NetworkRXBPS         uint64                 `json:"network_rx_bps"`
 	NetworkTXBPS         uint64                 `json:"network_tx_bps"`
-	NetworkInterfaces    []HostNetworkInterface `json:"network_interfaces,omitempty"`
+	NetworkInterfaces    []HostNetworkInterface `json:"network_interfaces,omitzero"` // nil preserves the previous snapshot; [] clears it.
 	// ObservedPublicIP is assigned by the control plane from the authenticated
 	// WSS source. Agent-provided values are never trusted. It only ever
 	// reflects the address family the WSS connection itself used.
@@ -35,8 +35,12 @@ type HostMetrics struct {
 	PublicIPv4 string `json:"public_ipv4,omitempty"`
 	PublicIPv6 string `json:"public_ipv6,omitempty"`
 	// Probe sources are fixed audit enums and never contain endpoint URLs.
-	PublicIPv4Source string `json:"public_ipv4_source,omitempty"`
-	PublicIPv6Source string `json:"public_ipv6_source,omitempty"`
+	PublicIPv4Source     string    `json:"public_ipv4_source,omitempty"`
+	PublicIPv6Source     string    `json:"public_ipv6_source,omitempty"`
+	PublicIPv4ObservedAt time.Time `json:"public_ipv4_observed_at,omitzero"`
+	PublicIPv6ObservedAt time.Time `json:"public_ipv6_observed_at,omitzero"`
+	PublicIPv4ChangedAt  time.Time `json:"public_ipv4_changed_at,omitzero"`
+	PublicIPv6ChangedAt  time.Time `json:"public_ipv6_changed_at,omitzero"`
 }
 
 type ClockSyncStatus struct {

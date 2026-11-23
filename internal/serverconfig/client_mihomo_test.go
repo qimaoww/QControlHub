@@ -79,7 +79,7 @@ func TestMihomoShadowTLSALPNNormalization(t *testing.T) {
 func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 	for _, engine := range core.AllEngines() {
 		for _, protocol := range Protocols(engine) {
-			if protocol.PortForward || protocol.UsesEndpoint || (engine == core.EngineXray && protocol.UsesWireGuard) {
+			if protocol.PortForward || (protocol.UsesEndpoint && !protocol.UsesWireGuard) {
 				continue
 			}
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
@@ -163,12 +163,12 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					if isVLESSEncryptionProtocol(input.Protocol) && proxy["encryption"] != input.VLESSEncryption {
 						t.Fatal("VLESS client encryption was lost")
 					}
-				case ProtocolSnell, ProtocolSnellShadowTLS:
+				case ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSnellV6, ProtocolSnellV6Unshaped, ProtocolSnellV6ShadowTLS, ProtocolSnellV6UnshapedShadowTLS:
 					wantType = "snell"
-					if proxy["psk"] != input.Credential || intValue(proxy["version"]) != 5 || proxy["tfo"] != true {
+					if proxy["psk"] != input.Credential || intValue(proxy["version"]) != input.SnellVersion || proxy["tfo"] != true {
 						t.Fatal("Snell v5 client settings were lost")
 					}
-					if protocol.Key == ProtocolSnellShadowTLS {
+					if protocol.SnellShadowTLS {
 						opts := mapValue(proxy["obfs-opts"])
 						if opts["mode"] != "shadow-tls" || opts["password"] != input.SnellShadowTLSPassword || opts["host"] != input.SnellObfsHost || intValue(opts["version"]) != 3 {
 							t.Fatal("ShadowTLS client settings were lost")
@@ -190,7 +190,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 				if proxy["type"] != wantType {
 					t.Fatalf("proxy type = %v, want %s", proxy["type"], wantType)
 				}
-				for _, secret := range []string{input.RealityPrivateKey, input.RealityMLDSA65Seed, input.VLESSDecryption, input.PrivateKeyPath, input.CertificatePath} {
+				for _, secret := range []string{input.WireGuardServerPrivateKey, input.RealityPrivateKey, input.RealityMLDSA65Seed, input.VLESSDecryption, input.PrivateKeyPath, input.CertificatePath} {
 					if secret != "" && strings.Contains(profile.Mihomo, secret) {
 						t.Fatal("server-only private key or file path leaked into subscription")
 					}

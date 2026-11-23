@@ -26,7 +26,7 @@ export async function testConnectionReadLifecycle() {
     const gate = locationOnly ? locationGate : historyGate;
     if (gate) await gate.promise; // Ignore abort deliberately; view ownership must reject late responses.
     if (!locationOnly && failure) return reply({ error: failure === 403 ? '连接查看权限已撤销' : '连接查询暂不可用' }, failure);
-    const response = { country_codes: geography === 'unknown' ? [] : ['CN'], records: snapshot.map(row => ({ ...row, location: locationOnly ? geography === 'unknown' ? {} : { country_code: 'CN', province: '江苏' } : geography === 'unknown' ? {} : geography === 'country' ? { country_code: 'CN' } : row.location })), ips: snapshot.length, flows: 10, sources: [...new Set(snapshot.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: agent_id, status: 'ok', updated_at: base.last_seen })), next_cursor: params.has('cursor') ? '' : 'page-2', page_cursor: params.get('cursor') || 'page-1', cache_scope: session.user_id, sync_token: String(revision) };
+    const response = { country_codes: geography === 'unknown' ? [] : ['CN'], records: snapshot.map(row => ({ ...row, ...(locationOnly && geography === "unknown" ? { location_retry_at: new Date(Date.now()+300_000).toISOString() } : {}), location: locationOnly ? geography === 'unknown' ? {} : { country_code: 'CN', province: '江苏' } : geography === 'unknown' ? {} : geography === 'country' ? { country_code: 'CN' } : row.location })), ips: snapshot.length, flows: 10, timeline: [], sources: [...new Set(snapshot.map(row => row.agent_id))].map(agent_id => ({ agent_id, agent_name: agent_id, status: 'ok', updated_at: base.last_seen })), next_cursor: params.has('cursor') ? '' : 'page-2', page_cursor: params.get('cursor') || 'page-1', cache_scope: session.user_id, sync_token: String(revision) };
     if (params.get('sync_token') === String(revision) && !locationOnly) { response.delta = true; response.record_keys = response.records.map(row => JSON.stringify([row.agent_id,row.engine,row.client_ip])); response.records = []; }
     return reply(response);
   };
@@ -101,7 +101,8 @@ export async function testConnectionReadLifecycle() {
     geography = 'unknown'; revision++; await boot(); await waitFor(() => locationReads() > 0, 'unknown geography did not start enrichment'); await delay(20);
     const geoCount = locationReads(); change('agent_id', 'alpha'); await waitFor(ready, 'unknown geography narrower scope failed');
     change('agent_id', ''); await waitFor(ready, 'unknown geography cached scope failed');
-    assert.equal(locationReads(), geoCount + 1, 'unknown geography was retried on every fresh cache hit');
+    assert.equal(locationReads(), geoCount, 'negative backoff was ignored across filter changes');
+    clockOffset = 301_000;
     geography = 'country'; revision++; locationGate = deferred(); await boot();
     const heldLocation = locationGate; change('engine', 'sing-box'); await waitFor(ready, 'new scope blocked on old geography');
     heldLocation.resolve(); locationGate = null; await waitFor(() => rows()[0]?.textContent.includes('中国 · 江苏'), 'China province enrichment did not paint');

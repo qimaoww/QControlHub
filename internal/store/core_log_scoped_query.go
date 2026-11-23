@@ -48,12 +48,40 @@ func authorizedCoreLogWindowStatement(ctx context.Context, query CoreLogQuery, e
 	if query.InstanceID != "main" {
 		streams += " UNION ALL " + window("r.instance_id<>'main' AND log.instance_id NOT IN ('main','') AND log.instance_id=r.instance_id")
 	}
+	resourceWindow := `SELECT recent.* FROM resources r
+ CROSS JOIN LATERAL (` + streams + `) AS recent
+ WHERE ` + resourceWhere + ` ORDER BY recent.id DESC LIMIT $2`
+	if query.AgentID == "" && query.InstanceID == "" && query.UserID == "" && query.Level == "" && query.Search == "" && query.Before == 0 {
+		resourceWindow = boundedFleetCoreLogWindow(columns, resourceWindow)
+	}
 	return `WITH resources AS MATERIALIZED (` + resources + `)
  SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at,logs.instance_id,logs.service,logs.owner_id
  FROM unnest($1::text[]) selected(engine)
  CROSS JOIN LATERAL (
- SELECT recent.* FROM resources r
- CROSS JOIN LATERAL (` + streams + `) AS recent
- WHERE ` + resourceWhere + ` ORDER BY recent.id DESC LIMIT $2
+ ` + resourceWindow + `
  ) AS logs ORDER BY logs.id DESC`, args
+}
+
+// An unfiltered fleet window can often be satisfied by one window per engine,
+// rather than a window per instance across every retained partition. Use that
+// bounded window only when all candidates are currently authorized. Otherwise
+// the resource-first query still finds quiet instances behind foreign history.
+func boundedFleetCoreLogWindow(columns, resourceWindow string) string {
+	// Keep engine in the range order. A scalar equality lets the planner use
+	// the global ID index and filter unrelated history for a sparse engine.
+	return `WITH candidates AS MATERIALIZED (
+ SELECT ` + columns + `,log.node_owner_id FROM core_logs log
+ WHERE log.engine=ANY(ARRAY[selected.engine]) ORDER BY log.engine,log.id DESC LIMIT $2
+ ), allowed AS MATERIALIZED (
+ SELECT ` + columns + ` FROM candidates log WHERE EXISTS (
+ SELECT 1 FROM resources r WHERE r.agent_id=log.agent_id AND r.engine=log.engine
+ AND r.node_owner_id=log.node_owner_id AND r.owner_id=log.owner_id
+ AND (r.instance_id=log.instance_id OR (r.instance_id='main' AND log.instance_id=''))
+ )
+ ), complete AS MATERIALIZED (
+ SELECT (SELECT count(*) FROM candidates)=(SELECT count(*) FROM allowed) AS visible
+ )
+ SELECT * FROM allowed WHERE (SELECT visible FROM complete)
+ UNION ALL
+ SELECT * FROM (` + resourceWindow + `) fallback WHERE NOT (SELECT visible FROM complete)`
 }

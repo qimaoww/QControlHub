@@ -117,7 +117,7 @@ export function autoFilter(ctx, fields, load, resetValues = {}) {
   const form = node("form", { className: "a-stack a-filter-form a-auto-filter" },
     node("fieldset", { className: "a-form-fields a-stack" }, fields), feedback);
   const controls = [...form.querySelectorAll("input,select,textarea")];
-  const defaults = controls.map(field => resetValues[field.name] ?? (field.type === "checkbox" ? field.checked : field.value));
+  const initial = controls.map(field => field.type === "checkbox" ? field.checked : field.value);
   form.append(actions(button("重置", () => form.reset())));
   let timer, controller, revision = 0;
   const cancel = () => { clearTimeout(timer); controller?.abort(); revision++; form.removeAttribute("aria-busy"); };
@@ -146,7 +146,11 @@ export function autoFilter(ctx, fields, load, resetValues = {}) {
   form.addEventListener("submit", event => { event.preventDefault(); schedule(); });
   form.addEventListener("reset", event => {
     event.preventDefault();
-    controls.forEach((field, index) => { if (field.type === "checkbox") field.checked = defaults[index]; else field.value = defaults[index]; });
+    const values = typeof resetValues === 'function' ? resetValues() : resetValues;
+    controls.forEach((field, index) => {
+      const value = values[field.name] ?? initial[index];
+      if (field.type === "checkbox") field.checked = value; else field.value = value;
+    });
     schedule();
   });
   form.addEventListener("keydown", event => {

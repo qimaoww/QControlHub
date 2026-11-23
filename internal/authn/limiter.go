@@ -27,19 +27,24 @@ func NewFailureLimiter(limit int, window, blockFor time.Duration) *FailureLimite
 }
 
 func (l *FailureLimiter) Allow(key string, now time.Time) bool {
+	return l.RetryAfter(key, now) == 0
+}
+
+// RetryAfter returns the remaining block duration at the same instant as the decision.
+func (l *FailureLimiter) RetryAfter(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	record, ok := l.records[key]
 	if !ok {
-		return true
+		return 0
 	}
 	if !record.BlockedUntil.IsZero() && now.Before(record.BlockedUntil) {
-		return false
+		return record.BlockedUntil.Sub(now)
 	}
 	if now.Sub(record.WindowStart) > l.window {
 		delete(l.records, key)
 	}
-	return true
+	return 0
 }
 
 func (l *FailureLimiter) Failure(key string, now time.Time) {

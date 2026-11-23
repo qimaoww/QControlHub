@@ -406,7 +406,7 @@ func TestClientAccessNativeDeployedFormatsAndExportOnlyAccounts(t *testing.T) {
 		{core.EngineMihomo, serverconfig.ProtocolSnell, "Surge Snell"},
 		{core.EngineMihomo, serverconfig.ProtocolMieru, "YAML"},
 		{core.EngineMihomo, serverconfig.ProtocolSudoku, "YAML"},
-		{core.EngineXray, serverconfig.ProtocolWireGuard, "WireGuard"},
+		{core.EngineXray, serverconfig.ProtocolWireGuard, "Mihomo WireGuard YAML"},
 	}
 	for _, test := range cases {
 		t.Run(test.protocol, func(t *testing.T) {
@@ -435,8 +435,8 @@ func TestClientAccessNativeDeployedFormatsAndExportOnlyAccounts(t *testing.T) {
 			if item.Error != "" || item.Profile.URI == "" || !strings.Contains(item.Profile.Format, test.format) || !strings.Contains(item.Profile.URI, "edge.example.test") {
 				t.Fatalf("native format missing: %s / %s", item.Profile.Format, item.Error)
 			}
-			if test.protocol == serverconfig.ProtocolWireGuard && !strings.Contains(item.Profile.URI, plan.WireGuardClientPrivateKey) {
-				t.Fatal("native peer metadata lost")
+			if test.protocol == serverconfig.ProtocolWireGuard && (item.MihomoYAML != item.Profile.URI || item.MihomoError != "" || !strings.Contains(item.MihomoYAML, plan.WireGuardClientPrivateKey)) {
+				t.Fatal("WireGuard YAML missing or peer metadata lost")
 			}
 			if test.protocol == serverconfig.ProtocolSnell && !strings.Contains(item.Profile.URI, plan.Credential) {
 				t.Fatal("Snell credential lost")

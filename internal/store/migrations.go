@@ -52,6 +52,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("begin schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if appliedVersion < 103 {
+		// Only discard derived tracking state. The new journal starts with
+		// the first read snapshot; no observation or geography is rewritten.
+		if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS client_connection_changes,client_connection_revision`); err != nil {
+			return fmt.Errorf("replace client connection change counter: %w", err)
+		}
+	}
+
 	if appliedVersion < 74 {
 		// PostgreSQL names the old inline engine CHECK tasks_check because it
 		// references both action and engine. Replacing tasks_engine_check never
@@ -176,13 +184,19 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("refresh core log covering indexes: %w", err)
 		}
 	}
-	if appliedVersion < 105 {
+	if appliedVersion < 108 {
 		if err := migrateDashboardProbeGroupsTx(ctx, tx); err != nil {
 			return fmt.Errorf("migrate dashboard probe groups: %w", err)
 		}
 	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema v%d -> v%d after %s: %w", appliedVersion, currentSchemaVersion, time.Since(started).Round(time.Millisecond), err)
+	}
+	if appliedVersion < 106 {
+		// Keep retained observation scans out of the schema migration.
+		if _, err := tx.Exec(ctx, `INSERT INTO client_connection_rollup_scan VALUES (1,'-infinity') ON CONFLICT DO NOTHING`); err != nil {
+			return fmt.Errorf("initialize connection rollup discovery: %w", err)
+		}
 	}
 	if appliedVersion < 52 {
 		// Legacy selections referred only to a node/engine/tag. Pin them to the

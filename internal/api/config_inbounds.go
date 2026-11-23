@@ -16,9 +16,10 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Protocol     string              `json:"protocol"`
-		GeneratePort bool                `json:"generate_port"`
-		Input        *serverconfig.Input `json:"input"`
+		Protocol           string              `json:"protocol"`
+		AddWireGuardClient bool                `json:"add_wireguard_client"`
+		GeneratePort       bool                `json:"generate_port"`
+		Input              *serverconfig.Input `json:"input"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -37,7 +38,13 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		plan serverconfig.Input
 		err  error
 	)
-	if input.Input == nil {
+	if input.AddWireGuardClient {
+		if !protocol.UsesWireGuard || input.Input == nil || input.Input.Protocol != protocol.Key {
+			writeError(w, http.StatusBadRequest, "请选择 WireGuard 入站后添加客户端")
+			return
+		}
+		plan, err = serverconfig.AddWireGuardClient(engine, *input.Input)
+	} else if input.Input == nil {
 		plan, err = serverconfig.NewPlan(protocol)
 		if err == nil && engine == core.EngineShadowsocksRust {
 			config, configErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
@@ -97,19 +104,19 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	var input struct {
-		ExpectedInstanceID    *string            `json:"expected_instance_id,omitempty"`
-		Operation             string             `json:"operation"`
-		InstallIfMissing      bool               `json:"install_if_missing"`
-		PreserveSSRustGlobals bool               `json:"preserve_ss_rust_globals"`
-		OriginalTag           string             `json:"original_tag"`
-		ExpectedVersion       int                `json:"expected_version"`
-		DisableMutableAPI     bool               `json:"disable_mutable_api"`
-		Name                  string             `json:"name"`
-		Description           string             `json:"description"`
-		Intent                string             `json:"intent"`
-		Fragment              *string            `json:"fragment"`
-		SnapshotTaskID        string             `json:"snapshot_task_id"`
-		Input                 serverconfig.Input `json:"input"`
+		ExpectedInstanceID    *string             `json:"expected_instance_id,omitempty"`
+		Operation             string              `json:"operation"`
+		InstallIfMissing      bool                `json:"install_if_missing"`
+		PreserveSSRustGlobals bool                `json:"preserve_ss_rust_globals"`
+		OriginalTag           string              `json:"original_tag"`
+		ExpectedVersion       int                 `json:"expected_version"`
+		DisableMutableAPI     bool                `json:"disable_mutable_api"`
+		Name                  string              `json:"name"`
+		Description           string              `json:"description"`
+		Intent                string              `json:"intent"`
+		Fragment              *string             `json:"fragment"`
+		SnapshotTaskID        string              `json:"snapshot_task_id"`
+		Input                 *serverconfig.Input `json:"input"`
 	}
 	mutationError := func(message string) {
 		if input.Operation == "delete" && !strings.HasPrefix(message, "删除入站失败") {
@@ -124,6 +131,17 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if input.Operation != "add" && input.Operation != "modify" && input.Operation != "delete" {
 		mutationError("operation must be add, modify, or delete")
 		return
+	}
+	if input.Fragment != nil && input.Input != nil {
+		mutationError("fragment 与 input 不能同时提交")
+		return
+	}
+	if input.Input == nil {
+		if input.Fragment == nil && input.Operation != "delete" {
+			mutationError("结构化新增和修改需要 input")
+			return
+		}
+		input.Input = &serverconfig.Input{}
 	}
 	if input.Intent != "validate" && input.Intent != "deploy" {
 		mutationError("intent must be validate or deploy")
@@ -156,13 +174,13 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
 				return
 			}
-			source, err = s.store.ReadTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine)
+			source, err = s.store.ReadWorkspaceTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine)
 			if err != nil {
 				writeStoreError(w, err)
 				return
 			}
 		}
-		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID, input.InstallIfMissing)
+		s.saveInboundSource(w, request, current, source, input.OriginalTag, *input.Fragment, input.Intent, input.ExpectedInstanceID, input.InstallIfMissing, snapshotMetadataReset(input.SnapshotTaskID))
 		return
 	}
 	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {
@@ -174,7 +192,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			mutationError("外部反代请自行配置证书")
 			return
 		}
-		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, &input.Input); err != nil {
+		if err := s.store.ResolveCertificatePlan(request.Context(), input.Input.PanelCertificateID, engine, input.Input); err != nil {
 			writeStoreError(w, err)
 			return
 		}
@@ -183,8 +201,8 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	// should fail immediately rather than waiting for the camouflage target.
 	var generated string
 	var err error
-	if input.Operation != "delete" {
-		generated, err = serverconfig.Generate(engine, input.Input)
+	if input.Operation == "add" {
+		generated, err = serverconfig.Generate(engine, *input.Input)
 		if err != nil {
 			mutationError(err.Error())
 			return
@@ -205,19 +223,17 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
 	}
-	previewChanged := false
 	if input.SnapshotTaskID != "" {
 		if !s.sessionAllows(request, core.PermissionTasksRead) {
 			writeError(w, http.StatusForbidden, "没有读取配置快照的权限")
 			return
 		}
 		var snapshot string
-		snapshot, err = s.store.ReadTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine)
+		snapshot, err = s.store.ReadWorkspaceTaskConfigSnapshot(request.Context(), input.SnapshotTaskID, agent.ID, engine)
 		if err != nil {
 			writeStoreError(w, err)
 			return
 		}
-		previewChanged = snapshot != current.Content
 		current.AgentID, current.Engine = agent.ID, engine
 		current.Content, err = s.accountingUpdateSource(request.Context(), current, snapshot)
 		if err != nil {
@@ -226,27 +242,47 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		}
 		currentErr = nil
 	}
-	if input.Operation == "modify" {
-		projections := serverconfig.ParseAll(engine, current.Content)
-		if current.ID != "" && !previewChanged {
-			if err := s.hydrateClientMetadata(request.Context(), current, projections); err != nil {
+	if currentErr == nil && input.Operation != "add" {
+		inventory, err := serverconfig.DiscoverNativeInbounds(engine, current.Content)
+		if err != nil {
+			mutationError(err.Error())
+			return
+		}
+		var projections []serverconfig.Input
+		if input.Operation == "modify" {
+			projections = serverconfig.ParseAll(engine, current.Content)
+		}
+		rows := workspaceInboundRows(inventory, projections)
+		if len(projections) > 0 && current.ID != "" && input.SnapshotTaskID == "" {
+			if err := s.hydrateClientMetadata(request.Context(), current, projections, rows); err != nil {
 				writeInternalError(w, err)
 				return
 			}
 		}
-		found := false
-		for _, existing := range projections {
-			if existing.Tag == input.OriginalTag {
-				if found || existing.SourceOnly {
-					mutationError("此配置无法安全使用预设，请使用完整入站配置")
-					return
-				}
-				found = true
+		var selected *configInboundRowResource
+		for i, row := range rows {
+			if row.TargetTag != "" && row.TargetTag == input.OriginalTag {
+				selected = &rows[i]
+			}
+			if input.Operation == "modify" && input.Input.Tag != input.OriginalTag && row.Tag == input.Input.Tag {
+				mutationError("入站名称已存在")
+				return
 			}
 		}
-		if !found {
-			mutationError("此配置无法安全使用预设，请使用完整入站配置")
+		if selected == nil {
+			mutationError("入站不存在、名称不唯一或由系统管理，请使用完整入站配置")
 			return
+		}
+		if input.Operation == "modify" {
+			if selected.ProjectionIndex == nil || !serverconfig.CanEditNativePreset(engine, projections[*selected.ProjectionIndex]) {
+				mutationError("此配置无法安全使用预设，请使用完整入站配置")
+				return
+			}
+			generated, err = serverconfig.GenerateNativePresetEdit(engine, *input.Input, projections[*selected.ProjectionIndex])
+			if err != nil {
+				mutationError(err.Error())
+				return
+			}
 		}
 	}
 	content := generated
@@ -346,12 +382,10 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	// Reject unsupported attribution before saving a version or queuing a task.
 	// Deleting the last inbound must remain possible.
-	plan, err := serverconfig.PlanPresetAccounting(engine, content)
-	if err != nil {
+	if _, err := serverconfig.PlanPresetAccounting(engine, content); err != nil {
 		mutationError("预设配置无法建立独立出口归属，未保存或部署：" + err.Error())
 		return
 	}
-	content = plan.Content
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = agent.Name + " · " + string(engine)
@@ -359,22 +393,23 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	var clientMetadata string
 	if input.Operation != "delete" {
 		var previous string
-		if current.ID != "" {
+		if current.ID != "" && input.SnapshotTaskID == "" {
 			values, metadataErr := s.store.ConfigClientMetadata(request.Context(), current.ID, current.Version)
 			if metadataErr != nil {
 				writeStoreError(w, metadataErr)
 				return
 			}
-			previous = serverconfig.PreviousManagedTLSMetadata(input.Input, values, input.OriginalTag)
+			previous = serverconfig.PreviousManagedTLSMetadata(*input.Input, values, input.OriginalTag)
 		}
-		clientMetadata, err = serverconfig.MarshalClientMetadataWithPrevious(input.Input, previous)
+		clientMetadata, err = serverconfig.MarshalClientMetadataWithPrevious(*input.Input, previous)
 		if err != nil {
 			mutationError(err.Error())
 			return
 		}
 	}
 	metadata := store.ConfigClientMetadataMutation{
-		OriginalTag: input.OriginalTag, Tag: input.Input.Tag, Content: clientMetadata, Delete: input.Operation == "delete",
+		OriginalTag: input.OriginalTag, Tag: input.Input.Tag, Content: clientMetadata,
+		Delete: input.Operation == "delete", ReplaceAll: input.SnapshotTaskID != "",
 	}
 	if metadata.Delete {
 		metadata.Tag = ""

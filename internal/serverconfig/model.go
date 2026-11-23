@@ -5,33 +5,42 @@ package serverconfig
 import "github.com/qimaoww/qcontrolhub/internal/core"
 
 const (
-	ProtocolShadowsocks     = "shadowsocks"
-	ProtocolSS2022          = "ss2022"
-	ProtocolVLESS           = "vless"
-	ProtocolVLESSXHTTP      = "vless-xhttp-reality"
-	ProtocolXHTTPTLS        = "vless-xhttp-tls"
-	ProtocolXHTTPTLSReality = "vless-xhttp-tls-reality"
-	ProtocolXHTTPRealityTLS = "vless-xhttp-reality-tls"
-	ProtocolXHTTPFive       = "vless-xhttp-five"
-	ProtocolVLESSEncTCP     = "vless-enc-tcp-reality-vision"
-	ProtocolVLESSEncXHTTP   = "vless-enc-xhttp-reality-vision"
-	ProtocolVLESSEncPlain   = "vless-enc-tcp"
-	ProtocolVMess           = "vmess"
-	ProtocolTrojan          = "trojan"
-	ProtocolHy2             = "hysteria2"
-	ProtocolTUIC            = "tuic"
-	ProtocolAnyTLS          = "anytls"
-	ProtocolSnell           = "snell"
-	ProtocolSnellShadowTLS  = "snell-shadow-tls-v3"
-	ProtocolMieru           = "mieru"
-	ProtocolSudoku          = "sudoku"
-	ProtocolPortForward     = "port-forward"
-	ProtocolWireGuard       = "wireguard"
-	ProtocolTailscale       = "tailscale"
-	ProtocolOpenVPNServer   = "openvpn-server"
+	ProtocolShadowsocks              = "shadowsocks"
+	ProtocolSS2022                   = "ss2022"
+	ProtocolVLESS                    = "vless"
+	ProtocolVLESSXHTTP               = "vless-xhttp-reality"
+	ProtocolXHTTPTLS                 = "vless-xhttp-tls"
+	ProtocolXHTTPTLSReality          = "vless-xhttp-tls-reality"
+	ProtocolXHTTPRealityTLS          = "vless-xhttp-reality-tls"
+	ProtocolXHTTPFive                = "vless-xhttp-five"
+	ProtocolVLESSEncTCP              = "vless-enc-tcp-reality-vision"
+	ProtocolVLESSEncXHTTP            = "vless-enc-xhttp-reality-vision"
+	ProtocolVLESSEncPlain            = "vless-enc-tcp"
+	ProtocolVMess                    = "vmess"
+	ProtocolTrojan                   = "trojan"
+	ProtocolHy2                      = "hysteria2"
+	ProtocolTUIC                     = "tuic"
+	ProtocolAnyTLS                   = "anytls"
+	ProtocolSnell                    = "snell"
+	ProtocolSnellShadowTLS           = "snell-shadow-tls-v3"
+	ProtocolSnellV6                  = "snell-v6"
+	ProtocolSnellV6Unshaped          = "snell-v6-unshaped"
+	ProtocolSnellV6ShadowTLS         = "snell-v6-shadow-tls-v3"
+	ProtocolSnellV6UnshapedShadowTLS = "snell-v6-unshaped-shadow-tls-v3"
+	ProtocolMieru                    = "mieru"
+	ProtocolSudoku                   = "sudoku"
+	ProtocolPortForward              = "port-forward"
+	ProtocolWireGuard                = "wireguard"
+	ProtocolTailscale                = "tailscale"
+	ProtocolOpenVPNServer            = "openvpn-server"
 )
 
+var portForwardNetworks = []string{"tcp", "udp", "tcp,udp"}
+
 type Protocol struct {
+	SnellVersion         int          `json:"snell_version,omitempty"`
+	SnellMode            string       `json:"snell_mode,omitempty"`
+	SnellShadowTLS       bool         `json:"snell_shadow_tls,omitempty"`
 	SupportsUDP443Block  bool         `json:"supports_udp_443_block,omitempty"`
 	StaticPages          []StaticPage `json:"static_pages,omitempty"`
 	SupportsManagedTLS   bool         `json:"supports_managed_tls,omitempty"`
@@ -43,6 +52,7 @@ type Protocol struct {
 	Docs                 string       `json:"docs"`
 	DefaultPort          int          `json:"default_port"`
 	Credential           string       `json:"credential_label"`
+	CredentialHint       string       `json:"credential_hint,omitempty"`
 	SecondaryCredential  string       `json:"secondary_credential_label"`
 	IgnoresUsername      bool         `json:"ignores_username"`
 	Methods              []string     `json:"methods"`
@@ -54,17 +64,32 @@ type Protocol struct {
 	UsesReality          bool         `json:"uses_reality"`
 	SupportsRealityMLDSA bool         `json:"supports_reality_mldsa"`
 	UsesVLESSEncryption  bool         `json:"uses_vless_encryption"`
+	ForwardNetworks      []string     `json:"forward_networks,omitempty"`
 	PortForward          bool         `json:"port_forward"`
 	DefaultListen        string       `json:"default_listen,omitempty"`
 	UsesWireGuard        bool         `json:"uses_wireguard,omitempty"`
 	UsesEndpoint         bool         `json:"uses_endpoint,omitempty"`
 }
 
+type WireGuardClient struct {
+	PublicKey    string `json:"public_key"`
+	PrivateKey   string `json:"private_key,omitempty"`
+	PresharedKey string `json:"preshared_key,omitempty"`
+	Address      string `json:"address"`
+	Email        string `json:"email,omitempty"`
+}
+
 type Input struct {
+	WireGuardAdditionalClients []WireGuardClient `json:"wireguard_additional_clients,omitempty"`
+
+	ProjectionSection string `json:"-"`
+	ProjectionIndex   int    `json:"-"`
 	// SourceOnly marks a native projection that has no safe catalog preset.
 	// Protocol remains the internal protocol key for bound client metadata.
 	SourceOnly                   bool `json:"source_only,omitempty"`
 	parsedEngine                 core.Engine
+	presetUnsupported            bool
+	clientUnsupported            bool
 	BlockUDP443                  *bool  `json:"block_udp_443,omitempty"`
 	PanelCertificateID           string `json:"panel_certificate_id,omitempty"`
 	XHTTPMode                    string `json:"xhttp_mode,omitempty"`
@@ -120,6 +145,7 @@ type Input struct {
 	ListenerProxy                string `json:"listener_proxy"`
 	MieruTransport               string `json:"mieru_transport,omitempty"`
 	MieruTrafficPattern          string `json:"mieru_traffic_pattern,omitempty"`
+	SnellMode                    string `json:"snell_mode"`
 	SnellVersion                 int    `json:"snell_version"`
 	SnellUDP                     bool   `json:"snell_udp"`
 	SnellReuse                   bool   `json:"snell_reuse"`
@@ -262,7 +288,7 @@ func Protocols(engine core.Engine) []Protocol {
 			Key: ProtocolPortForward, Name: "端口转发", Badge: "FORWARD",
 			Description: "将本机监听端口收到的 TCP、UDP 或双协议流量转发到指定目标地址与端口。",
 			Docs:        base + portForwardPath, DefaultPort: 8080,
-			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true,
+			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true, ForwardNetworks: portForwardNetworks,
 		},
 	}
 	// VLESS Encryption 可以直接跑在原生 TCP 上：Xray 允许在启用 VLESS Encryption 时
@@ -312,24 +338,15 @@ func Protocols(engine core.Engine) []Protocol {
 		protocols = append(protocols,
 			mieruProtocol(base),
 			Protocol{
-				Key: ProtocolSnell, Name: "Snell v5", Badge: "SNELL v5",
-				Description: "固定 Snell v5 的原生服务端，支持 UDP over TCP 与连接复用。",
-				Docs:        base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）",
-				Transports: []string{"raw"}, IgnoresUsername: true,
-			},
-			Protocol{
-				Key: ProtocolSnellShadowTLS, Name: "Snell v5 + ShadowTLS v3", Badge: "SNELL STLS",
-				Description: "固定 Snell v5 与 ShadowTLS v3；自动生成独立用户与强密码，并生成严格校验证书的匹配客户端配置。",
-				Docs:        base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）",
-				Transports: []string{"raw"}, IgnoresUsername: true,
-			},
-			Protocol{
 				Key: ProtocolSudoku, Name: "Sudoku", Badge: "SUDOKU",
 				Description: "按 SUDOKU-ASCII 上游生成 Ed25519 公私钥、AEAD、低熵字节表、HTTPMask 与原生复用。",
 				Docs:        base + "sudoku/", DefaultPort: 8443, Credential: "Master Public Key（服务端）",
 				Methods: []string{"chacha20-poly1305", "aes-128-gcm"}, Transports: []string{"raw"}, IgnoresUsername: true,
 			},
 		)
+	}
+	if engine == core.EngineMihomo {
+		protocols = append(protocols, snellProtocols(base)...)
 	}
 	if engine != core.EngineXray {
 		tuicPath, anyTLSPath := "tuic/", "anytls/"
@@ -356,7 +373,7 @@ func Protocols(engine core.Engine) []Protocol {
 	}
 	if engine == core.EngineXray {
 		protocols = append(protocols, xhttpProtocols()...)
-		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，单客户端预设。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
+		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，可添加多个客户端。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
 	}
 	if engine == core.EngineSingBox {
 		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard 端点", Badge: "WG", Description: "sing-box 1.11+ 用户态 WireGuard 端点，监听所有接口；需要 with_wireguard 与 with_gvisor。客户端私钥仅保存在加密元数据中。", Docs: base + "endpoint/wireguard/", DefaultPort: 51820, DefaultListen: "::", Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, UsesEndpoint: true, IgnoresUsername: true})

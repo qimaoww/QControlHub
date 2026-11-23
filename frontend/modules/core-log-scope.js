@@ -16,8 +16,17 @@ export function normalizeCoreLogScope(filters, sources) {
 }
 
 export function coreLogSourceAgents(sources) {
-  return [...new Map(sources.map(source => [source.agent_id, {
+  const agents = [...new Map(sources.map(source => [source.agent_id, {
     id: source.agent_id, name: source.name, features: source.features,
     status: source.status === "offline" ? "offline" : "online",
   }])).values()];
+  const counts = new Map();
+  for (const agent of agents) {
+    const name = agent.name || agent.id;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return agents.map(agent => {
+    const name = agent.name || agent.id;
+    return { ...agent, label: counts.get(name) > 1 ? `${agent.id} · ${name}` : name };
+  });
 }

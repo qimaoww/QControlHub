@@ -304,7 +304,7 @@ func verifyManagedTLSProviderSwitch(t *testing.T, m *tlsFrontendManager, ctx con
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", managedNginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", staged)
+	output, err := runInDirectoryWithEnvironmentAndIdentity(ctx, m.state, "", m.nginxBinary(), &identity, "-t", "-p", m.state+"/", "-c", staged)
 	if err == nil || !strings.Contains(output, "Permission denied") || !strings.Contains(output, "syntax is ok") {
 		t.Fatalf("original UID-only validation did not reproduce bind EACCES: %v %s", err, output)
 	}

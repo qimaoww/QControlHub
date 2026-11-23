@@ -69,7 +69,7 @@ ENV QCH_SERVICE_MANAGER=openrc
 VOLUME ["/var/lib/qcontrolhub"]
 ENTRYPOINT ["/usr/local/bin/qagent"]
 
-FROM nginx:1.31-alpine AS qcontrol-web
+FROM nginx:1.31.9-alpine@sha256:0713660ff64e819a478be0d69ae314e52d21623c93672edd9f381a6e66fd95ff AS qcontrol-web
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
@@ -126,6 +126,7 @@ COPY frontend/modules/ui-preferences.js frontend/modules/read-coordinator.js fro
     frontend/modules/outbound-preset-model.js \
     frontend/modules/permissions.js \
     frontend/modules/poller.js \
+    frontend/modules/runtime-defaults.js \
     frontend/modules/preset-route.js \
     frontend/modules/record-display.js \
     frontend/modules/region-model.js \
@@ -161,12 +162,8 @@ COPY deploy/systemd/qagent-shadowsocks-rust@.service /usr/share/nginx/html/insta
 COPY deploy/systemd/qagent.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent.service
 COPY examples/configs /usr/share/nginx/html/install-assets/examples/configs
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
-# Parse the config during the build: the build sandbox has no compose DNS and
-# /etc is read-only, so the one literal upstream is pinned to loopback in a
-# copy. Directive-level regressions from an nginx jump fail here, not at deploy.
-RUN sed 's#http://control-plane:8080#http://127.0.0.1:8080#g' /etc/nginx/nginx.conf > /tmp/nginx.check.conf \
-    && nginx -t -c /tmp/nginx.check.conf \
-    && rm -f /tmp/nginx.check.conf
+# The control-plane address is resolved on requests through Docker DNS.
+RUN nginx -t
 RUN startup_css_version="$(sha256sum /usr/share/nginx/html/assets/startup.css | cut -c1-16)" \
     && analytics_css_version="$(sha256sum /usr/share/nginx/html/assets/analytics/theme.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \

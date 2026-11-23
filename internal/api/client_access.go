@@ -200,12 +200,19 @@ func cloneClientLabels(labels, preferences map[string]string) map[string]string 
 	return result
 }
 
-func (s *Server) hydrateClientMetadata(ctx context.Context, config core.Config, inputs []serverconfig.Input) error {
+func (s *Server) hydrateClientMetadata(ctx context.Context, config core.Config, inputs []serverconfig.Input, rows []configInboundRowResource) error {
 	metadata, err := s.store.ConfigClientMetadata(ctx, config.ID, config.Version)
 	if err != nil {
 		return err
 	}
-	return applyClientMetadata(inputs, metadata)
+	for _, row := range rows {
+		if row.TargetTag != "" && row.ProjectionIndex != nil {
+			input := &inputs[*row.ProjectionIndex]
+			// Malformed or unbound auxiliary data cannot obscure native rows.
+			_ = serverconfig.ApplyClientMetadata(input, metadata[row.TargetTag])
+		}
+	}
+	return nil
 }
 
 func applyClientMetadata(inputs []serverconfig.Input, metadata map[string]string) error {

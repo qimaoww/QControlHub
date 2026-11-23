@@ -1,3 +1,4 @@
+import { allEngines as engineIDs } from "../modules/runtime-defaults.js";
 import { submitConfigImport } from "../modules/config-import.js";
 import { loadingForm, loadingTable, readRegion, dialogContext, preparedDialog } from "./loading.js";
 import { prepareConfigDeployment, configDeployBlockReason } from "../modules/core-install-state.js";
@@ -16,7 +17,6 @@ import { formatSharedPorts } from "../modules/user-model.js";
 import { filterbar, node, button, actions, stack, section, table, badge, field, pathID, list, muted, notice, formData, empty, code, link } from "./ui.js";
 import { date, status, taskDetail } from "./operations.js";
 
-const engineIDs = ["mihomo", "xray", "sing-box", "ss-rust"];
 const terminal = new Set(["succeeded", "failed", "canceled"]);
 const defaultSource = engine => engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n";
 

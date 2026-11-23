@@ -1,3 +1,4 @@
+import { testProxyReports, testReopenedProxyTasks } from './node-proxies.mjs';
 import { assert, delay, waitFor } from './assertions.mjs';
 
 export async function testNodeAddressRuntime({ testAPI, mode }) {
@@ -20,6 +21,7 @@ export async function testNodeAddressRuntime({ testAPI, mode }) {
     }
     await settle();
   };
+  await testProxyReports(dialog, agent, refresh);
   assert.equal(picker.value, 'manual'); assert.equal(input.value, 'old.example');
   change(input, 'draft.example'); input.focus(); input.setSelectionRange(2, 6);
   await delay(400); dialog.scrollTop = 100; const scroll = dialog.scrollTop;
@@ -70,6 +72,7 @@ export async function testNodeAddressRuntime({ testAPI, mode }) {
   assert.equal(agent.time_zone.time_zone, 'Asia/Tokyo');
   // Revoked node authority closes the draft, so no stale target can submit.
   agent.can_manage = false; await refresh(); await waitFor(() => !dialog.open, '权限失效后仍保留地址表单');
+  await testReopenedProxyTasks(agent, refresh);
   if (new URLSearchParams(location.search).has('preview')) {
     agent.can_manage = true; await refresh();
     const control = [...document.querySelectorAll('article[data-agent-id=alpha] button')].find(button => button.textContent === '查看设置');

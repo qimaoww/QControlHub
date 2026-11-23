@@ -164,6 +164,7 @@ func main() {
 	go certificateMaintenance(ctx, dataStore)
 	go cleanDeletedAgents(ctx, dataStore)
 	go backfillClientConnectionLogs(ctx, dataStore)
+	go maintainClientConnectionRollups(ctx, dataStore)
 	go apiServer.MonitorAgentPresence(ctx)
 	go apiServer.MonitorPanelMetrics(ctx)
 	startDiagnosticListener(ctx)

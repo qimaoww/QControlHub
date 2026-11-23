@@ -169,6 +169,10 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	c.creds = loaded
+	// An older Agent can install this binary using the existing upgrade
+	// protocol. Run the package check in the new process in that case too.
+	go c.upgradeProxiesOnStartup(ctx)
+	go c.observeProxies(ctx)
 	if err := c.pruneDiagnosticSpool(); err != nil {
 		slog.Warn("reclaim orphan task diagnostic cache", "error", core.DiagnosticText(err.Error()))
 	}
@@ -672,6 +676,14 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				}
 				if err := c.receiveTrafficPolicies(sessionContext, message.TrafficPolicies); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
+				}
+				continue
+			case core.WireTLSRecoveryQuery:
+				receipt, err := readTLSMigrationReceipt(message.TaskID)
+				if err == nil && receipt.State == "rolled_back" {
+					if err := outbox.EnqueueHigh(sessionContext, core.WireMessage{Type: core.WireTLSRecoveryResult, TaskID: message.TaskID, TLSRecovery: receipt}); err != nil {
+						return err
+					}
 				}
 				continue
 			case core.WireTelemetryResync:

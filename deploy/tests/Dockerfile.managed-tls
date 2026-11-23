@@ -1,4 +1,5 @@
-FROM debian:trixie-slim
+ARG DEBIAN_SUITE=trixie
+FROM debian:${DEBIAN_SUITE}-slim
 # Nginx is intentionally absent; the actual fixed Agent helper installs it.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd dbus ca-certificates \
     && groupadd --system qcontrolhub-core \

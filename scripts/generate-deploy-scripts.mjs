@@ -13,6 +13,7 @@ export const deployManifest = [
     output: "deploy/quick-start.sh",
     modules: [
       "deploy/modules/quick-start/00-header.sh",
+      "deploy/modules/shared/default-engines.sh",
       "deploy/modules/shared/github-download.sh",
       "deploy/modules/quick-start/00-bootstrap-options.sh",
       "deploy/modules/quick-start/10-secrets-state.sh",
@@ -48,6 +49,7 @@ export const deployManifest = [
     output: "deploy/remote/install-agent.sh",
     modules: [
       "deploy/modules/install-agent/00-arguments-platform.sh",
+      "deploy/modules/shared/default-engines.sh",
       "deploy/modules/install-agent/10-dependencies.sh",
       "deploy/modules/install-agent/20-uninstall-input.sh",
       "deploy/modules/install-agent/30-download-discovery.sh",

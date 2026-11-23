@@ -146,8 +146,8 @@ func TestBuildSnellSurgeConfigIncludesOptionalTransportParameters(t *testing.T) 
 	}
 	for _, want := range []string{
 		"snell-shadow = snell, edge.example.com, 20009",
-		"psk = psk with symbols", "version = 5", "reuse = true", "tfo = true", "udp-relay = true",
-		"shadow-tls-password = shadow secret", "shadow-tls-sni = cover.example.com", "shadow-tls-version = 3",
+		`psk = "psk with symbols"`, "version = 4", "reuse = true", "tfo = true", "udp-relay = true",
+		`shadow-tls-password = "shadow secret"`, "shadow-tls-sni = cover.example.com", "shadow-tls-version = 3",
 	} {
 		if !strings.Contains(profile.URI, want) {
 			t.Errorf("Surge profile %q omitted %q", profile.URI, want)

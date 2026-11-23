@@ -143,8 +143,8 @@ func (s *Server) discardEnrollmentToken(id string) error {
 func (s *Server) enrollAgent(w http.ResponseWriter, request *http.Request) {
 	key := authn.ClientIP(request, s.trustedProxies)
 	now := time.Now().UTC()
-	if !s.enrollLimiter.Allow(key, now) {
-		writeError(w, http.StatusTooManyRequests, "too many enrollment attempts")
+	if delay := s.enrollLimiter.RetryAfter(key, now); delay > 0 {
+		writeRateLimitError(w, delay, "too many enrollment attempts")
 		return
 	}
 	var input core.EnrollRequest

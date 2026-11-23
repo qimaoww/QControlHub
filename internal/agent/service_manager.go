@@ -129,6 +129,21 @@ func (manager *ServiceManager) command(ctx context.Context, service string, acti
 		arguments = []string{string(action), service}
 	}
 	output, err := run(ctx, manager.executable, arguments...)
+	// Explicit configuration changes can exceed systemd's restart burst.
+	// Recover only a confirmed rate-limit rejection, once, within this request.
+	// Keep automatic crash-loop protection and other failures unchanged.
+	if err != nil && ctx.Err() == nil && manager.Kind() == ServiceManagerSystemd && action != core.ActionStop {
+		result, resultErr := run(ctx, manager.executable, "show", service, "--property=Result", "--value")
+		if resultErr == nil && strings.TrimSpace(result) == "start-limit-hit" {
+			if resetErr := manager.resetFailed(ctx, service); resetErr != nil {
+				err = errors.Join(err, resetErr)
+			} else {
+				retryOutput, retryErr := run(ctx, manager.executable, arguments...)
+				output += "\nreset systemd start limit for explicit request\n" + retryOutput
+				err = retryErr
+			}
+		}
+	}
 	if err != nil {
 		return output, fmt.Errorf("%s %s %s: %w", manager.Kind(), action, service, err)
 	}

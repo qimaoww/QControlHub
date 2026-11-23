@@ -29,6 +29,8 @@ type ConfigClientMetadataMutation struct {
 	Tag         string
 	Content     string
 	Delete      bool
+	// ReplaceAll starts a revision from a different authorized source.
+	ReplaceAll bool
 }
 
 func (s *Store) SaveAgentConfigWithClientMetadata(ctx context.Context, input core.Config, expectedVersion int, mutation ConfigClientMetadataMutation) (core.Config, error) {
@@ -122,6 +124,9 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Config{}, fmt.Errorf("agent: %w", ErrNotFound)
 		}
+		return core.Config{}, err
+	}
+	if err := rejectPendingTLSMigration(ctx, tx, input.AgentID); err != nil {
 		return core.Config{}, err
 	}
 	var capabilities []core.Engine
@@ -223,7 +228,7 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 	if err := s.insertConfigRevision(ctx, tx, saved, management...); err != nil {
 		return core.Config{}, err
 	}
-	if currentVersion > 0 {
+	if currentVersion > 0 && (metadataMutation == nil || !metadataMutation.ReplaceAll) {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO config_client_metadata (config_id,config_version,profile_tag,content,created_at)
 			SELECT config_id,$2,profile_tag,content,now()
@@ -231,11 +236,11 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 			ON CONFLICT (config_id,config_version,profile_tag) DO NOTHING`, currentID, saved.Version, currentVersion); err != nil {
 			return core.Config{}, err
 		}
-		if input.Engine == core.EngineShadowsocksRust {
-			if _, err := tx.Exec(ctx, `UPDATE mainland_access_policies SET config_version=$2,updated_at=now()
-				WHERE config_id=$1 AND config_version=$3`, saved.ID, saved.Version, currentVersion); err != nil {
-				return core.Config{}, err
-			}
+	}
+	if currentVersion > 0 && input.Engine == core.EngineShadowsocksRust {
+		if _, err := tx.Exec(ctx, `UPDATE mainland_access_policies SET config_version=$2,updated_at=now()
+			WHERE config_id=$1 AND config_version=$3`, saved.ID, saved.Version, currentVersion); err != nil {
+			return core.Config{}, err
 		}
 	}
 	if metadataMutation != nil {

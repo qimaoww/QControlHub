@@ -1,5 +1,6 @@
+import { allEngines } from "../modules/runtime-defaults.js";
 import { bindPreferenceFields } from "./preferences.js";
-import { createConnectionCache, connectionSessionStorage } from "../modules/client-connection-cache.js";
+import { createConnectionCache, sameConnectionValue } from "../modules/client-connection-cache.js";
 import { requestCoreLogJSON as boundedRead } from "../modules/core-log-read.js";
 import { createPoller } from "../modules/poller.js";
 import { defaultConnectionFilters, connectionQuery, connectionLocationLabel, connectionSourceLabel, connectionSourceDetail } from "../modules/client-connection-model.js";
@@ -12,10 +13,20 @@ import { date } from "./operations.js";
 import { sourceStatus } from "./source-status.js";
 import { nodeName, nodeRegionFlag, regionFlag } from "./node-region.js";
 
-const connectionKey = record => JSON.stringify([record.agent_id, record.engine, record.client_ip]);
+const connectionPollDelay = 10_000;
+const groupKeys = new WeakMap();
+const connectionKey = record => {
+  let key = groupKeys.get(record);
+  if (!key) { key = JSON.stringify([record.agent_id, record.engine, record.client_ip]); groupKeys.set(record, key); }
+  return key;
+};
 export function mergeConnectionUpdate(previous, update) {
   if (!update.delta) return update;
   if (!previous || !Array.isArray(update.record_keys)) throw new Error("结果需要重新读取，请重试。");
+  if (!update.records.length && previous.records.length === update.record_keys.length &&
+      previous.records.every((record, index) => connectionKey(record) === update.record_keys[index])) {
+    return { ...update, delta: false, records: previous.records };
+  }
   const records = new Map(previous.records.map(record => [connectionKey(record), record]));
   for (const record of update.records) records.set(connectionKey(record), record);
   const next = update.record_keys.map(key => records.get(key));
@@ -27,22 +38,17 @@ const engineName = value => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing
 
 export async function connectionsPage(ctx) {
   const data = ctx.state.data;
-  const cache = data.analyticsConnectionCache ||= createConnectionCache({ storage: connectionSessionStorage() });
-  let scopeReady = !(cache.hasStored() || cache.scope), scopePending = ctx.connectionScope;
-  async function verifyScope() {
-    const pending = scopePending ||= boundedRead(ctx.api, '/client-connections?scope_only=true', {signal:ctx.signal});
-    try {
-      const verified = await pending;
-      if (!ctx.current()) throw new DOMException('页面已切换', 'AbortError');
-      if (!scopeReady) { cache.restore(verified.scope); scopeReady = true; }
-      return verified;
-    } catch (error) { cache.clear(); scopeReady = false; throw error; }
-    finally { if (scopePending === pending) scopePending = null; }
-  }
-  const today = defaultConnectionFilters().date;
+  const cache = data.analyticsConnectionCache ||= createConnectionCache();
+  let scopeReady = false, coldReadTimedOut = false;
+  const scopePending = ctx.connectionScope || boundedRead(ctx.api, "/client-connections?scope_only=true", { signal: ctx.signal });
+  const scopeRestore = scopePending.then(verified => cache.restore(verified.scope, () => ctx.current() && !scopeReady));
+  void scopeRestore.catch(() => {});
   let filters = data.analyticsConnectionFilters ||= defaultConnectionFilters();
   let initializing = true, queryTouched = false;
   let initialOrder = ctx.connectionNodeOrder, nodeOrderReady = false;
+  const initialNodeOrder = initialOrder || boundedRead(ctx.api, "/preferences/node-order", { signal: ctx.signal });
+  void initialNodeOrder.catch(() => {});
+  const absentLocations = new Map();
   // Filter changes can share the route's pending order read. Once settled,
   // later refreshes continue to read the current authenticated preference.
 
@@ -60,7 +66,7 @@ export async function connectionsPage(ctx) {
     field("查询范围", "period", filters.period, { options: [["day", "当天"], ["month", "所在月份"]] }),
     field("客户端来源 IP", "client_ip", filters.client_ip, { type: "search" }),
     field("国家/地区", "country_code", filters.country_code, { options: [["", "全部国家/地区"], ...(filters.country_code ? [[filters.country_code, geoRegionDetails(filters.country_code)?.name || filters.country_code]] : [])] }),
-    field("内核", "engine", filters.engine, { options: [["", "全部内核"], ...["mihomo", "xray", "sing-box", "ss-rust"].map(value => [value, engineName(value)])] })),
+    field("内核", "engine", filters.engine, { options: [["", "全部内核"], ...allEngines.map(value => [value, engineName(value)])] })),
     field("包含非公网地址", "include_non_public", filters.include_non_public === "true", { type: "checkbox" }),
     actions(button("今日", () => {
       const recent = defaultConnectionFilters();
@@ -98,6 +104,7 @@ export async function connectionsPage(ctx) {
     }
     select.value = value;
   }
+  let paintedRecords, paintedSettings;
   function paint() {
     updateRegions();
     const records = result?.records || [], reportSources = result?.sources || [];
@@ -107,13 +114,16 @@ export async function connectionsPage(ctx) {
     status.hidden = !result;
     view.root.setAttribute("aria-busy", String(loading));
     collection.trigger.disabled = !result;
-    view.update(records, record => {
-      const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
-      const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
-      const region = !record.location?.non_public && geoRegionDetails(record.location?.country_code);
-      return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", { className: "a-probe-name" }, nodeRegionFlag(ctx, agent), node("span", {}, agent.name)),
-        badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
-    }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试", connectionKey);
+    if (!result || paintedRecords !== records || paintedSettings !== data.settings || globalThis.getSelection?.()?.isCollapsed === false) {
+      paintedRecords = globalThis.getSelection?.()?.isCollapsed === false ? null : records; paintedSettings = data.settings;
+      view.update(records, record => {
+        const ports = [...new Set((record.endpoints?.length ? record.endpoints : [record]).map(endpoint => endpoint.local_port || 0))].sort((a, b) => a - b);
+        const agent = { id: record.agent_id, name: record.agent_name || record.agent_id };
+        const region = !record.location?.non_public && geoRegionDetails(record.location?.country_code);
+        return [node("code", {}, String(record.client_ip).split(/(?<=:)/).flatMap(part => [part, node("wbr")])), node("span", { className: "a-probe-name" }, region && regionFlag(region, true), node("span", {}, connectionLocationLabel(record.location))), node("span", { className: "a-probe-name" }, nodeRegionFlag(ctx, agent), node("span", {}, agent.name)),
+          badge(engineName(record.engine)), ports.map(port => port || "—").join(" · "), stack(muted(`最近 ${date(record.last_seen)}`), muted(`首次 ${date(record.first_seen)}`))];
+      }, result ? "暂无记录" : loading ? "正在读取…" : "读取失败，请重试", connectionKey);
+    }
     collection.update(reportSources.map(source => ({
       agentID: source.agent_id, agentName: source.agent_name || source.agent_id,
       engine: filters.engine ? engineName(filters.engine) : "全部内核", state: connectionSourceLabel(source),
@@ -125,7 +135,7 @@ export async function connectionsPage(ctx) {
     page.textContent = result ? `第 ${cursors.length + 1} 页 · 本页 ${records.length} 条` : "";
     previous.disabled = !cursors.length; next.disabled = !nextCursor;
   }
-  async function load({ target = "", history = [], force = false, changedScope = false } = {}) {
+  async function load({ target = "", history = [], force = false, changedScope = false, verifiedRestore = false } = {}) {
     if (force && forcePending || reading && !changedScope && target === cursor) return;
     reading = true;
     if (force) forcePending = true;
@@ -136,38 +146,66 @@ export async function connectionsPage(ctx) {
     view.root.setAttribute("aria-busy", "true");
     status.textContent = "正在读取…";
     try {
-      if (!scopeReady) await verifyScope();
       if (!current()) return;
       // Refresh the same account preference used by the node page; the API
       // controls ordering before applying its signed pagination cursor.
       if (force || initialOrder || !nodeOrderReady) {
-        const pendingOrder = !force && initialOrder; initialOrder = null;
+        const pendingOrder = !force && (initializing ? initialNodeOrder : initialOrder); initialOrder = null;
         const order = await (pendingOrder || boundedRead(ctx.api, "/preferences/node-order", { signal }));
         if (!current()) return;
-        if (JSON.stringify(nodeOrder) !== JSON.stringify(order.ids)) { target = ""; history = []; changedScope = true; }
+        if (!sameConnectionValue(nodeOrder, order.ids)) { target = ""; history = []; changedScope = true; }
         nodeOrder = order.ids; nodeOrderReady = true;
       }
       const params = connectionQuery(filters, target, nodeOrder), key = params.toString();
-      const entry = cache.get(key), cached = Array.isArray(entry?.result?.country_codes) ? entry : null;
-      if (changedScope || target !== cursor) { result = cached?.result || cache.preview(params); cursor = target; cursors = history; nextCursor = result?.next_cursor || ""; }
+      const observedAt = performance.timeOrigin + performance.now();
+      const entry = scopeReady && cache.get(key), cached = Array.isArray(entry?.result?.country_codes) ? entry : null;
+      if (changedScope || target !== cursor) { result = cached?.result || (scopeReady ? cache.preview(params) : null); cursor = target; cursors = history; nextCursor = result?.next_cursor || ""; }
 
       status.textContent = result ? "上次结果 · 正在更新…" : "正在读取…";
       error.textContent = "";
       paint();
+      if (verifiedRestore && cached?.historical && cached.fresh && result === cached.result) {
+        // Scope already checked this route. Keep the sealed page responsive
+        // and let the next authenticated poll confirm late observations.
+        status.textContent = "已读取";
+        return;
+      }
       const sync = new URLSearchParams(params);
       sync.set("sync", "true");
       if (cached?.result.sync_token) sync.set("sync_token", cached.result.sync_token);
-      let response = await boundedRead(ctx.api, `/client-connections?${sync}&locations=cached`, { signal });
-      // A group can re-enter this cursor page after another group disappears.
-      // If its old value is absent locally, obtain this bounded page once.
-      const known = new Set([...(cached?.result.records || []), ...response.records].map(connectionKey));
-      if (response.delta && response.record_keys?.some(key => !known.has(key))) {
-        sync.delete("sync_token");
-        response = await boundedRead(ctx.api, `/client-connections?${sync}&locations=cached`, { signal });
-      }
-      const fresh = mergeConnectionUpdate(cached?.result, response);
-      fresh.location_retry_at = cached?.result.location_retry_at || 0;
+      let etag = "";
+      const path = () => `/client-connections?${sync}&locations=cached`;
+      const onResponse = response => { etag = response.headers?.get("ETag") || ""; };
+      let response = await boundedRead(ctx.api, path(), {
+        signal, onResponse,
+        ...(cached?.etag ? { conditional: { etag: cached.etag, value: cached.result } } : {}),
+      });
       if (!current()) return;
+      if (cache.scope && response.cache_scope !== cache.scope) {
+        cache.clear(); result = null; sources = []; nextCursor = "";
+      }
+      // A group can enter this cursor page after another group disappears.
+      // Re-read the bounded page when no local baseline contains that group.
+      if (response.delta) {
+        const known = new Set([...(cached?.result.records || []), ...response.records].map(connectionKey));
+        if (response.record_keys?.some(key => !known.has(key))) {
+          sync.delete("sync_token");
+          response = await boundedRead(ctx.api, path(), { signal, onResponse });
+        }
+      }
+      if (!current()) return;
+      const previousResult = cached && cached.result.cache_scope === response.cache_scope ? cached.result : null;
+      let fresh = mergeConnectionUpdate(previousResult, response);
+      // Deferred geography is extra data for the exact record. Preserve its
+      // retry time only while the server's geography still agrees.
+      if (previousResult && fresh.records !== previousResult.records) {
+        const before = new Map(previousResult.records.map(record => [connectionKey(record), record]));
+        fresh = { ...fresh, records: fresh.records.map(record => {
+          const prior = before.get(connectionKey(record));
+          return prior?.location_retry_at && !record.location_retry_at && sameConnectionValue(record.location, prior.location)
+            ? { ...record, location_retry_at: prior.location_retry_at } : record;
+        }) };
+      }
       // A successful history response includes every accessible selected node,
       // even when that node has no logs. Failed reads never enter this path.
       if (filters.agent_id && Array.isArray(fresh.sources) && !fresh.sources.some(source => source.agent_id === filters.agent_id)) {
@@ -175,18 +213,24 @@ export async function connectionsPage(ctx) {
         queueMicrotask(changed); return;
       }
       const fetchedAt = Date.now();
-      cache.bind(fresh.cache_scope); cache.set(key, fresh, fetchedAt, cached?.locationsAttempted || false);
+      cache.bind(fresh.cache_scope); scopeReady = true;
+      const unchanged = fresh === previousResult || Boolean(previousResult && sameConnectionValue({ ...previousResult, sync_token: undefined, record_keys: undefined },
+        { ...fresh, sync_token: undefined, record_keys: undefined }));
+      cache.set(key, fresh, fetchedAt, { observedAt, etag, unchanged });
       failures = 0;
+      if (coldReadTimedOut) { coldReadTimedOut = false; scopeWatch.start(); }
       result = fresh;
       cursor = target; cursors = history; nextCursor = result.next_cursor || "";
       if (!filters.agent_id) sources = result.sources || [];
       else sources = sources.length ? sources.map(source => result.sources?.find(value => value.agent_id === source.agent_id) || source) : result.sources || [];
-      cache.select({ filters: { ...filters }, cursor, cursors, nodeOrder, day: today, sources: sources.map(source => ({ agent_id: source.agent_id, agent_name: source.agent_name })) });
+      cache.select({ filters: { ...filters }, cursor, cursors, nodeOrder, sources: sources.map(source => ({ agent_id: source.agent_id, agent_name: source.agent_name })) }, observedAt);
       status.textContent = "已读取";
-      if ((!cached?.locationsAttempted || force || Date.now() >= fresh.location_retry_at || fresh.records.some(record => !cached?.result.records.some(old => connectionKey(old) === connectionKey(record)))) && result.records?.some(record => !record.location?.non_public && (!record.location?.country_code || record.location.country_code === "CN" && !record.location.province))) {
-        result.location_retry_at = Date.now() + 60_000;
-        cache.set(key, result, fetchedAt, true);
+      for (const [ip, retryAt] of absentLocations) if (retryAt <= Date.now()) absentLocations.delete(ip);
+      const missing = result.records.filter(record => !record.location?.non_public && (!record.location?.country_code || record.location.country_code === "CN" && !record.location.province)
+        && Date.now() >= Math.max(Date.parse(record.location_retry_at) || 0, absentLocations.get(record.client_ip) || 0));
+      if (missing.length) {
         const locationQuery = new URLSearchParams(params);
+        locationQuery.set("sync", "true");
         if (result.page_cursor) locationQuery.set("cursor", result.page_cursor);
         void boundedRead(ctx.api, `/client-connections?${locationQuery}&locations=only`, { signal }).then(enriched => {
           if (!current() || !result) return;
@@ -194,22 +238,39 @@ export async function connectionsPage(ctx) {
             cache.clear(); result = null; sources = []; nextCursor = "";
             error.textContent = "访问范围已变化，请刷新"; updateSources(); paint(); return;
           }
-          const locations = new Map(enriched.records.map(record => [record.id, record.location]));
-          result = { ...result, records: result.records.map(record => ({ ...record, location: locations.get(record.id) || record.location })) };
-          result.country_codes = [...new Set([...(result.country_codes || []), ...result.records.filter(record => !record.location?.non_public).map(record => record.location?.country_code).filter(Boolean)])];
-          cache.set(key, result, fetchedAt, true); paint();
+          const locations = new Map(enriched.records.map(record => [connectionKey(record), record]));
+          const records = result.records.map(record => {
+            const match = locations.get(connectionKey(record));
+            if (!match) return record;
+            const retryAt = Date.parse(match.location_retry_at);
+            if (Number.isFinite(retryAt) && retryAt > Date.now()) absentLocations.set(record.client_ip, retryAt);
+            return { ...record, location: match.location, ...(match.location_retry_at ? { location_retry_at: match.location_retry_at } : {}) };
+          });
+          if (sameConnectionValue(records, result.records)) return;
+          result = { ...result, records };
+          result.country_codes = [...new Set([...(result.country_codes || []), ...result.records.filter(record => !record.location?.non_public).map(record => record.location?.country_code).filter(Boolean)])].sort();
+          // This page has data outside the original ETag. Keep the sync
+          // position for real changes, but do not validate it as that entity.
+          cache.set(key, result, fetchedAt, { observedAt: observedAt + 0.001 }); paint();
         }).catch(failure => {
           if (!current() || failure.name === "AbortError") return;
           if ([401, 403, 404, 409].includes(failure.status)) {
             cache.clear(); result = null; sources = []; nextCursor = ""; updateSources(); paint();
-          } else if (result) cache.set(key, result, fetchedAt, true);
-          error.textContent = `属地更新失败，可刷新重试：${redactDiagnostic(failure.message)}`;
+          } else {
+            for (const record of missing) absentLocations.set(record.client_ip, Date.now() + connectionPollDelay);
+          }
+          error.textContent = `属地更新失败：${redactDiagnostic(failure.message)}`;
         });
       }
     } catch (failure) {
       if (!current() || failure.name === "AbortError") return;
       if ([401, 403, 404, 409].includes(failure.status)) { cache.clear(); result = null; sources = []; nextCursor = ""; }
 
+      if ((!result || result.preview) && ([408, 504, 524].includes(failure.status) || failure.code === "read_timeout")) {
+        // There is no complete page to confirm. Focus and timer ticks must
+        // not restart a timed-out month scan. A user read can resume polling.
+        result = null; nextCursor = ""; coldReadTimedOut = true; scopeWatch.stop();
+      }
       failures++;
       error.textContent = redactDiagnostic(failure.message);
       status.textContent = result && !result.preview ? "更新失败，保留上次结果" : "读取失败，请重试";
@@ -232,33 +293,12 @@ export async function connectionsPage(ctx) {
   for (const event of ['input', 'change']) controls.addEventListener(event, () => { queryTouched = true; }, { capture: true });
   controls.elements.client_ip.addEventListener("input", event => { clearTimeout(timer); controller?.abort(); serial++; if (!event.isComposing) timer = setTimeout(changed, 250); });
   controls.elements.client_ip.addEventListener("compositionend", () => { clearTimeout(timer); timer = setTimeout(changed, 250); });
-  // Recheck authority without repeating history aggregates. This also handles
-  // an administrator losing an owner-hidden/revoked node in an idle tab.
+  // A history confirmation revalidates the session and live grants itself.
+  // Avoid a separate scope request on each polling tick.
   const scopeWatch = createPoller({
-    isActive: () => ctx.current() && !document.hidden,
-    delay: () => Math.min(120_000, 10_000 * 2 ** Math.min(failures, 4)),
-    async run() {
-      try {
-        const verified = await boundedRead(ctx.api, "/client-connections?scope_only=true", { signal: ctx.signal });
-        if (!ctx.current()) return;
-        if (!cache.scope || verified.scope === cache.scope) {
-          await load({ target: cursor, history: cursors }); return;
-        }
-        controller?.abort(); serial++; cache.clear(); result = null; sources = []; nextCursor = "";
-        updateSources(); paint();
-        void load({ changedScope: true });
-      } catch (failure) {
-        if (!ctx.current() || failure.intentionalCancellation) return;
-        failures++;
-        if ([401, 403].includes(failure.status)) {
-          controller?.abort(); serial++; cache.clear(); result = null; sources = []; nextCursor = "";
-          reading = false; loading = false; error.textContent = redactDiagnostic(failure.message); updateSources(); paint();
-        } else {
-          error.textContent = redactDiagnostic(failure.message);
-          status.textContent = result ? "更新失败，保留上次结果" : "读取失败，请重试";
-        }
-      }
-    },
+    isActive: () => ctx.current() && !document.hidden && !initializing && !coldReadTimedOut,
+    delay: () => Math.min(120_000, connectionPollDelay * 2 ** Math.min(failures, 4)),
+    run: () => load({ target: cursor, history: cursors }),
   });
   const visibility = () => document.hidden ? scopeWatch.stop() : void scopeWatch.trigger();
   document.addEventListener("visibilitychange", visibility, { signal: ctx.signal });
@@ -270,33 +310,36 @@ export async function connectionsPage(ctx) {
   // Mount usable filters while the first authenticated read is pending. The
   // table owns its busy state; unknown totals and sources are never success.
   async function initialize() {
-    if (cache.hasStored() || cache.scope) {
-      try { await verifyScope(); }
-      catch (failure) {
-        if (!ctx.current()) return;
-        cache.clear(); loading = false; error.textContent = redactDiagnostic(failure.message); paint(); return;
-      }
-    }
-    await preferenceFields.ready;
-    if (!ctx.current()) return;
-    initializing = false;
-    filters = { ...formData(controls), include_non_public: controls.elements.include_non_public.checked ? 'true' : '' };
-    data.analyticsConnectionFilters = filters;
+    // Preferences select the query, ordering selects its cursor, and scope
+    // gates only cached data. Start all three together and cap the cache wait.
+    let timer;
+    const grace = new Promise(resolve => { timer = setTimeout(resolve, 100); });
+    const restoration = Promise.race([scopeRestore.then(() => { scopeReady = true; }, failure => {
+      if ([401, 403, 404, 409].includes(failure.status)) throw failure;
+      // Cache access stays closed. The history request verifies authority independently.
+    }), grace]);
     try {
-      const order = await (initialOrder || boundedRead(ctx.api, '/preferences/node-order', { signal: ctx.signal }));
+      const [, order] = await Promise.all([preferenceFields.ready, initialNodeOrder, restoration]);
       if (!ctx.current()) return;
+      initializing = false;
       initialOrder = null; nodeOrder = order.ids; nodeOrderReady = true;
     } catch (failure) {
-      if (ctx.current()) { loading = false; error.textContent = redactDiagnostic(failure.message); paint(); }
+      if (ctx.current()) {
+        initializing = false; initialOrder = null; loading = false;
+        filters = { ...formData(controls), include_non_public: controls.elements.include_non_public.checked ? "true" : "" };
+        error.textContent = redactDiagnostic(failure.message); paint();
+      }
       return;
-    }
-    const position = cache.selection;
+    } finally { clearTimeout(timer); }
+    filters = { ...formData(controls), include_non_public: controls.elements.include_non_public.checked ? "true" : "" };
+    data.analyticsConnectionFilters = filters;
+    const position = scopeReady ? cache.selection : null;
     // The server owns filters. A verified same-scope cache may retain only a
     // reading position whose query still matches those restored controls.
-    if (!queryTouched && position?.day === today && JSON.stringify(position.nodeOrder) === JSON.stringify(nodeOrder) && ['date', 'period', 'agent_id', 'engine', 'client_ip', 'country_code', 'include_non_public'].every(name => (position.filters[name] || '') === (filters[name] || ''))) {
+    if (!queryTouched && position && sameConnectionValue(position.nodeOrder, nodeOrder) && ['date', 'period', 'agent_id', 'engine', 'client_ip', 'country_code', 'include_non_public'].every(name => (position.filters[name] || '') === (filters[name] || ''))) {
       cursor = position.cursor; cursors = position.cursors; sources = position.sources;
     }
-    void load({ target: cursor, history: cursors, changedScope: true });
+    void load({ target: cursor, history: cursors, changedScope: true, verifiedRestore: scopeReady });
     scopeWatch.start();
   }
   const preferenceFields = bindPreferenceFields(ctx, 'connections', [controls], {

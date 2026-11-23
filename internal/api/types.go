@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
@@ -36,6 +37,7 @@ type Config struct {
 }
 
 type Server struct {
+	clientConnectionReads      atomic.Int32
 	store                      *store.Store
 	allowedOrigins             map[string]struct{}
 	secureTransport            bool

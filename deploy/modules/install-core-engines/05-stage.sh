@@ -10,6 +10,29 @@ qch_stage_gzip_binary() {
   "$qch_gzip_binary" "$@"
 }
 
+# Follow the same stable channel as the Agent updater. Resolve the archive from
+# release metadata instead of embedding a release number in the installer.
+qch_mihomo_stable_url() {
+  jq -er '
+    select(.draft == false and .prerelease == false)
+    | .tag_name as $tag
+    | select($tag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+    | ("https://github.com/MetaCubeX/mihomo/releases/download/" + $tag + "/mihomo-linux-amd64-v1-" + $tag + ".gz") as $url
+    | [.assets[] | select(.browser_download_url == $url)]
+    | if length == 1 then .[0].browser_download_url else error("missing or ambiguous stable Mihomo asset") end
+  ' "$1"
+}
+
+qch_mihomo_version_matches() {
+  printf '%s\n' "$1" | awk -v tag="$2" '
+    NR == 1 {
+      version = ($2 == "Meta" ? $3 : $2)
+      valid = ($1 == "Mihomo" && version == tag)
+    }
+    END { exit !valid }
+  '
+}
+
 # A nonzero version probe stays fatal unless every line is the GNU loader's
 # missing GLIBC version diagnostic for this exact candidate.
 qch_ssrust_missing_glibc() {

@@ -98,13 +98,23 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	if heartbeat.Metrics != nil {
 		observedPublicIP = heartbeat.Metrics.ObservedPublicIP
 	}
+	if len(heartbeat.ManagedProxies) > 2 {
+		return fmt.Errorf("%w: too many managed proxies", ErrInvalid)
+	}
+	for mode, row := range heartbeat.ManagedProxies {
+		if (mode != "nginx" && mode != "caddy") || len(row.State) > 32 || len(row.Installed) > 120 || len(row.Running) > 120 || len(row.Latest) > 120 || len(row.Outcome) > 160 || len(row.CheckError) > 512 || len(row.UpdateError) > 512 || len(row.UpdateState) > 32 {
+			return fmt.Errorf("%w: invalid proxy report", ErrInvalid)
+		}
+	}
 	command, err := s.pool.Exec(ctx, `
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
-			                  features=$4::jsonb,
+			                  features=$4::jsonb, managed_proxies=$8,
 			                  os=CASE WHEN $5='' THEN os ELSE $5 END,
 			                  arch=CASE WHEN $6='' THEN arch ELSE $6 END,
-			                  observed_public_ip=CASE WHEN $7='' THEN observed_public_ip ELSE $7 END
-			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, featuresState, heartbeat.OS, heartbeat.Arch, observedPublicIP)
+			                  observed_public_ip_changed_at=CASE WHEN $7<>'' AND observed_public_ip<>'' AND observed_public_ip<>$7 THEN now() ELSE observed_public_ip_changed_at END,
+                                  observed_public_ip_at=CASE WHEN $7<>'' THEN now() ELSE observed_public_ip_at END,
+                                  observed_public_ip=CASE WHEN $7='' THEN observed_public_ip ELSE $7 END
+			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, featuresState, heartbeat.OS, heartbeat.Arch, observedPublicIP, heartbeat.ManagedProxies)
 	if err != nil {
 		return err
 	}
@@ -236,7 +246,9 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 		}
 	}
 	command, err := s.pool.Exec(ctx, `
-		UPDATE agents SET observed_public_ip=$2
+		UPDATE agents SET observed_public_ip=$2,
+		observed_public_ip_at=CASE WHEN $2<>'' THEN now() END,
+		observed_public_ip_changed_at=CASE WHEN observed_public_ip<>'' AND observed_public_ip<>$2 THEN now() ELSE observed_public_ip_changed_at END
 		WHERE id=$1 AND revoked_at IS NULL`, id, address)
 	if err != nil {
 		return err

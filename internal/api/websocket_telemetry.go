@@ -50,12 +50,7 @@ func (b *wsRateBucket) allow(now time.Time) bool {
 }
 
 func buildAgentSessionPolicy(baseProbe core.PublicIPProbeConfig, settings core.PanelSettings) (core.AgentPolicy, core.PublicIPProbeConfig) {
-	policy := core.AgentPolicy{
-		HeartbeatIntervalSeconds: uint32(settings.AgentHeartbeatIntervalSeconds),
-		MetricsIntervalSeconds:   uint32(settings.AgentMetricsIntervalSeconds),
-		CoreLogMaxMiB:            uint32(settings.AgentCoreLogMaxMiB),
-		CoreLogRotateCount:       uint32(settings.AgentCoreLogRotateCount),
-	}
+	policy := settings.AgentPolicy()
 	probe := baseProbe
 	probe.IntervalSeconds = uint32(settings.PublicIPProbeIntervalSeconds)
 	return policy, probe
@@ -93,6 +88,8 @@ func sameHostMetricsSnapshot(prev, cur core.HostMetrics) bool {
 		prev.ObservedPublicIP != cur.ObservedPublicIP ||
 		prev.PublicIPv4 != cur.PublicIPv4 ||
 		prev.PublicIPv6 != cur.PublicIPv6 ||
+		!prev.PublicIPv4ObservedAt.Equal(cur.PublicIPv4ObservedAt) || !prev.PublicIPv6ObservedAt.Equal(cur.PublicIPv6ObservedAt) ||
+		!prev.PublicIPv4ChangedAt.Equal(cur.PublicIPv4ChangedAt) || !prev.PublicIPv6ChangedAt.Equal(cur.PublicIPv6ChangedAt) ||
 		prev.PublicIPv4Source != cur.PublicIPv4Source ||
 		prev.PublicIPv6Source != cur.PublicIPv6Source {
 		return false
@@ -188,7 +185,7 @@ func sameClockSyncStatus(a, b *core.ClockSyncStatus) bool {
 }
 
 func sameHostNetworkInterfaces(a, b []core.HostNetworkInterface) bool {
-	if len(a) != len(b) {
+	if (a == nil) != (b == nil) {
 		return false
 	}
 	return slices.EqualFunc(a, b, func(left, right core.HostNetworkInterface) bool {

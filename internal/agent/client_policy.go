@@ -44,7 +44,7 @@ func (c *Client) buildHeartbeatMessage(ctx context.Context) core.WireMessage {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
 	metrics.ClockSync = c.cachedClockSync(ctx)
-	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
+	c.publicIP.applySnapshot(&metrics)
 	metrics.BBR = c.bbr.Collect(ctx)
 	sharedInstances := c.executor.SharedInstanceStatuses(ctx)
 	if c.logs != nil {
@@ -71,7 +71,7 @@ func (c *Client) buildHeartbeatMessage(ctx context.Context) core.WireMessage {
 		Version:     c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 		SharedInstances:     sharedInstances,
-		ProxyIngressReports: c.ingressReports(),
+		ProxyIngressReports: c.ingressReports(), ManagedProxies: readProxyReports(),
 	}
 	if metricsHaveData(metrics) || metrics.BBR != nil {
 		heartbeat.Metrics = &metrics
@@ -102,7 +102,7 @@ func (c *Client) buildMetricsMessage(ctx context.Context, nonBlockingClockSync b
 	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
 		return core.WireMessage{}, false
 	}
-	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
+	c.publicIP.applySnapshot(&metrics)
 	metrics.BBR = c.bbr.Cached()
 	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
 	if compact != nil {
@@ -168,7 +168,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeaturePresetAutoInstall,
 		core.AgentFeatureCoreUninstall,
 		core.AgentFeatureCNIPSource,
-		core.AgentFeatureSystemBBR,
+		core.AgentFeatureTLSMigration, core.AgentFeatureSystemBBR, core.AgentFeatureManagedProxies,
 		core.AgentFeatureIPQuality,
 		core.AgentFeatureInstanceStatus,
 		core.AgentFeatureCompactTelemetry,

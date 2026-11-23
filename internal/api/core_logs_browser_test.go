@@ -181,10 +181,7 @@ func runCoreLogsBrowser(t *testing.T, mode string) {
 	mux.Handle("/api/", handler)
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(root))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, filepath.Join(root, "index.html")) })
-	address := "127.0.0.1:18549"
-	if mode != "" {
-		address = "127.0.0.1:0"
-	}
+	address := "127.0.0.1:0"
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		t.Fatal(err)

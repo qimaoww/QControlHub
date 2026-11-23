@@ -65,7 +65,7 @@ func (s *Store) ListCoreLogSources(ctx context.Context) ([]CoreLogSource, error)
 	resource := coreLogResourcesSQL(ctx, &args)
 	rows, err := s.pool.Query(ctx, `WITH resources AS (`+resource+`)
  SELECT r.agent_id,r.name,r.instance_id,r.engine,r.owner_id,r.username,r.features,md5(r.node_owner_id || r.sharing_revision::text),
- CASE WHEN r.last_seen IS NULL OR r.last_seen<now()-interval '45 seconds' THEN 'offline'
+ CASE WHEN r.last_seen IS NULL OR r.last_seen<=now()-make_interval(secs => `+agentOfflineThresholdForOwnerSQL("r.node_owner_id", rootOfflineThresholdSQL)+`) THEN 'offline'
  WHEN NOT(r.features ? 'core-logs-v1') THEN 'unsupported'
  WHEN r.instance_id<>'main' AND NOT(r.features ? 'core-log-instances-v1') THEN 'unsupported'
  WHEN r.instance_id='main' AND NOT(r.features ? 'core-log-status-v1') THEN 'status-unavailable'

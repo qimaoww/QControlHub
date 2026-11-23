@@ -3,6 +3,7 @@ package core
 import "time"
 
 type HeartbeatRequest struct {
+	ManagedProxies      map[string]ProxyStatus  `json:"managed_proxies,omitempty"`
 	Diagnostics         *DiagnosticCapabilities `json:"diagnostics,omitempty"`
 	ProxyIngressReports []ProxyIngressReport    `json:"proxy_ingress_reports,omitempty"`
 	Version             string                  `json:"version,omitempty"`
@@ -51,6 +52,8 @@ const (
 	WireHeartbeat                 = "heartbeat"
 	WireMetrics                   = "metrics"
 	WireTelemetryResync           = "telemetry_resync"
+	WireTLSRecoveryQuery          = "tls_recovery_query"
+	WireTLSRecoveryResult         = "tls_recovery_result"
 	WireTask                      = "task"
 	WireResult                    = "result"
 	WireResultAck                 = "result_ack"
@@ -65,6 +68,8 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
+	TLSRecovery               *TLSMigrationResult        `json:"tls_recovery,omitempty"`
+	TLSProgress               *TLSMigrationProgress      `json:"tls_progress,omitempty"`
 	Diagnostics               []DiagnosticCommand        `json:"diagnostics,omitempty"`
 	DiagnosticResult          *DiagnosticResult          `json:"diagnostic_result,omitempty"`
 	ManagedCertificateSources []ManagedCertificateSource `json:"managed_certificate_sources,omitempty"`
