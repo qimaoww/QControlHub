@@ -96,6 +96,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		if err := validateWireGuardInput(input, true); err != nil {
 			return ClientProfile{}, err
 		}
+		normalizeWireGuardClient(&input)
 	} else if input.Protocol == ProtocolTailscale {
 		return ClientProfile{}, errors.New("Tailscale 登录状态生命周期尚未接入，暂不提供客户端配置")
 	} else if input.Protocol == ProtocolOpenVPNServer {
@@ -144,12 +145,14 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 
 	switch input.Protocol {
 	case ProtocolWireGuard:
-		profile.Format = "WireGuard native config"
-		profile.URI, err = wireguardClientConfig(input, address)
+		profile.Format = "Mihomo WireGuard YAML"
+		profile.Mihomo, err = buildWireGuardMihomoYAML(input, address, fragment)
 		if err != nil {
 			return ClientProfile{}, err
 		}
-		profile.SubscriptionCompatible = false
+		profile.URI = profile.Mihomo
+		profile.SubscriptionCompatible = true
+		return profile, nil
 	case ProtocolShadowsocks, ProtocolSS2022:
 		identity := base64.RawURLEncoding.EncodeToString([]byte(input.Method + ":" + input.Credential))
 		profile.Format = "Shadowsocks SIP002 URI"

@@ -33,8 +33,8 @@ func TestWireGuardPlanGenerateClientAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(profile.URI, "[Interface]") || !strings.Contains(profile.URI, in.WireGuardClientPrivateKey) {
-		t.Fatalf("bad client config: %s", profile.URI)
+	if !strings.Contains(profile.URI, "type: wireguard") || !strings.Contains(profile.URI, in.WireGuardClientPrivateKey) {
+		t.Fatal("missing WireGuard proxy type or client key")
 	}
 	meta, err := MarshalClientMetadata(in)
 	if err != nil {
