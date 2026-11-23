@@ -403,9 +403,9 @@ export async function dashboardPage(ctx) {
   return node("div", { className: "a-dash-deck a-dash-console" },
     statusLine.element,
     liveCells.element,
+    opsRow,
     stage?.element,
     topologySection.visible && topologySection.element,
-    opsRow,
   );
 }
 
