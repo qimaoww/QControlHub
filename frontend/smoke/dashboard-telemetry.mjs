@@ -27,7 +27,7 @@ import {
   summarizeProbeGroups,
 } from "../modules/dashboard-model.js";
 import { buildProbePillLabel } from "../analytics/dashboard-topo-shared.js";
-import { buildMapHudLatencyLine, computeGroupMapFocusZoom, computeMapFocusZoom } from "../analytics/dashboard-map.js";
+import { fleetLinkCamera, linkMapCamera, linkMapSize, sameLinkCamera, zoomLinkCamera } from "../analytics/dashboard-linkmap.js";
 
 export async function run() {
   const days = aggregateDashboardTrafficDays([
@@ -457,28 +457,17 @@ export async function run() {
   assert.equal(buildProbePillLabel(extLinkRev), "单向");
 
   const singleBoth = buildSingleGroupTopologyModel(groupModels[1], { metricDir: "both" });
-  const singleFwd = buildSingleGroupTopologyModel(groupModels[1], { metricDir: "forward" });
-  const singleRev = buildSingleGroupTopologyModel(groupModels[1], { metricDir: "reverse" });
-  assert.equal(buildMapHudLatencyLine(singleBoth, false), "跨洲十跳链 · 9跳总延迟 · 去 360ms / 回 310ms · 丢包 25%");
-  assert.equal(buildMapHudLatencyLine(singleBoth, true), "10站 · 去360ms/回310ms · 丢包25%");
-  assert.equal(buildMapHudLatencyLine(singleFwd, false), "跨洲十跳链 · 9跳总延迟 · 去 360ms · 丢包 25%");
-  assert.equal(buildMapHudLatencyLine(singleRev, false), "跨洲十跳链 · 9跳总延迟 · 回 310ms · 丢包 0%");
   const singleExtRev = buildSingleGroupTopologyModel(groupModels[2], { metricDir: "reverse" });
-  assert.equal(buildMapHudLatencyLine(singleExtRev, false), "外部黑洞检测 · 1跳 · 单向无回程");
+  assert.equal(singleBoth.nodes.length, 10, "single group topology model retains all chain nodes");
+  assert.equal(singleExtRev.singleGroup.isExternal, true, "external probe group preserves external flag");
 
-  const focusPair = computeGroupMapFocusZoom(buildSingleGroupTopologyModel(groupModels[0], { metricDir: "both" }), { width: 1160, height: 560, isMobile: false });
-  assert.ok(focusPair.scale > 1.5, `expected regional group to auto-focus >1.5x, got ${focusPair.scale}`);
-  const focusExt = computeGroupMapFocusZoom(singleExtRev, { width: 1160, height: 560, isMobile: false });
-  assert.ok(focusExt.scale >= 2.0, `expected single-node external group to auto-focus >=2.0x, got ${focusExt.scale}`);
-  const focusMob = computeGroupMapFocusZoom(buildSingleGroupTopologyModel(groupModels[0], { metricDir: "both" }), { width: 340, height: 231, isMobile: true });
-  assert.ok(focusMob.scale > 1.3 && focusMob.tx <= 0 && focusMob.ty <= 0, "mobile auto-focus transform must stay clamped");
-  const focusEmea = computeMapFocusZoom(buildProbeTopologyModel({
-    groups: buildProbeGroupModels({
-      agents: [{ id: "de", name: "法兰克福", region_code: "DE", status: "online" }, { id: "nl", name: "阿姆斯特丹", region_code: "NL", status: "online" }],
-      pairs: [{ id: "p_eu", group_name: "欧陆", node1: { agent_id: "de", name: "法兰克福" }, node2: { agent_id: "nl", name: "阿姆斯特丹" }, bidirectional: true }],
-    }),
-  }), { width: 1160, height: 560, isMobile: false });
-  assert.ok(focusEmea.scale >= 2.2 && focusEmea.tx <= 0, `expected border EMEA group to scale & wrap-center cleanly, got ${JSON.stringify(focusEmea)}`);
+  const camPair = linkMapCamera(groupModels[0], 680);
+  assert.ok(camPair && camPair.radius > 0 && Array.isArray(camPair.look) && camPair.look.every(Number.isFinite), "3D linkMapCamera computes finite globe camera for regional pair");
+  const camFleet = fleetLinkCamera(groupModels, 820, { minHeight: 420, maxHeight: 540, ratio: 0.72 });
+  assert.ok(camFleet && camFleet.radius > 0 && Array.isArray(camFleet.look) && camFleet.look.every(Number.isFinite), "3D fleetLinkCamera computes finite panorama camera for mixed fleet");
+  const zoomed = zoomLinkCamera(camPair, 1.35, linkMapSize(680));
+  assert.ok(zoomed.radius >= camPair.radius && Array.isArray(zoomed.look), "3D zoomLinkCamera scales globe radius cleanly");
+  assert.equal(sameLinkCamera(camPair, { look: [...camPair.look], radius: camPair.radius }), true, "sameLinkCamera identifies equal camera state");
 
   console.log("Dashboard telemetry model smoke passed");
 }

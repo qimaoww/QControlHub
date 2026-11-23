@@ -6,17 +6,16 @@ import {
   summarizeExpiringCertificates,
   summarizeIPQualityFleet,
 } from "../modules/dashboard-model.js";
-import { consoleCell, segmentMeter } from "./dashboard-console.js";
+import { figure, progressBar } from "./dashboard-console.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import { patch } from "./live-dom.js";
 import { nodeMetrics } from "./node-metrics.js";
 import { nodeRegionFlag } from "./node-region.js";
-import { node, pathID } from "./ui.js";
+import { node, pathID, section } from "./ui.js";
 
-// The node rack and the edge instruments of the dashboard. Both repaint
-// through keyed patches, so focus and scroll survive a refresh.
+// The active node grid and unified edge status card of the simplified
+// dashboard. Both repaint through keyed patches so focus and scroll survive.
 const RACK_UNITS = 8;
-const METER_SEGMENTS = 20;
 const NO_ITEMS = Object.freeze([]);
 const BLANK = ["—", ""];
 const WAIT_NOTES = { failed: "读取失败", denied: "无权限" };
@@ -26,20 +25,20 @@ const keyed = (key, element) => { element.setAttribute("data-refresh-key", key);
 const token = (key, text, tone = "") => keyed(key, el("span", tone ? `a-con-token ${tone}` : "a-con-token", text));
 const meterTone = (value) => value >= 90 ? "is-bad" : value >= 75 ? "is-warn" : "";
 
-// One usage meter of a rack unit. A stale or missing sample shows an empty
-// meter and no figure instead of a zero.
+// One clean continuous meter row for an online node tile.
 function unitMeter(key, label, value) {
   const known = value != null;
+  const tone = known ? meterTone(value) : "";
   return node("div", { className: "a-rack-meter", "data-refresh-key": key },
     el("span", "a-con-label", label),
-    known ? segmentMeter(value, METER_SEGMENTS, meterTone(value)) : segmentMeter(0, METER_SEGMENTS),
-    node("strong", { "data-refresh-key": "value" }, known ? `${value.toFixed(1)}%` : "—"));
+    progressBar(known ? value : 0, tone, "is-slim"),
+    node("strong", { className: tone, "data-refresh-key": "value" }, known ? `${value.toFixed(1)}%` : "—"));
 }
 
 function unitRate(agent, online, bytes) {
   const metrics = agent.metrics;
   const sampled = online && metrics?.network_available && metrics.network_rx_bps != null && metrics.network_tx_bps != null;
-  if (!sampled) return node("div", { className: "a-rack-rate", "data-refresh-key": "rate" }, el("span", "a-con-note", "—"));
+  if (!sampled) return node("div", { className: "a-rack-rate", "data-refresh-key": "rate" }, el("span", "a-con-note", "暂无速率"));
   return node("div", { className: "a-rack-rate", "data-refresh-key": "rate" },
     el("span", "a-con-rx", `↓ ${bytes(metrics.network_rx_bps)}/s`),
     el("span", "a-con-tx", `↑ ${bytes(metrics.network_tx_bps)}/s`));
@@ -51,30 +50,43 @@ function rackUnit(context, agent) {
   const skew = isClockSyncAbnormal(agent.metrics?.clock_sync);
   const state = online ? (skew ? "skew" : "online") : "offline";
   const heartbeat = agent.metrics?.collected_at || agent.last_seen;
+
   const head = node("div", { className: "a-rack-head", "data-refresh-key": "head" },
-    el("span", online ? "a-con-pip is-on" : "a-con-pip"),
+    el("span", online ? "a-node-dot is-on" : "a-node-dot"),
     nodeRegionFlag(ctx, agent),
-    node("a", { className: "a-rack-name", href: `#node-settings?agent=${pathID(agent.id)}`, title: agent.name || agent.id }, agent.name || agent.id),
-    online ? null : token("state", "离线", "bad"),
-    skew ? token("skew", "时钟异常", "warn") : null);
-  const meters = canMetrics ? [
-    unitMeter("cpu", "CPU", online ? panelMetricUsage(agent.metrics, "cpu") : null),
-    unitMeter("mem", "内存", online ? panelMetricUsage(agent.metrics, "memory") : null),
-    unitRate(agent, online, bytes),
+    node("a", {
+      className: "a-rack-name",
+      href: `#node-settings?agent=${pathID(agent.id)}`,
+      title: agent.name || agent.id,
+    }, agent.name || agent.id),
+    online ? null : keyed("state", el("span", "a-rack-pill", "离线")),
+    skew ? keyed("skew", el("span", "a-rack-pill warn", "时钟异常")) : null);
+
+  // Online nodes display clean slim CPU/Mem bars and live rate; offline nodes
+  // collapse cleanly to last-seen + trend action without empty meter clutter.
+  const meters = (online && canMetrics) ? [
+    unitMeter("cpu", "CPU", panelMetricUsage(agent.metrics, "cpu")),
+    unitMeter("mem", "内存", panelMetricUsage(agent.metrics, "memory")),
   ] : NO_ITEMS;
-  // A live unit needs no timestamp; an offline one shows when it was last seen.
-  const seen = online ? null : keyed("hb", el("span", "a-con-note", heartbeat ? date(heartbeat) : "未同步"));
+
+  const leftFoot = online
+    ? (canMetrics ? unitRate(agent, online, bytes) : keyed("online-note", el("span", "a-con-note", "在线")))
+    : keyed("hb", el("span", "a-con-note", heartbeat ? `最后在线 ${date(heartbeat)}` : "未同步"));
+
   const trend = canMetrics ? node("button", {
-    type: "button", className: "a-con-jump", title: "24 小时趋势", "data-refresh-key": "trend", onclick: () => nodeMetrics(ctx, agent),
+    type: "button",
+    className: "a-con-jump",
+    title: "24 小时趋势",
+    "data-refresh-key": "trend",
+    onclick: () => nodeMetrics(ctx, agent),
   }, "趋势") : null;
-  const foot = node("div", { className: "a-rack-foot", "data-refresh-key": "foot" }, seen, trend);
+
+  const foot = node("div", { className: "a-rack-foot", "data-refresh-key": "foot" }, leftFoot, trend);
   return node("li", { className: "a-rack-unit", "data-refresh-key": agent.id, "data-status": state }, head, meters, foot);
 }
 
 const rackSignatures = new WeakMap();
 
-// Rack of the most active nodes: status, usage meters and the live rate of
-// each. Offline nodes keep their unit but show no live figures.
 export function paintNodeRack({ ctx, summaryHost, rackHost, agents, agentsReady, canMetrics, bytes, date }) {
   const visible = selectMostActiveNodes(agents, { limit: RACK_UNITS });
   const skewed = agents.filter(agent => isClockSyncAbnormal(agent.metrics?.clock_sync)).length;
@@ -92,87 +104,165 @@ export function paintNodeRack({ ctx, summaryHost, rackHost, agents, agentsReady,
   const context = { ctx, bytes, date, canMetrics };
   const units = visible.map(agent => rackUnit(context, agent));
   const wait = agents.length ? null : keyed("empty", el("li", "a-rack-empty a-muted", agentsReady ? "暂无节点" : "读取中…"));
-  patch(rackHost, node("ol", { className: "a-rack", "aria-label": "节点运行状态" }, units, wait));
+  patch(rackHost, node("ol", { className: visible.length >= 4 ? "a-rack is-grid-4" : "a-rack", "aria-label": "节点运行状态" }, units, wait));
 }
 
-// Hourly inbound flows of the last day. The busiest hour is solid; an hour
-// without a flow keeps a baseline tick.
+// Compact 24h inbound connection pulse bars.
 function pulseBars(buckets) {
   const slice = buckets.slice(-24);
-  const svg = createSVGEl("svg", { class: "a-edge-pulse", viewBox: "0 0 96 24", preserveAspectRatio: "none", role: "img", "aria-label": "近 24 小时入站连接" });
-  svg.append(createSVGEl("line", { x1: 0, y1: 23.5, x2: 96, y2: 23.5, class: "a-con-trace-base", "vector-effect": "non-scaling-stroke" }));
+  const svg = createSVGEl("svg", {
+    class: "a-edge-pulse",
+    viewBox: "0 0 96 28",
+    preserveAspectRatio: "none",
+    role: "img",
+    "aria-label": "近 24 小时入站连接",
+  });
+  svg.append(createSVGEl("line", { x1: 0, y1: 27.5, x2: 96, y2: 27.5, class: "a-con-trace-base", "vector-effect": "non-scaling-stroke" }));
   const peak = Math.max(1, ...slice.map(item => item.flows));
   const offset = 24 - slice.length;
   slice.forEach((item, index) => {
-    const size = item.flows > 0 ? Math.max(2, item.flows / peak * 22) : 1;
+    const size = item.flows > 0 ? Math.max(2.5, item.flows / peak * 24) : 1.5;
     const tone = item.flows <= 0 ? "is-zero" : item.flows === peak ? "is-peak" : "";
-    svg.append(createSVGEl("rect", { x: (offset + index) * 4, y: (24 - size).toFixed(1), width: 3, height: size.toFixed(1), class: `a-edge-bar ${tone}` }));
+    svg.append(createSVGEl("rect", {
+      x: (offset + index) * 4,
+      y: (27 - size).toFixed(1),
+      width: 2.8,
+      height: size.toFixed(1),
+      rx: 1,
+      class: `a-edge-bar ${tone}`,
+    }));
   });
   return svg;
 }
 
-function waitingCell(key, label, href, state) {
-  const note = WAIT_NOTES[state] || "读取中…";
-  return { key, label, href, hrefLabel: "明细", state: WAIT_NOTES[state] ? state : "loading", figure: BLANK, subs: [{ text: note, tone: WAIT_NOTES[state] ? "bad" : "" }] };
+function edgeRowNode(model, viz = null) {
+  const pillNode = model.pill
+    ? node("span", { className: `a-edge-pill ${model.pill.tone || ""}`, "data-refresh-key": "pill" }, model.pill.text)
+    : null;
+  const subs = (model.subs || NO_ITEMS).map((item, idx) =>
+    node("span", { className: item.tone ? `a-con-sub-item ${item.tone}` : "a-con-sub-item", "data-refresh-key": `sub-${idx}` }, item.text));
+  return node("div", {
+    className: "a-edge-item",
+    "data-refresh-key": model.key,
+    "data-state": model.state || "ready",
+  },
+    node("div", { className: "a-edge-item-main", "data-refresh-key": "main" },
+      node("div", { className: "a-edge-item-head", "data-refresh-key": "head" },
+        node("span", { className: "a-con-label", "data-refresh-key": "label" }, model.label),
+        pillNode),
+      figure(model.figure, "a-con-fig a-edge-fig"),
+      subs.length ? node("div", { className: "a-edge-item-subs", "data-refresh-key": "subs" }, subs) : null),
+    viz ? node("div", { className: "a-edge-item-viz", "data-refresh-key": "viz" }, viz) : null,
+    model.href ? node("a", { className: "a-con-jump a-edge-jump", href: model.href, "data-refresh-key": "jump" }, model.hrefLabel) : null);
 }
 
-function connectionCell(data, state) {
-  if (!data) return [waitingCell("connections", "入站连接", "#client-connections", state), null];
+function waitingModel(key, label, href, hrefLabel, state) {
+  const note = WAIT_NOTES[state] || "读取中…";
+  return {
+    key, label, href, hrefLabel,
+    state: WAIT_NOTES[state] ? state : "loading",
+    figure: BLANK,
+    subs: [{ text: note, tone: WAIT_NOTES[state] ? "bad" : "" }],
+  };
+}
+
+function connectionRow(data, state) {
+  if (!data) return [waitingModel("connections", "入站连接", "#client-connections", "明细", state), null];
   const pulse = summarizeClientConnectionsPulse(data);
   const slice = pulse.buckets.slice(-24);
-  const subs = [{ text: `IP ${pulse.ips}`, tone: "" }];
-  const cell = { key: "connections", label: "入站连接", href: "#client-connections", hrefLabel: "明细", token: slice.length ? `${slice.length}h` : "", figure: [String(pulse.flows), " 活跃流"], subs };
-  return [cell, pulseBars(pulse.buckets)];
+  const subs = [{ text: `独立 IP ${pulse.ips}${slice.length ? ` · 近 ${slice.length}h` : ""}`, tone: "" }];
+  return [{
+    key: "connections",
+    label: "入站连接",
+    href: "#client-connections",
+    hrefLabel: "明细",
+    figure: [String(pulse.flows), "\u00a0活跃流"],
+    subs,
+  }, pulseBars(pulse.buckets)];
 }
 
-function certificateCell(data, state) {
-  if (!data) return [waitingCell("certificates", "证书", "#certificates", state), null];
+function certificateRow(data, state) {
+  if (!data) return [waitingModel("certificates", "证书", "#certificates", "管理", state), null];
   const summary = summarizeExpiringCertificates(data);
+  let pill = null;
+  if (summary.abnormal) pill = { text: `异常 ${summary.abnormal}`, tone: "bad" };
+  else if (summary.expiringSoon) pill = { text: `14 天内到期 ${summary.expiringSoon}`, tone: "warn" };
+
   const subs = [];
-  if (summary.expiringSoon) subs.push({ text: `14 天内到期 ${summary.expiringSoon}`, tone: "warn" });
-  if (summary.abnormal) subs.push({ text: `异常 ${summary.abnormal}`, tone: "bad" });
-  const rows = summary.urgent.slice(0, 2).map(item => node("li", { className: "a-edge-row", "data-refresh-key": String(item.id || item.name) },
-    node("span", { className: "a-edge-row-name", title: item.name }, item.name),
-    el("span", item.abnormal ? "a-con-token bad" : "a-con-token warn", item.abnormal ? "异常" : `${item.daysLeft ?? 0} 天`)));
-  const cell = { key: "certificates", label: "证书", href: "#certificates", hrefLabel: "管理", figure: [String(summary.totalOwned), " 有效"], subs };
-  return [cell, rows.length ? el("ul", "a-edge-rows", rows) : null];
+  if (summary.expiringSoon && summary.abnormal) subs.push({ text: `14 天内到期 ${summary.expiringSoon}`, tone: "warn" });
+  const urgent = summary.urgent.slice(0, 2);
+  if (urgent.length) {
+    for (const item of urgent) {
+      subs.push({
+        text: item.abnormal ? `${item.name} · 异常` : `${item.name} · ${item.daysLeft ?? 0} 天`,
+        tone: item.abnormal ? "bad" : "warn",
+      });
+    }
+  } else if (!summary.abnormal && !summary.expiringSoon) {
+    subs.push({ text: summary.totalOwned > 0 ? "状态正常" : "暂无托管证书", tone: "" });
+  }
+
+  return [{
+    key: "certificates",
+    label: "证书",
+    pill,
+    href: "#certificates",
+    hrefLabel: "管理",
+    figure: [String(summary.totalOwned), "\u00a0有效"],
+    subs,
+  }, null];
 }
 
-function qualityCell(data, state) {
-  if (!data) return [waitingCell("ipQuality", "IP 质量", "#ip-quality", state), null];
+function qualityRow(data, state) {
+  if (!data) return [waitingModel("ipQuality", "IP 质量", "#ip-quality", "记录", state), null];
   const summary = summarizeIPQualityFleet(data);
   const pass = summary.total ? summary.succeeded / summary.total * 100 : 0;
   const subs = [];
+  if (summary.total) subs.push({ text: `通过率 ${Math.round(pass)}%`, tone: "" });
   if (summary.failed) subs.push({ text: `异常 ${summary.failed}`, tone: "bad" });
   if (summary.running) subs.push({ text: `进行中 ${summary.running}`, tone: "" });
-  const cell = { key: "ipQuality", label: "IP 质量", href: "#ip-quality", hrefLabel: "记录", token: summary.total ? `通过 ${Math.round(pass)}%` : "", figure: [String(summary.total), " 已检测"], subs };
-  return [cell, summary.total ? segmentMeter(pass, 24) : null];
+  if (!summary.total) subs.push({ text: "暂无检测记录", tone: "" });
+
+  const viz = summary.total
+    ? node("div", { className: "a-edge-quality-viz" },
+        node("span", { className: pass >= 90 ? "a-edge-pct is-ok" : pass >= 70 ? "a-edge-pct" : "a-edge-pct is-warn" }, `${Math.round(pass)}%`),
+        progressBar(pass, pass >= 90 ? "is-ok" : pass >= 70 ? "" : "is-warn", "is-edge"))
+    : null;
+
+  return [{
+    key: "ipQuality",
+    label: "IP 质量",
+    href: "#ip-quality",
+    hrefLabel: "记录",
+    figure: [String(summary.total), "\u00a0已检测"],
+    subs,
+  }, viz];
 }
 
 const EDGE_SOURCES = [
-  ["connections", "core-logs.read", connectionCell],
-  ["certificates", "certificates.read", certificateCell],
-  ["ipQuality", "agents.read", qualityCell],
+  ["connections", "core-logs.read", connectionRow],
+  ["certificates", "certificates.read", certificateRow],
+  ["ipQuality", "agents.read", qualityRow],
 ];
 
-// Inbound connections, certificates and IP quality as three instruments in
-// one strip. Each one keeps its last reading while a refresh fails.
+// Inbound connections, certificates and IP quality stacked cleanly inside one
+// calm card beside Panel Host (expands gracefully if shown alone).
 export function createEdgeTelemetryController(ctx, { readEdgeState }) {
   const sources = EDGE_SOURCES.filter(entry => ctx.can(entry[1]));
-  const hosts = new Map(sources.map(entry => [entry[0], node("div", { className: "a-con-cell a-edge-cell", "data-refresh-key": entry[0] })]));
-  const element = node("section", { className: "a-card a-edge", "aria-label": "边缘状态" }, [...hosts.values()]);
+  const hosts = new Map(sources.map(entry => [entry[0], node("div", { className: "a-edge-item", "data-refresh-key": entry[0] })]));
+  const listEl = node("div", { className: "a-edge-list" }, [...hosts.values()]);
+  const element = section("边缘状态", listEl);
+  element.classList.add("a-edge-card");
   const signatures = new Map();
 
   function paint() {
     for (const [key, , build] of sources) {
       const { data, state } = readEdgeState(key);
-      const [cell, viz] = build(data, state || "");
-      const signature = JSON.stringify([cell, viz?.outerHTML || ""]);
+      const [model, viz] = build(data, state || "");
+      const signature = JSON.stringify([model, viz?.outerHTML || ""]);
       if (signatures.get(key) === signature) continue;
       signatures.set(key, signature);
-      const fresh = consoleCell(cell, viz);
-      fresh.classList.add("a-edge-cell");
-      patch(hosts.get(key), fresh);
+      patch(hosts.get(key), edgeRowNode(model, viz));
     }
   }
 

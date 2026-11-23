@@ -65,7 +65,7 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// the approved open tools layout, metric strips and readable route columns,
 	// plus wrapped record endpoints with independently centered direction markers,
 	// and light-paper dashboard telemetry grids, sparklines, ranking, topology and link probes.
-	const expected = "69a755a429425290383fc2800eb5deda8225322a1d3554ed2b8301ecb4fb8520"
+	const expected = "44b9cf07a78ac446c5162bf915b5245a4e008547a6faefe9cfddc9deff68bede"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

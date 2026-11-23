@@ -77,73 +77,63 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, num));
 }
 
-// Linear gauge of one usage percentage. The segment count follows the real
-// pixel width, so every segment keeps the same size at any breakpoint.
-function drawSegmentMeter({ width, height }, data) {
-  const pct = clampPercent(data?.pct);
-  const gap = 2;
-  const count = Math.max(12, Math.floor((width + gap) / 6));
-  const segW = (width - gap * (count - 1)) / count;
-  const lit = pct == null || pct <= 0 ? 0 : Math.max(1, Math.round((pct / 100) * count));
-  const tone = pct == null ? "" : pct >= 90 ? " is-bad" : pct >= 75 ? " is-warn" : "";
-  const svg = createSVGEl("svg", { class: "a-con-gauge-svg", viewBox: `0 0 ${width} ${height}`, "aria-hidden": "true" });
-  for (let i = 0; i < count; i++) {
-    const x = (i * (segW + gap)).toFixed(1);
-    svg.append(createSVGEl("rect", { x, y: 0, width: segW.toFixed(1), height, class: i < lit ? `a-con-seg is-on${tone}` : "a-con-seg" }));
-  }
-  return svg;
-}
-
 const NO_SAMPLE = Object.freeze(Object.create(null));
 const NO_HISTORY = Object.freeze(Array.of());
 const NBSP = String.fromCharCode(160);
 
-// One usage gauge: label, the used and total amounts where the metric has
-// them, the percentage, and a segment meter below.
-function createGaugeSlot(ctx, label, key) {
+// Compact single-resource gauge with native smooth rounded progress bar.
+function createGaugeSlot(label, key) {
   const valEl = node("strong", { "data-refresh-key": "value" }, "—");
-  const metaEl = node("span", { className: "a-con-token", "data-refresh-key": "amount" }, "");
-  const meter = createResponsiveSVG("a-con-gauge-track", ctx.signal, { height: 10, fallbackWidth: 280, draw: drawSegmentMeter });
-  const element = node("div", { className: "a-con-gauge", "data-refresh-key": key },
-    node("div", { className: "a-con-gauge-head" }, node("span", { className: "a-con-label" }, label), metaEl, valEl),
-    meter.element);
+  const metaEl = node("span", { className: "a-host-gauge-meta", "data-refresh-key": "amount" }, "");
+  const barEl = node("progress", { className: "a-con-progress", max: "100", value: "0", "aria-hidden": "true" });
+  const element = node("div", { className: "a-host-gauge", "data-refresh-key": key },
+    node("div", { className: "a-host-gauge-head" },
+      node("span", { className: "a-con-label" }, label),
+      valEl),
+    barEl,
+    metaEl);
   return {
     element,
     setPercent(pct, detail) {
       valEl.textContent = pct == null ? "—" : `${pct.toFixed(1)}%`;
       metaEl.textContent = detail;
-      meter.update({ pct });
+      barEl.value = pct == null ? 0 : pct;
+      barEl.className = pct == null
+        ? "a-con-progress"
+        : pct >= 90
+          ? "a-con-progress is-bad"
+          : pct >= 75
+            ? "a-con-progress is-warn"
+            : "a-con-progress";
     },
   };
 }
 
+// Calm, compact dual-trace sparkline (rx solid with soft wash, tx dashed).
+// Removes vertical engineering grid noise for clean scannability.
 function drawDualOscilloscope({ width, height }, data) {
   const rxSeries = data?.rx || [];
   const txSeries = data?.tx || [];
   const padL = 4;
   const padR = 4;
-  const padT = 8;
-  const padB = 8;
+  const padT = 7;
+  const padB = 6;
   const usableW = Math.max(20, width - padL - padR);
-  const usableH = Math.max(20, height - padT - padB);
+  const usableH = Math.max(16, height - padT - padB);
   const rawPeak = Math.max(64, ...(rxSeries.filter(Number.isFinite)), ...(txSeries.filter(Number.isFinite)));
-  const peak = rawPeak * 1.15;
+  const peak = rawPeak * 1.18;
 
   const svg = createSVGEl("svg", {
-    class: "a-dash-spark is-osc",
+    class: "a-dash-spark is-osc-compact",
     viewBox: `0 0 ${width} ${height}`,
     "aria-hidden": "true",
   });
 
-  // Calibrated engineering backdrop grid.
-  for (const frac of [0, 0.5, 1]) {
-    const y = (padT + frac * usableH).toFixed(1);
-    svg.append(createSVGEl("line", { x1: padL, y1: y, x2: width - padR, y2: y, class: frac === 1 ? "a-dash-osc-axis" : "a-dash-spark-baseline" }));
-  }
-  for (let i = 1; i < 6; i++) {
-    const x = (padL + (i / 6) * usableW).toFixed(1);
-    svg.append(createSVGEl("line", { x1: x, y1: padT, x2: x, y2: height - padB, class: "a-dash-osc-vgrid" }));
-  }
+  // Subtle horizontal reference guides only (midline + baseline).
+  svg.append(
+    createSVGEl("line", { x1: padL, y1: (padT + usableH * 0.5).toFixed(1), x2: width - padR, y2: (padT + usableH * 0.5).toFixed(1), class: "a-dash-spark-baseline" }),
+    createSVGEl("line", { x1: padL, y1: (height - padB).toFixed(1), x2: width - padR, y2: (height - padB).toFixed(1), class: "a-dash-osc-axis" }),
+  );
 
   const count = Math.max(rxSeries.length, txSeries.length);
   const buildPath = (series) => {
@@ -165,8 +155,8 @@ function drawDualOscilloscope({ width, height }, data) {
     const defs = createSVGEl("defs");
     const grad = createSVGEl("linearGradient", { id: gradID, x1: "0", y1: "0", x2: "0", y2: "1" });
     grad.append(
-      createSVGEl("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.14" }),
-      createSVGEl("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.01" }),
+      createSVGEl("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.10" }),
+      createSVGEl("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.0" }),
     );
     defs.append(grad);
     svg.append(defs);
@@ -183,18 +173,13 @@ function drawDualOscilloscope({ width, height }, data) {
     svg.append(createSVGEl("path", { d: txD, class: "a-dash-spark-secondary" }));
   }
 
-  if (rxPts.length >= 2 && rxPts.length <= 16) {
-    rxPts.slice(0, -1).forEach(([x, y]) => {
-      svg.append(createSVGEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: "1.8", class: "a-dash-osc-node-rx" }));
-    });
-  }
   if (rxPts.length) {
     const [rxX, rxY] = rxPts.at(-1);
-    svg.append(createSVGEl("circle", { cx: rxX.toFixed(1), cy: rxY.toFixed(1), r: "3", class: "a-dash-osc-dot-rx" }));
+    svg.append(createSVGEl("circle", { cx: rxX.toFixed(1), cy: rxY.toFixed(1), r: "2.8", class: "a-dash-osc-dot-rx" }));
   }
   if (txPts.length) {
     const [txX, txY] = txPts.at(-1);
-    svg.append(createSVGEl("circle", { cx: txX.toFixed(1), cy: txY.toFixed(1), r: "2.8", class: "a-dash-osc-dot-tx" }));
+    svg.append(createSVGEl("circle", { cx: txX.toFixed(1), cy: txY.toFixed(1), r: "2.5", class: "a-dash-osc-dot-tx" }));
   }
   return svg;
 }
@@ -220,7 +205,7 @@ function usageNote(used, total) {
 
 export function createPanelHostController(ctx, { bytes, date }) {
   const headBadges = node("div", { className: "a-actions", role: "status" });
-  const subTime = node("span", { className: "a-muted" }, "读取中…");
+  const subTime = node("span", { className: "a-host-foot-time" }, "读取中…");
   let lastRenderSignature = "";
 
   const keyedBadge = (key, label, tone = "") => {
@@ -229,25 +214,32 @@ export function createPanelHostController(ctx, { bytes, date }) {
     return el;
   };
 
-  const netOsc = createResponsiveSVG("a-dash-osc-wrap", ctx.signal, { height: 96, fallbackWidth: 320, draw: drawDualOscilloscope });
-  const cpuGauge = createGaugeSlot(ctx, "CPU", "CPU 使用率");
-  const memGauge = createGaugeSlot(ctx, "内存", "内存使用率");
-  const diskGauge = createGaugeSlot(ctx, "磁盘", "根目录磁盘");
-  const rxValEl = node("strong", { "data-refresh-key": "value" }, "—");
-  const txValEl = node("strong", { "data-refresh-key": "value" }, "—");
-  const oscSummaryEl = node("span", { className: "a-muted" }, "");
+  const netOsc = createResponsiveSVG("a-host-spark-wrap", ctx.signal, { height: 60, fallbackWidth: 320, draw: drawDualOscilloscope });
+  const cpuGauge = createGaugeSlot("CPU", "CPU 使用率");
+  const memGauge = createGaugeSlot("内存", "内存使用率");
+  const diskGauge = createGaugeSlot("磁盘", "根目录磁盘");
+  const rxValEl = node("strong", { "data-refresh-key": "rx" }, "—");
+  const txValEl = node("strong", { "data-refresh-key": "tx" }, "—");
+  const oscSummaryEl = node("span", { className: "a-host-peak" }, "");
 
-  // The line key beside each label doubles as the legend of the trace.
-  const rateReadout = (key, keyClass, label, valueEl) => node("div", { className: "a-con-readout", "data-refresh-key": key },
-    node("span", { className: "a-con-label" }, node("span", { className: keyClass }), label),
-    node("span", { className: "a-con-fig" }, valueEl));
-  const body = node("div", { className: "a-con-host" },
-    cpuGauge.element, memGauge.element, diskGauge.element,
-    node("div", { className: "a-con-host-rates" },
-      rateReadout("网络接收速率", "a-chart-key-rx", "接收", rxValEl),
-      rateReadout("网络发送速率", "a-chart-key-tx", "发送", txValEl)),
-    node("div", { className: "a-con-host-net" }, netOsc.element,
-      node("div", { className: "a-con-host-foot" }, subTime, oscSummaryEl)));
+  const netBand = node("div", { className: "a-host-net" },
+    node("div", { className: "a-host-net-head" },
+      node("div", { className: "a-host-rates" },
+        node("span", { className: "a-host-rate-item" },
+          node("span", { className: "a-chart-key-rx", "aria-hidden": "true" }),
+          "接收 ",
+          rxValEl),
+        node("span", { className: "a-host-rate-item is-tx" },
+          node("span", { className: "a-chart-key-tx", "aria-hidden": "true" }),
+          "发送 ",
+          txValEl)),
+      oscSummaryEl),
+    netOsc.element,
+    node("div", { className: "a-host-foot" }, subTime));
+
+  const body = node("div", { className: "a-host-body" },
+    node("div", { className: "a-host-gauges" }, cpuGauge.element, memGauge.element, diskGauge.element),
+    netBand);
 
   const element = section("面板主机", body, headBadges);
   element.classList.add("a-dash-host-card");
@@ -265,7 +257,7 @@ export function createPanelHostController(ctx, { bytes, date }) {
     const diskOK = Boolean(m.disk_available) && diskTotal > 0 && diskUsed != null;
     const diskPct = diskOK ? clampPercent((diskUsed / diskTotal) * 100) : null;
 
-    const netRateOK = Boolean(m.network_available) && (m.network_rate_available === undefined || Boolean(m.network_rate_available));
+    const netRateOK = Boolean(m.network_available) && (m.network_rate_available === undefined || Boolean(sample?.m?.network_rate_available));
     const rxBps = netRateOK ? finiteNonNegative(m.network_rx_bps) : null;
     const txBps = netRateOK ? finiteNonNegative(m.network_tx_bps) : null;
 
@@ -277,6 +269,10 @@ export function createPanelHostController(ctx, { bytes, date }) {
     if (collected) {
       const formattedTime = date(m.collected_at);
       subTimeText = status === "failed" ? `${formattedTime} · 保留上次采样` : formattedTime;
+    } else if (status === "denied") {
+      subTimeText = "无面板主机指标权限";
+    } else if (status === "failed") {
+      subTimeText = "资源采样读取失败";
     }
 
     const renderSignature = JSON.stringify([
@@ -287,7 +283,7 @@ export function createPanelHostController(ctx, { bytes, date }) {
     if (renderSignature === lastRenderSignature) return;
     lastRenderSignature = renderSignature;
 
-    cpuGauge.setPercent(cpuPct, "");
+    cpuGauge.setPercent(cpuPct, collected ? "容器可见" : "");
     memGauge.setPercent(memPct, memOK ? usageNote(bytes(memUsed), bytes(memTotal)) : "");
     diskGauge.setPercent(diskPct, diskOK ? usageNote(bytes(diskUsed), bytes(diskTotal)) : "");
 
@@ -300,11 +296,9 @@ export function createPanelHostController(ctx, { bytes, date }) {
 
     let stateBadge = keyedBadge("state", "尚无有效采样", "warn");
     if (status === "denied") stateBadge = keyedBadge("state", "无读取权限", "bad");
-    else if (status === "failed") stateBadge = keyedBadge("state", collected ? "刷新失败" : "资源读取失败", "warn");
-    else if (collected) stateBadge = keyedBadge("state", stale ? "采样已过期" : "实时", stale ? "warn" : "");
-    patch(headBadges, node("div", { className: "a-actions", role: "status" },
-      collected ? keyedBadge("scope", "容器可见") : null,
-      stateBadge));
+    else if (status === "failed") stateBadge = keyedBadge("state", collected ? "刷新失败" : "读取失败", "warn");
+    else if (collected) stateBadge = keyedBadge("state", stale ? "采样已过期" : "实时", stale ? "warn" : "ok");
+    patch(headBadges, node("div", { className: "a-actions", role: "status" }, stateBadge));
 
     if (subTime.textContent !== subTimeText) subTime.textContent = subTimeText;
   }

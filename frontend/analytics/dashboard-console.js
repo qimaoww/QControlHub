@@ -2,14 +2,11 @@ import { patch } from "./live-dom.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import { node } from "./ui.js";
 
-// Presentation primitives of the dashboard console: figures, readouts, the
-// status line and the small instruments of the live band. Every value
-// arrives already computed; nothing here reads or derives data.
+// Presentation primitives of the simplified dashboard: tabular figures,
+// readouts, smooth progress bars, the quiet UTC meta strip and the 4-card
+// executive KPI strip. Every value arrives already computed.
 const NBSP = String.fromCharCode(160);
-const PIP_LIMIT = 48;
 const NO_SUBS = Object.freeze([]);
-
-const span = (className, ...children) => node("span", { className }, children);
 
 // Splits a formatted quantity such as "12.4 GB" into its number and unit.
 export function quantityParts(text, suffix = "") {
@@ -34,48 +31,73 @@ export function readout(key, label, parts, note = "", tone = "") {
     note ? node("span", { className: "a-con-note", "data-refresh-key": "note" }, note) : null);
 }
 
-// Segmented ratio. The reading is the count of lit segments, so it does not
-// depend on a colour; the tone only marks a threshold.
-export function segmentMeter(percent, segments, tone = "") {
-  const lit = Math.round(Math.max(0, Math.min(100, percent)) / 100 * segments);
-  const on = tone ? `a-con-seg is-on ${tone}` : "a-con-seg is-on";
-  const svg = createSVGEl("svg", { class: "a-con-meter", viewBox: `0 0 ${segments * 5 - 1} 8`, preserveAspectRatio: "none", "aria-hidden": "true" });
-  for (let index = 0; index < segments; index++) {
-    svg.append(createSVGEl("rect", { x: index * 5, y: 0, width: 4, height: 8, class: index < lit ? on : "a-con-seg" }));
-  }
-  return svg;
+// Clean continuous rounded progress bar using native <progress> (zero inline
+// styles for strict CSP and distortion-free rounded caps at every width).
+export function progressBar(percent, tone = "", className = "") {
+  const numeric = typeof percent === "number" && Number.isFinite(percent)
+    ? Math.max(0, Math.min(100, percent))
+    : 0;
+  const normalizedTone = tone === "ok" || tone === "is-ok"
+    ? "is-ok"
+    : tone === "warn" || tone === "is-warn"
+      ? "is-warn"
+      : tone === "bad" || tone === "is-bad"
+        ? "is-bad"
+        : "";
+  const classes = ["a-con-progress", normalizedTone, className].filter(Boolean).join(" ");
+  return node("progress", {
+    className: classes,
+    max: "100",
+    value: numeric.toFixed(1),
+    "aria-hidden": "true",
+  });
 }
 
-// One pip per node while the fleet is small; lit pips are online. Larger
-// fleets fall back to a segmented ratio so the cell stays bounded.
-function pipsViz(viz) {
-  const total = Math.max(0, Number(viz.total) || 0), on = Math.max(0, Math.min(total, Number(viz.on) || 0));
-  if (!total) return null;
-  if (total > PIP_LIMIT) return segmentMeter(on / total * 100, 32);
-  const pips = Array.from({ length: total }, (_, index) => span(index < on ? "a-con-pip is-on" : "a-con-pip"));
-  return node("div", { className: "a-con-pips", "aria-hidden": "true" }, pips);
+// Backwards-compatible alias used by quota/telemetry call sites.
+export function segmentMeter(percent, _segments = 20, tone = "") {
+  return progressBar(percent, tone);
 }
 
 // Recent samples of one live reading, oldest first. Gaps are skipped.
 function traceViz(viz) {
   const values = (viz.values || NO_SUBS).filter(value => typeof value === "number" && Number.isFinite(value));
-  const svg = createSVGEl("svg", { class: "a-con-trace", viewBox: "0 0 120 24", preserveAspectRatio: "none", "aria-hidden": "true" });
-  svg.append(createSVGEl("line", { x1: 0, y1: 23.5, x2: 120, y2: 23.5, class: "a-con-trace-base", "vector-effect": "non-scaling-stroke" }));
-  if (values.length < 2) return svg;
-  // Headroom above the peak keeps a steady reading off the top edge.
+  if (values.length < 2) return null;
+  const svg = createSVGEl("svg", { class: "a-con-trace", viewBox: "0 0 120 22", preserveAspectRatio: "none", "aria-hidden": "true" });
+  svg.append(createSVGEl("line", { x1: 0, y1: 21.5, x2: 120, y2: 21.5, class: "a-con-trace-base", "vector-effect": "non-scaling-stroke" }));
   const peak = Math.max(1, ...values) * 1.25;
-  const points = values.map((value, index) => `${(index / (values.length - 1) * 120).toFixed(1)} ${(22 - value / peak * 20).toFixed(1)}`);
+  const points = values.map((value, index) => `${(index / (values.length - 1) * 120).toFixed(1)} ${(20 - value / peak * 18).toFixed(1)}`);
   svg.append(
-    createSVGEl("path", { d: `M0 24 L${points.join(" L")} L120 24 Z`, class: "a-con-trace-area" }),
+    createSVGEl("path", { d: `M0 22 L${points.join(" L")} L120 22 Z`, class: "a-con-trace-area" }),
     createSVGEl("path", { d: `M${points.join(" L")}`, class: "a-con-trace-line", "vector-effect": "non-scaling-stroke" }));
   return svg;
 }
 
-const VIZ = { pips: pipsViz, trace: traceViz };
+function barViz(viz) {
+  return progressBar(viz.pct, viz.tone || "", "is-kpi");
+}
 
-function tokenNode(cell) {
-  if (!cell.token) return null;
-  return node("span", { className: cell.tone ? `a-con-token ${cell.tone}` : "a-con-token", "data-refresh-key": "token" }, cell.token);
+const VIZ = { bar: barViz, trace: traceViz };
+
+function headAccessory(cell) {
+  if (cell.pill) {
+    const toneClass = cell.pill.tone ? ` ${cell.pill.tone}` : "";
+    if (cell.pill.href) {
+      return node("a", {
+        className: `a-dash-kpi-pill is-link${toneClass}`,
+        href: cell.pill.href,
+        "data-refresh-key": "pill",
+      }, cell.pill.text);
+    }
+    return node("span", {
+      className: `a-dash-kpi-pill${toneClass}`,
+      "data-refresh-key": "pill",
+    }, cell.pill.text);
+  }
+  if (cell.token) {
+    const toneClass = cell.tone ? ` ${cell.tone}` : "";
+    return node("span", { className: `a-con-token${toneClass}`, "data-refresh-key": "token" }, cell.token);
+  }
+  return null;
 }
 
 function subNode(item, index) {
@@ -83,43 +105,43 @@ function subNode(item, index) {
   return node("span", { className, "data-refresh-key": `sub-${index}` }, item.text);
 }
 
-// One reading of the console: label, figure, a short breakdown and its
-// instrument. The instrument is drawn from the model, or passed in.
+// One modular KPI card of the top executive overview strip.
 export function consoleCell(cell, instrument = null) {
   const draw = cell.viz ? VIZ[cell.viz.type] : null;
+  const renderedViz = draw ? draw(cell.viz) : instrument;
+  const subs = (cell.subs || NO_SUBS).map(subNode);
   const jump = cell.href ? node("a", { className: "a-con-jump", href: cell.href, "data-refresh-key": "jump" }, cell.hrefLabel) : null;
-  return node("div", { className: "a-con-cell", "data-refresh-key": cell.key, "data-state": cell.state || "ready" },
-    node("div", { className: "a-con-cell-head", "data-refresh-key": "head" },
+  return node("article", {
+    className: "a-card a-dash-kpi",
+    "data-refresh-key": cell.key,
+    "data-state": cell.state || "ready",
+  },
+    node("div", { className: "a-dash-kpi-head", "data-refresh-key": "head" },
       node("span", { className: "a-con-label", "data-refresh-key": "label" }, cell.label),
-      tokenNode(cell), jump),
-    figure(cell.figure, "a-con-fig a-con-cell-fig"),
-    node("div", { className: "a-con-cell-sub", "data-refresh-key": "sub" }, (cell.subs || NO_SUBS).map(subNode)),
-    node("div", { className: "a-con-cell-viz", "data-refresh-key": "viz" }, draw ? draw(cell.viz) : instrument));
-}
-
-function stripItem(item) {
-  const key = item.key;
-  if (item.strong != null) return node("strong", { "data-refresh-key": key }, item.strong);
-  if (item.href) return node("a", { className: `a-con-token ${item.tone || ""}`, href: item.href, "data-refresh-key": key }, item.text);
-  if (item.tone) return node("span", { className: `a-con-token ${item.tone}`, "data-refresh-key": key }, item.text);
-  return node("span", { className: "a-con-strip-text", "data-refresh-key": key }, item.text);
-}
-
-function stripGroup(group) {
-  return node("div", { className: "a-con-strip-group", "data-refresh-key": group.key },
-    node("span", { className: "a-con-label", "data-refresh-key": "label" }, group.label),
-    group.items.map(stripItem));
+      headAccessory(cell),
+      jump),
+    figure(cell.figure, "a-con-fig a-dash-kpi-fig"),
+    node("div", { className: "a-dash-kpi-foot", "data-refresh-key": "foot" },
+      subs.length ? node("div", { className: "a-dash-kpi-subs", "data-refresh-key": "subs" }, subs) : null,
+      renderedViz ? node("div", { className: "a-dash-kpi-viz", "data-refresh-key": "viz" }, renderedViz) : null));
 }
 
 function renderStatus(model) {
-  const status = node("span", { className: "a-con-token warn", role: "status", hidden: !model.status, "data-refresh-key": "status" }, model.status || "");
-  return node("div", { className: "a-con-status", role: "group", "aria-label": "运行概况" },
+  const status = node("span", {
+    className: "a-dash-meta-status",
+    role: "status",
+    hidden: !model.status,
+    "data-refresh-key": "status",
+  }, model.status || "");
+  return node("div", { className: "a-dash-meta", role: "group", "aria-label": "运行时间与状态" },
     node("span", { className: "a-con-clock", "data-refresh-key": "clock" }, model.clock),
-    model.groups.map(stripGroup),
-    node("span", { className: "a-con-strip-end", "data-refresh-key": "end" }, status));
+    status);
 }
 
-const renderCells = (cells) => node("div", { className: "a-con-cells" }, cells.map(cell => consoleCell(cell)));
+const renderCells = (cells) => node("section", {
+  className: "a-dash-kpis",
+  "aria-label": "关键指标概览",
+}, cells.map(cell => consoleCell(cell)));
 
 // Repaints a stable host only when its model changed.
 function guarded(element, render) {
@@ -132,14 +154,14 @@ function guarded(element, render) {
   };
 }
 
-// The slim line above the console: UTC clock, engines and tasks.
+// Quiet UTC clock and status indicator line above the KPI strip.
 export function createStatusLine() {
-  const element = node("div", { className: "a-con-status", role: "group", "aria-label": "运行概况" });
+  const element = node("div", { className: "a-dash-meta", role: "group", "aria-label": "运行时间与状态" });
   return { element, paint: guarded(element, renderStatus) };
 }
 
-// Live fleet readings shown beside the panel host.
+// Top 4-card executive KPI strip.
 export function createLiveCells() {
-  const element = node("div", { className: "a-con-cells" });
+  const element = node("section", { className: "a-dash-kpis", "aria-label": "关键指标概览" });
   return { element, paint: guarded(element, renderCells) };
 }

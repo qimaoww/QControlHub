@@ -15,7 +15,7 @@ export async function run() {
       { day: "2026-08-01", received_bytes: 4, sent_bytes: 3, used_bytes: 7, peak_receive_bps: 2 },
       { day: "2026-08-01", received_bytes: 5, sent_bytes: 2, used_bytes: 7, peak_receive_bps: 8 },
     ], "2026-08")[0],
-    { day: "2026-08-01", received_bytes: 9, sent_bytes: 5, used_bytes: 14, peak_receive_bps: 8, peak_send_bps: 0 },
+    { day: "2026-08-01", received_bytes: 9, sent_bytes: 5, used_bytes: 14, peak_receive_bps: 8, peak_send_bps: 0, rows: 2 },
     "same-day policy rows are aggregated for the dashboard chart",
   );
   const trendDays = aggregateDashboardTrafficDays([

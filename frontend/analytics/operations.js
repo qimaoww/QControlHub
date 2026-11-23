@@ -100,7 +100,7 @@ const BLANK_FIGURE = ["—", ""];
 const NO_SUBS = Object.freeze([]);
 const CORE_KEYS = new Set(["overview", "agents", "order"]);
 const EDGE_KEYS = new Set(["connections", "certificates", "ipQuality"]);
-const blankCell = (key, label) => ({ key, label, token: "", tone: "", state: "ready", figure: BLANK_FIGURE, subs: NO_SUBS, viz: null });
+const blankCell = (key, label) => ({ key, label, token: "", tone: "", pill: null, state: "ready", figure: BLANK_FIGURE, subs: NO_SUBS, viz: null });
 const twoDigits = (value) => String(value).padStart(2, "0");
 // Current UTC time to the minute. The traffic periods are cut on UTC days,
 // so the clock shows where the current day stands.
@@ -183,7 +183,8 @@ export async function dashboardPage(ctx) {
 
   const rackSummary = node("div", { className: "a-actions a-con-tools" });
   const rackHost = node("ol", { className: "a-rack", "aria-label": "节点运行状态" });
-  const nodes = can("agents.read") ? section("节点", rackHost, rackSummary) : null;
+  const nodes = can("agents.read") ? section("节点", node("div", { className: "a-rack-wrap" }, rackHost), rackSummary) : null;
+  nodes?.classList.add("a-dash-nodes-card");
 
   stage = can("traffic.read") ? createTrafficStage(ctx, {
     bytes,
@@ -241,7 +242,7 @@ export async function dashboardPage(ctx) {
   const waitText = (key) => ["failed", "denied"].includes(states.get(key)) ? "读取失败" : "读取中";
 
   function nodeCell(overview, agents) {
-    const cell = blankCell("节点", "节点");
+    const cell = blankCell("节点", "在线节点");
     if (!readings.has("overview") && !readings.has("agents")) {
       cell.state = states.get("overview") === "failed" ? "failed" : "loading";
       cell.subs = [{ text: waitText("overview"), tone: cell.state === "failed" ? "bad" : "" }];
@@ -250,9 +251,28 @@ export async function dashboardPage(ctx) {
     const online = Number(overview.agents_online ?? agents.filter(agent => agent.status === "online").length) || 0;
     const count = Number(overview.agents ?? agents.length) || 0;
     const offline = Math.max(0, count - online);
-    cell.figure = [String(online), `/${count}`];
-    if (offline > 0) cell.subs = [{ text: `离线 ${offline}`, tone: "bad" }];
-    cell.viz = { type: "pips", on: online, total: count };
+    cell.figure = [String(online), ` / ${count}`];
+    if (offline > 0) cell.pill = { text: `离线 ${offline}`, tone: "bad" };
+    else if (count > 0) cell.pill = { text: "全部在线", tone: "ok" };
+    const pct = count > 0 ? (online / count) * 100 : 0;
+    cell.viz = { type: "bar", pct, tone: online > 0 ? "ok" : "" };
+    return cell;
+  }
+
+  function engineCell(fleet) {
+    const cell = blankCell("运行内核", "运行内核");
+    if (!readings.has("agents")) {
+      cell.state = states.get("agents") === "failed" ? "failed" : "loading";
+      cell.subs = [{ text: waitText("agents"), tone: cell.state === "failed" ? "bad" : "" }];
+      return cell;
+    }
+    cell.figure = [String(fleet.running), ` / ${fleet.installed}`];
+    const pct = fleet.installed > 0 ? (fleet.running / fleet.installed) * 100 : 0;
+    if (fleet.installed > 0) {
+      cell.token = `${Math.round(pct)}%`;
+      cell.tone = pct >= 80 ? "ok" : pct > 0 ? "warn" : "";
+    }
+    cell.viz = { type: "bar", pct, tone: "" };
     return cell;
   }
 
@@ -260,7 +280,6 @@ export async function dashboardPage(ctx) {
   // expired samples are left out; no valid sample shows no figure.
   function rateCell(fleet, count) {
     const cell = blankCell("节点速率", "节点速率");
-    cell.viz = { type: "trace", values: rateTrace };
     if (!fleet.sampled) {
       cell.state = readings.has("agents") ? "empty" : "loading";
       cell.subs = [{ text: readings.has("agents") ? "无有效采样" : waitText("agents"), tone: "" }];
@@ -268,30 +287,33 @@ export async function dashboardPage(ctx) {
     }
     cell.figure = quantityParts(bytes(fleet.receiveBPS + fleet.sendBPS), "/s");
     if (fleet.sampled < count) cell.token = `${fleet.sampled}/${count} 节点`;
-    cell.subs = [{ text: `↓ ${bytes(fleet.receiveBPS)}/s`, tone: "" }, { text: `↑ ${bytes(fleet.sendBPS)}/s`, tone: "" }];
+    cell.subs = [{ text: `↓ ${bytes(fleet.receiveBPS)}/s`, tone: "rx" }, { text: `↑ ${bytes(fleet.sendBPS)}/s`, tone: "" }];
+    if (rateTrace.filter(v => typeof v === "number" && Number.isFinite(v)).length >= 2) {
+      cell.viz = { type: "trace", values: rateTrace };
+    }
     return cell;
   }
 
-  function engineGroup(fleet) {
-    const group = { key: "运行内核", label: "内核", items: [{ key: "wait", text: waitText("agents") }] };
-    if (!readings.has("agents")) return group;
-    group.items = [{ key: "running", strong: String(fleet.running) }, { key: "installed", text: `/ ${fleet.installed}` }];
-    return group;
+  function taskCell(tasks, known) {
+    const cell = blankCell("调度任务", "调度任务");
+    if (!known) {
+      cell.state = states.get("overview") === "failed" ? "failed" : "loading";
+      cell.subs = [{ text: waitText("overview"), tone: cell.state === "failed" ? "bad" : "" }];
+      return cell;
+    }
+    cell.figure = [String(tasks.running), "\u00a0运行中"];
+    if (tasks.failed > 0) {
+      cell.pill = {
+        text: `失败 ${tasks.failed}`,
+        tone: "bad",
+        href: can("tasks.read") ? "#tasks?status=failed" : "",
+      };
+    }
+    cell.subs = [{ text: `排队 ${tasks.pending}`, tone: "" }];
+    return cell;
   }
 
-  function taskGroup(tasks, known) {
-    const group = { key: "调度任务", label: "任务", items: [{ key: "wait", text: waitText("overview") }] };
-    if (!known) return group;
-    group.items = [{ key: "running", text: `运行 ${tasks.running}` }, { key: "pending", text: `排队 ${tasks.pending}` }];
-    if (tasks.failed <= 0) return group;
-    const failed = { key: "fail", text: `失败 ${tasks.failed}`, tone: "bad" };
-    if (can("tasks.read")) failed.href = "#tasks?status=failed";
-    group.items.push(failed);
-    return group;
-  }
-
-  // Status line and live cells: the slow-moving counts sit in the line, the
-  // node count and the live fleet rate beside the panel host.
+  // Quiet UTC clock line + 4 equal executive KPI cards (Nodes, Engines, Rate, Tasks).
   function paintConsole() {
     const overview = readings.get("overview") || {};
     const agents = orderedAgents();
@@ -299,15 +321,15 @@ export async function dashboardPage(ctx) {
     const known = readings.has("overview");
     const canAgents = can("agents.read");
     const cells = [nodeCell(overview, agents)];
+    if (canAgents) cells.push(engineCell(fleet));
     if (canAgents && can("metrics.read")) cells.push(rateCell(fleet, agents.length));
-    const groups = canAgents ? [engineGroup(fleet)] : [];
-    groups.push(taskGroup(taskNumbers(overview), known));
+    cells.push(taskCell(taskNumbers(overview), known));
     const failed = [...states].some(([key, state]) => CORE_KEYS.has(key) && ["failed", "denied"].includes(state));
     const waiting = ["overview", ...(canAgents ? ["agents"] : [])].some(key => !readings.has(key) && (!states.has(key) || states.get(key) === "loading"));
     let statusText = "";
     if (waiting) statusText = "读取中…";
     else if (failed) statusText = "部分状态异常";
-    statusLine.paint({ clock: utcClock(), groups, status: statusText });
+    statusLine.paint({ clock: utcClock(), status: statusText });
     liveCells.paint(cells);
     return agents;
   }
@@ -363,14 +385,21 @@ export async function dashboardPage(ctx) {
   void refresh(true);
   poll(ctx, () => refresh(false), probePollInterval);
 
-  const live = node("div", { className: "a-con-live" }, liveCells.element, hostController?.element);
-  return node("div", { className: "a-dash-deck a-console" },
+  const opsCards = [
+    hostController?.element,
+    edgeTelemetry.visible ? edgeTelemetry.element : null,
+  ].filter(Boolean);
+  const opsRow = opsCards.length
+    ? node("div", { className: opsCards.length === 1 ? "a-dash-ops-row is-single" : "a-dash-ops-row" }, opsCards)
+    : null;
+
+  return node("div", { className: "a-dash-deck a-dash-console" },
     statusLine.element,
+    liveCells.element,
     stage?.element,
-    live,
     topologySection.visible && topologySection.element,
     nodes,
-    edgeTelemetry.visible && edgeTelemetry.element,
+    opsRow,
   );
 }
 
@@ -418,7 +447,7 @@ export async function topologyPage(ctx) {
   void refresh(true);
   poll(ctx, () => refresh(false), probePollInterval);
 
-  return node("div", { className: "a-dash-deck" },
+  return node("div", { className: "a-dash-deck a-console a-topo-console" },
     topologySection.visible ? topologySection.element : node("div", { className: "a-notice" }, "当前账号无权查看网络拓扑。"),
   );
 }
