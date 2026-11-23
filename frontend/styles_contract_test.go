@@ -66,7 +66,7 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// plus wrapped record endpoints with independently centered direction markers,
 	// readable inbound port values at narrow desktop widths, the responsive node proxy version rows with aligned retry feedback,
 	// and light-paper dashboard telemetry grids, sparklines, ranking, topology and link probes.
-	const expected = "4eea8fc527fef665b9cb9a85c12a0e48ee9ddc27188866bed1f999a33b3fb1f5"
+	const expected = "0d3ab34ea0ae8ceedf97c0fdf2cc5e0f4c93b52335f118bed333fb50c8124b2c"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

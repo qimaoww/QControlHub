@@ -152,26 +152,52 @@ function gridMarks(scale, width, bytes) {
   return marks;
 }
 
+function visibleDays(view) {
+  const days = view?.grid?.days || NO_ITEMS;
+  const elapsed = days.filter(entry => !entry.future);
+  return elapsed.length ? elapsed : days;
+}
+
 function rulerMarks(days, geom, width) {
   const marks = [createSVGEl("text", { x: PAD_LEFT - 10, y: PLOT_BASE + 18, class: "a-flux-zone" }, "UTC")];
   const right = width - PAD_RIGHT;
+  const labelIndices = [];
   days.forEach((entry, index) => {
-    const left = geom.left(index);
-    const x = fixed(left);
+    const cx = geom.center(index);
+    const x = fixed(cx);
     const monday = weekdayOf(entry.day) === 1;
     let size = monday ? 5 : 2.5;
     if (index > 0 && entry.day.endsWith("-01")) size = 8;
     marks.push(createSVGEl("line", { x1: x, y1: PLOT_BASE, x2: x, y2: PLOT_BASE + size, class: monday ? "a-flux-tick is-week" : "a-flux-tick" }));
-    if (monday) {
-      const nearRight = left + 36 > right;
-      marks.push(createSVGEl("text", {
-        x: fixed(nearRight ? right : left + 2),
-        y: PLOT_BASE + 18,
-        "text-anchor": nearRight ? "end" : "start",
-        class: "a-flux-tick-label",
-      }, shortDay(entry.day)));
-    }
+    if (monday) labelIndices.push(index);
   });
+  if (days.length > 0) {
+    if (!labelIndices.length || geom.center(labelIndices[0]) - geom.center(0) >= 52) {
+      labelIndices.unshift(0);
+    }
+    const last = days.length - 1;
+    if (last > 0 && !labelIndices.includes(last)) {
+      const prev = labelIndices.at(-1);
+      if (prev == null || geom.center(last) - geom.center(prev) >= 44) {
+        labelIndices.push(last);
+      } else if (prev > 0) {
+        labelIndices[labelIndices.length - 1] = last;
+      }
+    }
+  }
+  for (const index of labelIndices) {
+    const cx = geom.center(index);
+    const atLeft = index === 0 || cx - 20 < PAD_LEFT;
+    const atRight = index === days.length - 1 || cx + 20 > right;
+    const anchor = atLeft ? "start" : (atRight ? "end" : "middle");
+    const lx = atLeft ? Math.max(PAD_LEFT, cx - 2) : (atRight ? Math.min(right, cx + 2) : cx);
+    marks.push(createSVGEl("text", {
+      x: fixed(lx),
+      y: PLOT_BASE + 18,
+      "text-anchor": anchor,
+      class: "a-flux-tick-label",
+    }, shortDay(days[index].day)));
+  }
   return marks;
 }
 
@@ -238,9 +264,9 @@ function hitMark(entry, index, geom, height, bytes) {
   });
 }
 
-// Smooth airy dual area-line chart (Emerald receive + calm Slate send).
+// Smooth monochrome dual area-line chart spanning elapsed days edge-to-edge.
 function drawPlot(view, width, bytes) {
-  const days = view.grid.days;
+  const days = visibleDays(view);
   const height = PLOT_BASE + RULER_HEIGHT;
   const geom = plotGeometry(days.length, width);
   const seriesPeak = days.reduce((max, day) => (day.future || !day.rows) ? max : Math.max(max, day.received || 0, day.sent || 0), 0);
@@ -253,14 +279,14 @@ function drawPlot(view, width, bytes) {
     viewBox: `0 0 ${width} ${height}`,
     height,
     role: "group",
-    "aria-label": "每日流量趋势，翠绿实线为接收，浅灰虚线为发送",
+    "aria-label": "每日流量趋势，深色实线为接收，浅灰虚线为发送",
   });
 
   const defs = createSVGEl("defs");
   const grad = createSVGEl("linearGradient", { id: gradId, x1: "0", y1: "0", x2: "0", y2: "1" });
   grad.append(
-    createSVGEl("stop", { offset: "0%", "stop-color": "#059669", "stop-opacity": "0.14" }),
-    createSVGEl("stop", { offset: "100%", "stop-color": "#059669", "stop-opacity": "0.0" }),
+    createSVGEl("stop", { offset: "0%", "stop-color": "#18181b", "stop-opacity": "0.08" }),
+    createSVGEl("stop", { offset: "100%", "stop-color": "#18181b", "stop-opacity": "0.0" }),
   );
   defs.append(grad);
   svg.append(defs);
@@ -277,7 +303,7 @@ function drawPlot(view, width, bytes) {
   const inside = coords.filter(c => c.within);
   const partialWindow = inside.length > 0 && inside.length < coords.filter(c => !c.future).length;
 
-  // Soft active period highlight band when inspecting 今日 or 本周 inside the month
+  // Soft monochrome highlight band + baseline accent only when inspecting 今日 or 本周 inside the month
   if (partialWindow) {
     const x0 = geom.left(inside[0].index);
     const x1 = geom.left(inside.at(-1).index) + geom.step;
@@ -304,22 +330,20 @@ function drawPlot(view, width, bytes) {
   if (partialWindow) {
     appendCurves(svg, splitCollectedSegments(coords), { gradId, faded: true });
     appendCurves(svg, splitCollectedSegments(coords, pt => pt.within), { gradId, faded: false });
-  } else {
-    appendCurves(svg, splitCollectedSegments(coords), { gradId, faded: false });
-  }
-
-  if (inside.length) {
     const from = fixed(geom.left(inside[0].index) + 1);
     const to = fixed(geom.left(inside.at(-1).index) + geom.step - 1);
-    svg.append(createSVGEl("line", { x1: from, y1: PLOT_BASE + 1, x2: to, y2: PLOT_BASE + 1, class: "a-flux-range-line" }));
+    svg.append(createSVGEl("line", { x1: from, y1: PLOT_BASE + 0.5, x2: to, y2: PLOT_BASE + 0.5, class: "a-flux-range-line" }));
+  } else {
+    const segments = splitCollectedSegments(coords);
+    appendCurves(svg, segments, { gradId, faded: false });
+    const lastSeg = segments.at(-1);
+    if (lastSeg && lastSeg.length > 1) {
+      const endPt = lastSeg.at(-1);
+      svg.append(createSVGEl("circle", { cx: fixed(endPt.x), cy: fixed(endPt.rxY), r: "2.6", class: "a-flux-end-rx" }));
+    }
   }
 
-  const todayIdx = days.findIndex(entry => entry.day === view.today);
-  if (todayIdx >= 0) {
-    svg.append(createSVGEl("circle", { cx: fixed(geom.center(todayIdx)), cy: PLOT_BASE + 7, r: "2.4", class: "a-flux-now" }));
-  }
-
-  // O(1) hover / pin focus guide & ceramic hollow dots
+  // O(1) hover / pin focus guide & monochrome hollow dots
   svg.append(
     createSVGEl("line", { x1: PAD_LEFT, y1: PLOT_TOP - 2, x2: PAD_LEFT, y2: PLOT_BASE, class: "a-flux-guide", hidden: true }),
     createSVGEl("circle", { cx: PAD_LEFT, cy: PLOT_BASE, r: "3.4", class: "a-flux-dot-tx", hidden: true }),
@@ -327,7 +351,7 @@ function drawPlot(view, width, bytes) {
   );
 
   days.forEach((entry, index) => { if (!entry.future) svg.append(hitMark(entry, index, geom, height, bytes)); });
-  return { svg, coords };
+  return { svg, coords, days };
 }
 
 function laneTag(item) {
@@ -538,9 +562,9 @@ function focusedDay(stage) {
 }
 
 function syncRoving(stage) {
-  const days = stage.view.grid.days;
-  let anchor = stage.rove >= 0 ? stage.rove : stage.pinned;
-  if (anchor < 0) anchor = days.findIndex(day => day.day === stage.view.today);
+  const days = stage.plottedDays.length ? stage.plottedDays : visibleDays(stage.view);
+  let anchor = stage.rove >= 0 && stage.rove < days.length ? stage.rove : stage.pinned;
+  if (anchor < 0 || anchor >= days.length) anchor = days.findIndex(day => day.day === stage.view.today);
   if (anchor < 0) anchor = days.length - 1;
   for (const hit of stage.plotHost.querySelectorAll(".a-flux-hit")) {
     const index = Number(hit.dataset.day);
@@ -556,11 +580,15 @@ function paintPlot(stage) {
   if (stamp === stage.plotStamp) return;
   stage.plotStamp = stamp;
   const focused = focusedDay(stage);
-  const { svg, coords } = drawPlot(view, stage.width, stage.bytes);
+  const { svg, coords, days } = drawPlot(view, stage.width, stage.bytes);
   stage.dayCoords = coords;
+  stage.plottedDays = days;
+  if (stage.hover >= days.length) stage.hover = -1;
+  if (stage.pinned >= days.length) stage.pinned = -1;
+  if (stage.rove >= days.length) stage.rove = -1;
   stage.plotHost.replaceChildren(svg);
   syncRoving(stage);
-  if (focused >= 0) hitOf(stage, focused)?.focus({ preventScroll: true });
+  if (focused >= 0 && focused < days.length) hitOf(stage, focused)?.focus({ preventScroll: true });
 }
 
 function paintLanes(stage) {
@@ -615,7 +643,10 @@ function paintLanes(stage) {
 function applyCursor(stage) {
   const view = stage.view;
   if (!view || !stage.width) return;
-  const active = stage.hover >= 0 ? stage.hover : stage.pinned;
+  const days = stage.plottedDays.length ? stage.plottedDays : visibleDays(view);
+  const active = stage.hover >= 0 && stage.hover < days.length
+    ? stage.hover
+    : (stage.pinned >= 0 && stage.pinned < days.length ? stage.pinned : -1);
   const guide = stage.plotHost.querySelector(".a-flux-guide");
   const dotRx = stage.plotHost.querySelector(".a-flux-dot-rx");
   const dotTx = stage.plotHost.querySelector(".a-flux-dot-tx");
@@ -647,7 +678,7 @@ function applyCursor(stage) {
   }
 
   const fresh = active >= 0
-    ? daySummary(view.grid.days[active], active === stage.pinned, stage.bytes)
+    ? daySummary(days[active], active === stage.pinned, stage.bytes)
     : rangeSummary(view, stage.period, stage.activeSource, stage.bytes);
   patch(stage.summaryHost, fresh);
 }
@@ -669,7 +700,7 @@ function paintStage(stage) {
 }
 
 function indexAt(stage, host, clientX) {
-  const days = stage.view?.grid.days || NO_ITEMS;
+  const days = stage.plottedDays.length ? stage.plottedDays : visibleDays(stage.view);
   const frame = host.matches("svg") ? host : host.querySelector("svg");
   const box = frame?.getBoundingClientRect();
   if (!days.length || !box || box.width <= 0 || !stage.width) return -1;
@@ -826,7 +857,7 @@ function buildStage(ctx, options) {
     ctx, ...options,
     period: PERIODS.some(entry => entry[0] === saved) ? saved : "month",
     canNodes: ctx.can("agents.read"),
-    width: 0, sideWidth: 0, dayCoords: [], hover: -1, pinned: -1, rove: -1, open: "",
+    width: 0, sideWidth: 0, dayCoords: [], plottedDays: [], hover: -1, pinned: -1, rove: -1, open: "",
     view: null, activeSource: null, dialog: null, unfolded: false, foldTouched: false,
     plotStamp: "", laneStamp: "", detailStamp: "", gridCache: null,
   };
