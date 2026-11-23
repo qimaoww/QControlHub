@@ -1,7 +1,4 @@
 import {
-  isClockSyncAbnormal,
-  panelMetricUsage,
-  selectMostActiveNodes,
   summarizeClientConnectionsPulse,
   summarizeExpiringCertificates,
   summarizeIPQualityFleet,
@@ -9,103 +6,13 @@ import {
 import { figure, progressBar } from "./dashboard-console.js";
 import { createSVGEl } from "./dashboard-panel.js";
 import { patch } from "./live-dom.js";
-import { nodeMetrics } from "./node-metrics.js";
-import { nodeRegionFlag } from "./node-region.js";
-import { node, pathID, section } from "./ui.js";
+import { node, section } from "./ui.js";
 
-// The active node grid and unified edge status card of the simplified
-// dashboard. Both repaint through keyed patches so focus and scroll survive.
-const RACK_UNITS = 8;
+// Unified edge status card (inbound connections, certificates, IP quality).
+// Each row repaints independently through keyed patches so focus and scroll survive.
 const NO_ITEMS = Object.freeze([]);
 const BLANK = ["—", ""];
 const WAIT_NOTES = { failed: "读取失败", denied: "无权限" };
-
-const el = (tag, className, ...children) => node(tag, { className }, children);
-const keyed = (key, element) => { element.setAttribute("data-refresh-key", key); return element; };
-const token = (key, text, tone = "") => keyed(key, el("span", tone ? `a-con-token ${tone}` : "a-con-token", text));
-const meterTone = (value) => value >= 90 ? "is-bad" : value >= 75 ? "is-warn" : "";
-
-// One clean continuous meter row for an online node tile.
-function unitMeter(key, label, value) {
-  const known = value != null;
-  const tone = known ? meterTone(value) : "";
-  return node("div", { className: "a-rack-meter", "data-refresh-key": key },
-    el("span", "a-con-label", label),
-    progressBar(known ? value : 0, tone, "is-slim"),
-    node("strong", { className: tone, "data-refresh-key": "value" }, known ? `${value.toFixed(1)}%` : "—"));
-}
-
-function unitRate(agent, online, bytes) {
-  const metrics = agent.metrics;
-  const sampled = online && metrics?.network_available && metrics.network_rx_bps != null && metrics.network_tx_bps != null;
-  if (!sampled) return node("div", { className: "a-rack-rate", "data-refresh-key": "rate" }, el("span", "a-con-note", "暂无速率"));
-  return node("div", { className: "a-rack-rate", "data-refresh-key": "rate" },
-    el("span", "a-con-rx", `↓ ${bytes(metrics.network_rx_bps)}/s`),
-    el("span", "a-con-tx", `↑ ${bytes(metrics.network_tx_bps)}/s`));
-}
-
-function rackUnit(context, agent) {
-  const { ctx, bytes, date, canMetrics } = context;
-  const online = agent.status === "online";
-  const skew = isClockSyncAbnormal(agent.metrics?.clock_sync);
-  const state = online ? (skew ? "skew" : "online") : "offline";
-  const heartbeat = agent.metrics?.collected_at || agent.last_seen;
-
-  const head = node("div", { className: "a-rack-head", "data-refresh-key": "head" },
-    el("span", online ? "a-node-dot is-on" : "a-node-dot"),
-    nodeRegionFlag(ctx, agent),
-    node("a", {
-      className: "a-rack-name",
-      href: `#node-settings?agent=${pathID(agent.id)}`,
-      title: agent.name || agent.id,
-    }, agent.name || agent.id),
-    online ? null : keyed("state", el("span", "a-rack-pill", "离线")),
-    skew ? keyed("skew", el("span", "a-rack-pill warn", "时钟异常")) : null);
-
-  // Online nodes display clean slim CPU/Mem bars and live rate; offline nodes
-  // collapse cleanly to last-seen + trend action without empty meter clutter.
-  const meters = (online && canMetrics) ? [
-    unitMeter("cpu", "CPU", panelMetricUsage(agent.metrics, "cpu")),
-    unitMeter("mem", "内存", panelMetricUsage(agent.metrics, "memory")),
-  ] : NO_ITEMS;
-
-  const leftFoot = online
-    ? (canMetrics ? unitRate(agent, online, bytes) : keyed("online-note", el("span", "a-con-note", "在线")))
-    : keyed("hb", el("span", "a-con-note", heartbeat ? `最后在线 ${date(heartbeat)}` : "未同步"));
-
-  const trend = canMetrics ? node("button", {
-    type: "button",
-    className: "a-con-jump",
-    title: "24 小时趋势",
-    "data-refresh-key": "trend",
-    onclick: () => nodeMetrics(ctx, agent),
-  }, "趋势") : null;
-
-  const foot = node("div", { className: "a-rack-foot", "data-refresh-key": "foot" }, leftFoot, trend);
-  return node("li", { className: "a-rack-unit", "data-refresh-key": agent.id, "data-status": state }, head, meters, foot);
-}
-
-const rackSignatures = new WeakMap();
-
-export function paintNodeRack({ ctx, summaryHost, rackHost, agents, agentsReady, canMetrics, bytes, date }) {
-  const visible = selectMostActiveNodes(agents, { limit: RACK_UNITS });
-  const skewed = agents.filter(agent => isClockSyncAbnormal(agent.metrics?.clock_sync)).length;
-  const online = agents.filter(agent => agent.status === "online").length;
-  const beats = visible.map(agent => agent.metrics?.collected_at || agent.last_seen || "");
-  const signature = JSON.stringify([agentsReady, agents.length, online, skewed, canMetrics, visible, beats]);
-  if (rackSignatures.get(rackHost) === signature) return;
-  rackSignatures.set(rackHost, signature);
-
-  patch(summaryHost, node("div", { className: "a-actions a-con-tools" },
-    agents.length > visible.length ? token("top", `活跃 Top ${visible.length}`) : null,
-    skewed > 0 ? token("skew", `时钟异常 ${skewed}`, "warn") : null,
-    node("a", { className: "a-button", href: "#node-settings", "data-refresh-key": "manage-all" }, "管理节点")));
-
-  const context = { ctx, bytes, date, canMetrics };
-  const units = visible.map(agent => rackUnit(context, agent));
-  const wait = agents.length ? null : keyed("empty", el("li", "a-rack-empty a-muted", agentsReady ? "暂无节点" : "读取中…"));
-  patch(rackHost, node("ol", { className: visible.length >= 4 ? "a-rack is-grid-4" : "a-rack", "aria-label": "节点运行状态" }, units, wait));
-}
 
 // Compact 24h inbound connection pulse bars.
 function pulseBars(buckets) {

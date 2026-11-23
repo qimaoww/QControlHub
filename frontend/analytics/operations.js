@@ -50,7 +50,7 @@ import { createLiveCells, createStatusLine, quantityParts } from "./dashboard-co
 import { createPanelHostController } from "./dashboard-panel.js";
 import { createDashboardProbeController } from "./dashboard-probes.js";
 import { createDashboardTopologySection } from "./dashboard-topology.js";
-import { createEdgeTelemetryController, paintNodeRack } from "./dashboard-telemetry.js";
+import { createEdgeTelemetryController } from "./dashboard-telemetry.js";
 import { createTrafficStage } from "./dashboard-traffic.js";
 
 /** Shared telemetry resource loader/poller used by both the dashboard and standalone topology pages. */
@@ -198,11 +198,6 @@ export async function dashboardPage(ctx) {
     if (status === "denied") panelHistory = [];
     hostController?.paint({ m, history: panelHistory, status });
   }
-
-  const rackSummary = node("div", { className: "a-actions a-con-tools" });
-  const rackHost = node("ol", { className: "a-rack", "aria-label": "节点运行状态" });
-  const nodes = can("agents.read") ? section("节点", node("div", { className: "a-rack-wrap" }, rackHost), rackSummary) : null;
-  nodes?.classList.add("a-dash-nodes-card");
 
   stage = can("traffic.read") ? createTrafficStage(ctx, {
     bytes,
@@ -353,13 +348,7 @@ export async function dashboardPage(ctx) {
   }
 
   function paintBusiness() {
-    const agents = paintConsole();
-    if (!nodes) return;
-    paintNodeRack({
-      ctx, summaryHost: rackSummary, rackHost, agents,
-      agentsReady: readings.has("agents") || states.get("agents") === "denied",
-      canMetrics: can("metrics.read"), bytes, date,
-    });
+    paintConsole();
   }
 
   let historyLastFetch = 0;
@@ -416,7 +405,6 @@ export async function dashboardPage(ctx) {
     liveCells.element,
     stage?.element,
     topologySection.visible && topologySection.element,
-    nodes,
     opsRow,
   );
 }
