@@ -1111,6 +1111,64 @@ export function createDashboardTopologySection(ctx, {
     return items;
   };
 
+  const shortChainNodeName = (name, compact = false) => {
+    const text = String(name || "").trim();
+    if (!text || !compact) return text;
+    const sep = text.indexOf("·");
+    if (sep > 0) return text.slice(0, sep).trim();
+    return text.length > 10 ? `${text.slice(0, 9)}…` : text;
+  };
+
+  const renderChainStepper = (group, metricDir = "both") => {
+    if (!group || (group.hops?.length || 0) < 2) return null;
+    const compact = group.nodes.length >= 4;
+    const items = [];
+    group.nodes.forEach((item, idx) => {
+      const nodeKey = `node:${idx}`;
+      const isEndpoint = idx === 0 || idx === group.nodes.length - 1;
+      const isActive = focusedItemKey === nodeKey;
+      const isDim = Boolean(focusedItemKey && !isActive && !(focusedItemKey.startsWith("hop:") && (Number(focusedItemKey.slice(4)) === idx || Number(focusedItemKey.slice(4)) + 1 === idx)));
+      items.push(node("button", {
+        type: "button",
+        className: `a-lm-chain-node${isEndpoint ? " is-endpoint" : ""}${isActive ? " is-active" : ""}${isDim ? " is-dim" : ""}`,
+        "aria-pressed": String(isActive),
+        "data-refresh-key": `chain-node-${idx}`,
+        title: `第 ${idx + 1} 站 · ${item.name}`,
+        onclick: () => toggleFocus(nodeKey),
+      },
+        node("span", { className: `a-lm-chain-idx${isEndpoint ? " is-endpoint" : ""}` }, String(idx + 1)),
+        node("span", { className: "a-lm-chain-name" }, shortChainNodeName(item.name, compact)),
+      ));
+      if (idx < group.hops.length) {
+        const hop = group.hops[idx];
+        const hopKey = `hop:${idx}`;
+        const hopActive = focusedItemKey === hopKey;
+        const hopDim = Boolean(focusedItemKey && !hopActive && !(focusedItemKey.startsWith("node:") && (Number(focusedItemKey.slice(5)) === idx || Number(focusedItemKey.slice(5)) === idx + 1)));
+        const flags = { running: group.running, ready: hop.ready };
+        const dir = (metricDir === "reverse" && hop.bidirectional) ? hop.reverse : hop.forward;
+        const metric = formatDirBadgeMetric(dir, flags);
+        const tone = hop.tone === "bad" ? " is-bad" : (hop.tone === "warn" ? " is-warn" : "");
+        items.push(node("button", {
+          type: "button",
+          className: `a-lm-chain-hop${tone}${hopActive ? " is-active" : ""}${hopDim ? " is-dim" : ""}`,
+          "aria-pressed": String(hopActive),
+          "data-refresh-key": `chain-hop-${idx}`,
+          title: `第 ${idx + 1} 跳：${hop.from.name} → ${hop.to.name}（${metric}）`,
+          onclick: () => toggleFocus(hopKey),
+        },
+          node("span", { className: "a-lm-chain-hop-val" }, metric),
+          node("span", { className: "a-lm-chain-hop-sep", "aria-hidden": "true" }, "›"),
+        ));
+      }
+    });
+    return node("div", {
+      className: "a-lm-chain-strip",
+      role: "group",
+      "aria-label": "多跳路径分段",
+      "data-refresh-key": `chain-strip-${group.id}`,
+    }, items);
+  };
+
   const renderDashboardRightRail = (group) => {
     const subject = railSubject(group, focusedItemKey, "both");
     const sampledAt = group.overall.sampledAt;
@@ -1304,13 +1362,18 @@ export function createDashboardTopologySection(ctx, {
     const map = drawCurrentGlobe(linkGlide !== 0);
     bindGlobeInteractions(map);
 
+    const dashStageTitle = activeGroup.hops.length >= 2
+      ? `${activeGroup.groupName} · ${activeGroup.hops.length} 跳`
+      : activeGroup.routeText;
+    const chainStrip = renderChainStepper(activeGroup, "both");
+
     const stage = node("div", { className: "a-lm-stage", "data-refresh-key": "lm-stage" },
       node("div", { className: "a-lm-stage-head", "data-refresh-key": "lm-dash-head" },
-        node("span", { className: "a-lm-stage-title", "data-refresh-key": "lm-dash-badge" }, activeGroup.routeText),
+        node("span", { className: "a-lm-stage-title", "data-refresh-key": "lm-dash-badge" }, dashStageTitle),
         renderGlobeOverlayTools({ compact: true }),
       ),
       map,
-      node("span", { className: "a-lm-drag-hint", "aria-hidden": "true" }, "拖拽旋转 · Ctrl+滚轮缩放"),
+      chainStrip || node("span", { className: "a-lm-drag-hint", "aria-hidden": "true" }, "拖拽旋转 · Ctrl+滚轮缩放"),
     );
 
     const leftNav = isCompact
@@ -1941,6 +2004,8 @@ export function createDashboardTopologySection(ctx, {
       ? "拖拽旋转 · Ctrl+滚轮缩放 · 点击 +N 展开近距集群"
       : "拖拽旋转 · Ctrl+滚轮缩放 · 点击弧线或节点聚焦";
 
+    const topoChainStrip = (!fleetActive && activeGroup) ? renderChainStepper(activeGroup, topoMetricDir) : null;
+
     const globeStage = node("div", { className: "a-topo-globe-stage", "data-refresh-key": "topo-globe-stage" },
       node("div", { className: "a-lm-stage", "data-refresh-key": "lm-stage" },
         node("div", { className: "a-lm-stage-head", "data-refresh-key": "lm-topo-head" },
@@ -1949,7 +2014,7 @@ export function createDashboardTopologySection(ctx, {
           renderGlobeOverlayTools({ compact: isCompact }),
         ),
         globeSvg,
-        node("span", { className: "a-lm-drag-hint", "aria-hidden": "true" }, dragHintText),
+        topoChainStrip || node("span", { className: "a-lm-drag-hint", "aria-hidden": "true" }, dragHintText),
       ),
       extDock,
     );
