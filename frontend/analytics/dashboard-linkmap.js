@@ -2060,10 +2060,13 @@ export function renderFleetLinkMap(groups, {
         pipElement({ kind: "agent", online: rec.online, issue: rec.issue }, x, y, isTight ? PIP * 0.82 : PIP),
       );
     } else {
+      const fleetState = !rec.online ? " is-off" : (rec.issue ? " is-bad" : " is-on");
       g.append(
-        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 3.2 : 3.8, class: "a-lm-bed" }),
-        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 6.0 : 7.2, class: "a-lm-ring" }),
-        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 2.35 : 2.8, class: rec.online ? "a-lm-fleet-dot is-on" : "a-lm-fleet-dot" }),
+        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 3.8 : 4.5, class: "a-lm-bed" }),
+        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 4.8 : 5.8, class: `a-lm-fleet-halo${fleetState}` }),
+        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 6.2 : 7.4, class: "a-lm-ring" }),
+        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 2.65 : 3.15, class: `a-lm-fleet-dot${fleetState}` }),
+        createSVGEl("circle", { cx: x, cy: y, r: isTight ? 0.95 : 1.15, class: `a-lm-fleet-core${fleetState}` }),
       );
     }
     if (placed) {

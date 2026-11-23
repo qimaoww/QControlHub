@@ -1865,8 +1865,16 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
 .a-lm-hop-pill.is-tone-warn .a-lm-hop-pill-text { fill: #92400e; }
 
 /* Concentric circular beacons, haloed city labels & close-distance regional clusters */
-.a-lm-fleet-dot { fill: var(--paper); stroke: #94a3b8; stroke-width: 1.3; }
-.a-lm-fleet-dot.is-on { fill: #334155; stroke: #334155; }
+.a-lm-fleet-halo { fill: rgba(5, 150, 105, 0.12); stroke: none; pointer-events: none; }
+.a-lm-fleet-halo.is-off { fill: rgba(100, 116, 139, 0.08); }
+.a-lm-fleet-halo.is-bad { fill: rgba(220, 38, 38, 0.11); }
+.a-lm-fleet-dot { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.35; transition: stroke-width 150ms var(--a-ease-state); }
+.a-lm-fleet-dot.is-on { fill: #ffffff; stroke: #059669; stroke-width: 1.5; }
+.a-lm-fleet-dot.is-bad { fill: #ffffff; stroke: #dc2626; stroke-width: 1.5; }
+.a-lm-fleet-node:hover .a-lm-fleet-dot { stroke-width: 1.85; }
+.a-lm-fleet-core { fill: #94a3b8; pointer-events: none; }
+.a-lm-fleet-core.is-on { fill: #059669; }
+.a-lm-fleet-core.is-bad { fill: #dc2626; }
 .a-lm-ping { display: none; fill: none; stroke: rgba(5, 150, 105, 0.56); stroke-width: 1; transform-box: fill-box; transform-origin: center; pointer-events: none; }
 .a-lm-bed { fill: var(--paper); stroke: none; }
 .a-lm-flag-bg { fill: #f1f5f9; stroke: none; pointer-events: none; }
