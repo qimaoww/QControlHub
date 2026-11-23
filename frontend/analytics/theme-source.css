@@ -806,11 +806,6 @@ button.a-con-jump { min-height: 24px; padding: 0; border: 0; background: none; f
 .a-con-trace-area { fill: #18181b10; }
 .a-con-trace-line { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linejoin: round; }
 
-/* Band 0: Quiet UTC clock & status line */
-.a-dash-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 20px; padding: 2px 2px 0; font-size: var(--text-caption); color: var(--soft-ink); font-variant-numeric: tabular-nums; }
-.a-con-clock { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 500; color: var(--soft-ink); white-space: nowrap; }
-.a-dash-meta-status { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; background: #fff8e9; border: 1px solid #efddbb; color: #754511; font-size: .6875rem; font-weight: 500; line-height: 16px; }
-
 /* Band 1: 4-card executive KPI strip */
 .a-dash-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; align-items: stretch; min-width: 0; }
 .a-dash-kpi { min-width: 0; padding: 14px 18px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; gap: 8px; min-height: 108px; }

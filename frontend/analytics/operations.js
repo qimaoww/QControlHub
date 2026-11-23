@@ -46,7 +46,7 @@ export const actionName = value => ({
   "disable-bbr": "关闭 BBR", "configure-tcp": "配置 TCP", "check-nginx":"检查 Nginx", "update-nginx":"更新 Nginx", "check-caddy":"检查 Caddy", "update-caddy":"更新 Caddy", "ip-quality": "IP 质量检测", "network-diagnostic":"网络诊断",
 })[value] || value;
 
-import { createLiveCells, createStatusLine, quantityParts } from "./dashboard-console.js";
+import { createLiveCells, quantityParts } from "./dashboard-console.js";
 import { createPanelHostController } from "./dashboard-panel.js";
 import { createDashboardProbeController } from "./dashboard-probes.js";
 import { createDashboardTopologySection } from "./dashboard-topology.js";
@@ -116,14 +116,8 @@ function createTelemetryStore(ctx, { getMonth = utcMonth, onLoading, onSuccess, 
 
 const BLANK_FIGURE = ["—", ""];
 const NO_SUBS = Object.freeze([]);
-const CORE_KEYS = new Set(["overview", "agents", "order"]);
 const EDGE_KEYS = new Set(["connections", "certificates", "ipQuality"]);
 const blankCell = (key, label) => ({ key, label, token: "", tone: "", pill: null, state: "ready", figure: BLANK_FIGURE, subs: NO_SUBS, viz: null });
-const twoDigits = (value) => String(value).padStart(2, "0");
-// Current UTC time to the minute. The traffic periods are cut on UTC days,
-// so the clock shows where the current day stands.
-const utcClock = (now = new Date()) =>
-  `UTC ${twoDigits(now.getUTCMonth() + 1)}-${twoDigits(now.getUTCDate())} ${twoDigits(now.getUTCHours())}:${twoDigits(now.getUTCMinutes())}`;
 const taskNumbers = (overview) => ({
   pending: Number(overview.tasks_pending || 0) + Number(overview.tasks_queued || 0),
   running: Number(overview.tasks_running || 0),
@@ -153,7 +147,6 @@ export async function dashboardPage(ctx) {
   });
   const { readings, states, read, shouldPoll, probePollInterval } = store;
 
-  const statusLine = createStatusLine();
   const liveCells = createLiveCells();
   const rateTrace = [];
   const usageKey = (monthKey) => `usage:${monthKey}`;
@@ -326,7 +319,7 @@ export async function dashboardPage(ctx) {
     return cell;
   }
 
-  // Quiet UTC clock line + 4 equal executive KPI cards (Nodes, Engines, Rate, Tasks).
+  // 4 equal executive KPI cards (Nodes, Engines, Rate, Tasks).
   function paintConsole() {
     const overview = readings.get("overview") || {};
     const agents = orderedAgents();
@@ -337,12 +330,6 @@ export async function dashboardPage(ctx) {
     if (canAgents) cells.push(engineCell(fleet));
     if (canAgents && can("metrics.read")) cells.push(rateCell(fleet, agents.length));
     cells.push(taskCell(taskNumbers(overview), known));
-    const failed = [...states].some(([key, state]) => CORE_KEYS.has(key) && ["failed", "denied"].includes(state));
-    const waiting = ["overview", ...(canAgents ? ["agents"] : [])].some(key => !readings.has(key) && (!states.has(key) || states.get(key) === "loading"));
-    let statusText = "";
-    if (waiting) statusText = "读取中…";
-    else if (failed) statusText = "部分状态异常";
-    statusLine.paint({ clock: utcClock(), status: statusText });
     liveCells.paint(cells);
     return agents;
   }
@@ -401,7 +388,6 @@ export async function dashboardPage(ctx) {
     : null;
 
   return node("div", { className: "a-dash-deck a-dash-console" },
-    statusLine.element,
     liveCells.element,
     opsRow,
     stage?.element,

@@ -126,18 +126,6 @@ export function consoleCell(cell, instrument = null) {
       renderedViz ? node("div", { className: "a-dash-kpi-viz", "data-refresh-key": "viz" }, renderedViz) : null));
 }
 
-function renderStatus(model) {
-  const status = node("span", {
-    className: "a-dash-meta-status",
-    role: "status",
-    hidden: !model.status,
-    "data-refresh-key": "status",
-  }, model.status || "");
-  return node("div", { className: "a-dash-meta", role: "group", "aria-label": "运行时间与状态" },
-    node("span", { className: "a-con-clock", "data-refresh-key": "clock" }, model.clock),
-    status);
-}
-
 const renderCells = (cells) => node("section", {
   className: "a-dash-kpis",
   "aria-label": "关键指标概览",
@@ -152,12 +140,6 @@ function guarded(element, render) {
     signature = next;
     patch(element, render(model));
   };
-}
-
-// Quiet UTC clock and status indicator line above the KPI strip.
-export function createStatusLine() {
-  const element = node("div", { className: "a-dash-meta", role: "group", "aria-label": "运行时间与状态" });
-  return { element, paint: guarded(element, renderStatus) };
 }
 
 // Top 4-card executive KPI strip.

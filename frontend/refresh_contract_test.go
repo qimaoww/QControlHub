@@ -93,7 +93,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"analytics/operations.js": {
 			"hostController?.paint({ m, history: panelHistory, status })",
 			"if (status === \"denied\") panelHistory = [];",
-			"createStatusLine()", "createLiveCells()", "createTrafficStage(",
+			"createLiveCells()", "createTrafficStage(", "createEdgeTelemetryController(",
 			"rowKey: row => row.taskID",
 			"const sequence = ++readSequence",
 			"if (!ctx.current() || sequence !== readSequence) return;",
