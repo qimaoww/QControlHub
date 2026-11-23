@@ -43,7 +43,7 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 			writeError(w, http.StatusBadRequest, "请选择 WireGuard 入站后添加客户端")
 			return
 		}
-		plan, err = serverconfig.AddWireGuardClient(*input.Input)
+		plan, err = serverconfig.AddWireGuardClient(engine, *input.Input)
 	} else if input.Input == nil {
 		plan, err = serverconfig.NewPlan(protocol)
 		if err == nil && engine == core.EngineShadowsocksRust {

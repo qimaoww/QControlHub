@@ -63,7 +63,7 @@ func main() {
 				}
 			}
 			if protocol.Key == serverconfig.ProtocolWireGuard {
-				multi, err := serverconfig.AddWireGuardClient(plan)
+				multi, err := serverconfig.AddWireGuardClient(engine, plan)
 				if err != nil {
 					panic(err)
 				}

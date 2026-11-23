@@ -144,7 +144,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 			return Input{}, err
 		}
 		input.WireGuardClientAddress = "10.66.66.2/32"
-		input.WireGuardServerAddress = "10.66.66.1/24"
+		input.WireGuardServerAddress = defaultWireGuardServerAddress
 		input.WireGuardAllowedIPs = "0.0.0.0/0"
 		input.WireGuardMTU, input.WireGuardKeepalive = 1420, 25
 		input.Username = "qch-" + suffix

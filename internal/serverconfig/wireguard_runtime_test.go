@@ -85,9 +85,12 @@ func wireGuardClientRoundTrip(t *testing.T, engine core.Engine, serverBinary str
 	target.Listener = wireGuardLocalHTTPListener(t)
 	target.Start()
 	defer target.Close()
-	input, err = AddWireGuardClient(input)
-	if err != nil {
-		t.Fatal(err)
+	const devices = 3
+	for i := 1; i < devices; i++ {
+		input, err = AddWireGuardClient(engine, input)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	content, err := Generate(engine, input)
 	if err != nil {
@@ -113,7 +116,7 @@ func wireGuardClientRoundTrip(t *testing.T, engine core.Engine, serverBinary str
 		})
 	} else {
 		profile, err := BuildClientProfile(input, "127.0.0.1", "")
-		if err != nil || len(profile.Variants) != 2 {
+		if err != nil || len(profile.Variants) != devices {
 			t.Fatal("missing device exports", err)
 		}
 		t.Run("concurrent Mihomo exports", func(t *testing.T) {

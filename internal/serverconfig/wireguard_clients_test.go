@@ -21,7 +21,7 @@ func TestWireGuardDeviceProfiles(t *testing.T) {
 			first.WireGuardServerAddress += ",fd00::1/120"
 			first.WireGuardClientAddress += ",fd00::2/128"
 			first.WireGuardAllowedIPs = ""
-			multi, err := AddWireGuardClient(first)
+			multi, err := AddWireGuardClient(engine, first)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,13 +117,52 @@ func TestWireGuardClientAddressAllocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.WireGuardClientAddress = "10.66.66.254/32"
-	next, err := AddWireGuardClient(input)
+	next, err := AddWireGuardClient(core.EngineSingBox, input)
 	if err != nil || next.WireGuardAdditionalClients[0].Address != "10.66.66.2/32" {
 		t.Fatal("address allocation did not wrap within subnet", err)
 	}
 	input.WireGuardClientAddress = "10.66.66.2/32"
 	input.WireGuardServerAddress = "10.66.66.1/30"
-	if _, err := AddWireGuardClient(input); !errors.Is(err, ErrInvalidPlanInput) {
+	if _, err := AddWireGuardClient(core.EngineSingBox, input); !errors.Is(err, ErrInvalidPlanInput) {
 		t.Fatal("allocated a reserved or occupied address", err)
+	}
+}
+
+func TestWireGuardAutofilledClients(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		engine                         core.Engine
+		server, primary, second, third string
+	}{
+		{"reopened Xray preset", core.EngineXray, "", "10.66.66.254/32", "10.66.66.2/32", "10.66.66.3/32"},
+		{"custom Xray subnet", core.EngineXray, "", "10.77.0.8/32", "10.77.0.9/32", "10.77.0.10/32"},
+		{"routed primary", core.EngineSingBox, "10.7.0.1/24", "10.8.0.2/32", "10.7.0.2/32", "10.7.0.3/32"},
+		{"host-only interface", core.EngineSingBox, "10.7.0.3/32", "10.7.0.2/32", "10.7.0.4/32", "10.7.0.5/32"},
+		{"dual stack wrap", core.EngineSingBox, "10.7.0.1/29,fd00::1/125", "10.7.0.6/32,fd00::7/128", "10.7.0.2/32,fd00::2/128", "10.7.0.3/32,fd00::3/128"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			protocol, _ := FindProtocol(tc.engine, ProtocolWireGuard)
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.WireGuardServerAddress, input.WireGuardClientAddress = tc.server, tc.primary
+			keys := map[string]bool{input.WireGuardClientPublicKey: true}
+			secrets := map[string]bool{input.WireGuardPresharedKey: true}
+			for _, want := range []string{tc.second, tc.third} {
+				input, err = AddWireGuardClient(tc.engine, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := input.WireGuardAdditionalClients[len(input.WireGuardAdditionalClients)-1]
+				if client.Address != want || client.PrivateKey == "" || client.PublicKey != wireguardServerPublic(client.PrivateKey) || keys[client.PublicKey] || client.PresharedKey == "" || secrets[client.PresharedKey] {
+					t.Fatalf("invalid generated credentials or tunnel address, got %s, want %s", client.Address, want)
+				}
+				keys[client.PublicKey], secrets[client.PresharedKey] = true, true
+				if _, err := Generate(tc.engine, input); err != nil {
+					t.Fatalf("autofilled plan cannot be saved: %v", err)
+				}
+			}
+		})
 	}
 }
