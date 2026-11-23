@@ -34,8 +34,6 @@ const UNIT_PX = 6.5;
 const FLAG_W = 14;
 const FLAG_H = 10;
 const FLAG_GAP = 4;
-const STEP_W = 14;
-const STEP_GAP = 4;
 const FLEET_FLAG_W = 12;
 const FLEET_FLAG_H = 8.5;
 const FLEET_FLAG_GAP = 3.5;
@@ -590,39 +588,6 @@ function boundsOf(points) {
   return { x: fixed(left), y: fixed(top), width: fixed(Math.max(...xs) + 10 - left), height: fixed(Math.max(...ys) + 10 - top) };
 }
 
-function sampleCurveGeometry(points, fromPt, toPt) {
-  if (!points || points.length < 2) return { samples: NO_VALUES, mid: null, early: null };
-  const n = points.length;
-  const chordMidX = (fromPt.x + toPt.x) / 2;
-  const chordMidY = (fromPt.y + toPt.y) / 2;
-  const pointInfoAt = (frac) => {
-    const idx = clamp(Math.round((n - 1) * frac), 1, n - 2);
-    const p = points[idx];
-    const prev = points[Math.max(0, idx - 2)];
-    const next = points[Math.min(n - 1, idx + 2)];
-    const dx = next.x - prev.x, dy = next.y - prev.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    let nx = -uy, ny = ux;
-    const outX = p.x - chordMidX, outY = p.y - chordMidY;
-    if (nx * outX + ny * outY < 0) { nx = -nx; ny = -ny; }
-    return { x: p.x, y: p.y, ux, uy, nx, ny };
-  };
-  const samples = [];
-  const step = Math.max(1, Math.floor((n - 1) / 14));
-  for (let i = 1; i < n - 1; i += step) {
-    const p = points[i];
-    if (Math.hypot(p.x - fromPt.x, p.y - fromPt.y) < 13) continue;
-    if (Math.hypot(p.x - toPt.x, p.y - toPt.y) < 13) continue;
-    samples.push({ x: p.x, y: p.y });
-  }
-  return {
-    samples,
-    mid: n >= 3 ? pointInfoAt(0.5) : null,
-    early: n >= 5 ? pointInfoAt(0.32) : null,
-  };
-}
-
 // Single bounded great-circle arch with proportional short-hop rise and true 3D lateral sway.
 function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0 } = {}) {
   const mid = unit3(mix3(a, 1, b, 1));
@@ -630,13 +595,13 @@ function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0
   const omega = Math.acos(clamp(dot3(a, b), -1, 1));
   const from = project(view, a), to = project(view, b), ground = project(view, mid);
   const span = Math.hypot(to.x - from.x, to.y - from.y);
-  const minRise = Math.min(12 * altitudeScale, Math.max(3.5, span * 0.28 * altitudeScale));
+  const minRise = Math.min(12, Math.max(3.5, span * 0.32));
   const baseRise = clamp(span * 0.23 * altitudeScale, minRise, 70);
-  const rise = Math.max(Math.min(8, span * 0.24 * altitudeScale), Math.min(baseRise, Math.max(12, ground.y - 18)));
+  const rise = Math.max(Math.min(9, span * 0.28), Math.min(baseRise, Math.max(12, ground.y - 18)));
   const upness = Math.sqrt(Math.max(0, 1 - dot3(mid, view.front) ** 2));
   const rawMaxLift = omega > 1.7 ? 0.24 : omega > 1.2 ? 0.34 : 0.46;
   const maxLift = strictLimb ? Math.min(rawMaxLift, 0.14) : rawMaxLift;
-  let lift = clamp(rise / (view.radius * Math.max(upness, 0.36)), 0.014, maxLift);
+  let lift = clamp(rise / (view.radius * Math.max(upness, 0.36)), 0.016, maxLift);
 
   let outer = arcPoints(view, a, b, lift, sway);
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -652,7 +617,6 @@ function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0
   const trkBuilt = buildVisiblePath(view, arcPoints(view, a, b, 0, sway), { strictLimb: true });
   const midIdx = Math.floor(built.visible.length / 2);
   const apex = built.visible[midIdx];
-  const geom = sampleCurveGeometry(built.visible, from, to);
   return {
     span,
     path: built.d,
@@ -661,9 +625,6 @@ function archShape(view, a, b, { altitudeScale = 1, strictLimb = false, sway = 0
     track: trkBuilt.d,
     hit: built.d,
     apex,
-    samples: geom.samples,
-    mid: geom.mid,
-    early: geom.early,
     limbExits: built.limbExits,
     box: boundsOf(built.visible),
   };
@@ -677,20 +638,10 @@ function lensShape(from, to) {
   const flip = dx < 0 || (dx === 0 && dy > 0) ? -1 : 1;
   const nx = flip * dy / length * bow, ny = -flip * dx / length * bow;
   const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
-  const ctrlX = mx + 2 * nx, ctrlY = my + 2 * ny;
   const start = `${fixed(from.x)} ${fixed(from.y)}`, end = `${fixed(to.x)} ${fixed(to.y)}`;
-  const ctrl = `${fixed(ctrlX)} ${fixed(ctrlY)}`;
+  const ctrl = `${fixed(mx + 2 * nx)} ${fixed(my + 2 * ny)}`;
   const path = `M${start}Q${ctrl} ${end}`;
   const apex = { x: mx + nx, y: my + ny };
-  const curvePts = [];
-  for (let i = 0; i <= 16; i++) {
-    const t = i / 16, mt = 1 - t;
-    curvePts.push({
-      x: mt * mt * from.x + 2 * mt * t * ctrlX + t * t * to.x,
-      y: mt * mt * from.y + 2 * mt * t * ctrlY + t * t * to.y,
-    });
-  }
-  const geom = sampleCurveGeometry(curvePts, from, to);
   return {
     span: length,
     path,
@@ -699,9 +650,6 @@ function lensShape(from, to) {
     track: "",
     hit: path,
     apex,
-    samples: geom.samples,
-    mid: geom.mid,
-    early: geom.early,
     limbExits: NO_VALUES,
     box: boundsOf([from, to, apex]),
   };
@@ -726,66 +674,26 @@ function railMark(apex, tone, { compact = false } = {}) {
   ];
 }
 
-function hopDirectionArrow(shape, lineColor, { hasMark = false } = {}) {
-  if (!shape || shape.span < 34) return NO_VALUES;
-  const pt = hasMark ? shape.early : shape.mid;
-  if (!pt) return NO_VALUES;
-  const { x, y, ux, uy } = pt;
-  const px = -uy, py = ux;
-  const tipX = x + ux * 3.1, tipY = y + uy * 3.1;
-  const tailX = x - ux * 2.5, tailY = y - uy * 2.5;
-  const wing = 2.65;
-  const lX = tailX + px * wing, lY = tailY + py * wing;
-  const rX = tailX - px * wing, rY = tailY - py * wing;
-  const d = `M${fixed(lX)} ${fixed(lY)}L${fixed(tipX)} ${fixed(tipY)}L${fixed(rX)} ${fixed(rY)}`;
-  return [
-    createSVGEl("path", { d, class: "a-lm-dir-halo", "aria-hidden": "true" }),
-    createSVGEl("path", { d, class: `a-lm-dir-arrow ${lineColor}`.trim(), "aria-hidden": "true" }),
-  ];
-}
-
-function hopPillElement(apex, text, view, colorClass, hasMark, {
-  alwaysVisible = false,
-  avoidBoxes = null,
-  arcBoxes = null,
-  recordBox = false,
-  compact = false,
-  normal = null,
-  maxAlwaysVisibleScore = 150,
-} = {}) {
+function hopPillElement(apex, text, view, colorClass, hasMark, { alwaysVisible = false, avoidBoxes = null, recordBox = false } = {}) {
   if (!apex || !text) return null;
-  const unitPx = compact ? 5.2 : 5.8;
-  const w = Math.max(compact ? 38 : 46, Math.round(visualUnits(text) * unitPx + (compact ? 11 : 14)));
-  const h = compact ? 16 : 19;
+  const w = Math.max(46, Math.round(visualUnits(text) * 5.8 + 14));
+  const h = 19;
   const maxX = Math.max(6, view.width - w - 6);
   const maxY = Math.max(6, view.height - h - 6);
   const centerX = clamp(apex.x - w / 2, 6, maxX);
-  const aboveY = hasMark ? apex.y - h - 10 : apex.y - h - 7;
+  const aboveY = hasMark ? apex.y - h - 10 : apex.y - h - 6;
   const belowY = hasMark ? apex.y + 12 : apex.y + 8;
 
-  const candidates = [];
-  if (normal) {
-    const padDist = hasMark ? 20 : 15;
-    for (const dist of [padDist, padDist + 8]) {
-      candidates.push({
-        x: apex.x + normal.nx * dist - w / 2,
-        y: apex.y + normal.ny * dist - h / 2,
-      });
-    }
-    candidates.push(
-      { x: apex.x - normal.nx * padDist - w / 2, y: apex.y - normal.ny * padDist - h / 2 },
-    );
-  }
-  candidates.push(
+  const candidates = [
     { x: centerX, y: aboveY },
     { x: centerX, y: belowY },
-    { x: centerX, y: aboveY - 16 },
-    { x: centerX, y: belowY + 16 },
+    { x: centerX, y: aboveY - 18 },
+    { x: centerX, y: belowY + 18 },
     { x: apex.x + 12, y: apex.y - h / 2 },
     { x: apex.x - w - 12, y: apex.y - h / 2 },
     { x: apex.x + 12, y: belowY },
     { x: apex.x - w - 12, y: belowY },
-  );
+  ];
 
   let best = null;
   for (let idx = 0; idx < candidates.length; idx++) {
@@ -793,25 +701,21 @@ function hopPillElement(apex, text, view, colorClass, hasMark, {
     const px = clamp(raw.x, 6, maxX);
     const py = clamp(raw.y, 6, maxY);
     const box = { x1: px - 2, y1: py - 2, x2: px + w + 2, y2: py + h + 2 };
-    let score = idx * 5;
+    let score = idx * 6;
     if (Math.abs(px - raw.x) > 4 || Math.abs(py - raw.y) > 4) score += 160;
     if (avoidBoxes?.length) {
-      for (const other of avoidBoxes) score += overlapArea(box, other) * 32;
-    }
-    if (arcBoxes?.length) {
-      for (const seg of arcBoxes) score += overlapArea(box, seg) * 18;
+      for (const other of avoidBoxes) score += overlapArea(box, other) * 30;
     }
     if (!best || score < best.score) best = { px, py, box, score };
-    if (score === idx * 5) break;
+    if (score === idx * 6) break;
   }
   if (!best) return null;
-  const shown = alwaysVisible && best.score < maxAlwaysVisibleScore;
-  if (recordBox && shown && avoidBoxes) avoidBoxes.push(best.box);
-  const cls = `a-lm-hop-pill ${colorClass}${compact ? " is-chain-pill" : ""}${shown ? " is-shown" : ""}`.replace(/\s+/g, " ").trim();
+  if (recordBox && avoidBoxes) avoidBoxes.push(best.box);
+  const cls = `a-lm-hop-pill ${colorClass}${alwaysVisible ? " is-shown" : ""}`.replace(/\s+/g, " ").trim();
   const g = createSVGEl("g", { class: cls, "aria-hidden": "true" });
   g.append(
-    createSVGEl("rect", { x: fixed(best.px), y: fixed(best.py), width: w, height: h, rx: compact ? 8 : 9.5, class: "a-lm-hop-pill-bg" }),
-    createSVGEl("text", { x: fixed(best.px + w / 2), y: fixed(best.py + (compact ? 11.2 : 13)), "text-anchor": "middle", class: "a-lm-hop-pill-text" }, text),
+    createSVGEl("rect", { x: fixed(best.px), y: fixed(best.py), width: w, height: h, rx: 9.5, class: "a-lm-hop-pill-bg" }),
+    createSVGEl("text", { x: fixed(best.px + w / 2), y: fixed(best.py + 13), "text-anchor": "middle", class: "a-lm-hop-pill-text" }, text),
   );
   return g;
 }
@@ -836,28 +740,26 @@ function renderConduitLayers({
   isBroken = false,
   isAlertHop = false,
   tierClass = "is-l1",
-  isChainHop = false,
 }) {
   if (!shape?.path) return NO_VALUES;
   const out = [];
   const tier = isL1 ? "is-l1" : tierClass;
   const shortCls = !isL1 && shape.span < 48 ? " is-short" : "";
-  const chainCls = isL1 && isChainHop ? " is-chain-hop" : "";
   const baseRailCls = isL1
-    ? `a-lm-rail ${lineColor}${isBroken ? " is-broken" : ""}${chainCls}`.trim()
+    ? `a-lm-rail ${lineColor}${isBroken ? " is-broken" : ""}`.trim()
     : `a-lm-fleet-rail ${tierClass} ${lineColor}${isBroken ? " is-broken" : ""}${isAlertHop ? " is-alert-hop" : ""}`.trim();
 
   if (isL1 && shape.track) {
     out.push(createSVGEl("path", { d: shape.track, class: "a-lm-track" }));
   }
   if (isL1) {
-    out.push(createSVGEl("path", { d: shape.path, class: `a-lm-halo${chainCls}` }));
+    out.push(createSVGEl("path", { d: shape.path, class: "a-lm-halo" }));
   } else {
     out.push(createSVGEl("path", { d: shape.path, class: `a-lm-conduit-halo ${tier}${shortCls}`.trim() }));
   }
   out.push(
     createSVGEl("path", { d: shape.path, class: `${baseRailCls} is-conduit-outer${shortCls}` }),
-    createSVGEl("path", { d: shape.path, class: `a-lm-line-cut ${tier} ${lineColor}${isBroken ? " is-broken" : ""}${shortCls}${chainCls}`.trim() }),
+    createSVGEl("path", { d: shape.path, class: `a-lm-line-cut ${tier} ${lineColor}${isBroken ? " is-broken" : ""}${shortCls}`.trim() }),
   );
   if (isL1 && lineColor === "is-tone-warn" && !isBroken) {
     out.push(createSVGEl("path", { d: shape.path, class: "a-lm-conduit-warn-dash" }));
@@ -941,8 +843,6 @@ function hopElement(scene, hop, index) {
     group,
     spots,
     vectors,
-    hopShapes,
-    isMultiHop = false,
     focus,
     metricDir = "both",
     arcGlowId = "",
@@ -950,30 +850,24 @@ function hopElement(scene, hop, index) {
   const from = spots[index], to = spots[index + 1];
   const showFwd = metricDir !== "reverse";
   const showRev = hop.bidirectional && metricDir !== "forward";
-  const shape = hopShapes?.[index]
-    || (from.on && to.on ? archShape(view, vectors[index], vectors[index + 1], { altitudeScale: isMultiHop ? 0.7 : 1 }) : null)
-    || lensShape(from, to);
+  const shape = (from.on && to.on ? archShape(view, vectors[index], vectors[index + 1]) : null) || lensShape(from, to);
   const flags = { running: group.running, ready: hop.ready };
   const key = `hop:${index}`;
   const outbound = formatDirBadgeMetric(hop.forward, flags);
   const inbound = hop.bidirectional ? formatDirBadgeMetric(hop.reverse, flags) : "";
   let label = `${hop.from.name} 至 ${hop.to.name}，${outbound}`;
   if (hop.bidirectional) label = `${hop.from.name} 与 ${hop.to.name}，去程 ${outbound}，回程 ${inbound}`;
-  const isFocusedHop = focus.key === key;
-  const compactChainPill = isMultiHop && group.hops.length <= 6 && !isFocusedHop;
   const pillText = metricDir === "reverse" && hop.bidirectional
     ? `← ${inbound}`
-    : compactChainPill
-      ? outbound
-      : hop.bidirectional && metricDir === "both" && outbound !== inbound
-        ? `${outbound} / ${inbound}`
-        : outbound;
+    : hop.bidirectional && metricDir === "both" && outbound !== inbound
+      ? `${outbound} / ${inbound}`
+      : outbound;
 
   const element = createSVGEl("g", {
-    class: `${focus.dimHop(index) ? "a-lm-hop is-dim" : "a-lm-hop"}${isMultiHop ? " is-chain-hop" : ""}`,
+    class: focus.dimHop(index) ? "a-lm-hop is-dim" : "a-lm-hop",
     tabindex: 0,
     role: "button",
-    "aria-pressed": String(isFocusedHop),
+    "aria-pressed": String(focus.key === key),
     "aria-label": label,
     "data-lm-key": key,
     "data-refresh-key": `lm-hop-${index}`,
@@ -993,7 +887,6 @@ function hopElement(scene, hop, index) {
     isBroken: combinedMark === "bad",
     isAlertHop: Boolean(combinedMark),
     tierClass: "is-l1",
-    isChainHop: isMultiHop,
   }));
   element.append(...renderLaserSweepLayers({
     shape,
@@ -1006,34 +899,23 @@ function hopElement(scene, hop, index) {
     lineColor,
     isL1: true,
     isBroken: combinedMark === "bad",
-    staggerSlot: isMultiHop ? ((STAGGER_SLOTS - (index % STAGGER_SLOTS)) % STAGGER_SLOTS) : index,
+    staggerSlot: index,
     arcGlowId,
   }));
-  if (isMultiHop) {
-    element.append(...hopDirectionArrow(shape, lineColor, { hasMark: Boolean(combinedMark) }));
-  }
   if (combinedMark) element.append(...railMark(shape.apex, combinedMark, { compact: shape.span < 44 }));
-  const showRestingPill = isMultiHop && group.hops.length <= 6 && shape.span >= 36;
   const pill = hopPillElement(shape.apex, pillText, view, lineColor, Boolean(combinedMark), {
-    alwaysVisible: showRestingPill || isFocusedHop,
     avoidBoxes: scene.pillAvoidBoxes,
-    arcBoxes: scene.arcObstacles,
-    recordBox: showRestingPill,
-    compact: compactChainPill,
-    normal: shape.mid,
-    maxAlwaysVisibleScore: isFocusedHop ? 9999 : 150,
   });
   if (pill) element.append(pill);
   element.append(createSVGEl("path", { d: shape.hit, class: "a-lm-hit is-line" }));
   return element;
 }
 
-function pipElement(item, x, y, size = PIP, chainRole = "") {
-  const roleCls = chainRole ? ` is-chain-${chainRole}` : "";
+function pipElement(item, x, y, size = PIP) {
   if (item.kind === "ext") {
     const r = size * 0.56;
     const d = `M${x} ${fixed(y - r)}L${fixed(x + r)} ${y}L${x} ${fixed(y + r)}L${fixed(x - r)} ${y}Z`;
-    const g = createSVGEl("g", { class: `a-lm-beacon is-ext${roleCls}` });
+    const g = createSVGEl("g", { class: "a-lm-beacon is-ext" });
     g.append(
       createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.72), class: "a-lm-pip-halo is-ext" }),
       createSVGEl("path", { d, class: "a-lm-pip is-ext" }),
@@ -1046,33 +928,16 @@ function pipElement(item, x, y, size = PIP, chainRole = "") {
   let state = "";
   if (!item.online) state = " is-off";
   else if (item.issue) state = " is-bad";
-  const g = createSVGEl("g", { class: `a-lm-beacon${state}${roleCls}` });
-  if (chainRole === "start") {
-    g.append(
-      createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.78), class: `a-lm-pip-halo${state}` }),
-      createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.48), class: `a-lm-pip is-round is-chain-start${state}` }),
-      createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.24), class: `a-lm-pip-core is-chain-start${state}` }),
-    );
-    return g;
-  }
-  if (chainRole === "end") {
-    g.append(
-      createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.8), class: `a-lm-pip-halo${state}` }),
-      createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.52), class: `a-lm-pip is-round is-chain-end${state}` }),
-      createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.23), class: `a-lm-pip-core is-chain-end${state}` }),
-    );
-    return g;
-  }
-  const scale = chainRole === "relay" ? 0.86 : 1;
+  const g = createSVGEl("g", { class: `a-lm-beacon${state}` });
   g.append(
-    createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.64 * scale), class: `a-lm-pip-halo${state}` }),
-    createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.42 * scale), class: `a-lm-pip is-round${state}${roleCls}` }),
-    createSVGEl("circle", { cx: x, cy: y, r: state === " is-off" ? 1.1 : (chainRole === "relay" ? 1.2 : 1.4), class: `a-lm-pip-core${state}` }),
+    createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.68), class: `a-lm-pip-halo${state}` }),
+    createSVGEl("circle", { cx: x, cy: y, r: fixed(size * 0.42), class: `a-lm-pip is-round${state}` }),
+    createSVGEl("circle", { cx: x, cy: y, r: state === " is-off" ? 1.15 : 1.4, class: `a-lm-pip-core${state}` }),
   );
   return g;
 }
 
-// Appends an optional multi-hop step chip, crisp country/region flag and haloed typography cleanly floating over the light sphere.
+// Appends a crisp country/region flag and haloed typography cleanly floating over the light sphere.
 function appendGlobeFlagAndName(parent, {
   flag,
   text,
@@ -1083,36 +948,8 @@ function appendGlobeFlagAndName(parent, {
   flagGap,
   textClass,
   isExt = false,
-  stepNum = 0,
-  chainRole = "",
 }) {
   let textX = x;
-  if (stepNum > 0) {
-    const isEndpoint = chainRole === "start" || chainRole === "end";
-    const stepCls = isEndpoint ? "is-endpoint" : "is-relay";
-    const cx = textX + STEP_W / 2;
-    parent.append(
-      createSVGEl("circle", {
-        cx: fixed(cx),
-        cy: fixed(y),
-        r: fixed(STEP_W / 2 + 1),
-        class: "a-lm-bed",
-      }),
-      createSVGEl("circle", {
-        cx: fixed(cx),
-        cy: fixed(y),
-        r: fixed(STEP_W / 2),
-        class: `a-lm-step-bg ${stepCls}`,
-      }),
-      createSVGEl("text", {
-        x: fixed(cx),
-        y: fixed(y + 3.2),
-        "text-anchor": "middle",
-        class: `a-lm-step-num ${stepCls}`,
-      }, String(stepNum)),
-    );
-    textX += STEP_W + STEP_GAP;
-  }
   if (flag?.flagCode) {
     const fy = y - flagH / 2;
     parent.append(
@@ -1193,30 +1030,6 @@ function computeClusterOutwardVec(index, spots, radius = 56) {
   return { awayVec, nearestDist, crowded: true };
 }
 
-function computeChainOutwardVec(index, spots, hopShapes) {
-  const spot = spots[index];
-  if (!spot) return null;
-  const neighbors = [];
-  if (index > 0 && spots[index - 1]) neighbors.push(spots[index - 1]);
-  if (index < spots.length - 1 && spots[index + 1]) neighbors.push(spots[index + 1]);
-  const prevMid = index > 0 ? hopShapes?.[index - 1]?.mid : null;
-  const nextMid = index < spots.length - 1 ? hopShapes?.[index]?.mid : null;
-  if (prevMid) neighbors.push(prevMid);
-  if (nextMid) neighbors.push(nextMid);
-  let sx = 0, sy = 0;
-  for (const nb of neighbors) {
-    const dx = spot.x - nb.x, dy = spot.y - nb.y;
-    const d = Math.hypot(dx, dy);
-    if (d > 1e-3) {
-      const w = 1 / Math.max(18, d);
-      sx += (dx / d) * w;
-      sy += (dy / d) * w;
-    }
-  }
-  const len = Math.hypot(sx, sy);
-  return len > 1e-4 ? { x: sx / len, y: sy / len } : null;
-}
-
 function solveLabelPlacement({
   spot,
   totalW,
@@ -1224,7 +1037,6 @@ function solveLabelPlacement({
   view,
   preferSide,
   occupied,
-  arcObstacles = null,
   skipObstacleIndex = -1,
   pipCount = 0,
   awayVec = null,
@@ -1241,8 +1053,8 @@ function solveLabelPlacement({
   const sides = [];
   if (isCrowded && awayVec) {
     const baseAngle = Math.atan2(awayVec.y, awayVec.x);
-    for (const dist of [18, 28, 42]) {
-      for (const delta of [0, 0.42, -0.42, 0.85, -0.85]) {
+    for (const dist of [20, 32, 46]) {
+      for (const delta of [0, 0.45, -0.45, 0.9, -0.9]) {
         const ang = baseAngle + delta;
         const ux = Math.cos(ang), uy = Math.sin(ang);
         const cx = spot.x + ux * dist;
@@ -1314,11 +1126,6 @@ function solveLabelPlacement({
       const weight = o < pipCount ? 72 : 30;
       score += overlapArea(box, occupied[o]) * weight;
     }
-    if (arcObstacles?.length) {
-      for (let a = 0; a < arcObstacles.length; a++) {
-        score += overlapArea(box, arcObstacles[a]) * 28;
-      }
-    }
     if (!best || score < best.score) best = { x, cy, box, score };
     if (score === idx * 3) break;
   }
@@ -1363,50 +1170,37 @@ function preferredSide(index, spots) {
 }
 
 function nodeElement(scene, item, index, occupied) {
-  const { view, spots, flags, focus, isMultiHop = false, hopShapes = null, arcObstacles = null } = scene;
+  const { view, spots, flags, focus } = scene;
   const x = fixed(spots[index].x), y = fixed(spots[index].y);
   const key = `node:${index}`;
   const pressed = focus.key === key;
   const flag = flags[index];
-  const chainRole = isMultiHop
-    ? (index === 0 ? "start" : (index === spots.length - 1 ? "end" : "relay"))
-    : "";
-  const stepNum = isMultiHop ? index + 1 : 0;
-  let label = isMultiHop ? `第 ${stepNum} 站 · ${item.role} ${item.name}` : `${item.role} ${item.name}`;
+  let label = `${item.role} ${item.name}`;
   if (item.issue) label += `，${item.issue}`;
   else if (item.kind !== "ext" && !item.online) label += "，离线";
   const tagH = 17;
   const rawDisplay = view.width < 440 ? shortNodeName(item.name) : item.name;
   const name = clipLabel(rawDisplay, view.width < 440 ? 10 : NAME_UNITS);
   const textW = visualUnits(name) * UNIT_PX;
-  const stepW = stepNum > 0 ? STEP_W + STEP_GAP : 0;
-  const totalW = stepW + (flag ? FLAG_W + FLAG_GAP : 0) + textW;
+  const totalW = (flag ? FLAG_W + FLAG_GAP : 0) + textW;
   const prox = computeClusterOutwardVec(index, spots, 56);
-  const chainAway = isMultiHop ? computeChainOutwardVec(index, spots, hopShapes) : null;
-  const awayVec = chainAway || prox.awayVec;
-  const isCrowded = Boolean(chainAway) || prox.crowded;
   const isTight = prox.nearestDist < 26;
-  const prefer = awayVec
-    ? (awayVec.x < -0.2 ? -1 : awayVec.x > 0.2 ? 1 : 0)
-    : preferredSide(index, spots);
   const placement = solveLabelPlacement({
     spot: spots[index],
     totalW,
     labelH: tagH,
     view,
-    preferSide: prefer,
+    preferSide: preferredSide(index, spots),
     occupied,
-    arcObstacles,
     skipObstacleIndex: index,
     pipCount: spots.length,
-    awayVec,
-    isCrowded,
+    awayVec: prox.awayVec,
+    isCrowded: prox.crowded,
   });
   occupied.push(placement.box);
 
-  const roleCls = chainRole ? ` is-chain-${chainRole}` : "";
   const element = createSVGEl("g", {
-    class: `a-lm-node${focus.dimNode(index) ? " is-dim" : ""}${isTight ? " is-tight" : ""}${roleCls}`,
+    class: `a-lm-node${focus.dimNode(index) ? " is-dim" : ""}${isTight ? " is-tight" : ""}`,
     tabindex: 0,
     role: "button",
     "aria-pressed": String(pressed),
@@ -1415,16 +1209,15 @@ function nodeElement(scene, item, index, occupied) {
     "data-refresh-key": `lm-node-${index}`,
   });
   element.append(titleElement(label));
-  if (((item.kind !== "ext" && item.online && !item.issue && (!isMultiHop || chainRole === "start" || chainRole === "end")) || pressed)) {
+  if ((item.kind !== "ext" && item.online && !item.issue) || pressed) {
     element.append(createSVGEl("circle", { cx: x, cy: y, r: isTight ? 4 : 5, class: pressed ? "a-lm-ping is-focus" : "a-lm-ping", "vector-effect": "non-scaling-stroke" }));
   }
   const leader = labelLeaderElement(spots[index], placement, totalW, tagH);
   if (leader) element.append(leader);
-  const pipSize = isTight ? PIP * 0.82 : PIP;
   element.append(
-    createSVGEl("circle", { cx: x, cy: y, r: isTight ? 4.0 : (chainRole === "relay" ? 4.2 : 5.0), class: "a-lm-bed" }),
+    createSVGEl("circle", { cx: x, cy: y, r: isTight ? 4.0 : 4.8, class: "a-lm-bed" }),
     createSVGEl("circle", { cx: x, cy: y, r: isTight ? 7.0 : 8.4, class: "a-lm-ring" }),
-    pipElement(item, x, y, pipSize, chainRole),
+    pipElement(item, x, y, isTight ? PIP * 0.82 : PIP),
   );
   appendGlobeFlagAndName(element, {
     flag,
@@ -1436,8 +1229,6 @@ function nodeElement(scene, item, index, occupied) {
     flagGap: FLAG_GAP,
     textClass: "a-lm-name",
     isExt: item.kind === "ext",
-    stepNum,
-    chainRole,
   });
   const hitHalf = isTight ? 10 : 18;
   element.append(createSVGEl("rect", { x: fixed(x - hitHalf), y: fixed(y - hitHalf), width: hitHalf * 2, height: hitHalf * 2, class: "a-lm-hit" }));
@@ -1460,36 +1251,18 @@ export function renderLinkMap(group, {
   const flags = located.map(entry => entry.flag);
   const spots = place(view, vectors, group.nodes);
   const bd = backdrop(view, draft, idPrefix);
-  const isMultiHop = (group.hops?.length || 0) >= 2;
-
-  // Pre-compute hop curves first so node labels & latency pills actively avoid crossing any arc.
-  const hopShapes = group.hops.map((_, index) => {
-    const from = spots[index], to = spots[index + 1];
-    return (from.on && to.on ? archShape(view, vectors[index], vectors[index + 1], { altitudeScale: isMultiHop ? 0.7 : 1 }) : null)
-      || lensShape(from, to);
-  });
-  const arcObstacles = [];
-  for (const shape of hopShapes) {
-    for (const pt of (shape?.samples || NO_VALUES)) {
-      arcObstacles.push({ x1: pt.x - 5.5, y1: pt.y - 5.5, x2: pt.x + 5.5, y2: pt.y + 5.5 });
-    }
-  }
-
   const scene = {
     view,
     group,
     vectors,
     flags,
     spots,
-    hopShapes,
-    arcObstacles,
-    isMultiHop,
     focus: focusState(focusKey),
     metricDir,
     arcGlowId: bd.arcGlowId,
   };
   const svg = createSVGEl("svg", {
-    class: `a-lm is-pannable${isMultiHop ? " is-multihop" : ""}`,
+    class: "a-lm is-pannable",
     viewBox: `0 0 ${size.width} ${size.height}`,
     role: "group",
     "aria-label": `${group.groupName} 链路图`,
