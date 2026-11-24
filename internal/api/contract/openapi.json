@@ -6164,6 +6164,9 @@
           "requires_tls": {
             "type": "boolean"
           },
+          "requires_username": {
+            "type": "boolean"
+          },
           "secondary_credential_label": {
             "type": "string"
           },
@@ -12461,6 +12464,7 @@
                       "name": "example",
                       "port_forward": false,
                       "requires_tls": false,
+                      "requires_username": false,
                       "secondary_credential_label": "example",
                       "snell_mode": "example",
                       "snell_shadow_tls": false,
@@ -12891,6 +12895,7 @@
                       "name": "example",
                       "port_forward": false,
                       "requires_tls": false,
+                      "requires_username": false,
                       "secondary_credential_label": "example",
                       "snell_mode": "example",
                       "snell_shadow_tls": false,
@@ -18583,6 +18588,7 @@
                       "name": "example",
                       "port_forward": false,
                       "requires_tls": false,
+                      "requires_username": false,
                       "secondary_credential_label": "example",
                       "snell_mode": "example",
                       "snell_shadow_tls": false,

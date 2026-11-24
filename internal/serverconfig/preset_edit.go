@@ -115,6 +115,11 @@ func alignXrayPresetKeys(current, before, after map[string]any) {
 	if stream["xhttpSettings"] == nil && stream["splithttpSettings"] != nil {
 		alignPresetKey(oldStream, newStream, "xhttpSettings", "splithttpSettings")
 	}
+	if current["protocol"] == ProtocolSocks {
+		if settings := mapValue(current["settings"]); settings["accounts"] == nil && settings["users"] != nil {
+			alignPresetKey(mapValue(before["settings"]), mapValue(after["settings"]), "accounts", "users")
+		}
+	}
 	if current["protocol"] != "tunnel" && current["protocol"] != "dokodemo-door" {
 		return
 	}

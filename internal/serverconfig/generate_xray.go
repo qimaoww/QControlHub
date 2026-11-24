@@ -12,6 +12,12 @@ func generateXray(input Input) (string, error) {
 		"tag": input.Tag, "listen": input.Listen, "port": input.Port,
 	}
 	switch input.Protocol {
+	case ProtocolSocks:
+		inbound["protocol"] = ProtocolSocks
+		inbound["settings"] = map[string]any{
+			"auth": "password", "udp": true, "ip": input.Listen,
+			"accounts": []any{map[string]any{"user": input.Username, "pass": input.Credential}},
+		}
 	case ProtocolWireGuard:
 		inbound["protocol"] = "wireguard"
 		var peers []any
@@ -181,6 +187,11 @@ func parseXray(content string) (Input, bool) {
 		if input.Protocol == ProtocolHy2 {
 			input.Credential = stringValue(user["auth"])
 		}
+	}
+	if input.Protocol == ProtocolSocks {
+		input.Username, input.Credential, _ = socksInboundCredentials(core.EngineXray, inbound)
+		input.presetUnsupported = !boolValue(settings["udp"])
+		input.clientUnsupported = input.presetUnsupported
 	}
 	stream := mapValue(inbound["streamSettings"])
 	security := strings.ToLower(stringValue(stream["security"]))

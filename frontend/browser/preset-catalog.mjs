@@ -4,7 +4,7 @@ import { createPresetEditor } from "./preset-controls.mjs";
 // Round-trip the backend-generated catalog through the actual native editor.
 export async function testPresetCatalogRuntime(catalog) {
   const covered=new Set();
-  const cases=[...catalog,...catalog.filter(entry=>entry.engine==='xray'&&entry.plan.transport==='xhttp').map(entry=>({...entry,shared:true}))];
+  const cases=[...catalog,...catalog.filter(entry=>entry.engine==='xray'&&entry.plan.transport==='xhttp'||entry.protocol.key==='socks').map(entry=>({...entry,shared:true}))];
   for(const actual of cases) {
     const certificate={id:'crt_fixture',name:'面板证书',domains:['tls.example.test'],source:'import',owned:true,version:1,not_after:'2099-01-01T00:00:00Z'};
     const test=await createPresetEditor(actual.engine,{protocol:actual.protocol.key,shared:actual.shared,certificates:[certificate]});
@@ -24,6 +24,11 @@ export async function testPresetCatalogRuntime(catalog) {
         assert(Boolean(control('snell_shadow_tls_password'))===Boolean(actual.protocol.snell_shadow_tls),'Snell carrier fields do not match the preset');
         assert(!control('tls_server_name')&&!control('certificate_path'),'native Snell requires unrelated TLS configuration');
         edit('snell_udp',false);edit('snell_reuse',false);
+      }
+      if(actual.protocol.key==='socks') {
+        assert(control('username').required&&control('credential').required,'SOCKS5 credentials must be required');
+        assert(!control('tls_enabled')&&!control('transport'),'SOCKS5 exposed unsupported security or transport controls');
+        edit('username','socks-edited');edit('credential','socks-password-edited');
       }
       if(actual.protocol.port_forward) {
         const network = control('network');
@@ -96,6 +101,10 @@ export async function testPresetCatalogRuntime(catalog) {
         assert(saved.snell_version===actual.protocol.snell_version&&saved.snell_mode===(actual.protocol.snell_mode||''),'Snell version/mode changed during save');
         assert(saved.snell_obfs_mode===(actual.protocol.snell_shadow_tls?'shadow-tls':'none')&&saved.snell_shadow_tls_version===(actual.protocol.snell_shadow_tls?3:0),'Snell carrier changed during save');
         assert(!saved.snell_udp&&!saved.snell_reuse&&!control('snell_udp').checked&&!control('snell_reuse').checked,'disabled UDP/reuse lost during save or refill');
+      }
+      if(actual.protocol.key==='socks') {
+        assert(saved.username==='socks-edited'&&saved.credential==='socks-password-edited','SOCKS5 credentials changed during save');
+        assert(control('username').value===saved.username&&control('credential').value===saved.credential,'SOCKS5 credentials missing on reopen');
       }
 
       if(crossCoreWS) {

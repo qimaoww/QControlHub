@@ -37,6 +37,10 @@ func generateMihomo(input Input) (string, error) {
 		listener["proxy"] = input.ListenerProxy
 	}
 	switch input.Protocol {
+	case ProtocolSocks:
+		listener["type"] = ProtocolSocks
+		listener["udp"] = true
+		listener["users"] = []any{map[string]any{"username": input.Username, "password": input.Credential}}
 	case ProtocolSS2022:
 		listener["type"] = "shadowsocks"
 		listener["cipher"] = input.Method
@@ -340,10 +344,14 @@ func parseMihomo(content string) (Input, bool) {
 			input.TLSALPN = "h2,http/1.1"
 		}
 	}
-	if input.Protocol == ProtocolTrojan {
+	if input.Protocol == ProtocolTrojan || input.Protocol == ProtocolSocks {
 		if user := firstMap(listener["users"]); user != nil {
 			input.Username, input.Credential = stringValue(user["username"]), stringValue(user["password"])
 		}
+	}
+	if input.Protocol == ProtocolSocks {
+		input.presetUnsupported = !boolValue(listener["udp"])
+		input.clientUnsupported = input.presetUnsupported
 	}
 	if input.Protocol == ProtocolHy2 {
 		if users := mapValue(listener["users"]); len(users) > 0 {

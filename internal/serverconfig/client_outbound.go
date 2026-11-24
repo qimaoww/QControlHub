@@ -93,12 +93,17 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 	}
 	out := map[string]any{"tag": "peer"}
 	if engine == core.EngineXray {
-		if input.Protocol == ProtocolSocks || input.TransportHost != "" && input.Transport != "websocket" || input.TLSClientCertificate != "" || input.TLSALPN != "" && input.Transport != "websocket" {
-			return nil, fmt.Errorf("Xray 出站暂不支持此 Socks / HTTP Host / ALPN / 自定义证书组合，请使用 sing-box JSON")
+		if input.TransportHost != "" && input.Transport != "websocket" || input.TLSClientCertificate != "" || input.TLSALPN != "" && input.Transport != "websocket" {
+			return nil, fmt.Errorf("Xray 出站暂不支持此 HTTP Host / ALPN / 自定义证书组合，请使用 sing-box JSON")
 		}
 		out["protocol"] = protocol
 		user := map[string]any{"id": input.Credential}
 		switch protocol {
+		case ProtocolSocks:
+			out["settings"] = map[string]any{"servers": []any{map[string]any{
+				"address": address, "port": input.Port,
+				"users": []any{map[string]any{"user": input.Username, "pass": input.Credential}},
+			}}}
 		case "vless", "vmess":
 			if protocol == "vless" {
 				user["encryption"] = "none"
