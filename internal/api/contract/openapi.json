@@ -17547,7 +17547,16 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "application/x-pem-file": {
+                "example": "example",
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "证书公开链"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -20791,7 +20800,16 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "image/svg+xml": {
+                "example": "example",
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "查询IP 质量归档"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -20859,7 +20877,7 @@
                 }
               }
             },
-            "description": "可安装的 qcontrolhub-manager Skill ZIP"
+            "description": "下载管理 Skill"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -23436,7 +23454,16 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "image/svg+xml": {
+                "example": "example",
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "查询地区旗帜"
           },
           "400": {
             "$ref": "#/components/responses/error400"

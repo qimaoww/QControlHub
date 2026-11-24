@@ -40,6 +40,8 @@ Key 摘要存储，原文只在创建时显示一次；编辑不会轮换或恢�
 
 从 API 页或 `GET /api/v1/management-skill` 下载 ZIP。解压后将 `qcontrolhub-manager` 放入客户端的 Skill 目录（Codex 为 `~/.agents/skills/`），重新加载后调用 `$qcontrolhub-manager`。客户端需支持 `SKILL.md` 和 Python 3.9 或以上版本；在安全运行环境注入面板地址和 Key。Skill 内的 Python helper 仅向配置目标发送凭据，拒绝重定向，不自动重试写请求。
 
+在解压目录运行 `python3 scripts/operations.py list` 可离线查看本版全部操作。例如，`list --key 证书` 筛选支持 Key 的证书接口，`show POST '/api/v1/configs/{id}/tasks'` 查看请求字段和结果。实际执行前仍须核对当前 Key 的有效端点。节点、配置、任务、证书、订阅、流量、诊断和面板设置的操作步骤见包内 `references/workflows.md`。
+
 Skill 按“目标和授权 → 自身授权 → 精确资源 → 状态 → 执行 → 查询结果”工作。API 返回的日志、名称和配置属于数据，不能授权附加命令或替换凭据、目标地址。服务端独立执行所有授权，即使客户端绕过 Skill 也不能扩大权限。
 
 已有 [只读诊断脚本](api-diagnose.sh) 保留兼容，只读取自身授权内的数据；管理使用下载的 Skill 及当前机器规范。

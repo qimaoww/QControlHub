@@ -299,8 +299,14 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		response["200"] = object{"description": "复用已有任务；核对任务状态与实际结果", "content": object{"application/json": object{"schema": g.named("core.Task")}}}
 	case "getTask":
 		response["200"] = object{"description": "真实任务状态及结果；view=status 省略完整内容", "content": object{"application/json": object{"schema": g.named("core.Task")}}}
-	case "downloadManagementSkill":
-		response["200"] = object{"description": "可安装的 qcontrolhub-manager Skill ZIP", "content": object{"application/zip": object{"schema": object{"type": "string", "format": "binary"}}}}
+	case "downloadManagementSkill", "getRegionFlag", "getIPQualityArchive", "certificatePublicChain":
+		mediaType := map[string]string{
+			"downloadManagementSkill": "application/zip",
+			"getRegionFlag":           "image/svg+xml",
+			"getIPQualityArchive":     "image/svg+xml",
+			"certificatePublicChain":  "application/x-pem-file",
+		}[handler]
+		response["200"] = object{"description": op["summary"], "content": object{mediaType: object{"schema": object{"type": "string", "format": "binary"}}}}
 	}
 }
 

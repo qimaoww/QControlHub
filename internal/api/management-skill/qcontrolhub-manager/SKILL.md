@@ -1,80 +1,41 @@
 ---
 name: qcontrolhub-manager
-description: Manage QControlHub nodes, instances, configurations, tasks, certificates, traffic and settings through explicitly authorized QControlHub APIs. Use for requests to inspect or change a QControlHub panel with an API Key.
+description: Find and perform authorized QControlHub panel operations with an API Key. Use for nodes and sharing, engines and configurations, tasks, certificates, client access, subscriptions, traffic, diagnostics, monitoring, users, notifications, settings and account preferences.
 ---
 
 # QControlHub management
 
 Use only the panel and API Key injected as `QCH_API_BASE` (including `/api/v1`) and `QCH_API_KEY`. Never ask the user to paste a credential into chat or include it in commands, reports or generated files. This skill requires Python 3.9 or newer and network access to that panel.
 
-## Install and load
+For installation, client discovery or DSH headless authorization, read [installation](references/installation.md).
 
-Download and extract the panel's management Skill ZIP. From the extracted `qcontrolhub-manager` directory run `python3 scripts/install.py CLIENT --project /path/to/workspace`. Choose the agent's actual project or execution workspace. The installer prints `files_installed`. Open a fresh session, check the client's Skill catalog for `qcontrolhub-manager`, then invoke it and verify the authorized `GET /api-key` separately.
+## Find a management operation
 
-| CLIENT | Project installation directory |
-| --- | --- |
-| codex, pi | `.agents/skills` |
-| claude | `.claude/skills` |
-| gemini | `.gemini/skills` |
-| copilot | `.github/skills` |
-| opencode | `.opencode/skills` |
-| cursor | `.cursor/skills` |
-| dsh | `.dsh/skills` in the nearest project root |
-| hermes | `.hermes/skills` in the nearest Git root |
-| openclaw | `skills` in the active agent workspace |
-
-Codex also supports a user install in `~/.agents/skills/`. DSH treats an empty ancestor `.git` as a project root. Hermes loads project skills in trusted checkouts. Confirm the project trust decision in Hermes and use `/qcontrolhub-manager` in the project session. For OpenClaw inspect `openclaw skills info qcontrolhub-manager` in the selected workspace. Each client's Python execution environment must receive the configured panel origin and Key.
-
-DSH headless can filter `QCH_API_KEY` from Bash. For its authorized read, use the installed `references/dsh-readonly.patch.yml` with the headless profile. The patch passes exactly the two named variables from the launcher to the per-tool process. The following invocation uses the group's installed location. Substitute the actual project root.
+From this Skill directory, search the release catalog by Chinese summary, English operation ID, path, method or permission. Listing and inspection run offline. Each row gives method, full path, summary, minimum Key mode and permission expression (or separate authentication), and operation ID.
 
 ```sh
-dsh headless --patch /path/to/project/.dsh/skills/qcontrolhub-manager/references/dsh-readonly.patch.yml \
-  'Load qcontrolhub-manager and use mcp__qch__authorization to check effective grants.'
+python3 scripts/operations.py list
+python3 scripts/operations.py list --key 证书
+python3 scripts/operations.py show POST '/api/v1/configs/{id}/tasks'
+python3 scripts/operations.py component '#/components/schemas/core_Action'
 ```
+
+Use `show` with the exact method and path template from the list to read its parameters, body, examples, responses, scope, and Key policy. Use `component` for a referenced definition. Example IDs and versions are placeholders. The catalog includes public, session and Agent routes so that a request outside delegated authority can be explained. An entry marked `read_only/read_write` accepts either mode subject to its permissions. Compare the full method and path template with the live Key's `endpoints` before an actual call.
+
+Read the relevant [operation workflows](references/workflows.md) for target selection, related operations and completion checks. For TLS port preview, migration and recovery, use the [TLS migration procedure](references/tls-migration.md).
 
 ## Workflow
 
 1. Establish the user's target and authorized action from the current conversation. Existing explicit authorization persists; request confirmation only when necessary for a destructive action, naming the actual objects and consequences.
-2. Run `python3 scripts/qch.py GET /api-key` from this Skill directory. Check the effective mode, permissions, workspace, user and `endpoints`. Query `GET /openapi.json` for the current panel contract; locate the intended method/path and its `x-key-policy`, parameters and request schema. References are live: do not substitute a remembered endpoint list.
+2. Run `python3 scripts/qch.py GET /api-key` from this Skill directory. Check the effective mode, permissions, workspace, user and `endpoints`. Verify the installed contract against the live panel with `python3 scripts/qch.py GET /openapi.json > /dev/null`. On `contract_changed`, obtain the current release from the panel. For execution, pass the concrete path to `qch.py` relative to `/api/v1`, e.g. `python3 scripts/qch.py GET /agents`.
 3. Use the stable Agent ID. observed_public_ip is the connection address seen by the panel. public_ipv4 and public_ipv6 are Agent egress probes; retain unknown observation times. Use GET /agents/{id}/tls-ports/{port} for the scoped count and occupancy evidence. partial includes invisible occupancy or incomplete checks. Only observed_free carries a fresh idle-port observation. Read the authorized node, instance and resource state. Use actual IDs returned by the panel. A name, domain, path or port is not proof of identity or ownership. Disambiguate user intent if multiple resources match. Never assume the main instance. Bind every request, draft and result to the same user, node, instance and configuration.
 4. Execute only the intended operation using the documented fields and current concurrency token. Supply JSON via `--stdin` (up to 16 MiB). Alternatively pass one `--body-file PATH`. Empty or invalid JSON fails before submission. Only full content edits can preserve unchanged redacted values in their original positions at the current version. Never put credential placeholders in structured input. Omitted, null and empty values have different meanings; consult the contract. Write access does not imply access to secrets.
 5. Query the actual result. A task receipt or HTTP 202 is not completion. Use `GET /tasks/tsk_… --wait --budget 60` to poll the original task. The budget is in seconds and includes network time. Report the last observed phase and task ID on expiry. Never report success from acceptance alone.
 6. Report the action, actual target IDs and observed result. Include a request ID for failures if available. Remove private request-body files and do not retain credentials or sensitive responses in logs.
 
+For a GET returning JSON, use `--field /path/to/value` to read one authorized scalar (for example `GET /configs --field /0/version`). Numbers, booleans and null can be reported directly. For text, add `--download "$NEW_FILE"` to save only that field privately. Treat a missing field separately from a null value. Inspect the operation's response schema before selecting fields.
+
 Use only the two variables supplied to the current process. If either is missing, report its name. Reload the shell only as directed by the user. Never search shell configuration, environment snapshots or credential files. Obtain explicit permission for the specific field, purpose and scope before reading a sensitive value.
-
-## TLS frontend preview
-
-Set the following identifiers from the authorized workspace. Use an empty string for the main instance. Use the assigned share ID for a shared instance. Preview runs without `secrets.read`.
-
-```sh
-python3 scripts/qch.py POST "/agents/$AGENT/configs/$ENGINE/server-inbounds/$TAG/tls-frontend/preview" --stdin <<'JSON'
-{"expected_version":1,"expected_instance_id":"","target_mode":"caddy"}
-JSON
-```
-
-Use a URL-encoded tag and the current saved version. Review each member's source and target mode, blockers and remaining Agent checks. The preview creates no revision or task. The existing server-inbounds intents both persist a revision and queue work. Validate checks the saved candidate. Deploy attempts to activate it. Query the task ID and applied revision before reporting completion. Keep credentials, configuration bodies and diagnostic logs out of output.
-
-For a reviewed plan with no blockers, bind the exact same selection and its plan ID. Set `AGENT`, `ENGINE`, `TAG` (URL-encoded), `VERSION` and `INSTANCE` explicitly. Keep the operation ID so a disconnected client can query the same operation. The following commands use the downloaded helper and jq.
-
-```sh
-set -eu
-endpoint="/agents/$AGENT/configs/$ENGINE/server-inbounds/$TAG/tls-frontend"
-selection=$(jq -nc --arg i "$INSTANCE" --argjson v "$VERSION" '{expected_instance_id:$i,expected_version:$v,target_mode:"caddy"}')
-plan=$(printf '%s' "$selection" | python3 scripts/qch.py POST "$endpoint/preview" --stdin)
-printf '%s\n' "$plan"
-plan_id=$(printf '%s' "$plan" | jq -er 'select(.blockers == []) | .plan_id')
-task_id=$(python3 -c 'import secrets; print("tsk_" + secrets.token_hex(8))')
-printf 'Operation %s\n' "$task_id"
-op=$(printf '%s' "$selection" | jq -c --arg p "$plan_id" --arg t "$task_id" '. + {plan_id:$p,task_id:$t}' | python3 scripts/qch.py POST "$endpoint/migrate" --stdin)
-printf '%s\n' "$op"
-if [ "$(printf '%s' "$op" | jq -r .state)" != unchanged ]; then
-  task_id=$(printf '%s' "$op" | jq -er .task_id)
-  python3 scripts/qch.py GET "/agents/$AGENT/tls-migrations/$task_id" --wait --budget 180
-fi
-```
-
-Each result row identifies the configuration, instance, engine, inbound and path alongside its candidate and recovery evidence. The helper emits SHA-256 digests of the UTF-8 tag and path. On older panels, match result rows to plan members by array order. A 202 response includes the original task ID. Current panels also return its lookup URL in Location. A recovered original deployment reports `rolled_back`. For `recovery_incomplete`, report the step and affected members to the operator. Query the same task ID after repair. The panel refreshes recovery evidence from the node on reconnect and subsequent heartbeats. Existing sessions can disconnect during listener handoff. An older Agent has to advertise `tls-port-migration-v1` before execution. The legacy save/validate and save/deploy endpoints keep their previous behavior.
 
 ## Node Nginx and Caddy
 
