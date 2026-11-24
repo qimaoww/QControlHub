@@ -269,6 +269,16 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["description"] = "保存当前授权工作区配置，必要时同时受理异步任务；按返回配置和任务 ID 查询结果。snapshot 引用还要求 tasks.read，不能引用他人配置/证书。"
 	}
 	response := op["responses"].(object)
+	// Both routes return arrays outside the generator's usual writeJSON inference.
+	arrayItem := map[string]string{
+		"/api/v1/core-logs":             "core.CoreLogEntry",
+		"/api/v1/system-tcp/parameters": "core.TCPParameterRule",
+	}[path]
+	if method == "get" && arrayItem != "" {
+		response["200"] = object{"description": op["summary"], "content": object{"application/json": object{
+			"schema": object{"type": "array", "items": g.named(arrayItem)},
+		}}}
+	}
 	switch handler {
 	case "getAPIKeyAuthorization":
 		response["200"] = object{
@@ -299,8 +309,14 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		response["200"] = object{"description": "复用已有任务；核对任务状态与实际结果", "content": object{"application/json": object{"schema": g.named("core.Task")}}}
 	case "getTask":
 		response["200"] = object{"description": "真实任务状态及结果；view=status 省略完整内容", "content": object{"application/json": object{"schema": g.named("core.Task")}}}
-	case "downloadManagementSkill":
-		response["200"] = object{"description": "可安装的 qcontrolhub-manager Skill ZIP", "content": object{"application/zip": object{"schema": object{"type": "string", "format": "binary"}}}}
+	case "downloadManagementSkill", "getRegionFlag", "getIPQualityArchive", "certificatePublicChain":
+		mediaType := map[string]string{
+			"downloadManagementSkill": "application/zip",
+			"getRegionFlag":           "image/svg+xml",
+			"getIPQualityArchive":     "image/svg+xml",
+			"certificatePublicChain":  "application/x-pem-file",
+		}[handler]
+		response["200"] = object{"description": op["summary"], "content": object{mediaType: object{"schema": object{"type": "string", "format": "binary"}}}}
 	}
 }
 

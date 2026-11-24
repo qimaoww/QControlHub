@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -41,6 +42,52 @@ class Transport(unittest.TestCase):
             except qch.Failure as error:
                 result = error.result
         return result, calls, stderr.getvalue()
+
+    def test_read_one_private_field(self):
+        payload = {"/group": [{"~name": "private canary", "value": None}]}
+        path = ["GET", "/configs", "--field", "/~1group/0/~0name"]
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory, "selected.txt")
+            for args, expected in (
+                (path, {"classification": "private_destination_required"}),
+                (path + ["--download", str(target)], {"bytes_saved": len("private canary")}),
+                (path + ["--download", str(target)], {"classification": "download_destination_unavailable"}),
+                (["GET", "/configs", "--field", "/~1group/0/value"], {"value": None}),
+                (["GET", "/configs", "--field", "/~1group/1"], {"classification": "field_missing"}),
+                (["GET", "/configs", "--field", "/~1group"], {"classification": "scalar_field_required"}),
+            ):
+                result, calls, stderr = self.run_case(args, b"", [(200, {}, payload)])
+                self.assertEqual(result, expected)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(stderr, "")
+            self.assertEqual(target.read_text(), "private canary")
+            if qch.os.name == "posix":
+                self.assertEqual(target.stat().st_mode & 0o077, 0)
+
+    def test_fields_on_log_and_tcp_parameter_rows(self):
+        for route, field in (("/core-logs", "id"), ("/system-tcp/parameters", "min")):
+            result, calls, _ = self.run_case(
+                ["GET", route, "--field", "/0/" + field], b"", [(200, {}, [{field: 1}])]
+            )
+            self.assertEqual(result, {"value": 1})
+            self.assertEqual(calls, [("GET", route)])
+
+    def test_receipts_drop_free_text(self):
+        receipt = {"id": "trf_1111111111111111", "status": "not_executed", "message": "private canary"}
+        safe = {"id": receipt["id"], "status": receipt["status"]}
+        for payload, expected in (([receipt], [safe]), ({"results": [receipt]}, {"results": [safe]})):
+            self.assertEqual(qch.project("/traffic-policies", payload, {}), expected)
+
+    def test_invalid_download_and_field_targets_make_no_request(self):
+        for args in (
+            ["GET", "/users", "--download", "unused"],
+            ["GET", "/auth/session", "--field", "/name"],
+            ["POST", "/configs", "--field", "/id"],
+            ["GET", "/configs", "--field", "/bad~path"],
+        ):
+            result, calls, _ = self.run_case(args, b"", [])
+            self.assertIn(result["classification"], {"invalid_download_target", "invalid_field_pointer"})
+            self.assertEqual(calls, [])
 
     def test_path_evidence_and_unknown_blocker(self):
         row = {"config_id": "cfg_1111111111111111", "instance_id": "", "engine": "xray",

@@ -2337,6 +2337,45 @@
         },
         "type": "object"
       },
+      "core_CoreLogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/core_Engine"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "logged_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "身份与资源归属由服务端决定；API Key 不得修改账户身份或指定其他所有者。",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_Deployment": {
         "additionalProperties": false,
         "properties": {
@@ -4390,6 +4429,33 @@
             "type": "string"
           },
           "root": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "core_TCPParameterRule": {
+        "additionalProperties": false,
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "min": {
+            "type": "integer"
+          },
+          "tuple": {
             "type": "boolean"
           }
         },
@@ -17547,7 +17613,16 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "application/x-pem-file": {
+                "example": "example",
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "证书公开链"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -19942,7 +20017,31 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "agent_id": "example",
+                    "engine": "mihomo",
+                    "id": "resource_example",
+                    "instance_id": "example",
+                    "level": "example",
+                    "logged_at": "2026-11-10T12:00:00Z",
+                    "message": "example",
+                    "owner_id": "example",
+                    "received_at": "2026-11-10T12:00:00Z",
+                    "service": "example"
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/core_CoreLogEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "列出内核日志"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -20791,7 +20890,16 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "image/svg+xml": {
+                "example": "example",
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "查询IP 质量归档"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -20859,7 +20967,7 @@
                 }
               }
             },
-            "description": "可安装的 qcontrolhub-manager Skill ZIP"
+            "description": "下载管理 Skill"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -23436,7 +23544,16 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "image/svg+xml": {
+                "example": "example",
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "查询地区旗帜"
           },
           "400": {
             "$ref": "#/components/responses/error400"
@@ -26695,7 +26812,29 @@
         "operationId": "_api_v1_system-tcp_parameters",
         "responses": {
           "200": {
-            "description": "成功；无内容响应为 204。"
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "choices": [
+                      "example"
+                    ],
+                    "key": "example",
+                    "label": "example",
+                    "max": 1,
+                    "min": 1,
+                    "tuple": false
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/core_TCPParameterRule"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "系统 TCP 参数"
           },
           "400": {
             "$ref": "#/components/responses/error400"

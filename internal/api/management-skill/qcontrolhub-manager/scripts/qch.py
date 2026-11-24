@@ -105,6 +105,66 @@ def catalog():
     return json.loads(path.read_bytes())
 
 
+def read_media(path, contract, field):
+    parts = urllib.parse.urlsplit(path).path.split("/")
+    for route, methods in contract["paths"].items():
+        op = methods.get("get", {})
+        if not op.get("x-api-key"):
+            continue
+        template = route.removeprefix("/api/v1").split("/")
+        if len(template) != len(parts) or not all(
+            actual == pattern or (actual and pattern.startswith("{") and pattern.endswith("}"))
+            for actual, pattern in zip(parts, template)
+        ):
+            continue
+        content = op["responses"].get("200", {}).get("content", {})
+        if field is not None:
+            if "application/json" in content:
+                return "application/json"
+            break
+        if route == "/api/v1/agents/{id}/configs/{engine}/client-access":
+            return "application/json"
+        for media, spec in content.items():
+            if spec.get("schema", {}).get("format") == "binary":
+                return media
+    raise Failure("invalid_download_target")
+
+
+def selected_scalar(value, pointer):
+    for token in pointer[1:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict) and token in value:
+            value = value[token]
+        elif isinstance(value, list) and re.fullmatch(r"0|[1-9][0-9]{0,9}", token):
+            index = int(token)
+            if index >= len(value):
+                raise Failure("field_missing")
+            value = value[index]
+        else:
+            raise Failure("field_missing")
+    if isinstance(value, (dict, list)):
+        raise Failure("scalar_field_required")
+    return value
+
+
+def save_download(destination, value):
+    if isinstance(value, dict) and isinstance(value.get("content"), str):
+        value = value["content"].encode("utf-8")
+    if not isinstance(value, bytes):
+        raise Failure("invalid_download_response")
+    try:
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    except OSError:
+        raise Failure("download_destination_unavailable")
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(value)
+    except BaseException:
+        os.unlink(destination)
+        raise
+    return {"bytes_saved": len(value)}
+
+
 def allowed(value, options):
     return isinstance(value, str) and value in options
 
@@ -113,18 +173,22 @@ def resource(item):
     if not isinstance(item, dict):
         return {}
     result = {}
-    for field in ("id", "agent_id", "task_id", "submission_id", "config_id", "user_id", "workspace_id", "instance_id", "request_id"):
+    for field in ("id", "owner_id", "share_id", "certificate_id", "agent_id", "task_id", "submission_id", "config_id", "user_id", "workspace_id", "instance_id", "request_id"):
         value = item.get(field)
         if isinstance(value, str) and ID.fullmatch(value):
             result[field] = value
     for field in ("version", "revision", "config_version", "deployed_version", "certificate_version", "attempt", "public_port", "backend_port"):
         if type(item.get(field)) is int:
             result[field] = item[field]
-    for field, options in (("status", STATES), ("engine", ENGINES), ("target_mode", {"caddy", "nginx"}),
+    for field, options in (("status", STATES | {"not_executed", "queued"}), ("engine", ENGINES), ("target_mode", {"caddy", "nginx"}),
                            ("from", {"caddy", "nginx"}), ("to", {"caddy", "nginx"}),
                            ("transport", {"websocket", "httpupgrade", "http", "xhttp"})):
         if allowed(item.get(field), options):
             result[field] = item[field]
+    if result.get("id", "").startswith("ndg_") and allowed(
+        item.get("state"), {"preparing", "running", "stopping", "cleanup_pending", "failed", "canceled", "succeeded"}
+    ):
+        result["state"] = item["state"]
     return result
 
 
@@ -222,11 +286,15 @@ def project(path, value, contract):
         if allowed(value.get("state"), {"partial", "observed_free", "unconfirmed", "visible_in_use"}):
             result["state"] = value["state"]
         return result
-    if path in ("/agents", "/tasks", "/deployments", "/configs") and isinstance(value, list):
+    if isinstance(value, list):
         return [resource(v) for v in value]
     if isinstance(value, dict):
         result = resource(value)
-        for field in ("config", "task"):
+        # Keep scoped identifiers and receipts even when a list is wrapped.
+        for field in ("items", "orders", "grants", "bindings", "versions", "shares", "records", "schedules", "targets", "results"):
+            if isinstance(value.get(field), list):
+                result[field] = [resource(row) for row in value[field]]
+        for field in ("config", "task", "certificate"):
             if isinstance(value.get(field), dict):
                 result[field] = resource(value[field])
         return result
@@ -262,10 +330,18 @@ def fetch(opener, request, deadline):
                     if response.status < 400:
                         raise Failure("response_too_large")
                     data = b""
-                try:
-                    value = json.loads(data)
-                except (ValueError, UnicodeError, RecursionError):
-                    value = None
+                media = request.get_header("Accept")
+                if response.status < 300 and media != "application/json":
+                    length = response.headers.get("Content-Length")
+                    if (response.status != 200 or media != response.headers.get_content_type()
+                            or (length is not None and (not length.isdecimal() or int(length) != len(data)))):
+                        raise Failure("invalid_download_response")
+                    value = data
+                else:
+                    try:
+                        value = json.loads(data)
+                    except (ValueError, UnicodeError, RecursionError):
+                        value = None
                 replies.put((response.status, response.headers, value))
         except Exception as error:
             replies.put(error)
@@ -291,9 +367,9 @@ def fetch(opener, request, deadline):
     return answer
 
 
-def call(base, key, method, path, body, deadline, submission=None):
+def call(base, key, method, path, body, deadline, submission=None, accept="application/json"):
     url = target_url(base, path)
-    headers = {"Authorization": "Bearer " + key, "Accept": "application/json", "Content-Type": "application/json",
+    headers = {"Authorization": "Bearer " + key, "Accept": accept, "Content-Type": "application/json",
                "User-Agent": "QControlHub-Manager/1.1"}
     if submission:
         headers["X-Config-Task-ID"] = submission
@@ -329,6 +405,8 @@ def main():
     sources = parser.add_mutually_exclusive_group()
     sources.add_argument("--stdin", action="store_true")
     sources.add_argument("--body-file")
+    parser.add_argument("--field", help="read one authorized JSON scalar by JSON Pointer")
+    parser.add_argument("--download", metavar="NEW_FILE", help="save a requested file or workspace client export")
     parser.add_argument("--wait", action="store_true", help="poll a task until terminal")
     parser.add_argument("--budget", type=float, default=60)
     args = parser.parse_args()
@@ -345,6 +423,13 @@ def main():
         raise Failure("invalid_wait_target")
     body = read_body(args)
     spec = catalog()
+    media = "application/json"
+    if args.download is not None or args.field is not None:
+        if args.field is not None and (not args.field.startswith("/") or re.search(r"~(?![01])", args.field)):
+            raise Failure("invalid_field_pointer")
+        if args.method != "GET" or args.wait:
+            raise Failure("invalid_download_target")
+        media = read_media(args.path, spec, args.field)
     deadline = time.monotonic() + args.budget
     submission = None
     if args.method == "POST" and SUBMISSION_PATH.fullmatch(args.path):
@@ -361,7 +446,7 @@ def main():
         try:
             write = args.method != "GET"
             limit = min(deadline, time.monotonic() + args.budget * 0.75) if write else deadline
-            value = call(base, key, args.method, args.path, body, limit, submission)
+            value = call(base, key, args.method, args.path, body, limit, submission, media)
         except Failure as error:
             classification = error.result["classification"]
             if write and classification in ("connection_failure", "read_timeout", "server_failure"):
@@ -399,6 +484,15 @@ def main():
             if args.wait:
                 error.result["task_id"] = task[1]
             raise
+        if args.field is not None:
+            value = selected_scalar(value, args.field)
+            if args.download is None:
+                if isinstance(value, str):
+                    raise Failure("private_destination_required")
+                return {"value": value}
+            value = (value if isinstance(value, str) else json.dumps(value)).encode("utf-8")
+        if args.download is not None:
+            return save_download(args.download, value)
         result = project(args.path, value, spec)
         if not args.wait:
             return result
