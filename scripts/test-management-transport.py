@@ -64,6 +64,14 @@ class Transport(unittest.TestCase):
             if qch.os.name == "posix":
                 self.assertEqual(target.stat().st_mode & 0o077, 0)
 
+    def test_fields_on_log_and_tcp_parameter_rows(self):
+        for route, field in (("/core-logs", "id"), ("/system-tcp/parameters", "min")):
+            result, calls, _ = self.run_case(
+                ["GET", route, "--field", "/0/" + field], b"", [(200, {}, [{field: 1}])]
+            )
+            self.assertEqual(result, {"value": 1})
+            self.assertEqual(calls, [("GET", route)])
+
     def test_receipts_drop_free_text(self):
         receipt = {"id": "trf_1111111111111111", "status": "not_executed", "message": "private canary"}
         safe = {"id": receipt["id"], "status": receipt["status"]}

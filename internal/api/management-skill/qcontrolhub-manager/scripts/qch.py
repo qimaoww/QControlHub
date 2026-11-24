@@ -331,7 +331,11 @@ def fetch(opener, request, deadline):
                         raise Failure("response_too_large")
                     data = b""
                 media = request.get_header("Accept")
-                if response.status < 300 and media != "application/json" and media == response.headers.get_content_type():
+                if response.status < 300 and media != "application/json":
+                    length = response.headers.get("Content-Length")
+                    if (response.status != 200 or media != response.headers.get_content_type()
+                            or (length is not None and (not length.isdecimal() or int(length) != len(data)))):
+                        raise Failure("invalid_download_response")
                     value = data
                 else:
                     try:
@@ -374,8 +378,6 @@ def call(base, key, method, path, body, deadline, submission=None, accept="appli
     for attempt in range(3):
         status, headers, value = fetch(opener, request, deadline)
         if 200 <= status < 300:
-            if accept != "application/json" and not isinstance(value, bytes):
-                raise Failure("invalid_download_response")
             return value
         code = {400: "invalid_input", 401: "authentication_failed", 403: "permission_denied", 404: "target_missing",
                 409: "conflict", 429: "rate_limited"}.get(status, "server_failure" if status >= 500 else "http_failure")

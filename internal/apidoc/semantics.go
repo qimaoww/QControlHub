@@ -269,6 +269,16 @@ func (g *generator) annotate(op object, handler, method, path string) {
 		op["description"] = "保存当前授权工作区配置，必要时同时受理异步任务；按返回配置和任务 ID 查询结果。snapshot 引用还要求 tasks.read，不能引用他人配置/证书。"
 	}
 	response := op["responses"].(object)
+	// Both routes return arrays outside the generator's usual writeJSON inference.
+	arrayItem := map[string]string{
+		"/api/v1/core-logs":             "core.CoreLogEntry",
+		"/api/v1/system-tcp/parameters": "core.TCPParameterRule",
+	}[path]
+	if method == "get" && arrayItem != "" {
+		response["200"] = object{"description": op["summary"], "content": object{"application/json": object{
+			"schema": object{"type": "array", "items": g.named(arrayItem)},
+		}}}
+	}
 	switch handler {
 	case "getAPIKeyAuthorization":
 		response["200"] = object{
