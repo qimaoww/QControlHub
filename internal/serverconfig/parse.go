@@ -222,9 +222,8 @@ func firstSupportedInbound(engine core.Engine, value any, protocolField string) 
 			if engine == core.EngineSingBox && singBoxPresetEditError(candidate) != nil {
 				continue
 			}
-			if engine == core.EngineSingBox && protocol == ProtocolSocks {
-				user := firstMap(candidate["users"])
-				if stringValue(user["username"]) == "" || stringValue(user["password"]) == "" {
+			if protocol == ProtocolSocks {
+				if _, _, ok := socksInboundCredentials(engine, candidate); !ok {
 					continue
 				}
 			}

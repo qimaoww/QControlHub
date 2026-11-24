@@ -6,6 +6,7 @@ import "github.com/qimaoww/qcontrolhub/internal/core"
 
 const (
 	ProtocolShadowsocks              = "shadowsocks"
+	ProtocolSocks                    = "socks"
 	ProtocolSS2022                   = "ss2022"
 	ProtocolVLESS                    = "vless"
 	ProtocolVLESSXHTTP               = "vless-xhttp-reality"
@@ -55,6 +56,7 @@ type Protocol struct {
 	CredentialHint       string       `json:"credential_hint,omitempty"`
 	SecondaryCredential  string       `json:"secondary_credential_label"`
 	IgnoresUsername      bool         `json:"ignores_username"`
+	RequiresUsername     bool         `json:"requires_username,omitempty"`
 	Methods              []string     `json:"methods"`
 	Transports           []string     `json:"transports"`
 	SupportsTLS          bool         `json:"supports_tls"`
@@ -240,6 +242,7 @@ func Protocols(engine core.Engine) []Protocol {
 	trojanPath := "trojan/"
 	hy2Path := "hysteria2/"
 	portForwardPath := "direct/"
+	socksPath := "socks/"
 	if engine == core.EngineMihomo {
 		ssPath = "ss/"
 		portForwardPath = "tunnel/"
@@ -251,6 +254,7 @@ func Protocols(engine core.Engine) []Protocol {
 		trojanPath = "trojan.html"
 		hy2Path = "hysteria.html"
 		portForwardPath = "tunnel.html"
+		socksPath = "socks.html"
 	}
 	protocols := []Protocol{
 		{
@@ -289,6 +293,13 @@ func Protocols(engine core.Engine) []Protocol {
 			Description: "将本机监听端口收到的 TCP、UDP 或双协议流量转发到指定目标地址与端口。",
 			Docs:        base + portForwardPath, DefaultPort: 8080,
 			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true, ForwardNetworks: portForwardNetworks,
+		},
+		{
+			Key: ProtocolSocks, Name: "SOCKS5", Badge: "SOCKS5",
+			RequiresUsername: true,
+			Description:      "用户名与密码认证，支持 TCP 与 UDP 转发。",
+			Docs:             base + socksPath, DefaultPort: 1080, Credential: "用户密码",
+			Transports: []string{"raw"},
 		},
 	}
 	// VLESS Encryption 可以直接跑在原生 TCP 上：Xray 允许在启用 VLESS Encryption 时
@@ -384,7 +395,7 @@ func Protocols(engine core.Engine) []Protocol {
 		}
 		protocols = append(protocols, singBoxPresetProtocols()...)
 		protocols = append(protocols, Protocol{Key: ProtocolVLESSTLS, Name: "VLESS-TLS · 自定义传输", Badge: "VLESS", Description: "兼容已有 VLESS 原生 TLS 配置；TCP、WebSocket、gRPC、HTTP/H2、HTTPUpgrade、QUIC。", Docs: base + vlessPath, DefaultPort: 443, Credential: "用户 UUID", Transports: []string{"raw", "websocket", "grpc", "http", "httpupgrade", "quic"}, TransportConfig: true, SupportsTLS: true, RequiresTLS: true, DefaultTLS: true})
-		protocols = append(protocols, Protocol{Key: ProtocolShadowsocks, Name: "Shadowsocks AEAD", Badge: "SS", Description: "传统 AEAD，TCP 与 UDP；与 Shadowsocks 2022 分别生成密码。", Docs: base + ssPath, DefaultPort: 8388, Credential: "用户密码", Methods: []string{"aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305"}, Transports: []string{"raw"}, IgnoresUsername: true}, Protocol{Key: ProtocolSocks, Name: "Socks5 · 用户名与密码", Badge: "SOCKS", Description: "原生 Socks5 认证入站，支持 CONNECT 与 UDP ASSOCIATE；请在可信网络使用。", Docs: base + "socks/", DefaultPort: 1080, Credential: "用户密码", Transports: []string{"raw"}})
+		protocols = append(protocols, Protocol{Key: ProtocolShadowsocks, Name: "Shadowsocks AEAD", Badge: "SS", Description: "传统 AEAD，TCP 与 UDP；与 Shadowsocks 2022 分别生成密码。", Docs: base + ssPath, DefaultPort: 8388, Credential: "用户密码", Methods: []string{"aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305"}, Transports: []string{"raw"}, IgnoresUsername: true})
 		for index := range protocols {
 			protocols[index].Group = map[string]string{ProtocolVLESS: "VLESS", ProtocolVMess: "VMess", ProtocolTrojan: "Trojan", ProtocolShadowsocks: "Shadowsocks", ProtocolSS2022: "Shadowsocks"}[nativeProtocol(protocols[index].Key)]
 			if protocols[index].Group == "" {

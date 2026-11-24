@@ -117,7 +117,7 @@ func generate(engine core.Engine, input Input, requireWireGuardClient bool) (str
 				return "", errors.New("WireGuard 路由只能识别隧道内源地址，公网来源限制须在节点防火墙配置")
 			}
 		} else {
-			optionalName := engine == core.EngineXray || engine == core.EngineSingBox && input.Protocol != ProtocolSocks
+			optionalName := (engine == core.EngineXray || engine == core.EngineSingBox) && !protocol.RequiresUsername
 			if !protocol.IgnoresUsername && (len(input.Username) > 64 || !optionalName && strings.TrimSpace(input.Username) == "") {
 				return "", errors.New("用户名不能为空且不能超过 64 个字符")
 			}
@@ -128,6 +128,9 @@ func generate(engine core.Engine, input Input, requireWireGuardClient bool) (str
 	}
 	if input.Transport == "" {
 		input.Transport = "raw"
+	}
+	if input.Protocol == ProtocolSocks && (input.Transport != "raw" || input.TLSEnabled || input.RealityEnabled || input.Flow != "") {
+		return "", errors.New("SOCKS5 预设仅支持原生 TCP/UDP，不支持 TLS、Reality 或 Flow")
 	}
 	if protocol.PortForward && input.Transport != "raw" {
 		return "", errors.New("端口转发只支持原生 TCP/UDP 传输")

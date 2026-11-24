@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-const ProtocolSocks = "socks"
 const ProtocolVLESSTLS = "vless-tls"
 const ProtocolVLESSHTTP2Reality = "vless-http2-reality"
 
