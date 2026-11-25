@@ -85,7 +85,7 @@ export async function createConfigFixture(engine, options = {}) {
     session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
   const tasks = new Map();
-  let disabled = [];
+  let disabled = structuredClone(options.disabled || []);
   const inboundSection = engine === "mihomo" ? "listeners" : engine === "ss-rust" ? "servers" : "inbounds";
   const workspace = () => ({client_source:`source-${saved?.version || 0}`, agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
     deployment:{state: test.deploymentState || ([...tasks.values()].some(task=>task.action==='deploy'&&task.config_version===saved?.version) ?

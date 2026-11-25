@@ -19,7 +19,10 @@ export function deploymentStatus(ctx, { base, workspace, getConfig, isPreview=()
     control.hidden = !failed;
     normal.hidden = failed;
     const labels = {pending:"待部署", deploying:latest.task_status === "pending" ? "等待执行" : "部署中", canceled:"部署已取消", unknown:"部署结果待确认"};
-    const label = !current ? "部署结果待确认" : latest.state === "applied" ? enabled === undefined ? "—" : enabled ? "启用" : "停用" : labels[latest.state] || "尚未部署";
+    const target = enabled === undefined ? "" : enabled ? "启用" : "停用";
+    const deployment = !current ? "部署结果待确认" : labels[latest.state] || "尚未部署";
+    const label = latest.state === "applied" && current ? target || "—" : [target, deployment].filter(Boolean).join(" · ");
+    if (failed) control.textContent = [target, "部署失败"].filter(Boolean).join(" · ");
     if (normal.textContent !== label) normal.textContent = label;
     normal.className = `a-badge${current && latest.state === "applied" ? "" : " warn"}`;
     configState.hidden = ports.size > 0 || latest.state === "applied";
