@@ -205,14 +205,14 @@ func TestSharedTrafficEnforcesEngineRevocationWithoutResettingLedger(t *testing.
 		t.Fatal("engine revocation reset cumulative traffic")
 	}
 	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID,
-		[]core.PortTrafficEndpoint{{Engine: core.EngineXray, Port: 21002}}); err == nil {
+		[]core.PortTrafficEndpoint{{Engine: core.EngineXray, Port: 21002}}, false); err == nil {
 		t.Fatal("revoked engine could redeploy using its retained reservation")
 	}
 	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID,
-		[]core.PortTrafficEndpoint{{Engine: core.EngineMihomo, Port: 21001}}); err != nil {
+		[]core.PortTrafficEndpoint{{Engine: core.EngineMihomo, Port: 21001}}, false); err != nil {
 		t.Fatalf("authorized engine became unusable: %v", err)
 	}
-	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID, nil); err == nil {
+	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID, nil, false); err == nil {
 		t.Fatal("empty listener set bypassed shared authorization")
 	}
 }
@@ -232,10 +232,10 @@ func TestSharedTrafficRecoversServerTotalAndRejectsUnsafeExecution(t *testing.T)
 		t.Fatal("missing local checkpoint reset acknowledged usage")
 	}
 	endpoints := []core.PortTrafficEndpoint{{Engine: core.EngineMihomo, Port: 21001}}
-	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID, endpoints); err == nil {
+	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID, endpoints, false); err == nil {
 		t.Fatal("exhausted local allowance permitted deployment")
 	}
-	if err := manager.authorizeSharedDeployment(ctx, policies[2].SharedQuota.ID, endpoints); err == nil {
+	if err := manager.authorizeSharedDeployment(ctx, policies[2].SharedQuota.ID, endpoints, false); err == nil {
 		t.Fatal("another allocation's port permitted deployment")
 	}
 	var halted []core.Engine
@@ -244,7 +244,7 @@ func TestSharedTrafficRecoversServerTotalAndRejectsUnsafeExecution(t *testing.T)
 		return nil
 	}
 	backend.err = errors.New("nftables is unavailable")
-	if err := manager.authorizeSharedDeployment(ctx, policies[2].SharedQuota.ID, []core.PortTrafficEndpoint{{Engine: core.EngineXray, Port: 21003}}); err == nil {
+	if err := manager.authorizeSharedDeployment(ctx, policies[2].SharedQuota.ID, []core.PortTrafficEndpoint{{Engine: core.EngineXray, Port: 21003}}, false); err == nil {
 		t.Fatal("unavailable enforcement permitted deployment")
 	}
 	if len(halted) != 2 {
@@ -534,5 +534,24 @@ func TestSharedTrafficAcknowledgedEpochRepairsRestoredPendingUsage(t *testing.T)
 	}
 	if got := sharedTrafficUsed(manager.records, policies[0].SharedQuota.ID); got != 300 {
 		t.Fatalf("acknowledged epoch retained phantom pending bytes: %d", got)
+	}
+}
+
+func TestSharedStartRequiresHealthyRetainedAccounting(t *testing.T) {
+	manager, _, policies, _ := sharedTrafficFixture(t)
+	ctx := context.Background()
+	manager.sharedSource = func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error) {
+		return nativeAccountingSnapshot{}, errors.New("cannot verify deployed configuration")
+	}
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	p := policies[0]
+	endpoints := []core.PortTrafficEndpoint{{Engine: p.Engine, Port: p.Port}}
+	if err := manager.authorizeSharedDeployment(ctx, p.SharedQuota.ID, endpoints, true); err == nil {
+		t.Fatal("start passed with unverifiable retained accounting")
+	}
+	if err := manager.authorizeSharedDeployment(ctx, p.SharedQuota.ID, endpoints, false); err != nil {
+		t.Fatalf("repair deploy was blocked: %v", err)
 	}
 }

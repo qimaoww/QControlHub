@@ -101,7 +101,7 @@ func sharedTrafficUsed(records map[string]*trafficRecord, shareID string) uint64
 	return saturatedTrafficAdd(acknowledged, pending)
 }
 
-func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, shareID string, endpoints []core.PortTrafficEndpoint) error {
+func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, shareID string, endpoints []core.PortTrafficEndpoint, requireRetainedAccounting bool) error {
 	if manager == nil || !core.ValidAgentShareID(shareID) || len(endpoints) == 0 {
 		return errors.New("shared traffic manager or allocation is unavailable")
 	}
@@ -117,6 +117,9 @@ func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, sh
 			if quota != nil && quota.ID == shareID && record.Policy.Port == endpoint.Port && record.Policy.Engine == endpoint.Engine {
 				if !quota.AllowsEngine(endpoint.Engine) || record.Blocked || (quota.LimitBytes > 0 && sharedTrafficUsed(manager.records, shareID) >= quota.LimitBytes) {
 					return errors.New("shared Agent access is revoked or its cumulative allowance is exhausted")
+				}
+				if requireRetainedAccounting && record.AccountingError != "" {
+					return fmt.Errorf("shared port %d accounting is unavailable: %s", endpoint.Port, record.AccountingError)
 				}
 				matched = true
 				break

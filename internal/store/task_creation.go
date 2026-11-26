@@ -511,6 +511,15 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := s.checkTaskPortUseTx(ctx, tx, &task, false); err != nil {
 		return core.Task{}, err
 	}
+	reuseBinding := ctx.Value(unchangedBindingTaskKey{}) == true
+	sharedDeployRuns := false
+	if reuseBinding && task.SharedInstance && task.Action == core.ActionDeploy {
+		endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
+		if err != nil {
+			return core.Task{}, err
+		}
+		sharedDeployRuns = len(endpoints) > 0
+	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance,shared_traffic_id
@@ -524,7 +533,8 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		  AND api_key_id=$12 AND owner_id=$8 AND install_if_missing=$9
 		  AND (status IN ('pending','running') OR ($13 AND status='succeeded' AND
 		    ($2='validate' OR (NOT $11 AND EXISTS(SELECT 1 FROM agent_engine_ownership o WHERE o.agent_id=$1 AND o.engine=$3 AND o.owner_id=$8 AND o.config_id=$4 AND o.config_version=$5 AND NOT o.config_uncertain AND NOT o.uncertain))
-		      OR ($11 AND EXISTS(SELECT 1 FROM agent_shared_instance_ownership o WHERE o.agent_id=$1 AND o.engine=$3 AND o.owner_id=$8 AND o.share_id=$10 AND o.config_id=$4 AND o.config_version=$5 AND NOT o.config_uncertain AND NOT o.uncertain)))))
+		      OR ($11 AND EXISTS(SELECT 1 FROM agent_shared_instance_ownership o WHERE o.agent_id=$1 AND o.engine=$3 AND o.owner_id=$8 AND o.share_id=$10 AND o.config_id=$4 AND o.config_version=$5 AND NOT o.config_uncertain AND NOT o.uncertain
+		        AND o.desired_running=$14 AND o.service_status=CASE WHEN $14 THEN 'active' ELSE 'inactive' END)))))
 		  AND shared_traffic_id=$10 AND shared_instance=$11
 		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
 		      SELECT 1 FROM tasks mutation
@@ -532,7 +542,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance, func() string { id, _ := apiKeyTaskIdentity(ctx); return id }(), ctx.Value(unchangedBindingTaskKey{}) == true), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing, task.SharedTrafficID, task.SharedInstance, func() string { id, _ := apiKeyTaskIdentity(ctx); return id }(), reuseBinding, sharedDeployRuns), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
@@ -556,6 +566,15 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	if !errors.Is(existingErr, pgx.ErrNoRows) {
 		return core.Task{}, existingErr
+	}
+	if task.SharedInstance && (task.Action == core.ActionStop || task.Action == core.ActionDeploy) {
+		// An explicit target can supersede recovery until the Agent claims it.
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='canceled',finished_at=now(),config_content=NULL,
+			error='Automatic start superseded by a newer instance operation'
+			WHERE agent_id=$1 AND engine=$2 AND shared_traffic_id=$3 AND shared_auto_start AND status='pending'`,
+			task.AgentID, task.Engine, task.SharedTrafficID); err != nil {
+			return core.Task{}, err
+		}
 	}
 	if task.SharedInstance && (task.Action.ChangesInstance() || task.Action == core.ActionInstall) {
 		var busy bool

@@ -702,6 +702,9 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 			if err := e.verifySharedStart(ctx, spec, task); err != nil {
 				return "", err
 			}
+			if err := checkOutboundMarkRouting(ctx); err != nil {
+				return "", fmt.Errorf("shared accounting unavailable: %w", err)
+			}
 		}
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err

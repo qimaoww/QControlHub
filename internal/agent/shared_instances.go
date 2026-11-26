@@ -386,7 +386,13 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 			if err != nil {
 				continue
 			}
-			observation := e.sharedInstanceStatus(ctx, engine, entry.Name())
+			// The heartbeat may stop an unsafe service. Inspect a settled
+			// configuration while holding the same lock as lifecycle operations.
+			lock := e.sharedAccountingLock(engine, entry.Name())
+			if !lock.TryRLock() {
+				continue
+			}
+			observation := e.deploymentStatus(ctx, engine, spec, entry.Name())
 			status := observation.Status
 			if status == "active" {
 				content, readErr := readConfigurationFile(spec.ConfigPath)
@@ -395,7 +401,7 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 				}
 				var plan serverconfig.AccountingPlan
 				if readErr == nil {
-					plan, readErr = serverconfig.PrepareIndependentEgress(engine, content)
+					plan, readErr = serverconfig.PrepareSharedAccounting(engine, content)
 					if readErr == nil && plan.Source == "disabled" {
 						readErr = errors.New("independent exit is disabled")
 					}
@@ -422,6 +428,7 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 			}
 			observation.Status = status
 			statuses = append(statuses, observation)
+			lock.RUnlock()
 		}
 	}
 	return statuses

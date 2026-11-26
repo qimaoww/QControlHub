@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"strings"
 	"time"
@@ -189,14 +190,28 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 		if err := tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, id).Scan(&locked); err != nil {
 			return mapError(err)
 		}
+		var stopped bool
 		for _, instance := range heartbeat.SharedInstances {
+			stopped = stopped || instance.Status == "inactive" || instance.Status == "failed"
 			if err := recordSharedInstanceObservationTx(ctx, tx, id, instance,
 				containsFeature(heartbeat.Features, core.AgentFeatureSharedCoreLifecycle), receivedAt, false, reportedPolicies[instance.ShareID], false); err != nil {
 				return err
 			}
 		}
+		var targets []sharedStartTarget
+		if stopped && len(reportedPolicies) > 0 && containsFeature(heartbeat.Features, core.AgentFeatureSharedCoreRecovery) {
+			targets, err = reserveSharedStarts(ctx, tx, id, receivedAt)
+			if err != nil {
+				return err
+			}
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return err
+		}
+		for _, target := range targets {
+			if err := s.enqueueSharedStart(ctx, id, receivedAt, target); err != nil {
+				slog.Warn("shared instance automatic start deferred", "agent", id, "engine", target.engine, "share", target.share, "error", err)
+			}
 		}
 	}
 	return s.recordProxyIngressReports(ctx, id, heartbeat.ProxyIngressReports)

@@ -106,6 +106,9 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
+		if len(endpoints) == 0 && (task.Action == core.ActionStart || task.Action == core.ActionRestart) {
+			return fmt.Errorf("%w: 实例没有可用协议，请先添加协议并部署", ErrConflict)
+		}
 		var limit, used uint64
 		var unrestricted bool
 		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes,ports_unrestricted FROM agent_shares
@@ -181,7 +184,8 @@ func markEngineExecutionTx(ctx context.Context, tx pgx.Tx, task core.Task) error
 					false,true,t.action='deploy',t.id,now() FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1
 				ON CONFLICT(agent_id,engine,share_id) DO UPDATE SET uncertain=true,
 					config_uncertain=agent_shared_instance_ownership.config_uncertain OR EXCLUDED.config_uncertain,
-					last_task_id=EXCLUDED.last_task_id,traffic_settled=false,updated_at=now()`, task.ID)
+					desired_running=agent_shared_instance_ownership.desired_running AND $2<>'stop',
+					last_task_id=EXCLUDED.last_task_id,traffic_settled=false,updated_at=now()`, task.ID, task.Action)
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership

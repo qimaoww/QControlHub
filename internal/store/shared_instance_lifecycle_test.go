@@ -287,6 +287,13 @@ func TestSharedEmptyDeploymentSucceedsWithInactiveExactRevision(t *testing.T) {
 			if err != nil || node.Runtime[engine].ServiceStatus != "inactive" || node.Runtime[engine].Instance.DeployedVersion != config.Version {
 				t.Fatalf("empty deployment identity/status: %+v %v", node.Runtime[engine], err)
 			}
+			var desired bool
+			if err := db.pool.QueryRow(ctx, `SELECT desired_running FROM agent_shared_instance_ownership WHERE share_id=$1 AND engine=$2`, shareID, engine).Scan(&desired); err != nil || desired {
+				t.Fatalf("empty deployment requested automatic recovery: %v %v", desired, err)
+			}
+			if _, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: engine, Action: core.ActionStart}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("start admitted an empty retained configuration: %v", err)
+			}
 		})
 	}
 }
