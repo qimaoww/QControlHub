@@ -89,6 +89,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		SELECT id,reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
 		       traffic_history_initialized,period_start,period_end,last_reported_at,last_collected_at,counter_epoch,
 		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,created_at,accounting,COALESCE(share_id,''),port,engine,
+               share_id IS NOT NULL AND EXISTS(SELECT 1 FROM agents a WHERE a.id=$2 AND a.features ? 'shared-process-traffic-v1'),
                (share_id IS NULL OR EXISTS(SELECT 1 FROM agent_shares sh JOIN agent_share_ports sp ON sp.share_id=sh.id
                  WHERE sh.id=port_traffic_policies.share_id AND sh.agent_id=port_traffic_policies.agent_id
                  AND sp.agent_id=sh.agent_id AND sp.port=port_traffic_policies.port)
@@ -101,6 +102,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		return err
 	}
 	type trafficBaseline struct {
+		processRequired                bool
 		engine                         core.Engine
 		port                           int
 		shareID                        string
@@ -127,7 +129,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			&current.historyInitialized,
 			&current.periodStart, &current.periodEnd, &current.lastReported,
 			&current.lastCollected, &current.epoch, &current.lifetimeReceived, &current.lifetimeSent, &current.cycle, &current.anchor, &current.created,
-			&current.accounting, &current.shareID, &current.port, &current.engine, &current.bindingValid,
+			&current.accounting, &current.shareID, &current.port, &current.engine, &current.processRequired, &current.bindingValid,
 		); err != nil {
 			rows.Close()
 			return err
@@ -324,6 +326,12 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			}
 		}
 		usedDelta := saturatedStoredTrafficAdd(receivedDelta, sentDelta)
+		// A pre-upgrade sample may still settle its old epoch. It cannot
+		// authorize recovery until this Agent has armed its process rules.
+		if current.processRequired && usage.ProcessUsage == nil {
+			usage.EnforcementAvailable = false
+			usage.EnforcementError = "等待共享实例进程计量就绪"
+		}
 		newUsed := saturatedStoredTrafficAdd(newReceived, newSent)
 		writes = append(writes, trafficUsageWrite{
 			ID: usage.PolicyID, Generation: usage.ResetGeneration,

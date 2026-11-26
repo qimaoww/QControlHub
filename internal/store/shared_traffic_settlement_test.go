@@ -279,6 +279,19 @@ func TestSharedProcessSettlementAcrossPortsAndRestarts(t *testing.T) {
 			}
 		}
 	}
+	before := reports[0]
+	before.ProcessUsage = nil
+	if err := db.UpdatePortTrafficUsage(ctx, agent.ID, []core.PortTrafficUsage{before}, at); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || prior[0].EnforcementAvailable || prior[0].UsedBytes != 10 {
+		t.Fatalf("legacy sample must settle without authorizing recovery: %+v %v", prior, err)
+	}
+	at = at.Add(time.Second)
+	for i := range reports {
+		reports[i].CollectedAt = at
+	}
 	settle(90)
 	settle(90)
 	at = at.Add(time.Second)
