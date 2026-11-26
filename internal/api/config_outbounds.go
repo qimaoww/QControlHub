@@ -178,7 +178,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(serverconfig.DiscoverTrafficPorts(engine, config.Content)) > 0 {
-		plan, planErr := serverconfig.PlanPresetAccounting(engine, config.Content)
+		plan, planErr := s.planWorkspaceAccounting(r.Context(), agent.ID, engine, config.Content)
 		if planErr != nil {
 			writeError(w, 400, planErr.Error())
 			return

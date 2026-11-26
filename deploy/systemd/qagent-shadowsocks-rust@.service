@@ -9,6 +9,7 @@ ConditionPathExists=/etc/qagent/shadowsocks-rust/shares/%i/qch-mainland-block.ac
 
 [Service]
 Type=simple
+Slice=qchshadowsocksrust%i.slice
 User=qcontrolhub-core
 Group=qcontrolhub-core
 WorkingDirectory=/var/lib/qcontrolhub-shadowsocks-rust-%i

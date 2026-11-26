@@ -42,7 +42,12 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 		if len(healthMessage) > 500 {
 			healthMessage = string([]rune(healthMessage)[:min(500, len([]rune(healthMessage)))])
 		}
-		result = append(result, core.PortTrafficUsage{
+		var process *core.SharedProcessUsage
+		if record.Process.Epoch != "" {
+			sample := record.Process.SharedProcessUsage
+			process = &sample
+		}
+		result = append(result, core.PortTrafficUsage{ProcessUsage: process,
 			PolicyID: id, ResetGeneration: record.Policy.ResetGeneration,
 			ReceivedBytes: record.ReceivedBytes, SentBytes: record.SentBytes,
 			UsedBytes: trafficUsed(record), ReceiveBPS: record.ReceiveBPS, SendBPS: record.SendBPS,
@@ -81,22 +86,35 @@ func sharedQuotaID(quota *core.SharedTrafficQuota) string {
 
 func sameSharedQuota(left, right *core.SharedTrafficQuota) bool {
 	return left == nil && right == nil || left != nil && right != nil &&
-		left.ProxyIngressRevision == right.ProxyIngressRevision && reflect.DeepEqual(left.ProxyIngresses, right.ProxyIngresses) && left.ID == right.ID && left.LimitBytes == right.LimitBytes && left.UsedBytes == right.UsedBytes &&
+		left.ProcessMetering == right.ProcessMetering && reflect.DeepEqual(left.ProcessAck, right.ProcessAck) && left.ProxyIngressRevision == right.ProxyIngressRevision && reflect.DeepEqual(left.ProxyIngresses, right.ProxyIngresses) && left.ID == right.ID && left.LimitBytes == right.LimitBytes && left.UsedBytes == right.UsedBytes &&
 		left.PortUsedBytes == right.PortUsedBytes && left.CounterEpoch == right.CounterEpoch &&
 		left.LifetimeReceivedBytes == right.LifetimeReceivedBytes && left.LifetimeSentBytes == right.LifetimeSentBytes && left.Revoked == right.Revoked && slices.Equal(left.Engines, right.Engines)
 }
 
 func sharedTrafficUsed(records map[string]*trafficRecord, shareID string) uint64 {
 	var acknowledged, pending uint64
+	processPending := map[core.Engine]uint64{}
 	for _, record := range records {
 		quota := record.Policy.SharedQuota
 		if quota == nil || quota.ID != shareID {
 			continue
 		}
+		if record.Process.Epoch != "" {
+			var settled uint64
+			if ack := quota.ProcessAck; ack != nil && ack.Epoch == record.Process.Epoch {
+				settled = ack.Bytes
+			}
+			if record.Process.Bytes > settled {
+				processPending[record.Policy.Engine] = max(processPending[record.Policy.Engine], record.Process.Bytes-settled)
+			}
+		}
 		acknowledged = max(acknowledged, quota.UsedBytes)
 		if record.ShareUsedBytes > quota.PortUsedBytes {
 			pending = saturatedTrafficAdd(pending, record.ShareUsedBytes-quota.PortUsedBytes)
 		}
+	}
+	for _, v := range processPending {
+		pending = saturatedTrafficAdd(pending, v)
 	}
 	return saturatedTrafficAdd(acknowledged, pending)
 }
@@ -118,7 +136,10 @@ func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, sh
 				if !quota.AllowsEngine(endpoint.Engine) || record.Blocked || (quota.LimitBytes > 0 && sharedTrafficUsed(manager.records, shareID) >= quota.LimitBytes) {
 					return errors.New("shared Agent access is revoked or its cumulative allowance is exhausted")
 				}
-				if requireRetainedAccounting && record.AccountingError != "" {
+				if manager.processSource != nil && (!quota.ProcessMetering || record.Process.GroupInode == 0) {
+					return errors.New("shared process quota enforcement is not ready")
+				}
+				if (requireRetainedAccounting || quota.ProcessMetering) && record.AccountingError != "" {
 					return fmt.Errorf("shared port %d accounting is unavailable: %s", endpoint.Port, record.AccountingError)
 				}
 				matched = true

@@ -245,7 +245,16 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 		return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	if current.AgentID != "" {
-		if err := serverconfig.ValidateIndependentEgress(revision.Engine, revision.Content); err != nil {
+		processMode, err := configUsesProcessMetering(ctx, tx, current.AgentID, current.OwnerID)
+		if err != nil {
+			return core.Config{}, err
+		}
+		if processMode {
+			_, err = serverconfig.SharedProcessPlan(revision.Engine, revision.Content)
+		} else {
+			err = serverconfig.ValidateIndependentEgress(revision.Engine, revision.Content)
+		}
+		if err != nil {
 			return core.Config{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		metadata, err := s.configClientMetadataTx(ctx, tx, configID, revision.Version)

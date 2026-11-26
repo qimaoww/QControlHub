@@ -45,6 +45,7 @@ case "$1" in
   show)
     case "$3" in
       --property=FragmentPath) printf '/etc/systemd/system/%%s@.service\n' "${2%%%%@*}" ;;
+      --property=Slice) unit=${2#qagent-}; engine=${unit%%%%@*}; instance=${unit#*@}; printf 'qch%%s%%s.slice\n' "$(echo "$engine" | tr -d -)" "${instance%%.service}" ;;
       --property=User|--property=Group) echo qcontrolhub-core ;;
       --property=DropInPaths) echo '' ;;
       *) exit 99 ;;

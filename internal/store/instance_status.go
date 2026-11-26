@@ -54,7 +54,7 @@ func (s *Store) prepareStatusSnapshotTx(ctx context.Context, tx pgx.Tx, task *co
 	}
 	// The retained source includes stopped objects. Reproduce the exact
 	// deployed revision's management state before the Agent accounts it.
-	task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
+	task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent, task.SharedInstance && containsFeature(features, core.AgentFeatureSharedProcessTraffic))
 	return err
 }
 

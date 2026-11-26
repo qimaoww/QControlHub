@@ -73,7 +73,7 @@ func (s *Store) prepareSharedInstanceOperationTx(ctx context.Context, tx pgx.Tx,
 	}
 	// Revalidate the retained revision and its reservations. A newer draft is
 	// deliberately not read; start always uses the last deployed version.
-	task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
+	task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent, containsFeature(features, core.AgentFeatureSharedProcessTraffic))
 	if err != nil {
 		return err
 	}
@@ -93,4 +93,18 @@ func requireConfigSnapshotAccess(ctx context.Context, executor storeExecutor, ag
 		return err
 	}
 	return requireHostConfigRead(ctx, executor, agentID, engine)
+}
+
+// ConfigUsesProcessMetering resolves the workspace owner on the selected node.
+// A foreign saved configuration can also be deployed by an administrator.
+func (s *Store) ConfigUsesProcessMetering(ctx context.Context, agentID, owner string) (bool, error) {
+	return configUsesProcessMetering(ctx, s.pool, agentID, owner)
+}
+func configUsesProcessMetering(ctx context.Context, db storeExecutor, agentID, owner string) (bool, error) {
+	if owner == "" {
+		owner = scopeForConfig(ctx).OwnerID
+	}
+	var enabled bool
+	err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents a JOIN panel_users u ON u.id=$2 WHERE a.id=$1 AND u.role='user' AND u.id<>a.owner_id AND a.features ? 'shared-process-traffic-v1' AND a.features ? 'shared-core-instances-v1')`, agentID, owner).Scan(&enabled)
+	return enabled, err
 }

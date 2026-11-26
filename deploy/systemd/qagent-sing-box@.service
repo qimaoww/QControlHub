@@ -8,6 +8,7 @@ ConditionPathExists=/etc/qagent/sing-box/shares/%i/config.json
 
 [Service]
 Type=simple
+Slice=qchsingbox%i.slice
 User=qcontrolhub-core
 Group=qcontrolhub-core
 WorkingDirectory=/var/lib/qcontrolhub-sing-box-%i

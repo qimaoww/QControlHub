@@ -119,12 +119,7 @@ func (e *Executor) verifySharedStart(ctx context.Context, spec EngineSpec, task 
 		return errors.New("实例部署尚未核实，请重新部署已确认的配置")
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
-		if warning != "" {
-			return errors.New(warning)
-		}
-		prepared, err = serverconfig.SharedInstanceRuntimeContent(task.Engine, prepared)
-		if err != nil || prepared != actual {
+		if !sharedRuntimeMatches(task, actual) {
 			return errors.New("旧实例文件与已部署版本不一致，请保存并部署本人配置以恢复版本关联")
 		}
 		task.ConfigContent = actual
@@ -201,23 +196,32 @@ func (e *Executor) identifyRetainedDeployment(ctx context.Context, spec EngineSp
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return unverified
 	}
-	err = nil
 	// Exact bytes are sufficient for legacy configurations without compiled
 	// accounting. Otherwise reproduce only the retained server snapshot.
-	prepared := task.ConfigContent
-	if prepared != actual {
-		var warning string
-		prepared, warning = e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
-		if warning != "" {
+	if task.SharedInstance {
+		if !sharedRuntimeMatches(task, actual) {
+			return unverified
+		}
+	} else if task.ConfigContent != actual {
+		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		if warning != "" || prepared != actual {
 			return unverified
 		}
 	}
-	if task.SharedInstance {
-		prepared, err = serverconfig.SharedInstanceRuntimeContent(task.Engine, prepared)
-	}
-	if err != nil || prepared != actual {
-		return unverified
-	}
 	task.ConfigContent = actual
 	return e.commitSharedDeployment(spec, task)
+}
+
+// Pre-sidecar deployments can prove ownership with their exact historical
+// rendered bytes. A custom mark on a current runtime needs no legacy plan.
+func sharedRuntimeMatches(task core.Task, actual string) bool {
+	runtime, err := serverconfig.SharedInstanceRuntimeContent(task.Engine, task.ConfigContent)
+	if err != nil {
+		return false
+	}
+	if runtime == actual {
+		return true
+	}
+	legacy, err := serverconfig.PrepareSharedAccounting(task.Engine, task.ConfigContent)
+	return err == nil && legacy.Content == actual
 }

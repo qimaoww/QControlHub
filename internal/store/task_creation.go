@@ -384,7 +384,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err != nil {
 			return core.Task{}, err
 		}
-		task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent)
+		processMode, err := configUsesProcessMetering(ctx, tx, task.AgentID, configOwnerID)
+		if err != nil {
+			return core.Task{}, err
+		}
+		task.ConfigContent, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, task.ConfigVersion, task.Engine, task.ConfigContent, processMode)
 		if err != nil {
 			return core.Task{}, err
 		}
@@ -400,7 +404,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			task.CNIPSource = &source
 		}
 		if request.Action == core.ActionValidate || request.Action == core.ActionDeploy {
-			plan, err := serverconfig.PrepareIndependentEgress(task.Engine, task.ConfigContent)
+			planner := serverconfig.PrepareIndependentEgress
+			if processMode {
+				planner = serverconfig.SharedProcessPlan
+			}
+			plan, err := planner(task.Engine, task.ConfigContent)
 			if err != nil {
 				return core.Task{}, fmt.Errorf("%w: 独立出口校验失败：%v", ErrInvalid, err)
 			}

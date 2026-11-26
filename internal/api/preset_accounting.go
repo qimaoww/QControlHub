@@ -12,6 +12,13 @@ import (
 // routes. Use only this authorized workspace's revisions as repair evidence.
 // The optimistic save still rejects a concurrent change after this read.
 func (s *Server) presetAccountingSource(ctx context.Context, config core.Config) (string, error) {
+	processMode, err := s.store.ConfigUsesProcessMetering(ctx, config.AgentID, config.OwnerID)
+	if err != nil {
+		return "", err
+	}
+	if processMode {
+		return config.Content, nil
+	}
 	source, originalErr := serverconfig.PresetAccountingSource(config.Engine, config.Content)
 	if originalErr == nil {
 		return source, nil
@@ -20,6 +27,13 @@ func (s *Server) presetAccountingSource(ctx context.Context, config core.Config)
 }
 
 func (s *Server) accountingUpdateSource(ctx context.Context, config core.Config, content string) (string, error) {
+	processMode, err := s.store.ConfigUsesProcessMetering(ctx, config.AgentID, config.OwnerID)
+	if err != nil {
+		return "", err
+	}
+	if processMode {
+		return content, nil
+	}
 	// Explicitly removing all managed entries in the source editor is allowed.
 	// The new configuration is still parsed and compiled before it can deploy.
 	if config.Engine != core.EngineShadowsocksRust && !strings.Contains(content, "qch-trf-") {
@@ -42,4 +56,15 @@ func (s *Server) accountingUpdateSource(ctx context.Context, config core.Config,
 		}
 	}
 	return "", originalErr
+}
+
+func (s *Server) planWorkspaceAccounting(ctx context.Context, agentID string, engine core.Engine, content string) (serverconfig.AccountingPlan, error) {
+	processMode, err := s.store.ConfigUsesProcessMetering(ctx, agentID, "")
+	if err != nil {
+		return serverconfig.AccountingPlan{}, err
+	}
+	if processMode {
+		return serverconfig.SharedProcessPlan(engine, content)
+	}
+	return serverconfig.PlanPresetAccounting(engine, content)
 }

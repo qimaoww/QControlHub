@@ -192,7 +192,7 @@ func (s *Server) putMainlandAccessPolicy(w http.ResponseWriter, request *http.Re
 	source := config.Content
 	managedAccounting := strings.Contains(source, "qch-trf-")
 	if managedAccounting {
-		source, err = serverconfig.PresetAccountingSource(input.Engine, source)
+		source, err = s.presetAccountingSource(request.Context(), config)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -205,7 +205,7 @@ func (s *Server) putMainlandAccessPolicy(w http.ResponseWriter, request *http.Re
 	}, nil)
 	if err == nil && managedAccounting {
 		var plan serverconfig.AccountingPlan
-		plan, err = serverconfig.PlanPresetAccounting(input.Engine, content)
+		plan, err = s.planWorkspaceAccounting(request.Context(), agent.ID, input.Engine, content)
 		content = plan.Content
 	}
 	if err != nil {

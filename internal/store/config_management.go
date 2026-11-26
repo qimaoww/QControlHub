@@ -31,7 +31,11 @@ func (s *Store) configManagementStateTx(ctx context.Context, db storeExecutor, i
 }
 
 func (s *Store) saveConfigManagementStateTx(ctx context.Context, tx pgx.Tx, config core.Config, state serverconfig.ManagedState) error {
-	if _, err := serverconfig.CompileManagedConfig(config.Engine, config.Content, state); err != nil {
+	processMode, err := configUsesProcessMetering(ctx, tx, config.AgentID, config.OwnerID)
+	if err != nil {
+		return err
+	}
+	if _, err := serverconfig.CompileManagedConfig(config.Engine, config.Content, state, processMode); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	if len(state.Disabled) == 0 {
@@ -83,16 +87,16 @@ func (s *Store) SaveAgentConfigManagement(ctx context.Context, input core.Config
 	return saved, task, nil
 }
 
-func (s *Store) compileConfigManagementRuntime(ctx context.Context, db storeExecutor, configID string, version int, engine core.Engine, content string) (string, error) {
+func (s *Store) compileConfigManagementRuntime(ctx context.Context, db storeExecutor, configID string, version int, engine core.Engine, content string, processMode bool) (string, error) {
 	state, err := s.configManagementStateTx(ctx, db, configID, version)
 	if err != nil {
 		return "", err
 	}
-	runtime, err := serverconfig.CompileManagedConfig(engine, content, state)
+	runtime, err := serverconfig.CompileManagedConfig(engine, content, state, processMode)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	if len(state.Disabled) == 0 {
+	if len(state.Disabled) == 0 || processMode {
 		return runtime, nil
 	}
 	plan, err := serverconfig.PrepareIndependentEgress(engine, runtime)

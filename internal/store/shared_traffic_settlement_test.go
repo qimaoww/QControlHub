@@ -230,3 +230,76 @@ func TestSharedTrafficDualSettlementPreservesListenerHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedProcessSettlementAcrossPortsAndRestarts(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	user, actor := sharedTestUser(t, db, ctx, "process-settlement")
+	agent := sharedTestAgent(t, db, ctx)
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features || '["shared-process-traffic-v1"]' WHERE id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 120, 21001, 21002)
+	source := "routing-mark: 17\nlisteners: [{name: a, type: http, port: 21001}, {name: b, type: http, port: 21002}]\n"
+	config, task, err := db.SaveAgentConfigAndTask(actor, core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "private", Content: source}, 0, ConfigMutationOptions{Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || lease == nil || !lease.SharedInstance || lease.ConfigContent != source {
+		t.Fatalf("shared unmodified lease: %+v %v", lease, err)
+	}
+	if err = completeSharedTestTask(db, ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 2 {
+		t.Fatalf("policies: %v %v", policies, err)
+	}
+	at := time.Now().UTC()
+	reports := []core.PortTrafficUsage{}
+	for _, p := range policies {
+		if !p.SharedQuota.ProcessMetering {
+			t.Fatal("process quota was not negotiated")
+		}
+		start, end, _ := core.TrafficPeriodAt(p.CycleAnchor, p.Cycle, at)
+		reports = append(reports, core.PortTrafficUsage{PolicyID: p.ID, ShareID: p.SharedQuota.ID, ResetGeneration: p.ResetGeneration, PeriodStart: start, PeriodEnd: end, CollectedAt: at, CounterEpoch: strings.Repeat("a", 32), ReceivedBytes: 10, UsedBytes: 10, LifetimeReceivedBytes: 10, EnforcementAvailable: true, ProcessUsage: &core.SharedProcessUsage{Epoch: strings.Repeat("b", 32), Bytes: 70}})
+	}
+	settle := func(want uint64) {
+		t.Helper()
+		if err := db.UpdatePortTrafficUsage(ctx, agent.ID, reports, at); err != nil {
+			t.Fatal(err)
+		}
+		read, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range read {
+			if p.UsedBytes != 10 || p.SharedQuota.UsedBytes != want || p.SharedQuota.ProcessAck == nil {
+				t.Fatalf("port %d, aggregate %d, want 10/%d", p.UsedBytes, p.SharedQuota.UsedBytes, want)
+			}
+		}
+	}
+	settle(90)
+	settle(90)
+	at = at.Add(time.Second)
+	for i := range reports {
+		reports[i].CollectedAt = at
+		reports[i].ProcessUsage.Bytes = 100
+	}
+	settle(120)
+	if _, err := db.CreateTask(actor, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy}); err == nil || !strings.Contains(err.Error(), "exhausted") {
+		t.Fatalf("exhausted process quota deploy: %v", err)
+	}
+	at = at.Add(time.Second)
+	for i := range reports {
+		reports[i].CollectedAt = at
+		reports[i].ProcessUsage = &core.SharedProcessUsage{Epoch: strings.Repeat("c", 32), Bytes: 5}
+	}
+	settle(125)
+	at = at.Add(time.Second)
+	for i := range reports {
+		reports[i].CollectedAt = at
+		reports[i].ProcessUsage = &core.SharedProcessUsage{Epoch: strings.Repeat("b", 32), Bytes: 100}
+	}
+	settle(125)
+}

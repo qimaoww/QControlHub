@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 108
+const currentSchemaVersion = 109
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1367,6 +1367,15 @@ CREATE TABLE IF NOT EXISTS network_diagnostic_sessions (
 );
 CREATE INDEX IF NOT EXISTS network_diagnostic_active_idx ON network_diagnostic_sessions(deadline)
  WHERE state IN ('preparing','running','stopping','cleanup_pending');
+
+CREATE TABLE IF NOT EXISTS shared_process_usage (
+ share_id text NOT NULL REFERENCES agent_shares(id) ON DELETE CASCADE,
+ engine text NOT NULL,
+ epoch text NOT NULL,
+ used_bytes bigint NOT NULL CHECK (used_bytes>=0),
+ sampled_at timestamptz NOT NULL,
+ PRIMARY KEY (share_id,engine,epoch)
+);
 
 -- Historical observations alone do not distinguish a manual stop from a
 -- node restart. Only adopt an unambiguous, retained lifecycle task.

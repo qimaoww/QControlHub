@@ -4177,6 +4177,18 @@
         },
         "type": "object"
       },
+      "core_SharedProcessUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "type": "integer"
+          },
+          "epoch": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "core_SharedTrafficQuota": {
         "additionalProperties": false,
         "properties": {
@@ -4203,6 +4215,19 @@
           },
           "port_used_bytes": {
             "type": "integer"
+          },
+          "process_ack": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/core_SharedProcessUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "process_metering": {
+            "type": "boolean"
           },
           "proxy_ingress_revision": {
             "type": "integer"
@@ -29548,6 +29573,8 @@
                       "lifetime_sent_bytes": 1,
                       "limit_bytes": 1,
                       "port_used_bytes": 1,
+                      "process_ack": null,
+                      "process_metering": false,
                       "proxy_ingress_revision": 1,
                       "proxy_ingresses": [
                         null
@@ -29745,6 +29772,8 @@
                     "lifetime_sent_bytes": 1,
                     "limit_bytes": 1,
                     "port_used_bytes": 1,
+                    "process_ack": null,
+                    "process_metering": false,
                     "proxy_ingress_revision": 1,
                     "proxy_ingresses": [
                       null
@@ -30154,6 +30183,8 @@
                     "lifetime_sent_bytes": 1,
                     "limit_bytes": 1,
                     "port_used_bytes": 1,
+                    "process_ack": null,
+                    "process_metering": false,
                     "proxy_ingress_revision": 1,
                     "proxy_ingresses": [
                       null
@@ -30374,6 +30405,8 @@
                     "lifetime_sent_bytes": 1,
                     "limit_bytes": 1,
                     "port_used_bytes": 1,
+                    "process_ack": null,
+                    "process_metering": false,
                     "proxy_ingress_revision": 1,
                     "proxy_ingresses": [
                       null

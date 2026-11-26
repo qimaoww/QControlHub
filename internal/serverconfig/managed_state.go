@@ -132,7 +132,7 @@ func managedReferencesAt(value any, target, parent string) bool {
 	return false
 }
 
-func CompileManagedConfig(engine core.Engine, source string, state ManagedState) (string, error) {
+func CompileManagedConfig(engine core.Engine, source string, state ManagedState, processMode ...bool) (string, error) {
 	if len(state.Disabled) == 0 {
 		return source, nil
 	}
@@ -142,7 +142,7 @@ func CompileManagedConfig(engine core.Engine, source string, state ManagedState)
 	// Generated accounting copies refer to the complete enabled source. Verify
 	// and remove them before compiling a different listener set; task creation
 	// replans only the remaining listeners using the established accounting rules.
-	if strings.Contains(source, accountingPrefix) || engine == core.EngineShadowsocksRust && strings.Contains(source, "outbound_fwmark") {
+	if !(len(processMode) > 0 && processMode[0]) && (strings.Contains(source, accountingPrefix) || engine == core.EngineShadowsocksRust && strings.Contains(source, "outbound_fwmark")) {
 		var err error
 		source, err = PresetAccountingSource(engine, source)
 		if err != nil {

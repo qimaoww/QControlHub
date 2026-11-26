@@ -8,6 +8,7 @@ ConditionPathExists=/etc/qagent/mihomo/shares/%i/config.yaml
 
 [Service]
 Type=simple
+Slice=qchmihomo%i.slice
 User=qcontrolhub-core
 Group=qcontrolhub-core
 WorkingDirectory=/var/lib/qcontrolhub-mihomo-%i

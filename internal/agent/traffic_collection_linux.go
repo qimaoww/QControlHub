@@ -58,10 +58,15 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		var snapshot nativeAccountingSnapshot
 		var err error
 		if key.shareID != "" {
-			if manager.sharedSource == nil {
-				continue
+			if record.Policy.SharedQuota.ProcessMetering {
+				if manager.processSource == nil {
+					err = errors.New("process accounting unavailable")
+				} else {
+					snapshot, err = manager.processSource(ctx, key.engine, key.shareID)
+				}
+			} else if manager.sharedSource != nil {
+				snapshot, err = manager.sharedSource(ctx, key.engine, key.shareID)
 			}
-			snapshot, err = manager.sharedSource(ctx, key.engine, key.shareID)
 		} else {
 			if manager.nativeSource == nil {
 				continue
@@ -76,6 +81,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		// cancelled inspection as an attribution failure that stops a share.
 		return manager.collectLocked(ctx, forceRules)
 	}
+	sampledProcesses := map[sourceKey]processCheckpoint{}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
 		shared := record.Policy.SharedQuota != nil
@@ -96,7 +102,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			}
 			manager.dirty, manager.urgentDirty, manager.rulesDirty = true, true, true
 		}
-		hasSource := manager.nativeSource != nil && !shared || shared && manager.sharedSource != nil
+		hasSource := manager.nativeSource != nil && !shared || shared && (record.Policy.SharedQuota.ProcessMetering || manager.sharedSource != nil)
 		scopeIssue := nativeAccountingScopeIssue(record.Policy, snapshot)
 		nativeAllowed := hasSource && scopeIssue == ""
 		// A transient source failure must freeze an established native baseline,
@@ -154,7 +160,36 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			err := sourceErr
 			if err == nil {
 				previousEpoch := record.CounterEpoch
-				if snapshot.Plan.Source == "nft-dual" {
+				if snapshot.Plan.Source == "process" {
+					sample, exists := sampledProcesses[key]
+					if !exists {
+						sample, err = sampleProcessCounter(record, record.Process, counters, snapshot.GroupInode)
+						sampledProcesses[key] = sample
+					}
+					if err == nil {
+						if record.Process.Epoch != sample.Epoch || record.Process.GroupInode != sample.GroupInode {
+							manager.rulesDirty = true
+							manager.urgentDirty = true
+						}
+						if record.Process != sample {
+							manager.dirty = true
+						}
+						record.Process = sample
+						// Settle remaining marked counters in their original epoch. Once
+						// acknowledged, the listener starts a clean history at the same nft cut.
+						if record.Accounting != nil && record.Accounting.Source == "nft-dual" {
+							receivedDelta, sentDelta = collectMarkedAccounting(counters, record, receivedDelta, sentDelta, false)
+							q := record.Policy.SharedQuota
+							if receivedDelta == 0 && sentDelta == 0 && q.CounterEpoch == record.CounterEpoch && q.LifetimeReceivedBytes == record.LifetimeReceivedBytes && q.LifetimeSentBytes == record.LifetimeSentBytes {
+								old := record.CounterEpoch
+								if err = rotateLostTrafficEpoch(record); err == nil {
+									retainListenerCounters(record, old, counters)
+									record.NeedsServerQuotaSync = false
+								}
+							}
+						}
+					}
+				} else if snapshot.Plan.Source == "nft-dual" {
 					err = prepareMarkedAccounting(record, snapshot)
 					if err == nil {
 						if !shared && previousEpoch != record.CounterEpoch {
@@ -302,6 +337,16 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			manager.rulesDirty = true
 			manager.dirty = true
 			manager.urgentDirty = true
+		}
+	}
+	marks := map[uint32]string{}
+	for _, r := range desired {
+		if r.Process.GroupInode != 0 {
+			mark, key := processConnectionMark(r), processCounterPrefix(r)
+			if other, exists := marks[mark]; exists && other != key {
+				return manager.setUnavailableLocked(errors.New("conflicting process conntrack identities"))
+			}
+			marks[mark] = key
 		}
 	}
 	// One aggregate decision after sampling every port. Billing a full quota

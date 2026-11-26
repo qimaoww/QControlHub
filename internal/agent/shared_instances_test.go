@@ -32,7 +32,7 @@ func TestSharedCoreInstanceServicesCoverEveryEngineAndManager(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					for _, value := range []string{spec.Service, spec.ConfigPath, statePath,
+					for _, value := range []string{sharedOpenRCGroupLine(engine, spec), spec.Service, spec.ConfigPath, statePath,
 						"/var/log/qagent/" + spec.Service + ".log", "^cap_net_bind_service,^cap_net_admin"} {
 						if !strings.Contains(content, value) {
 							t.Errorf("OpenRC script lacks %q", value)
@@ -47,7 +47,7 @@ func TestSharedCoreInstanceServicesCoverEveryEngineAndManager(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, value := range []string{"/etc/qagent/" + assetName + "/shares/%i/",
+				for _, value := range []string{"Slice=" + processSliceName(engine, "%i"), "/etc/qagent/" + assetName + "/shares/%i/",
 					"/var/lib/qcontrolhub-" + assetName + "-%i", "StateDirectory=qcontrolhub-" + assetName + "-%i", "CAP_NET_ADMIN"} {
 					if !strings.Contains(string(unit), value) {
 						t.Errorf("systemd unit lacks %q", value)

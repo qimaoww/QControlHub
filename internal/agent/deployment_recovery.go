@@ -17,7 +17,10 @@ func recoverConfigurationDeployment(ctx context.Context, engine core.Engine, spe
 		if err != nil {
 			return "", fmt.Errorf("read rollback configuration: %w", err)
 		}
-		if plan, err := serverconfig.PrepareIndependentEgress(engine, content); err == nil && plan.Source == "disabled" {
+		if isSharedInstanceSpec(engine, spec, services.Kind()) {
+			endpoints, err := serverconfig.SharedTrafficEndpoints(engine, content)
+			shouldRun = err == nil && len(endpoints) > 0
+		} else if plan, err := serverconfig.PrepareIndependentEgress(engine, content); err == nil && plan.Source == "disabled" {
 			shouldRun = false
 		}
 	}

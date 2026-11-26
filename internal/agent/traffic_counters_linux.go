@@ -99,6 +99,16 @@ func trafficRuleComment(policyID, direction, protocol string) string {
 
 func trafficRuleSetComplete(counters map[string]uint64, records map[string]*trafficRecord) bool {
 	for _, record := range records {
+		if record.Process.GroupInode != 0 {
+			name := processCounterPrefix(record) + record.Process.Epoch
+			drops := uint64(0)
+			if record.Blocked {
+				drops = 2
+			}
+			if _, ok := counters[name]; !ok || counters["rule:"+name] != 2 || counters["drop:"+name] != drops {
+				return false
+			}
+		}
 		for _, protocol := range trafficProtocols(record.Policy.Protocol) {
 			for _, direction := range []string{"in", "out"} {
 				name := trafficCounterName(record, direction, protocol)
@@ -114,7 +124,7 @@ func trafficRuleSetComplete(counters map[string]uint64, records map[string]*traf
 				}
 			}
 		}
-		if record.Accounting != nil && record.Accounting.Source == "nft-dual" {
+		if record.Process.GroupInode == 0 && record.Accounting != nil && record.Accounting.Source == "nft-dual" {
 			for _, protocol := range []string{"tcp", "udp"} {
 				for _, direction := range []string{"targetin", "targetout"} {
 					name := trafficCounterName(record, direction, protocol)
@@ -183,9 +193,10 @@ func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, cou
 		script.WriteString("flush chain inet " + trafficTableName + " output\n")
 	}
 	active := make(map[string]bool)
+	renderProcessRules(&script, records, counters, active)
 	for _, id := range sortedTrafficRecordIDs(records) {
 		record := records[id]
-		if record.Accounting != nil && record.Accounting.Source == "nft-dual" {
+		if record.Process.GroupInode == 0 && record.Accounting != nil && record.Accounting.Source == "nft-dual" {
 			mark := record.Accounting.Mark
 			for _, protocol := range []string{"tcp", "udp"} {
 				for _, direction := range []string{"targetin", "targetout"} {
@@ -218,8 +229,16 @@ func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, cou
 					fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s %s %d drop comment %s\n",
 						trafficTableName, chain, protocol, protocol, portField, record.Policy.Port, strconv.Quote("qch:block:"+name))
 				}
-				fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s %s %d counter name %s comment %s\n",
-					trafficTableName, chain, protocol, protocol, portField, record.Policy.Port, name,
+				scope := ""
+				if record.Process.GroupInode != 0 {
+					ctDirection := "original"
+					if direction == "out" {
+						ctDirection = "reply"
+					}
+					scope = fmt.Sprintf(" ct direction %s socket cgroupv2 level 1 %q", ctDirection, processSliceName(record.Policy.Engine, record.Policy.SharedQuota.ID))
+				}
+				fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s %s %d%s counter name %s comment %s\n",
+					trafficTableName, chain, protocol, protocol, portField, record.Policy.Port, scope, name,
 					strconv.Quote(trafficRuleComment(id, direction, protocol)))
 			}
 		}
@@ -238,6 +257,9 @@ func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, cou
 }
 
 func validTrafficCounterName(name string) bool {
+	if validProcessCounter(name) {
+		return true
+	}
 	parts := strings.Split(name, "_")
 	return len(parts) == 6 && parts[0] == "qch" && core.ValidPortTrafficPolicyID(parts[1]+"_"+parts[2]) &&
 		core.ValidTrafficCounterEpoch(parts[3]) && (parts[4] == "in" || parts[4] == "out" || parts[4] == "targetin" || parts[4] == "targetout") && (parts[5] == "tcp" || parts[5] == "udp")

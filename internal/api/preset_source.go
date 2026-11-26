@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -63,7 +62,7 @@ func (s *Server) savePresetSource(w http.ResponseWriter, request *http.Request) 
 			return
 		}
 	}
-	if _, err := serverconfig.PlanPresetAccounting(engine, content); err != nil {
+	if _, err := s.planWorkspaceAccounting(request.Context(), agent.ID, engine, content); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

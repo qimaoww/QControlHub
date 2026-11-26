@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"strings"
 
@@ -27,7 +28,7 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 	var allowed, listKey, portKey, nameKey, kindKey string
 	switch engine {
 	case core.EngineMihomo:
-		allowed = "listeners rules proxies proxy-groups proxy-providers rule-providers sub-rules dns log-level ipv6 allow-lan bind-address mode tcp-concurrent unified-delay find-process-mode global-client-fingerprint profile geodata-mode geodata-loader geo-auto-update geo-update-interval geox-url sniffer hosts authentication skip-auth-prefixes lan-allowed-ips lan-disallowed-ips"
+		allowed = "routing-mark listeners rules proxies proxy-groups proxy-providers rule-providers sub-rules dns log-level ipv6 allow-lan bind-address mode tcp-concurrent unified-delay find-process-mode global-client-fingerprint profile geodata-mode geodata-loader geo-auto-update geo-update-interval geox-url sniffer hosts authentication skip-auth-prefixes lan-allowed-ips lan-disallowed-ips"
 		listKey, portKey, nameKey, kindKey = "listeners", "port", "name", "type"
 		if dns := mapValue(root["dns"]); dns["listen"] != nil && dns["listen"] != "" {
 			return nil, fmt.Errorf("shared configuration cannot expose a separate DNS listener")
@@ -94,7 +95,15 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 	// Deleting the final inbound produces an explicit, inert listener list.
 	// Reuse the independent-egress check so hidden ingress or management APIs
 	// cannot qualify merely because best-effort discovery found no ports.
-	if explicitlyEmptyProxyConfig(engine, root) {
+	// Socket routing options do not create listeners, including when the last
+	// listener is removed from a source that retains an explicit mark.
+	emptyRoot := root
+	if engine == core.EngineMihomo || engine == core.EngineShadowsocksRust {
+		emptyRoot = maps.Clone(root)
+		delete(emptyRoot, "routing-mark")
+		delete(emptyRoot, "outbound_fwmark")
+	}
+	if explicitlyEmptyProxyConfig(engine, emptyRoot) {
 		return []core.PortTrafficEndpoint{}, nil
 	}
 	entries, ok := root[listKey].([]any)

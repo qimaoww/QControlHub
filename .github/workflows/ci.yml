@@ -325,7 +325,10 @@ jobs:
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/permission-agent.test" ./internal/agent
           # SYS_PTRACE belongs to the fixture Agent, which verifies cross-UID
           # /proc/exe identity. Each core is still bounded to BIND_SERVICE+ADMIN.
-          sh .github/scripts/run-ci-container.sh --rm --init --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
+          # Delegate only this fixture subtree for private OpenRC service processes.
+          fixture_groups=$(sudo mktemp -d /sys/fs/cgroup/qch-ci-openrc-XXXXXXXX)
+          trap 'sudo find "$fixture_groups" -depth -type d -exec rmdir {} \;' EXIT
+          sh .github/scripts/run-ci-container.sh --rm --init --cgroupns=host -v "$fixture_groups:/sys/fs/cgroup:rw" --cap-add NET_ADMIN --cap-add SYS_PTRACE --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/permission-cores:/official:ro" \
             -v "$RUNNER_TEMP/permission-agent.test:/permission-agent.test:ro" \
             -w /src golang:1.27.3-alpine sh -ec '

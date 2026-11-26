@@ -81,6 +81,9 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 			(record.ListenerEpoch != "" && !core.ValidTrafficCounterEpoch(record.ListenerEpoch)) {
 			return errors.New("traffic state contains an invalid counter epoch")
 		}
+		if record.Process.Epoch != "" && (record.Policy.SharedQuota == nil || !record.Process.SharedProcessUsage.Valid() || record.Process.Raw > math.MaxInt64) {
+			return errors.New("invalid process traffic checkpoint")
+		}
 		if !record.Accounting.Valid() {
 			return errors.New("traffic state contains invalid accounting metadata")
 		}

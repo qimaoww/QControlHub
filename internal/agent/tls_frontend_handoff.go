@@ -32,7 +32,13 @@ func (m *tlsFrontendManager) checkNativeTLSHandoff(ctx context.Context, service,
 	if !public {
 		return errors.New("port is not a public TLS frontend")
 	}
-	if err := serverconfig.ValidateIndependentEgress(engine, candidate); err != nil {
+	var configErr error
+	if isSharedInstanceSpec(engine, spec, m.services.Kind()) {
+		_, configErr = serverconfig.SharedTrafficEndpoints(engine, candidate)
+	} else {
+		configErr = serverconfig.ValidateIndependentEgress(engine, candidate)
+	}
+	if err := configErr; err != nil {
 		return err
 	}
 	for _, endpoint := range serverconfig.DiscoverTrafficPorts(engine, candidate) {

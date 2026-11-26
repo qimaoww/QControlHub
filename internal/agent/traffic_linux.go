@@ -30,6 +30,7 @@ type trafficCounterBackend interface {
 }
 
 type trafficRecord struct {
+	Process               processCheckpoint       `json:"process,omitzero"`
 	ShareUsedBytes        uint64                  `json:"share_used_bytes,omitempty"`
 	Accounting            *core.TrafficAccounting `json:"accounting,omitempty"`
 	AccountingError       string                  `json:"-"`
@@ -59,6 +60,9 @@ type trafficState struct {
 }
 
 type TrafficManager struct {
+	releaseProcess        func(context.Context, core.Engine, string) error
+	processPorts          func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
+	processSource         func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
 	nativeSource          func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
 	sharedSource          func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error)
 	haltShared            func(context.Context, core.Engine) error
@@ -129,6 +133,7 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 			manager.records = state.Records
 			if state.BootID != "" && state.BootID != manager.bootID {
 				for _, id := range sortedTrafficRecordIDs(manager.records) {
+					manager.records[id].Process.Raw, manager.records[id].Process.Handle = 0, 0
 					if err := rotateLostTrafficEpoch(manager.records[id]); err != nil {
 						slog.Warn("rotate port traffic epoch after boot change", "policy_id", id, "error", err)
 					}
@@ -333,6 +338,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				return errors.New("shared traffic requires both listener transports")
 			}
 			group := quota
+			group.ProcessAck = nil
 			group.PortUsedBytes = 0
 			group.CounterEpoch = ""
 			group.LifetimeReceivedBytes, group.LifetimeSentBytes = 0, 0
@@ -505,8 +511,12 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				// A settled deployment may retire a port while keeping this
 				// allocation active on its replacement. Independently verify
 				// the protected local mapping before treating removal as safe.
-				if len(authorized[key]) > 0 && manager.sharedSource != nil {
-					snapshot, err := manager.sharedSource(ctx, key.engine, key.shareID)
+				if len(authorized[key]) > 0 && (manager.sharedSource != nil || quota.ProcessMetering && manager.processPorts != nil) {
+					source := manager.sharedSource
+					if quota.ProcessMetering && manager.processPorts != nil {
+						source = manager.processPorts
+					}
+					snapshot, err := source(ctx, key.engine, key.shareID)
 					if errors.Is(err, errSharedAccountingTransition) {
 						// The session retries this policy snapshot after the queued
 						// deployment. Keep both old rules and its activation guard
@@ -514,7 +524,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 						return fmt.Errorf("shared port retirement awaiting deployment: %w", err)
 					}
 					oldPresent, newPresent := false, false
-					if err == nil && snapshot.Plan.Source == "nft-dual" {
+					if err == nil && (snapshot.Plan.Source == "nft-dual" || snapshot.Plan.Source == "process") {
 						for _, port := range snapshot.Plan.Ports {
 							oldPresent = oldPresent || port.Port == record.Policy.Port
 							newPresent = newPresent || authorized[key][port.Port]
@@ -565,6 +575,21 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			}
 		}
 	}
+	// Transfer the process baseline even when every listener policy was replaced.
+	previousProcesses := make(map[string]processCheckpoint)
+	for _, r := range manager.records {
+		if r.Policy.SharedQuota != nil && r.Process.Epoch != "" {
+			previousProcesses[processCounterPrefix(r)] = r.Process
+		}
+	}
+	for _, r := range next {
+		if r.Policy.SharedQuota != nil && r.Policy.SharedQuota.ProcessMetering {
+			r.Process = previousProcesses[processCounterPrefix(r)]
+		} else {
+			r.Process = processCheckpoint{}
+		}
+	}
+	previousRecords := manager.records
 	manager.records = next
 	manager.awaitingPolicies = false
 	manager.recoveryEngines = nil
@@ -579,7 +604,7 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		}
 	}
 	manager.notifyCollect()
-	return nil
+	return manager.releaseUnusedProcessGroups(ctx, previousRecords)
 }
 
 func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
@@ -620,11 +645,15 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	manager.awaitingPolicies = false
 	manager.recoveryEngines = nil
 	manager.recoveryPorts = nil
+	previousRecords := manager.records
 	manager.records = make(map[string]*trafficRecord)
 	manager.dirty = true
 	manager.urgentDirty = true
 	defer manager.notifyCollect()
-	return manager.collectLocked(ctx, true)
+	if err := manager.collectLocked(ctx, true); err != nil {
+		return err
+	}
+	return manager.releaseUnusedProcessGroups(ctx, previousRecords)
 }
 
 func (manager *TrafficManager) Snapshot() []core.PortTrafficUsage {

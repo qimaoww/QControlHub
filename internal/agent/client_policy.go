@@ -177,7 +177,7 @@ func (c *Client) advertisedFeatures() []string {
 		features = append(features, core.AgentFeatureHostPorts)
 	}
 	if sharedCoreTemplatesSupported(c.executor.Specs, c.executor.serviceManager()) {
-		features = append(features, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureSharedCoreLifecycle, core.AgentFeatureSharedCoreRecovery)
+		features = append(features, core.AgentFeatureSharedProcessTraffic, core.AgentFeatureSharedCoreInstances, core.AgentFeatureSharedCorePrepare, core.AgentFeatureSharedCoreLifecycle, core.AgentFeatureSharedCoreRecovery)
 	}
 	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)

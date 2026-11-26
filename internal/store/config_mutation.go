@@ -49,7 +49,15 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 	}
 	// Persist editable originals. Generated exits are execution artifacts and
 	// must never become user outbounds in the next edit or copy.
-	source, err := serverconfig.PresetAccountingSource(input.Engine, input.Content)
+	processMode, err := configUsesProcessMetering(ctx, tx, input.AgentID, "")
+	if err != nil {
+		return core.Config{}, core.Task{}, err
+	}
+	prepare := serverconfig.PresetAccountingSource
+	if processMode {
+		prepare = serverconfig.FormatConfigSource
+	}
+	source, err := prepare(input.Engine, input.Content)
 	if err != nil {
 		return core.Config{}, core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}

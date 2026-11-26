@@ -291,7 +291,10 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			if decryptErr != nil {
 				return decryptErr
 			}
-			if plan, planErr := serverconfig.PrepareIndependentEgress(engine, content); planErr == nil && plan.Source == "disabled" {
+			if shared {
+				endpoints, e := serverconfig.SharedTrafficEndpoints(engine, content)
+				appliedRunning = e == nil && len(endpoints) > 0
+			} else if plan, planErr := serverconfig.PrepareIndependentEgress(engine, content); planErr == nil && plan.Source == "disabled" {
 				appliedRunning = false
 			}
 		}

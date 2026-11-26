@@ -142,9 +142,10 @@ type TrafficSyncCandidate struct {
 }
 
 type PortTrafficUsage struct {
-	ShareID        string             `json:"share_id,omitempty"`
-	ShareUsedBytes uint64             `json:"share_used_bytes,omitempty"`
-	Accounting     *TrafficAccounting `json:"accounting,omitempty"`
+	ProcessUsage   *SharedProcessUsage `json:"process_usage,omitempty"`
+	ShareID        string              `json:"share_id,omitempty"`
+	ShareUsedBytes uint64              `json:"share_used_bytes,omitempty"`
+	Accounting     *TrafficAccounting  `json:"accounting,omitempty"`
 	// CollectedAt identifies the actual sample, not the heartbeat or network
 	// arrival. CounterEpoch changes only when the local accounting is reset.
 	CollectedAt           time.Time `json:"collected_at,omitzero"`
