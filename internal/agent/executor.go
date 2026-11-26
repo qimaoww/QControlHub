@@ -575,9 +575,6 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 			return validation, fmt.Errorf("inspect service before deployment: %w", err)
 		}
 		applyAction := core.ActionRestart
-		if plan, planErr := serverconfig.PrepareIndependentEgress(task.Engine, task.ConfigContent); planErr == nil && plan.Source == "disabled" {
-			applyAction = core.ActionStop
-		}
 		if task.SharedInstance {
 			endpoints, endpointErr := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
 			if endpointErr != nil {
@@ -586,6 +583,8 @@ func (e *Executor) execute(parent context.Context, task core.Task) (output strin
 			if len(endpoints) == 0 {
 				applyAction = core.ActionStop
 			}
+		} else if plan, planErr := serverconfig.PrepareIndependentEgress(task.Engine, task.ConfigContent); planErr == nil && plan.Source == "disabled" {
+			applyAction = core.ActionStop
 		}
 		// Persist uncertainty before changing the running process. If rollback
 		// fails, matching old bytes alone cannot prove what the process loaded.

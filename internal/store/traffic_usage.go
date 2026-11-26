@@ -34,6 +34,9 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			usage.ShareUsedBytes > math.MaxInt64 || (usage.ShareID == "" && usage.ShareUsedBytes != 0) {
 			return fmt.Errorf("%w: invalid shared traffic usage", ErrInvalid)
 		}
+		if !usage.ProcessUsage.Valid() || usage.ProcessUsage != nil && usage.ShareID == "" {
+			return fmt.Errorf("%w: invalid shared process sample", ErrInvalid)
+		}
 		if !usage.Accounting.Valid() || usage.Accounting != nil && usage.CounterEpoch == "" {
 			return fmt.Errorf("%w: invalid traffic accounting metadata", ErrInvalid)
 		}
@@ -85,7 +88,8 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	rows, err := tx.Query(ctx, `
 		SELECT id,reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
 		       traffic_history_initialized,period_start,period_end,last_reported_at,last_collected_at,counter_epoch,
-		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,created_at,accounting,COALESCE(share_id,''),port,
+		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,created_at,accounting,COALESCE(share_id,''),port,engine,
+               share_id IS NOT NULL AND EXISTS(SELECT 1 FROM agents a WHERE a.id=$2 AND a.features ? 'shared-process-traffic-v1'),
                (share_id IS NULL OR EXISTS(SELECT 1 FROM agent_shares sh JOIN agent_share_ports sp ON sp.share_id=sh.id
                  WHERE sh.id=port_traffic_policies.share_id AND sh.agent_id=port_traffic_policies.agent_id
                  AND sp.agent_id=sh.agent_id AND sp.port=port_traffic_policies.port)
@@ -98,6 +102,8 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		return err
 	}
 	type trafficBaseline struct {
+		processRequired                bool
+		engine                         core.Engine
 		port                           int
 		shareID                        string
 		bindingValid                   bool
@@ -123,7 +129,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			&current.historyInitialized,
 			&current.periodStart, &current.periodEnd, &current.lastReported,
 			&current.lastCollected, &current.epoch, &current.lifetimeReceived, &current.lifetimeSent, &current.cycle, &current.anchor, &current.created,
-			&current.accounting, &current.shareID, &current.port, &current.bindingValid,
+			&current.accounting, &current.shareID, &current.port, &current.engine, &current.processRequired, &current.bindingValid,
 		); err != nil {
 			rows.Close()
 			return err
@@ -178,6 +184,12 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			return err
 		}
 	}
+	type processKey struct {
+		share  string
+		engine core.Engine
+		epoch  string
+	}
+	processSamples := make(map[processKey]core.SharedProcessUsage)
 	writes := make([]trafficUsageWrite, 0, len(baselines))
 	reportedAt = reportedAt.UTC()
 	for _, usage := range usages {
@@ -307,7 +319,19 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			receiveBPS = trafficAverageRate(receivedDelta, *rateBaseline, sampledAt)
 			sendBPS = trafficAverageRate(sentDelta, *rateBaseline, sampledAt)
 		}
+		if sample := usage.ProcessUsage; sample != nil {
+			key := processKey{current.shareID, current.engine, sample.Epoch}
+			if sample.Bytes >= processSamples[key].Bytes {
+				processSamples[key] = *sample
+			}
+		}
 		usedDelta := saturatedStoredTrafficAdd(receivedDelta, sentDelta)
+		// A pre-upgrade sample may still settle its old epoch. It cannot
+		// authorize recovery until this Agent has armed its process rules.
+		if current.processRequired && usage.ProcessUsage == nil {
+			usage.EnforcementAvailable = false
+			usage.EnforcementError = "等待共享实例进程计量就绪"
+		}
 		newUsed := saturatedStoredTrafficAdd(newReceived, newSent)
 		writes = append(writes, trafficUsageWrite{
 			ID: usage.PolicyID, Generation: usage.ResetGeneration,
@@ -331,6 +355,21 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			return err
 		}
 		if _, err := tx.Exec(ctx, applyTrafficUsageSQL, agentID, reportedAt, payload); err != nil {
+			return err
+		}
+	}
+	// The allocation lock serializes all its engines and listener reports.
+	for key, sample := range processSamples {
+		_, err := tx.Exec(ctx, `WITH old AS MATERIALIZED (
+   SELECT used_bytes FROM shared_process_usage WHERE share_id=$1 AND engine=$2 AND epoch=$3
+  ), saved AS (
+   INSERT INTO shared_process_usage(share_id,engine,epoch,used_bytes,sampled_at) VALUES($1,$2,$3,$4,$5)
+   ON CONFLICT(share_id,engine,epoch) DO UPDATE SET used_bytes=EXCLUDED.used_bytes,sampled_at=EXCLUDED.sampled_at
+   WHERE shared_process_usage.used_bytes < EXCLUDED.used_bytes RETURNING used_bytes
+  ) UPDATE agent_shares SET used_bytes=LEAST(9223372036854775807::numeric,
+    agent_shares.used_bytes::numeric+saved.used_bytes-COALESCE((SELECT used_bytes FROM old),0)),updated_at=now()
+    FROM saved WHERE id=$1`, key.share, key.engine, key.epoch, sample.Bytes, reportedAt)
+		if err != nil {
 			return err
 		}
 	}

@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 107
+const currentSchemaVersion = 109
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS site_branding (
@@ -1367,4 +1367,28 @@ CREATE TABLE IF NOT EXISTS network_diagnostic_sessions (
 );
 CREATE INDEX IF NOT EXISTS network_diagnostic_active_idx ON network_diagnostic_sessions(deadline)
  WHERE state IN ('preparing','running','stopping','cleanup_pending');
+
+CREATE TABLE IF NOT EXISTS shared_process_usage (
+ share_id text NOT NULL REFERENCES agent_shares(id) ON DELETE CASCADE,
+ engine text NOT NULL,
+ epoch text NOT NULL,
+ used_bytes bigint NOT NULL CHECK (used_bytes>=0),
+ sampled_at timestamptz NOT NULL,
+ PRIMARY KEY (share_id,engine,epoch)
+);
+
+-- Historical observations alone do not distinguish a manual stop from a
+-- node restart. Only adopt an unambiguous, retained lifecycle task.
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS desired_running boolean;
+UPDATE agent_shared_instance_ownership o SET desired_running=EXISTS(
+ SELECT 1 FROM tasks t WHERE t.id=o.last_task_id AND t.agent_id=o.agent_id AND t.engine=o.engine
+ AND t.shared_instance AND t.shared_traffic_id=o.share_id AND t.config_id=o.config_id AND t.config_version=o.config_version
+ AND t.status='succeeded' AND (t.action IN ('start','restart') OR t.action='deploy' AND t.id=o.applied_task_id
+ AND (o.running OR EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=o.agent_id AND p.engine=o.engine
+ AND p.share_id=o.share_id AND p.config_id=o.config_id AND p.config_version=o.config_version AND p.monitoring_enabled))))
+ WHERE desired_running IS NULL;
+ALTER TABLE agent_shared_instance_ownership ALTER COLUMN desired_running SET DEFAULT false;
+ALTER TABLE agent_shared_instance_ownership ALTER COLUMN desired_running SET NOT NULL;
+ALTER TABLE agent_shared_instance_ownership ADD COLUMN IF NOT EXISTS next_auto_start timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_auto_start boolean NOT NULL DEFAULT false;
 `

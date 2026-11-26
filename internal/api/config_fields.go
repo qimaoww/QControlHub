@@ -123,7 +123,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 	}
 	if err == nil && len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
 		var plan serverconfig.AccountingPlan
-		plan, err = serverconfig.PlanPresetAccounting(engine, content)
+		plan, err = s.planWorkspaceAccounting(request.Context(), agent.ID, engine, content)
 		content = plan.Content
 	}
 	if err != nil {

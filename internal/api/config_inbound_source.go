@@ -47,7 +47,7 @@ func (s *Server) saveInboundSource(w http.ResponseWriter, r *http.Request, curre
 	}
 	if err == nil && len(serverconfig.DiscoverTrafficPorts(current.Engine, content)) > 0 {
 		var plan serverconfig.AccountingPlan
-		plan, err = serverconfig.PlanPresetAccounting(current.Engine, content)
+		plan, err = s.planWorkspaceAccounting(r.Context(), current.AgentID, current.Engine, content)
 		content = plan.Content
 	}
 	if err != nil {

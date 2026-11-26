@@ -227,7 +227,7 @@ func runtimePermissionManagedService(ctx context.Context, manager *ServiceManage
 			if err != nil {
 				return engine, spec, false
 			}
-			want = []byte(contents)
+			return engine, spec, matchesAnyManagedDropIn(got, sharedOpenRCVariants(engine, spec, contents))
 		} else {
 			want, err = fs.ReadFile(qcontrolhub.CoreInstallAssets(), "deploy/openrc/"+service)
 			if err != nil {

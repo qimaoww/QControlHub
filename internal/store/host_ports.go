@@ -59,7 +59,11 @@ func (s *Store) retainedCandidatePortsTx(ctx context.Context, tx pgx.Tx, task *c
 	if err != nil {
 		return nil, err
 	}
-	content, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, version, task.Engine, content)
+	processMode, err := configUsesProcessMetering(ctx, tx, task.AgentID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	content, err = s.compileConfigManagementRuntime(ctx, tx, task.ConfigID, version, task.Engine, content, processMode)
 	if err != nil {
 		return nil, err
 	}

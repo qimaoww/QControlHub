@@ -62,7 +62,7 @@ func (backend *nftBackend) Counters(ctx context.Context) (map[string]uint64, boo
 	if err := backend.ensureAvailable(ctx); err != nil {
 		return nil, false, err
 	}
-	output, err := backend.run(ctx, nil, "-j", "list", "table", "inet", trafficTableName)
+	output, err := backend.run(ctx, nil, "-a", "-j", "list", "table", "inet", trafficTableName)
 	if err != nil {
 		if strings.Contains(err.Error(), "No such file or directory") {
 			return map[string]uint64{}, false, nil
@@ -281,7 +281,7 @@ func parseNFTTrafficCounters(contents []byte) (map[string]uint64, error) {
 				result["drop:"+name]++
 			}
 		}
-		if item.Rule == nil || !strings.HasPrefix(item.Rule.Comment, "qch:trf_") {
+		if item.Rule == nil || !(strings.HasPrefix(item.Rule.Comment, "qch:trf_") || strings.HasPrefix(item.Rule.Comment, "qch:process:")) {
 			continue
 		}
 		for _, expression := range item.Rule.Expr {

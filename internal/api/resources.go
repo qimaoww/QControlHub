@@ -176,7 +176,15 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			result.Deployment.TaskID = ""
 			result.Deployment.TaskStatus = ""
 		}
-		source, sourceErr := serverconfig.PresetAccountingSource(engine, config.Content)
+		processMode, err := s.store.ConfigUsesProcessMetering(request.Context(), agent.ID, config.OwnerID)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		source, sourceErr := config.Content, error(nil)
+		if !processMode {
+			source, sourceErr = serverconfig.PresetAccountingSource(engine, config.Content)
+		}
 		if sourceErr != nil && snapshot == "" {
 			source, sourceErr = s.presetAccountingSource(request.Context(), config)
 		}
@@ -192,8 +200,12 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		}
 		// Reading a saved plan only needs one verification pass. Stripping and
 		// compiling it again tripled this work on every post-save page refresh.
-		plan, planErr := serverconfig.PrepareAccounting(engine, config.Content)
-		if planErr != nil && engine == core.EngineSingBox {
+		planBuilder := serverconfig.PrepareAccounting
+		if processMode {
+			planBuilder = serverconfig.SharedProcessPlan
+		}
+		plan, planErr := planBuilder(engine, config.Content)
+		if !processMode && planErr != nil && engine == core.EngineSingBox {
 			plan, planErr = serverconfig.PlanPresetAccounting(engine, config.Content)
 		}
 		if planErr == nil {

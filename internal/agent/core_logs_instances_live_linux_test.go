@@ -73,6 +73,14 @@ func TestSharedCoreLogLiveLifecycle(t *testing.T) {
 				if _, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath); err != nil {
 					t.Fatal(err)
 				}
+				if manager.Kind() == ServiceManagerOpenRC {
+					group := filepath.Join("/sys/fs/cgroup", processSliceName(engine, share))
+					t.Cleanup(func() {
+						if err := os.Remove(group); err != nil {
+							t.Error(err)
+						}
+					})
+				}
 				if err := executor.ensureSharedInstanceService(ctx, engine, spec); err != nil {
 					t.Fatal(err)
 				}
@@ -87,6 +95,9 @@ func TestSharedCoreLogLiveLifecycle(t *testing.T) {
 				}
 				if output, err := manager.command(ctx, spec.Service, core.ActionStart); err != nil {
 					t.Fatalf("start: %v %s", err, output)
+				}
+				if _, err := executor.sharedProcessAccounting(ctx, engine, share); err != nil {
+					t.Fatalf("live shared service process attribution: %v", err)
 				}
 				specs = append(specs, spec)
 				waitLiveInstanceLog(t, ctx, collector, engine, share)

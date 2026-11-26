@@ -192,6 +192,9 @@ func (c *Client) Run(ctx context.Context) error {
 	c.executor.migrateNativeAccounting(ctx)
 	if c.traffic != nil {
 		c.traffic.nativeSource = c.executor.nativeAccounting
+		c.traffic.releaseProcess = c.executor.releaseProcessGroup
+		c.traffic.processPorts = c.executor.sharedProcessPorts
+		c.traffic.processSource = c.executor.sharedProcessAccounting
 		c.traffic.sharedSource = c.executor.sharedAccounting
 		c.traffic.haltShared = func(ctx context.Context, engine core.Engine) error {
 			c.executor.specsMu.RLock()

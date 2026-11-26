@@ -8,6 +8,7 @@ ConditionPathExists=/etc/qagent/xray/shares/%i/config.json
 
 [Service]
 Type=simple
+Slice=qchxray%i.slice
 User=qcontrolhub-core
 Group=qcontrolhub-core
 WorkingDirectory=/var/lib/qcontrolhub-xray-%i

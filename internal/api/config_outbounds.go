@@ -146,7 +146,12 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if input.Operation != "bind" {
-		config.Content, state, err = serverconfig.MutateManagedOutbound(engine, config.Content, input.Section, input.Tag, input.Fragment, input.Operation, state)
+		processMode, errMode := s.store.ConfigUsesProcessMetering(r.Context(), config.AgentID, config.OwnerID)
+		if errMode != nil {
+			writeStoreError(w, errMode)
+			return
+		}
+		config.Content, state, err = serverconfig.MutateManagedOutbound(engine, config.Content, input.Section, input.Tag, input.Fragment, input.Operation, state, processMode)
 	} else if input.InboundTag == "" {
 		writeError(w, 400, "请选择绑定入站")
 		return
@@ -178,7 +183,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(serverconfig.DiscoverTrafficPorts(engine, config.Content)) > 0 {
-		plan, planErr := serverconfig.PlanPresetAccounting(engine, config.Content)
+		plan, planErr := s.planWorkspaceAccounting(r.Context(), agent.ID, engine, config.Content)
 		if planErr != nil {
 			writeError(w, 400, planErr.Error())
 			return

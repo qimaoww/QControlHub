@@ -7,13 +7,13 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// SharedInstanceRuntimeContent removes fixed local statistics APIs from a
-// private process. Both legs use verified, per-port socket marks;
-// keeping the generated 10085/10086 listeners would make two processes of the
-// same engine fight for the same loopback port. The independent exits remain.
+// Private instances use kernel process attribution. Only their fixed listeners
+// and management API exposure constrain the shared runtime configuration.
 func SharedInstanceRuntimeContent(engine core.Engine, content string) (string, error) {
-	plan, err := PrepareSharedAccounting(engine, content)
-	return plan.Content, err
+	if _, err := SharedTrafficEndpoints(engine, content); err != nil {
+		return "", err
+	}
+	return stripSharedStatisticsAPI(engine, content)
 }
 
 // PrepareSharedAccounting never exposes a fixed statistics API shared by two
@@ -38,9 +38,6 @@ func PrepareSharedAccounting(engine core.Engine, content string) (AccountingPlan
 func stripSharedStatisticsAPI(engine core.Engine, content string) (string, error) {
 	if engine != core.EngineXray && engine != core.EngineSingBox {
 		return content, nil
-	}
-	if err := ValidateIndependentEgress(engine, content); err != nil {
-		return "", err
 	}
 	root, err := decodeAccountingRoot(engine, content)
 	if err != nil {
@@ -122,4 +119,15 @@ func listContainsString(value any, wanted string) bool {
 		}
 	}
 	return false
+}
+
+// SharedProcessPlan validates the allocated listeners without coupling routes
+// or socket options in the user's source to the host's traffic counters.
+func SharedProcessPlan(engine core.Engine, content string) (AccountingPlan, error) {
+	endpoints, err := SharedTrafficEndpoints(engine, content)
+	plan := AccountingPlan{Content: content, Source: "process"}
+	for _, ep := range endpoints {
+		plan.Ports = append(plan.Ports, AccountingPort{Port: ep.Port, Inbound: ep.Name})
+	}
+	return plan, err
 }

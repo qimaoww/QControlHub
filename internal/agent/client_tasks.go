@@ -185,7 +185,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				} else if len(endpoints) == 0 {
 					executionErr = errors.New("实例没有可用协议，请先添加协议并部署")
 				} else {
-					executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints)
+					executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints, true)
 				}
 			}
 		} else if task.SharedTrafficID != "" {
@@ -199,7 +199,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			} else if task.Action == core.ActionDeploy && len(endpoints) > 0 {
 				// Explicit empty deployments only remove ingress and TLS routes;
 				// new listeners still require the Agent's quota authorization.
-				executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints)
+				executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints, false)
 			} else if task.Action != core.ActionValidate && task.Action != core.ActionDeploy {
 				executionErr = errors.New("unsupported shared task action")
 			}

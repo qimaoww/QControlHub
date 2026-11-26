@@ -11,7 +11,10 @@ const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_
        enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting,metadata_managed,
 	   config_id,config_version,inbound_tag,COALESCE(share_id,''),share_used_bytes,
 	   (SELECT jsonb_build_object('id',share.id,'limit_bytes',share.limit_bytes,
-			'used_bytes',share.used_bytes,'port_used_bytes',port_traffic_policies.share_used_bytes,'engines',share.engines,
+			'process_metering',EXISTS(SELECT 1 FROM agents a WHERE a.id=share.agent_id AND a.features ? 'shared-process-traffic-v1'),
+            'process_ack',(SELECT jsonb_build_object('epoch',p.epoch,'bytes',p.used_bytes) FROM shared_process_usage p
+              WHERE p.share_id=share.id AND p.engine=port_traffic_policies.engine ORDER BY p.sampled_at DESC LIMIT 1),
+            'used_bytes',share.used_bytes,'port_used_bytes',port_traffic_policies.share_used_bytes,'engines',share.engines,
              'proxy_ingresses',CASE WHEN EXISTS(SELECT 1 FROM agents a WHERE a.id=share.agent_id AND a.features ? 'shared-proxy-ingress-v2') THEN share.proxy_ingresses
  ELSE (SELECT COALESCE(jsonb_agg(jsonb_build_object('mode',g->>'mode','port',lease->'port','generation',lease->'generation') ORDER BY g->>'mode',lease->>'port'),'[]'::jsonb)
  FROM jsonb_array_elements(share.proxy_ingresses) g CROSS JOIN LATERAL jsonb_array_elements(COALESCE(g->'legacy','[]'::jsonb)) lease) END,

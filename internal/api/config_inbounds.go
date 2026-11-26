@@ -382,7 +382,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	// Reject unsupported attribution before saving a version or queuing a task.
 	// Deleting the last inbound must remain possible.
-	if _, err := serverconfig.PlanPresetAccounting(engine, content); err != nil {
+	if _, err := s.planWorkspaceAccounting(request.Context(), agent.ID, engine, content); err != nil {
 		mutationError("预设配置无法建立独立出口归属，未保存或部署：" + err.Error())
 		return
 	}

@@ -15,6 +15,7 @@ import (
 var errSharedAccountingTransition = errors.New("shared instance deployment is in progress")
 
 type nativeAccountingSnapshot struct {
+	GroupInode        uint64
 	Plan              serverconfig.AccountingPlan
 	Counters          map[string]uint64
 	ConfigID          string

@@ -144,6 +144,10 @@ func TestInstalledOpenRCCorePermissionMigration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				script = strings.Replace(script, sharedOpenRCGroupLine(engine, spec), "", 1)
+				group := filepath.Join("/sys/fs/cgroup", processSliceName(engine, filepath.Base(filepath.Dir(spec.ConfigPath))))
+				t.Cleanup(func() { _ = os.Remove(group) })
+
 			}
 			start, end := strings.Index(script, "\n# QCH core bounding policy begin\n"), strings.Index(script, "# QCH core bounding policy end\n")
 			script = script[:start] + script[end+len("# QCH core bounding policy end\n"):]

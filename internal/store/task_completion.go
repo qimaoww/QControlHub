@@ -89,6 +89,8 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return fmt.Errorf("%w: main instance result does not match its leased target", ErrInvalid)
 		}
 	}
+	var committedSharedDeployment bool
+	var deployedListeners bool
 	if shared && (action.ChangesInstance() || action == core.ActionStatus) {
 		observation := result.InstanceStatus
 		if observation != nil && (validateSharedInstanceStatus(*observation) != nil || observation.Engine != engine || observation.ShareID != shareID ||
@@ -96,12 +98,12 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return fmt.Errorf("%w: instance result does not match its leased target", ErrInvalid)
 		}
 		emptyDeploymentStopped := false
-		if action == core.ActionDeploy && observation != nil && observation.Status == "inactive" {
-			var content string
-			if err := tx.QueryRow(ctx, `SELECT COALESCE(config_content,'') FROM tasks WHERE id=$1`, taskID).Scan(&content); err != nil {
-				return err
-			}
-			content, err = s.decryptContent(content)
+		if action == core.ActionDeploy && observation != nil {
+			committedSharedDeployment = observation.AppliedTaskID == taskID && observation.ConfigID == configID && observation.ConfigVersion == configVersion
+			deployedListeners = observation.Status == "active"
+		}
+		if action == core.ActionDeploy && observation != nil && observation.Status != "active" {
+			content, err := s.decryptContent(runtimeSnapshot)
 			if err != nil {
 				return err
 			}
@@ -110,7 +112,8 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 				return err
 			}
 			endpoints, parseErr := serverconfig.SharedTrafficEndpoints(engine, content)
-			emptyDeploymentStopped = parseErr == nil && len(endpoints) == 0
+			emptyDeploymentStopped = observation.Status == "inactive" && parseErr == nil && len(endpoints) == 0
+			deployedListeners = parseErr == nil && len(endpoints) > 0
 		}
 		if result.Success && versioned && (observation == nil || action.ChangesInstance() &&
 			(action == core.ActionStop && observation.Status != "inactive" || action != core.ActionStop &&
@@ -288,7 +291,10 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			if decryptErr != nil {
 				return decryptErr
 			}
-			if plan, planErr := serverconfig.PrepareIndependentEgress(engine, content); planErr == nil && plan.Source == "disabled" {
+			if shared {
+				endpoints, e := serverconfig.SharedTrafficEndpoints(engine, content)
+				appliedRunning = e == nil && len(endpoints) > 0
+			} else if plan, planErr := serverconfig.PrepareIndependentEgress(engine, content); planErr == nil && plan.Source == "disabled" {
 				appliedRunning = false
 			}
 		}
@@ -311,6 +317,17 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return err
 		}
 	}
+	if shared && (status == core.TaskSucceeded && action.ChangesInstance() || committedSharedDeployment) {
+		// A protective stop can precede delivery of a committed deployment's
+		// receipt. Retain its listener intent even if startup verification failed.
+		_, err := tx.Exec(ctx, `UPDATE agent_shared_instance_ownership SET desired_running=CASE WHEN $5 THEN $6 ELSE running END
+			WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND last_task_id=$4 AND NOT uncertain`,
+			agentID, engine, shareID, taskID, committedSharedDeployment, deployedListeners)
+		if err != nil {
+			return err
+		}
+	}
+
 	if !shared && result.InstanceStatus != nil && (action.ChangesInstance() || action == core.ActionStatus || action == core.ActionImportExisting) {
 		if err := recordHostInstanceObservationTx(ctx, tx, taskID, *result.InstanceStatus); err != nil {
 			return err

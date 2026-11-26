@@ -66,7 +66,12 @@ func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Re
 		writeStoreError(w, store.ErrConflict)
 		return
 	}
-	if err == nil && (strings.Contains(current.Content, "qch-trf-") || strings.Contains(input.Content, "qch-trf-") || input.Engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark")) {
+	processMode, modeErr := s.store.ConfigUsesProcessMetering(request.Context(), input.AgentID, current.OwnerID)
+	if modeErr != nil {
+		writeStoreError(w, modeErr)
+		return
+	}
+	if !processMode && err == nil && (strings.Contains(current.Content, "qch-trf-") || strings.Contains(input.Content, "qch-trf-") || input.Engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark")) {
 		input.Content, err = s.accountingUpdateSource(request.Context(), current, input.Content)
 		if err == nil {
 			var plan serverconfig.AccountingPlan

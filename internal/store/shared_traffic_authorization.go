@@ -23,6 +23,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			OR (`+unauthorizedTaskPrincipalSQL+`)
 			OR (`+unauthorizedHostConfigTaskSQL+`)
 			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
+			OR (t.shared_auto_start AND NOT $9::boolean)
 			OR (t.shared_instance AND (NOT $4::boolean OR ((t.install_if_missing OR t.action='install') AND NOT $6::boolean)))
 			OR (t.shared_instance AND t.action IN ('start','stop','restart','status','read-config','read-managed-config') AND NOT $7::boolean)
 			OR (t.action IN ('check-nginx','update-nginx','check-caddy','update-caddy') AND NOT $8::boolean)
@@ -47,7 +48,8 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 		)`,
 		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress),
 		containsFeature(features, core.AgentFeatureSharedCoreInstances), containsFeature(features, core.AgentFeatureCoreUninstall),
-		containsFeature(features, core.AgentFeatureSharedCorePrepare), containsFeature(features, core.AgentFeatureSharedCoreLifecycle), containsFeature(features, core.AgentFeatureManagedProxies))
+		containsFeature(features, core.AgentFeatureSharedCorePrepare), containsFeature(features, core.AgentFeatureSharedCoreLifecycle), containsFeature(features, core.AgentFeatureManagedProxies),
+		containsFeature(features, core.AgentFeatureSharedCoreRecovery))
 	return err
 }
 

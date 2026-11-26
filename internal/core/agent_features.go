@@ -90,6 +90,9 @@ const AgentFeatureSharedCorePrepare = "shared-core-prepare-v1"
 // send these commands to an older Agent: it would target the host service.
 const AgentFeatureSharedCoreLifecycle = "shared-core-lifecycle-v1"
 
+// Shared starts verify retained accounting and live mark routing before activation.
+const AgentFeatureSharedCoreRecovery = "shared-core-recovery-v1"
+
 // AgentFeatureInstanceStatus verifies retained main-instance identities during
 // status refreshes and reports them after failed lifecycle operations.
 const AgentFeatureInstanceStatus = "core-instance-status-v1"

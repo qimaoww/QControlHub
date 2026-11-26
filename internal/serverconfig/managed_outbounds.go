@@ -53,7 +53,7 @@ func ManagedOutboundFragment(engine core.Engine, source, section, tag string) (s
 	return string(entries[found]), nil
 }
 
-func MutateManagedOutbound(engine core.Engine, source, section, original, fragment, operation string, state ManagedState) (string, ManagedState, error) {
+func MutateManagedOutbound(engine core.Engine, source, section, original, fragment, operation string, state ManagedState, processMode ...bool) (string, ManagedState, error) {
 	fail := func(err error) (string, ManagedState, error) { return "", ManagedState{}, err }
 	if inbound, ok := managedSections(engine)[section]; !ok || inbound {
 		return fail(errors.New("出站配置区域无效"))
@@ -62,7 +62,7 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 		return fail(errors.New("出站操作无效"))
 	}
 	var err error
-	if strings.Contains(source, accountingPrefix) {
+	if !(len(processMode) > 0 && processMode[0]) && strings.Contains(source, accountingPrefix) {
 		source, err = PresetAccountingSource(engine, source)
 		if err != nil {
 			return fail(err)
@@ -107,7 +107,7 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 	}
 	if operation == "delete" {
 		// Deletion must retain an explicit replacement path for every consumer.
-		if _, err = CompileManagedConfig(engine, source, ManagedState{Disabled: []ManagedResource{{section, original}}}); err != nil {
+		if _, err = CompileManagedConfig(engine, source, ManagedState{Disabled: []ManagedResource{{section, original}}}, processMode...); err != nil {
 			return fail(err)
 		}
 	}
@@ -196,7 +196,7 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 		}
 		remapped.Disabled = append(remapped.Disabled, ref)
 	}
-	if _, err = CompileManagedConfig(engine, result, remapped); err != nil {
+	if _, err = CompileManagedConfig(engine, result, remapped, processMode...); err != nil {
 		return fail(fmt.Errorf("出站状态校验失败: %w", err))
 	}
 	return result, remapped, nil

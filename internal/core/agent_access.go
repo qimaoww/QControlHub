@@ -99,9 +99,24 @@ func UnrestrictedSharedPorts(ports []int) bool {
 // is the server's durable total across all ports; PortUsedBytes acknowledges
 // this port's contribution. The Agent adds unreported local increments to the
 // total, so the combined allowance is enforced even during a disconnection.
+const AgentFeatureSharedProcessTraffic = "shared-process-traffic-v1"
+
+// SharedProcessUsage counts both directions of connections opened by a private
+// instance. The same sample may accompany several listener policies.
+type SharedProcessUsage struct {
+	Epoch string `json:"epoch"`
+	Bytes uint64 `json:"bytes"`
+}
+
+func (p *SharedProcessUsage) Valid() bool {
+	return p == nil || ValidTrafficCounterEpoch(p.Epoch) && p.Bytes <= math.MaxInt64
+}
+
 type SharedTrafficQuota struct {
-	ProxyIngresses       []ProxyIngress `json:"proxy_ingresses,omitempty"`
-	ProxyIngressRevision int64          `json:"proxy_ingress_revision,omitempty"`
+	ProcessMetering      bool                `json:"process_metering,omitempty"`
+	ProcessAck           *SharedProcessUsage `json:"process_ack,omitempty"`
+	ProxyIngresses       []ProxyIngress      `json:"proxy_ingresses,omitempty"`
+	ProxyIngressRevision int64               `json:"proxy_ingress_revision,omitempty"`
 	// Acknowledged lifetime counters let a restored checkpoint reconcile its
 	// pending contribution without treating already settled bytes as new debt.
 	CounterEpoch          string `json:"counter_epoch,omitempty"`
@@ -132,7 +147,7 @@ func ValidAgentShareID(id string) bool {
 }
 
 func (quota *SharedTrafficQuota) Valid() bool {
-	return quota == nil || (proxyIngressPolicyValid(quota.ProxyIngresses, quota.ProxyIngressRevision) && ValidAgentShareID(quota.ID) &&
+	return quota == nil || (quota.ProcessAck.Valid() && proxyIngressPolicyValid(quota.ProxyIngresses, quota.ProxyIngressRevision) && ValidAgentShareID(quota.ID) &&
 		quota.LimitBytes <= math.MaxInt64 && quota.UsedBytes <= math.MaxInt64 &&
 		quota.PortUsedBytes <= quota.UsedBytes && quota.LifetimeReceivedBytes <= math.MaxInt64 && quota.LifetimeSentBytes <= math.MaxInt64 &&
 		(quota.CounterEpoch == "" || ValidTrafficCounterEpoch(quota.CounterEpoch)) && ValidateEngineCapabilities(quota.Engines) == nil &&

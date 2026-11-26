@@ -90,6 +90,10 @@ func (s *Store) openExecutionConfig(task *core.Task, features []string) error {
 		}
 	}
 	if task.Action == core.ActionValidate || task.Action == core.ActionDeploy {
+		if task.SharedInstance && containsFeature(features, core.AgentFeatureSharedProcessTraffic) {
+			_, err := serverconfig.SharedProcessPlan(task.Engine, task.ConfigContent)
+			return err
+		}
 		return serverconfig.ValidateIndependentEgress(task.Engine, task.ConfigContent)
 	}
 	return nil

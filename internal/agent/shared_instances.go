@@ -97,9 +97,12 @@ func sharedInstanceTemplateNeedsUpgrade(engine core.Engine, path string) (bool, 
 	// Earlier generated templates duplicated StateDirectory directives. Accept
 	// only the exact bundled historical variants, including Mihomo's old family
 	// filter; extra administrator directives still require manual review.
-	variants := [][]byte{want}
+	legacy := bytes.Replace(want, []byte("Slice="+processSliceName(engine, "%i")+"\n"), nil, 1)
+	variants := [][]byte{want, legacy}
 	if engine == core.EngineMihomo {
-		variants = append(variants, bytes.Replace(want, []byte("Environment=SAFE_PATHS=/etc/qagent/mihomo/shares/%i:/etc/qcontrolhub/tls\n"), nil, 1))
+		for _, v := range slices.Clone(variants) {
+			variants = append(variants, bytes.Replace(v, []byte("Environment=SAFE_PATHS=/etc/qagent/mihomo/shares/%i:/etc/qcontrolhub/tls\n"), nil, 1))
+		}
 	}
 	if engine == core.EngineMihomo || engine == core.EngineSingBox {
 		for _, value := range append([][]byte(nil), variants...) {
@@ -117,6 +120,9 @@ func sharedInstanceTemplateNeedsUpgrade(engine core.Engine, path string) (bool, 
 func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) error {
 	if !isSharedInstanceSpec(engine, spec, ServiceManagerOpenRC) {
 		return errors.New("invalid OpenRC shared core service")
+	}
+	if err := ensureOpenRCProcessGroup(engine, filepath.Base(filepath.Dir(spec.ConfigPath))); err != nil {
+		return err
 	}
 	contents, err := openRCSharedInstanceContent(engine, spec)
 	if err != nil {
@@ -154,7 +160,7 @@ func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) erro
 		return err
 	}
 	if !bytes.Equal(stored, []byte(contents)) {
-		if !matchesAnyManagedDropIn(stored, managedOpenRCScriptVariants([]byte(contents))) {
+		if !matchesAnyManagedDropIn(stored, sharedOpenRCVariants(engine, spec, contents)) {
 			return fmt.Errorf("OpenRC shared service %s differs from recognized QAgent scripts; review administrator changes before permission sync", spec.Service)
 		}
 		_, err = atomicDeployWithDefaultMetadata(path, contents, fileMetadata{mode: 0o755})
@@ -172,6 +178,7 @@ func validateManagedSharedService(ctx context.Context, engine core.Engine, spec 
 		return err
 	}
 	for property, want := range map[string]string{
+		"Slice":        processSliceName(engine, filepath.Base(filepath.Dir(spec.ConfigPath))),
 		"FragmentPath": filepath.Join(existingDiscoveryManagedUnitRoot, base), "User": managedCoreServiceGroup, "Group": managedCoreServiceGroup,
 	} {
 		got, err := systemdUnitProperty(ctx, spec.Service, property)
@@ -199,6 +206,7 @@ func openRCSharedInstanceContent(engine core.Engine, spec EngineSpec) (string, e
 	if engine == core.EngineShadowsocksRust {
 		contents = strings.ReplaceAll(contents, shadowsocksRustACLPath, spec.ACLPath)
 	}
+	contents = strings.Replace(contents, "start_pre() {\n", "start_pre() {\n"+sharedOpenRCGroupLine(engine, spec), 1)
 	return contents, nil
 }
 
@@ -371,8 +379,6 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 	}
 	e.specsMu.RUnlock()
 	var statuses []core.SharedInstanceStatus
-	markedEgressChecked := false
-	var markedEgressError error
 	for engine, base := range specs {
 		entries, err := os.ReadDir(sharedInstanceRoot(engine))
 		if err != nil {
@@ -386,26 +392,22 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 			if err != nil {
 				continue
 			}
-			observation := e.sharedInstanceStatus(ctx, engine, entry.Name())
+			// The heartbeat may stop an unsafe service. Inspect a settled
+			// configuration while holding the same lock as lifecycle operations.
+			lock := e.sharedAccountingLock(engine, entry.Name())
+			if !lock.TryRLock() {
+				continue
+			}
+			observation := e.deploymentStatus(ctx, engine, spec, entry.Name())
 			status := observation.Status
 			if status == "active" {
 				content, readErr := readConfigurationFile(spec.ConfigPath)
 				if readErr == nil {
-					_, readErr = serverconfig.SharedTrafficEndpoints(engine, content)
-				}
-				var plan serverconfig.AccountingPlan
-				if readErr == nil {
-					plan, readErr = serverconfig.PrepareIndependentEgress(engine, content)
-					if readErr == nil && plan.Source == "disabled" {
-						readErr = errors.New("independent exit is disabled")
+					var endpoints []core.PortTrafficEndpoint
+					endpoints, readErr = serverconfig.SharedTrafficEndpoints(engine, content)
+					if readErr == nil && len(endpoints) == 0 {
+						readErr = errors.New("shared instance has no listeners")
 					}
-				}
-				if readErr == nil && plan.Source == "nft-dual" {
-					if !markedEgressChecked {
-						markedEgressError = checkOutboundMarkRouting(ctx)
-						markedEgressChecked = true
-					}
-					readErr = markedEgressError
 				}
 				if readErr != nil {
 					if _, stopErr := e.serviceManager().command(ctx, spec.Service, core.ActionStop); stopErr == nil {
@@ -414,7 +416,7 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 					} else {
 						status = "unknown"
 					}
-					observation.Reason = "独立出口安全检查失败，实例被保护性停止：" + limitStateValue(readErr.Error(), 500)
+					observation.Reason = "共享监听检查失败，实例被保护性停止：" + limitStateValue(readErr.Error(), 500)
 					e.sharedStateMu.Lock()
 					rememberSharedStopReason(spec, observation.Reason)
 					e.sharedStateMu.Unlock()
@@ -422,6 +424,7 @@ func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInst
 			}
 			observation.Status = status
 			statuses = append(statuses, observation)
+			lock.RUnlock()
 		}
 	}
 	return statuses
@@ -442,4 +445,9 @@ func prepareSharedCorePrerequisites(base EngineSpec) error {
 		}
 	}
 	return nil
+}
+
+func sharedOpenRCVariants(engine core.Engine, spec EngineSpec, current string) [][]byte {
+	legacy := strings.Replace(current, sharedOpenRCGroupLine(engine, spec), "", 1)
+	return append(managedOpenRCScriptVariants([]byte(current)), managedOpenRCScriptVariants([]byte(legacy))...)
 }

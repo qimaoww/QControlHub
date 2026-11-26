@@ -53,3 +53,23 @@ func TestSharedInstanceRemovesOnlyLocalStatisticsAPI(t *testing.T) {
 		})
 	}
 }
+
+func TestSharedProcessPlanPreservesExplicitRoutingMarks(t *testing.T) {
+	for engine, source := range map[core.Engine]string{
+		core.EngineMihomo:          "routing-mark: 17\nlisteners: [{name: in, type: http, port: 24101}]\n",
+		core.EngineXray:            `{"inbounds":[{"tag":"in","protocol":"http","port":24101}],"outbounds":[{"tag":"a","protocol":"freedom","streamSettings":{"sockopt":{"mark":17}}}]}`,
+		core.EngineSingBox:         `{"inbounds":[{"tag":"in","type":"http","listen_port":24101}],"outbounds":[{"tag":"a","type":"direct","routing_mark":17}]}`,
+		core.EngineShadowsocksRust: `{"server":"0.0.0.0","server_port":24101,"method":"aes-256-gcm","password":"fixture","outbound_fwmark":17}`,
+	} {
+		t.Run(string(engine), func(t *testing.T) {
+			plan, err := SharedProcessPlan(engine, source)
+			if err != nil || plan.Content != source || len(plan.Ports) != 1 || plan.Ports[0].Mark != 0 || plan.Source != "process" {
+				t.Fatalf("%+v %v", plan, err)
+			}
+			runtime, err := SharedInstanceRuntimeContent(engine, source)
+			if err != nil || runtime != source {
+				t.Fatalf("process accounting rewrote routing: %s %v", runtime, err)
+			}
+		})
+	}
+}
