@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -99,29 +100,30 @@ func (e *Executor) sharedProcessAccounting(ctx context.Context, engine core.Engi
 		}
 		return result, errors.New("running shared service is outside its accounting slice")
 	}
-	epoch, err := managedCoreProcessEpoch(spec)
-	if err != nil {
-		state, statusErr := manager.status(ctx, spec.Service)
-		if statusErr == nil && (state == "inactive" || state == "failed") {
-			return result, nil
-		}
-		return result, fmt.Errorf("cannot verify shared process membership: %w", err)
-	}
-	parts := strings.Split(epoch, ":")
-	if len(parts) != 3 {
-		return result, errors.New("invalid shared process identity")
-	}
-	membership, err := os.ReadFile("/proc/" + parts[1] + "/cgroup")
+	// OpenRC starts the supervisor and core in the same cgroup. Looking only
+	// at its members avoids scanning every process once per share and sample.
+	members, err := os.ReadFile(filepath.Join(path, "cgroup.procs"))
 	if err != nil {
 		return result, err
 	}
-	for _, line := range strings.Split(string(membership), "\n") {
-		path, ok := strings.CutPrefix(line, "0::/")
-		if ok && (path == group || strings.HasPrefix(path, group+"/")) {
+	for _, pid := range strings.Fields(string(members)) {
+		cmd, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+		if err != nil {
+			continue
+		}
+		args := strings.Split(string(cmd), "\x00")
+		if args[0] == spec.Binary && slices.Contains(args, spec.ConfigPath) {
 			return result, nil
 		}
 	}
-	return result, errors.New("running shared core must restart in its accounting cgroup")
+	state, err := manager.status(ctx, spec.Service)
+	if err != nil {
+		return result, err
+	}
+	if state == "inactive" || state == "failed" {
+		return result, nil
+	}
+	return result, errors.New("running shared core is outside its accounting cgroup")
 }
 
 // All listeners of one instance carry the same cumulative target sample.

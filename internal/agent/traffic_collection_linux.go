@@ -353,7 +353,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	// independently to each port would multiply the user's allowance.
 	for id, record := range desired {
 		if quota := record.Policy.SharedQuota; quota != nil {
-			record.Blocked = !quota.AllowsEngine(record.Policy.Engine) || (quota.LimitBytes > 0 && sharedTrafficUsed(desired, quota.ID) >= quota.LimitBytes)
+			record.Blocked = quota.ProcessMetering && record.AccountingError != "" || !quota.AllowsEngine(record.Policy.Engine) || (quota.LimitBytes > 0 && sharedTrafficUsed(desired, quota.ID) >= quota.LimitBytes)
 			if record.Blocked != manager.records[id].Blocked {
 				manager.rulesDirty = true
 				manager.dirty = true

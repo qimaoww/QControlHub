@@ -63,6 +63,36 @@ func TestSharedProcessQuota(t *testing.T) {
 	if got := m.Snapshot()[0]; got.UsedBytes != 10 || got.ProcessUsage.Bytes != 90 {
 		t.Fatalf("mixed listener and process usage: %+v", got)
 	}
+	for i := range policies[:2] {
+		policies[i].SharedQuota.LimitBytes = 110
+	}
+	if err := m.SetPolicies(ctx, policies, policies[0].AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID, []core.PortTrafficEndpoint{{Engine: a.Policy.Engine, Port: a.Policy.Port}}, true); err != nil {
+		t.Fatal(err)
+	}
+	good := m.processSource
+	m.processSource = func(ctx context.Context, engine core.Engine, share string) (nativeAccountingSnapshot, error) {
+		if share == a.Policy.SharedQuota.ID {
+			return nativeAccountingSnapshot{}, errors.New("unverified process")
+		}
+		return good(ctx, engine, share)
+	}
+	if err := m.collectLocked(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if !m.records[policies[0].ID].Blocked || m.Snapshot()[0].EnforcementAvailable || m.records[policies[2].ID].Blocked {
+		t.Fatal("loss of attribution did not close this allocation")
+	}
+	m.processSource = good
+	if err := m.collectLocked(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if m.records[policies[0].ID].Blocked || !m.Snapshot()[0].EnforcementAvailable {
+		t.Fatal("healthy process scope failed to recover its quota")
+	}
+
 }
 
 // In a disposable network namespace, use two real UDP processes in different
