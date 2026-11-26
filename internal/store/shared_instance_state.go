@@ -81,8 +81,8 @@ func recordSharedInstanceObservationTx(ctx context.Context, tx pgx.Tx, agentID s
 		observed_at=$11,sampled_at=$10,updated_at=$11,
 		traffic_settled=$4 IN ('inactive','failed') AND ($13::boolean OR
 			COALESCE(cardinality($14::text[])>0,false)
-			AND EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled)
-			AND NOT EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled
+			AND EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=$1 AND p.engine=$2 AND p.share_id=$3 AND p.monitoring_enabled)
+			AND NOT EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=$1 AND p.engine=$2 AND p.share_id=$3 AND p.monitoring_enabled
 				AND NOT(p.id=ANY($14::text[]))))
 	FROM observation obs WHERE state.agent_id=obs.agent_id AND state.engine=obs.engine AND state.share_id=obs.share_id`,
 		agentID, instance.Engine, instance.ShareID, instance.Status, instance.Reason, instance.ConfigID,

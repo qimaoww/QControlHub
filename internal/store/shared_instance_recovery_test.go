@@ -72,6 +72,7 @@ func TestSharedInstanceAutomaticStart(t *testing.T) {
 	if err != nil || len(policies) != 2 {
 		t.Fatalf("policies %+v: %v", policies, err)
 	}
+	var reportProcess, expired bool
 	heartbeat := func(healthy bool, taskID string) {
 		t.Helper()
 		now := time.Now().UTC()
@@ -88,6 +89,18 @@ func TestSharedInstanceAutomaticStart(t *testing.T) {
 			start, end, _ := core.TrafficPeriodAt(p.CycleAnchor, p.Cycle, now)
 			hb.TrafficUsage = append(hb.TrafficUsage, core.PortTrafficUsage{PolicyID: p.ID, ShareID: p.SharedQuota.ID, ResetGeneration: p.ResetGeneration,
 				CollectedAt: now, CounterEpoch: strings.Repeat("a", 32), PeriodStart: start, PeriodEnd: end, EnforcementAvailable: healthy || p.SharedQuota.ID == b.SharedTrafficID})
+			if reportProcess {
+				hb.TrafficUsage[len(hb.TrafficUsage)-1].ProcessUsage = &core.SharedProcessUsage{Epoch: strings.Repeat("b", 32)}
+			}
+		}
+		// The metrics ticker can deliver the identical snapshot just before the heartbeat.
+		if err := db.UpdatePortTrafficUsage(ctx, agent.ID, hb.TrafficUsage, now); err != nil {
+			t.Fatal(err)
+		}
+		if expired {
+			if _, err := db.pool.Exec(ctx, `UPDATE port_traffic_policies SET last_reported_at=now()-interval '1 day' WHERE agent_id=$1`, agent.ID); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := db.Heartbeat(ctx, agent.ID, hb); err != nil {
 			t.Fatal(err)
@@ -112,7 +125,17 @@ func TestSharedInstanceAutomaticStart(t *testing.T) {
 	if task := claim(); task != nil {
 		t.Fatalf("older Agent received automatic start: %+v", task)
 	}
-	features = append(features, core.AgentFeatureSharedCoreRecovery)
+	features = append(features, core.AgentFeatureSharedCoreRecovery, core.AgentFeatureSharedProcessTraffic)
+	heartbeat(true, a.ID)
+	if task := claim(); task != nil {
+		t.Fatal("pre-upgrade metrics authorized a process-metered recovery")
+	}
+	reportProcess, expired = true, true
+	heartbeat(true, a.ID)
+	if task := claim(); task != nil {
+		t.Fatal("expired duplicate authorized recovery")
+	}
+	expired = false
 	heartbeat(false, a.ID)
 	if task := claim(); task != nil {
 		t.Fatalf("unhealthy or manually stopped allocation started: %+v", task)

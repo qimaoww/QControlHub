@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -131,7 +129,6 @@ func (e *Executor) sharedProcessAccounting(ctx context.Context, engine core.Engi
 type processCheckpoint struct {
 	core.SharedProcessUsage
 	Raw        uint64 `json:"raw"`
-	Handle     uint64 `json:"handle"`
 	GroupInode uint64 `json:"-"`
 }
 
@@ -185,22 +182,19 @@ func sampleProcessCounter(r *trafficRecord, previous processCheckpoint, counters
 		if ack := r.Policy.SharedQuota.ProcessAck; ack != nil && ack.Epoch == previous.Epoch {
 			previous.Bytes = max(previous.Bytes, ack.Bytes)
 		}
-		previous.Raw, previous.Handle = previous.Bytes, 0
+		previous.Raw = previous.Bytes
 		return previous, nil
 	}
-	handle := counters["handle:"+name]
-	baseline := previous.Raw
-	if previous.Handle != 0 && previous.Handle != handle {
-		baseline = 0
+	// Objects in this epoch are seeded with their cumulative bytes. A restored
+	// ruleset can give the same counter a new handle, including after reboot.
+	if value >= previous.Raw {
+		previous.Bytes = saturatedTrafficAdd(previous.Bytes, value-previous.Raw)
 	}
-	previous.Bytes = saturatedTrafficAdd(previous.Bytes, counterDelta(value, baseline))
-	previous.Raw, previous.Handle, previous.GroupInode = value, handle, inode
+	if ack := r.Policy.SharedQuota.ProcessAck; ack != nil && ack.Epoch == previous.Epoch {
+		previous.Bytes = max(previous.Bytes, ack.Bytes)
+	}
+	previous.Raw = value
 	return previous, nil
-}
-
-func processConnectionMark(r *trafficRecord) uint32 {
-	sum := sha256.Sum256([]byte(processCounterPrefix(r) + r.Process.Epoch))
-	return binary.BigEndian.Uint32(sum[:4])&0x3fffffff | 0x40000000
 }
 
 // Install these rules first. A packet on a process-owned target connection
@@ -220,12 +214,12 @@ func renderProcessRules(script *strings.Builder, records map[string]*trafficReco
 			fmt.Fprintf(script, "add counter inet %s %s { packets 0 bytes %d; }\n", trafficTableName, name, r.Process.Bytes)
 		}
 		group := strconv.Quote(processSliceName(r.Policy.Engine, r.Policy.SharedQuota.ID))
-		mark := processConnectionMark(r)
 		for _, chain := range []string{"input", "output"} {
-			match := fmt.Sprintf("ct direction reply ct mark %d", mark)
+			direction := "reply"
 			if chain == "output" {
-				match = fmt.Sprintf("ct direction original socket cgroupv2 level 1 %s ct mark set %d", group, mark)
+				direction = "original"
 			}
+			match := fmt.Sprintf("ct direction %s socket cgroupv2 level 1 %s", direction, group)
 			if r.Blocked {
 				fmt.Fprintf(script, "add rule inet %s %s %s drop comment %q\n", trafficTableName, chain, match, "qch:block:"+name)
 			}

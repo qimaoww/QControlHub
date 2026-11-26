@@ -102,7 +102,7 @@ func TestSharedProcessNetwork(t *testing.T) {
 		t.Skip("requires isolated netns and writable cgroup v2")
 	}
 	if addr := os.Getenv("QCH_PROCESS_LISTENER"); addr != "" {
-		conn, err := net.ListenPacket("udp4", addr)
+		conn, err := net.ListenPacket(os.Getenv("QCH_PROCESS_FAMILY"), addr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -120,7 +120,7 @@ func TestSharedProcessNetwork(t *testing.T) {
 		return
 	}
 	if os.Getenv("QCH_PROCESS_PACKET") != "" {
-		conn, err := net.Dial("udp4", os.Getenv("QCH_PROCESS_PACKET"))
+		conn, err := net.Dial(os.Getenv("QCH_PROCESS_FAMILY"), os.Getenv("QCH_PROCESS_PACKET"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,18 +140,27 @@ func TestSharedProcessNetwork(t *testing.T) {
 		}
 		return
 	}
-	if os.Getenv("QCH_PROCESS_NETNS") == "" {
-		child := exec.Command("unshare", "--net", os.Args[0], "-test.run=^TestSharedProcessNetwork$", "-test.v")
-		child.Env = append(os.Environ(), "QCH_PROCESS_NETNS=1")
-		if out, err := child.CombinedOutput(); err != nil {
-			t.Fatalf("%s: %v", out, err)
+	family := os.Getenv("QCH_PROCESS_FAMILY")
+	if family == "" {
+		for _, network := range []string{"udp4", "udp6"} {
+			t.Run(network, func(t *testing.T) {
+				child := exec.Command("unshare", "--net", os.Args[0], "-test.run=^TestSharedProcessNetwork$", "-test.v")
+				child.Env = append(os.Environ(), "QCH_PROCESS_FAMILY="+network)
+				if out, err := child.CombinedOutput(); err != nil {
+					t.Fatalf("%s: %v", out, err)
+				}
+			})
 		}
 		return
+	}
+	host, overhead := "127.0.0.1", 28
+	if family == "udp6" {
+		host, overhead = "::1", 48
 	}
 	if out, err := exec.Command("ip", "link", "set", "lo", "up").CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v", out, err)
 	}
-	socket, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	socket, err := net.ListenPacket(family, net.JoinHostPort(host, "0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +190,7 @@ func TestSharedProcessNetwork(t *testing.T) {
 	for i := range policies {
 		policies[i].SharedQuota.ID = share
 		policies[i].SharedQuota.ProcessMetering = true
-		policies[i].SharedQuota.LimitBytes = 100
+		policies[i].SharedQuota.LimitBytes = uint64(3 * (overhead + len("qch-process")))
 	}
 	m.processSource = func(context.Context, core.Engine, string) (nativeAccountingSnapshot, error) {
 		return nativeAccountingSnapshot{Plan: serverconfig.AccountingPlan{Source: "process"}, GroupInode: 1}, nil
@@ -190,6 +199,19 @@ func TestSharedProcessNetwork(t *testing.T) {
 	ctx := context.Background()
 	if err = m.SetPolicies(ctx, policies, policies[0].AgentID); err != nil {
 		t.Fatal(err)
+	}
+	// Model a host firewall which restores its routing mark from conntrack.
+	// Requests must retain the operator's mark after the accounting hook.
+	targetPort := socket.LocalAddr().(*net.UDPAddr).Port
+	firewall := exec.Command("nft", "-f", "-")
+	firewall.Stdin = strings.NewReader(fmt.Sprintf(`add table inet hostpolicy
+add chain inet hostpolicy before { type filter hook output priority -20; policy accept; }
+add chain inet hostpolicy after { type filter hook output priority 0; policy accept; }
+add rule inet hostpolicy before udp dport %d ct mark set 42
+add rule inet hostpolicy after udp dport %d ct mark != 42 drop
+`, targetPort, targetPort))
+	if out, err := firewall.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v", out, err)
 	}
 	send := func(owned, blocked bool) {
 		t.Helper()
@@ -210,13 +232,13 @@ func TestSharedProcessNetwork(t *testing.T) {
 	}
 	send(false, false)
 	send(true, false)
-	expected := uint64(2 * (28 + len("qch-process")))
+	expected := uint64(2 * (overhead + len("qch-process")))
 	if got := sharedTrafficUsed(m.records, share); got != expected {
 		t.Fatalf("process IP bytes %d, want %d", got, expected)
 	}
-	addr := fmt.Sprintf("127.0.0.1:%d", policies[0].Port)
+	addr := net.JoinHostPort(host, fmt.Sprint(policies[0].Port))
 	listener := exec.Command("sh", "-ec", `echo $$ > "$1/cgroup.procs"; shift; exec "$@"`, "sh", group, os.Args[0], "-test.run=^TestSharedProcessNetwork$")
-	listener.Env = append(os.Environ(), "QCH_PROCESS_LISTENER="+addr)
+	listener.Env = append(os.Environ(), fmt.Sprintf("QCH_PROCESS_LISTENER=:%d", policies[0].Port))
 	ready, err := listener.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -265,6 +287,27 @@ func TestProcessCounterRecoveryUsesLiveObjectAndServerHighWater(t *testing.T) {
 	if err != nil || process.Bytes != 150 {
 		t.Fatalf("recreated object overbilled: %+v %v", process, err)
 	}
+	counters["handle:"+name] = 3
+	restored, err := sampleProcessCounter(r, process, counters, 1)
+	if err != nil || restored.Bytes != 150 {
+		t.Fatalf("restored counter billed again: %+v %v", restored, err)
+	}
+	counters[name] = 140
+	restored, err = sampleProcessCounter(r, restored, counters, 1)
+	if err != nil || restored.Bytes != 150 || restored.Raw != 140 {
+		t.Fatalf("older nft snapshot billed again: %+v %v", restored, err)
+	}
+	ack.Bytes = 200
+	restored, err = sampleProcessCounter(r, restored, counters, 1)
+	if err != nil || restored.Bytes != 200 {
+		t.Fatalf("late acknowledgement: %+v %v", restored, err)
+	}
+	counters[name]++
+	restored, err = sampleProcessCounter(r, restored, counters, 1)
+	if err != nil || restored.Bytes != 201 {
+		t.Fatalf("lost first byte after reconciliation: %+v %v", restored, err)
+	}
+	counters[name], ack.Bytes = 150, 123
 	for _, old := range []processCheckpoint{{}, {SharedProcessUsage: core.SharedProcessUsage{Epoch: strings.Repeat("a", 32), Bytes: 400}}} {
 		got, err := sampleProcessCounter(r, old, counters, 1)
 		if err != nil || got.Bytes != 150 || got.Epoch != epoch {

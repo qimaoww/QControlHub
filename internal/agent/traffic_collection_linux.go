@@ -339,16 +339,6 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			manager.urgentDirty = true
 		}
 	}
-	marks := map[uint32]string{}
-	for _, r := range desired {
-		if r.Process.GroupInode != 0 {
-			mark, key := processConnectionMark(r), processCounterPrefix(r)
-			if other, exists := marks[mark]; exists && other != key {
-				return manager.setUnavailableLocked(errors.New("conflicting process conntrack identities"))
-			}
-			marks[mark] = key
-		}
-	}
 	// One aggregate decision after sampling every port. Billing a full quota
 	// independently to each port would multiply the user's allowance.
 	for id, record := range desired {

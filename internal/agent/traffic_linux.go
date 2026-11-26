@@ -133,7 +133,6 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 			manager.records = state.Records
 			if state.BootID != "" && state.BootID != manager.bootID {
 				for _, id := range sortedTrafficRecordIDs(manager.records) {
-					manager.records[id].Process.Raw, manager.records[id].Process.Handle = 0, 0
 					if err := rotateLostTrafficEpoch(manager.records[id]); err != nil {
 						slog.Warn("rotate port traffic epoch after boot change", "policy_id", id, "error", err)
 					}
