@@ -49,10 +49,7 @@ func (e *Executor) sharedProcessAccounting(ctx context.Context, engine core.Engi
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if manager.Kind() == ServiceManagerOpenRC {
-			err = os.Mkdir(path, 0755)
-			if errors.Is(err, os.ErrExist) {
-				err = nil
-			}
+			err = ensureOpenRCProcessGroup(engine, share)
 		} else {
 			_, err = run(ctx, manager.executable, "start", group)
 		}
@@ -80,18 +77,35 @@ func (e *Executor) sharedProcessAccounting(ctx context.Context, engine core.Engi
 			return result, nil
 		}
 	}
-	epoch, state, err := e.accountingProcessEpochWithState(ctx, spec)
-	if err != nil {
-		if state == "" {
-			state, err = serviceStatusWithManager(ctx, manager, spec.Service)
-			if err != nil {
-				return result, err
+	if manager.Kind() == ServiceManagerSystemd {
+		// ProtectProc=invisible can hide the non-root core even from the Agent.
+		// systemd owns the service and reports its actual kernel ControlGroup.
+		output, err := run(ctx, manager.executable, "show", spec.Service, "--property=ActiveState", "--property=ControlGroup", "--no-pager")
+		if err != nil {
+			return result, err
+		}
+		var state, path string
+		for _, line := range strings.Split(output, "\n") {
+			key, value, _ := strings.Cut(line, "=")
+			switch key {
+			case "ActiveState":
+				state = value
+			case "ControlGroup":
+				path = value
 			}
 		}
-		if state == "inactive" || state == "failed" {
+		if state == "inactive" || state == "failed" || path == "/"+group+"/"+spec.Service {
 			return result, nil
 		}
-		return result, errors.New("cannot verify shared process membership")
+		return result, errors.New("running shared service is outside its accounting slice")
+	}
+	epoch, err := managedCoreProcessEpoch(spec)
+	if err != nil {
+		state, statusErr := manager.status(ctx, spec.Service)
+		if statusErr == nil && (state == "inactive" || state == "failed") {
+			return result, nil
+		}
+		return result, fmt.Errorf("cannot verify shared process membership: %w", err)
 	}
 	parts := strings.Split(epoch, ":")
 	if len(parts) != 3 {
@@ -285,4 +299,13 @@ func (e *Executor) releaseProcessGroup(ctx context.Context, engine core.Engine, 
 		return err
 	}
 	return os.Remove(path)
+}
+
+func ensureOpenRCProcessGroup(engine core.Engine, share string) error {
+	path := filepath.Join("/sys/fs/cgroup", processSliceName(engine, share))
+	if err := os.Mkdir(path, 0755); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("prepare OpenRC shared cgroup: %w", err)
+	}
+	_, err := os.Stat(filepath.Join(path, "cgroup.procs"))
+	return err
 }

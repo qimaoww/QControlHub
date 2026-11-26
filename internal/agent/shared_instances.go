@@ -121,6 +121,9 @@ func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) erro
 	if !isSharedInstanceSpec(engine, spec, ServiceManagerOpenRC) {
 		return errors.New("invalid OpenRC shared core service")
 	}
+	if err := ensureOpenRCProcessGroup(engine, filepath.Base(filepath.Dir(spec.ConfigPath))); err != nil {
+		return err
+	}
 	contents, err := openRCSharedInstanceContent(engine, spec)
 	if err != nil {
 		return err
@@ -157,8 +160,7 @@ func ensureOpenRCSharedInstanceService(engine core.Engine, spec EngineSpec) erro
 		return err
 	}
 	if !bytes.Equal(stored, []byte(contents)) {
-		legacy := strings.Replace(contents, sharedOpenRCGroupLine(engine, spec), "", 1)
-		if !matchesAnyManagedDropIn(stored, append(managedOpenRCScriptVariants([]byte(contents)), managedOpenRCScriptVariants([]byte(legacy))...)) {
+		if !matchesAnyManagedDropIn(stored, sharedOpenRCVariants(engine, spec, contents)) {
 			return fmt.Errorf("OpenRC shared service %s differs from recognized QAgent scripts; review administrator changes before permission sync", spec.Service)
 		}
 		_, err = atomicDeployWithDefaultMetadata(path, contents, fileMetadata{mode: 0o755})
@@ -443,4 +445,9 @@ func prepareSharedCorePrerequisites(base EngineSpec) error {
 		}
 	}
 	return nil
+}
+
+func sharedOpenRCVariants(engine core.Engine, spec EngineSpec, current string) [][]byte {
+	legacy := strings.Replace(current, sharedOpenRCGroupLine(engine, spec), "", 1)
+	return append(managedOpenRCScriptVariants([]byte(current)), managedOpenRCScriptVariants([]byte(legacy))...)
 }

@@ -73,13 +73,8 @@ func TestSharedCoreLogLiveLifecycle(t *testing.T) {
 				if _, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath); err != nil {
 					t.Fatal(err)
 				}
-				// This fixture starts the unit directly. Provision the cgroup
-				// normally armed by the authenticated traffic policy first.
 				if manager.Kind() == ServiceManagerOpenRC {
 					group := filepath.Join("/sys/fs/cgroup", processSliceName(engine, share))
-					if err := os.Mkdir(group, 0755); err != nil {
-						t.Fatal(err)
-					}
 					t.Cleanup(func() {
 						if err := os.Remove(group); err != nil {
 							t.Error(err)
