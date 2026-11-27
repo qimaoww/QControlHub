@@ -157,7 +157,7 @@ func TestAgentHeartbeatWithoutMetricsClearsProbes(t *testing.T) {
 	ctx := context.Background()
 	agentID := seedLiveStateAgent(t, s, "probe fixture")
 	if err := s.UpdateAgentMetrics(ctx, agentID, core.HostMetrics{
-		CPUAvailable: true, CPUPercent: 5,
+		CPUAvailable: true, CPUPercent: 100,
 		PublicIPv4: "93.184.216.34", PublicIPv4Source: core.PublicIPProbeSourceAgent,
 		NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"9.9.9.9"}}},
 	}); err != nil {
@@ -165,6 +165,22 @@ func TestAgentHeartbeatWithoutMetricsClearsProbes(t *testing.T) {
 	}
 	if err := s.Heartbeat(ctx, agentID, core.HeartbeatRequest{Version: "v1"}); err != nil {
 		t.Fatalf("heartbeat without metrics: %v", err)
+	}
+
+	agent, err := s.GetAgent(ctx, agentID)
+	if err != nil || agent.Metrics.CPUAvailable || agent.Metrics.CPUPercent != 0 {
+		t.Fatalf("live CPU after empty heartbeat: got %+v, %v", agent.Metrics, err)
+	}
+	at := agent.Metrics.CollectedAt
+	if at.IsZero() {
+		t.Fatal("lost timestamp of the last actual sample")
+	}
+	if count, err := s.RecordAgentMetricSamples(ctx, at.Add(time.Second)); err != nil || count != 1 {
+		t.Fatalf("record last actual sample: count=%d, err=%v", count, err)
+	}
+	rows, err := s.MetricSamples(ctx, agentID, at.Add(-time.Second), 2)
+	if err != nil || len(rows) != 1 || rows[0].CPUPercent != 100 {
+		t.Fatalf("empty heartbeat changed historical CPU: %+v, %v", rows, err)
 	}
 
 	var stored []byte

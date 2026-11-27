@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -951,5 +952,45 @@ func TestWSSTelemetryConvergenceAcrossRateDropAndCompactResyncWithPostgreSQL(t *
 			t.Fatalf("DB did not converge: agent=%+v policies=%+v (errs=%v/%v)", stored.Metrics, policies, getErr, polErr)
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestNodeCardCPURecoversAcrossEmptyHeartbeat(t *testing.T) {
+	db, ctx, _, alice, _ := newConfigScopeAPIFixture(t)
+	server := httptest.NewServer(alice.handler)
+	defer server.Close()
+	agent, key := enrollWSSAgentForUser(t, ctx, alice, db, "card-cpu", nil)
+	conn := dialPublicIPProbeWSS(t, ctx, server.URL, agent.ID, key)
+	defer conn.CloseNow()
+
+	full := &core.HostMetrics{CPUAvailable: true, CPUPercent: 100}
+	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{Metrics: full}}
+	for _, step := range []struct {
+		message   core.WireMessage
+		available bool
+		percent   float64
+	}{
+		{heartbeat, true, 100},
+		{core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{}}, false, 0},
+		{core.WireMessage{Type: core.WireMetrics, Metrics: full}, true, 100},
+		{core.WireMessage{Type: core.WireMetrics, Metrics: &core.HostMetrics{CPUAvailable: true, CPUPercent: 10}}, true, 10},
+	} {
+		if err := wsjson.Write(ctx, conn, step.message); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			var agents []core.Agent
+			alice.call("GET", "/agents", nil, http.StatusOK, &agents)
+			if slices.ContainsFunc(agents, func(node core.Agent) bool {
+				return node.ID == agent.ID && node.Status == "online" && node.Metrics.CPUAvailable == step.available && node.Metrics.CPUPercent == step.percent
+			}) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("node list did not publish cpu_available=%t, cpu_percent=%v after %s", step.available, step.percent, step.message.Type)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	}
 }

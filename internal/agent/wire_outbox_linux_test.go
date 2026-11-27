@@ -17,6 +17,16 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestMetricsPushPublishesUnavailableCPUDuringWarmup(t *testing.T) {
+	client := reconnectTestClient(t)
+	client.metrics = NewMetricsCollector()
+	client.clockSync = &core.ClockSyncStatus{CheckedAt: time.Now(), Status: "synchronized"}
+	msg, ok := client.buildMetricsMessage(context.Background(), true, nil)
+	if !ok || msg.Metrics == nil || msg.Metrics.CPUAvailable || !msg.Metrics.MemoryAvailable {
+		t.Fatalf("first metrics push = %+v, sent=%t", msg.Metrics, ok)
+	}
+}
+
 func TestRunWebSocketCompactTelemetryWriterResync(t *testing.T) {
 	client := reconnectTestClient(t)
 	client.bbr = NewSystemBBRManager(client.executor.serviceManager())

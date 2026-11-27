@@ -6,6 +6,8 @@ import (
 	"context"
 	"math"
 	"net"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -14,11 +16,11 @@ import (
 
 func TestParseCPUTimes(t *testing.T) {
 	t.Parallel()
-	total, idle, err := parseCPUTimes("cpu  100 2 30 400 5 6 7 8 0 0\ncpu0 1 2 3 4\n")
-	if err != nil || total != 558 || idle != 405 {
-		t.Fatalf("parseCPUTimes() = total %d idle %d error %v", total, idle, err)
+	samples, err := parseCPUTimesData("cpu  100 2 30 400 5 6 7 8 90 1\ncpu0 1 2 3 4\n")
+	if err != nil || samples != (procCPUTimes{100, 2, 30, 400, 5, 6, 7, 8}) {
+		t.Fatalf("parseCPUTimesData() = %v, %v", samples, err)
 	}
-	if _, _, err := parseCPUTimes("cpu invalid 1 2 3\n"); err == nil {
+	if _, err := parseCPUTimesData("cpu invalid 1 2 3\n"); err == nil {
 		t.Fatal("parseCPUTimes accepted an invalid counter")
 	}
 }
@@ -107,19 +109,26 @@ func TestBytesPerSecond(t *testing.T) {
 	}
 }
 
-func TestCPUUsagePercentZeroDeltaReportsIdleZero(t *testing.T) {
-	t.Parallel()
-	if percent, ok := cpuUsagePercent(1000, 800, 1000, 800); !ok || percent != 0 {
-		t.Fatalf("identical counters = (%v, %v), want (0, true)", percent, ok)
-	}
-	if percent, ok := cpuUsagePercent(1000, 800, 1100, 850); !ok || percent != 50 {
-		t.Fatalf("normal delta = (%v, %v), want (50, true)", percent, ok)
-	}
-	if _, ok := cpuUsagePercent(1100, 850, 1000, 800); ok {
-		t.Fatal("backwards counters were accepted")
-	}
-	if _, ok := cpuUsagePercent(1000, 800, 1000, 900); ok {
-		t.Fatal("idle exceeding its own delta was accepted")
+func TestProcCPUUsageWindows(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		before, after procCPUTimes
+		want          float64
+		valid         bool
+	}{
+		{"tickless idle", procCPUTimes{100}, procCPUTimes{100}, 0, true},
+		{"idle plus IO wait", procCPUTimes{}, procCPUTimes{50, 0, 0, 25, 25}, 50, true},
+		{"revised IO wait", procCPUTimes{100, 0, 0, 300, 100}, procCPUTimes{110, 0, 0, 390, 10}, 10, true},
+		{"hypervisor took whole window", procCPUTimes{}, procCPUTimes{7: 100}, 0, true},
+		{"partly stolen", procCPUTimes{}, procCPUTimes{25, 0, 0, 0, 0, 0, 0, 75}, 25, true},
+		{"busy includes interrupts", procCPUTimes{}, procCPUTimes{10, 20, 30, 0, 0, 20, 20, 0}, 100, true},
+		{"one counter reset", procCPUTimes{100}, procCPUTimes{0, 0, 200}, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, valid := tc.after.usageSince(tc.before); valid != tc.valid || got != tc.want {
+				t.Fatalf("usageSince() = %v, %t; want %v, %t", got, valid, tc.want, tc.valid)
+			}
+		})
 	}
 }
 
@@ -137,7 +146,7 @@ func TestCPUWindowIgnoresBackToBackSamples(t *testing.T) {
 			var sample cpuSample
 			check := func(after time.Duration, total, idle uint64, percent float64, available bool, baseline time.Duration) {
 				t.Helper()
-				sample.record(cpuReading{at: start.Add(after), total: total, idle: idle, quota: tc.quota})
+				sample.record(cpuReading{at: start.Add(after), proc: procCPUTimes{0: total - idle, 3: idle}, usageUsec: total, quota: tc.quota})
 				if sample.percent != percent || sample.available != available || !sample.reading.at.Equal(start.Add(baseline)) {
 					t.Fatalf("after %s, got %+v; want %.1f%%, available=%t, baseline=%s", after, sample, percent, available, baseline)
 				}
@@ -147,8 +156,45 @@ func TestCPUWindowIgnoresBackToBackSamples(t *testing.T) {
 			check(time.Second, tc.half, tc.idle, 50, true, time.Second)
 			check(time.Second+time.Millisecond, tc.half+1, tc.idle, 50, true, time.Second)
 			check(2*time.Second, tc.full, tc.idle, 100, true, 2*time.Second)
-			check(3*time.Second, 10, 0, 100, true, 3*time.Second)
+			check(3*time.Second, 10, 0, 0, false, 3*time.Second)
 			check(4*time.Second, 10, 0, 0, true, 4*time.Second)
+		})
+	}
+}
+
+func TestCgroupCPUCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		v2    bool
+		quota string
+		want  float64
+	}{
+		{"v2 unlimited", true, "max", 5},
+		{"v2 fractional", true, "25000", 0.25},
+		{"v2 cpuset below quota", true, "800000", 5},
+		{"v2 invalid quota", true, "-1", 0},
+		{"v1 unlimited", false, "-1", 5},
+		{"v1 fractional", false, "50000", 0.5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			files := map[string]string{"cpuset.cpus.effective": "1-2,6,8-9", "cpu.max": tc.quota + " 100000"}
+			if !tc.v2 {
+				files = map[string]string{"cpuset/cpuset.effective_cpus": "1-2,6,8-9", "cpu/cpu.cfs_quota_us": tc.quota, "cpu/cpu.cfs_period_us": "100000"}
+			}
+			for name, value := range files {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(value+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := cgroupCPUCapacity(root, tc.v2)
+			if got != tc.want || (err != nil) != (tc.want == 0) {
+				t.Fatalf("capacity = %v, %v; want %v", got, err, tc.want)
+			}
 		})
 	}
 }
@@ -158,11 +204,11 @@ func TestCPUWindowRestartsWhenSourceOrQuotaChanges(t *testing.T) {
 	start := time.Unix(100, 0)
 	for i, quota := range []float64{0, 1, 0.5, 0} {
 		at := start.Add(time.Duration(2*i) * time.Second)
-		sample.record(cpuReading{at: at, total: 1000, quota: quota})
+		sample.record(cpuReading{at: at, proc: procCPUTimes{1000}, usageUsec: 1000, quota: quota})
 		if sample.available {
 			t.Fatalf("quota %v reused a different CPU baseline", quota)
 		}
-		sample.record(cpuReading{at: at.Add(time.Second), total: 1000, quota: quota})
+		sample.record(cpuReading{at: at.Add(time.Second), proc: procCPUTimes{1000}, usageUsec: 1000, quota: quota})
 		if !sample.available || sample.percent != 0 {
 			t.Fatalf("quota %v, complete idle window: %+v", quota, sample)
 		}

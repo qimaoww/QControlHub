@@ -7,9 +7,10 @@ import (
 	"io"
 	"math"
 	"os"
-	"runtime"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func readMetricFile(path string, limit int64) ([]byte, error) {
@@ -204,20 +205,16 @@ func nextLineSlice[T ~[]byte | ~string](data T, pos int) (T, int, bool) {
 	return data[start:end], pos, true
 }
 
-func parseCPUTimes(contents string) (uint64, uint64, error) {
-	return parseCPUTimesData(contents)
-}
-
-func parseCPUTimesData[T ~[]byte | ~string](contents T) (uint64, uint64, error) {
+func parseCPUTimesData[T ~[]byte | ~string](contents T) (procCPUTimes, error) {
 	line, _, ok := nextLineSlice(contents, 0)
 	if !ok {
-		return 0, 0, errors.New("/proc/stat has no aggregate CPU line")
+		return procCPUTimes{}, errors.New("/proc/stat has no aggregate CPU line")
 	}
 	tag, pos, ok := nextASCIIField(line, 0)
 	if !ok || !equalBytesString(tag, "cpu") {
-		return 0, 0, errors.New("/proc/stat has no aggregate CPU line")
+		return procCPUTimes{}, errors.New("/proc/stat has no aggregate CPU line")
 	}
-	var values [8]uint64
+	var values procCPUTimes
 	count := 0
 	for count < len(values) {
 		field, nextPos, ok := nextASCIIField(line, pos)
@@ -227,59 +224,119 @@ func parseCPUTimesData[T ~[]byte | ~string](contents T) (uint64, uint64, error) 
 		pos = nextPos
 		value, err := parseUintASCII(field)
 		if err != nil {
-			return 0, 0, errors.New("/proc/stat contains an invalid CPU counter")
+			return procCPUTimes{}, errors.New("/proc/stat contains an invalid CPU counter")
 		}
 		values[count] = value
 		count++
 	}
 	if count < 4 {
-		return 0, 0, errors.New("/proc/stat CPU line is incomplete")
+		return procCPUTimes{}, errors.New("/proc/stat CPU line is incomplete")
 	}
-	var total uint64
-	for i := 0; i < count; i++ {
-		if math.MaxUint64-total < values[i] {
-			return 0, 0, errors.New("CPU counter overflow")
-		}
-		total += values[i]
-	}
-	idle := values[3]
-	if count > 4 {
-		idle += values[4]
-	}
-	return total, idle, nil
+	return values, nil
 }
 
-func cgroupCPUUsage() (uint64, error) {
-	if contents, err := readMetricFile("/sys/fs/cgroup/cpu.stat", 16<<10); err == nil {
+// The usage counter belongs to the visible cgroup root. Process affinity
+// (including runtime.NumCPU) describes the collector, not that root.
+func cgroupCPUReading() (cpuReading, error) {
+	const root = "/sys/fs/cgroup"
+	if contents, err := readMetricFile(root+"/cpu.stat", 16<<10); err == nil {
 		for _, line := range strings.Split(string(contents), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) == 2 && fields[0] == "usage_usec" {
-				return strconv.ParseUint(fields[1], 10, 64)
+				usage, err := strconv.ParseUint(fields[1], 10, 64)
+				if err != nil {
+					return cpuReading{}, err
+				}
+				reading := cpuReading{at: time.Now(), usageUsec: usage}
+				reading.quota, err = cgroupCPUCapacity(root, true)
+				return reading, err
 			}
 		}
 	}
-	contents, err := readMetricFile("/sys/fs/cgroup/cpuacct/cpuacct.usage", 128)
+	nanos, err := readUintMetric(root + "/cpuacct/cpuacct.usage")
 	if err != nil {
-		return 0, err
+		return cpuReading{}, err
 	}
-	nanoseconds, err := strconv.ParseUint(strings.TrimSpace(string(contents)), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return nanoseconds / 1000, nil
+	reading := cpuReading{at: time.Now(), usageUsec: nanos / 1000, cgroupV1: true}
+	reading.quota, err = cgroupCPUCapacity(root, false)
+	return reading, err
 }
 
-func cgroupCPUQuota() float64 {
-	if contents, err := readMetricFile("/sys/fs/cgroup/cpu.max", 128); err == nil {
-		fields := strings.Fields(string(contents))
-		if len(fields) == 2 && fields[0] != "max" {
-			quota, quotaErr := strconv.ParseFloat(fields[0], 64)
-			period, periodErr := strconv.ParseFloat(fields[1], 64)
-			if quotaErr == nil && periodErr == nil && quota > 0 && period > 0 {
-				return quota / period
+func cgroupCPUCapacity(root string, v2 bool) (float64, error) {
+	cpuset := "cpuset.cpus.effective"
+	if !v2 {
+		cpuset = "cpuset/cpuset.effective_cpus"
+	}
+	var count int
+	for _, path := range []string{filepath.Join(root, cpuset), "/sys/devices/system/cpu/online"} {
+		if contents, err := readMetricFile(path, 64<<10); err == nil {
+			if count, err = cpuListCount(strings.TrimSpace(string(contents))); err == nil {
+				break
 			}
 		}
-		return float64(runtime.NumCPU())
 	}
-	return float64(runtime.NumCPU())
+	// Without a quota limit, capacity is the group's effective CPU set.
+	// On the hierarchy root with no cpuset controller, use online host CPUs.
+	var quota, period string
+	if v2 {
+		if contents, err := readMetricFile(filepath.Join(root, "cpu.max"), 128); err == nil {
+			fields := strings.Fields(string(contents))
+			if len(fields) != 2 {
+				return 0, errors.New("invalid cgroup cpu.max")
+			}
+			if fields[0] != "max" {
+				quota, period = fields[0], fields[1]
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return 0, err
+		}
+	} else if contents, err := readMetricFile(filepath.Join(root, "cpu/cpu.cfs_quota_us"), 128); err == nil {
+		if value := strings.TrimSpace(string(contents)); value != "-1" {
+			quota = value
+			contents, err = readMetricFile(filepath.Join(root, "cpu/cpu.cfs_period_us"), 128)
+			if err != nil {
+				return 0, err
+			}
+			period = strings.TrimSpace(string(contents))
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	if period != "" || quota != "" {
+		q, qErr := strconv.ParseUint(quota, 10, 64)
+		p, pErr := strconv.ParseUint(period, 10, 64)
+		if qErr != nil || pErr != nil || q == 0 || p == 0 {
+			return 0, errors.New("invalid cgroup CPU quota")
+		}
+		limit := float64(q) / float64(p)
+		if count == 0 || limit < float64(count) {
+			return limit, nil
+		}
+	}
+	if count == 0 {
+		return 0, errors.New("cgroup CPU capacity unavailable")
+	}
+	return float64(count), nil
+}
+
+// Linux exports CPU sets as ordered, non-overlapping ranges, e.g. 0-3,8.
+func cpuListCount(list string) (int, error) {
+	count, previous := 0, -1
+	for part := range strings.SplitSeq(list, ",") {
+		first, last, ranged := strings.Cut(part, "-")
+		lo, err := strconv.Atoi(first)
+		if err != nil || lo <= previous {
+			return 0, errors.New("invalid CPU list")
+		}
+		hi := lo
+		if ranged {
+			hi, err = strconv.Atoi(last)
+		}
+		if err != nil || hi < lo || hi == math.MaxInt {
+			return 0, errors.New("invalid CPU range")
+		}
+		count += hi - lo + 1
+		previous = hi
+	}
+	return count, nil
 }

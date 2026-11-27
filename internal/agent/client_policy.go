@@ -99,7 +99,7 @@ func (c *Client) buildMetricsMessage(ctx context.Context, nonBlockingClockSync b
 	} else {
 		metrics.ClockSync = c.cachedClockSync(ctx)
 	}
-	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
+	if !metricsHaveData(metrics) {
 		return core.WireMessage{}, false
 	}
 	c.publicIP.applySnapshot(&metrics)
@@ -113,9 +113,8 @@ func (c *Client) buildMetricsMessage(ctx context.Context, nonBlockingClockSync b
 
 // queueMetrics sends a lightweight metrics-only push between full heartbeats
 // so the panel's live resource values refresh at the configured cadence
-// instead of waiting for the heartbeat cycle. Samples without a CPU reading
-// are skipped so one partial collection never overwrites the last complete
-// snapshot stored on the control plane.
+// instead of waiting for the heartbeat cycle. A partial sample carries CPUAvailable=false
+// so a previous percentage does not outlive a failed CPU measurement.
 func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMessage) error {
 	message, ok := c.buildMetricsMessage(ctx, false, nil)
 	if !ok {

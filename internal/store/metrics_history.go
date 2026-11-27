@@ -19,7 +19,8 @@ func (s *Store) RecordAgentMetricSamples(ctx context.Context, sampledAt time.Tim
 			agent_id, sampled_at, cpu_percent, memory_percent, rx_rate_bps, tx_rate_bps
 		)
 		SELECT agents.id, snapshot.received_at,
-			CASE WHEN live.metrics->>'cpu_available' = 'true' THEN (live.metrics->>'cpu_percent')::real ELSE 0 END,
+			CASE WHEN live.metrics->>'cpu_available' = 'true' THEN (live.metrics->>'cpu_percent')::real
+				ELSE COALESCE((live.metrics->>'sampled_cpu_percent')::real, 0) END,
 			CASE WHEN live.metrics->>'memory_available' = 'true' AND (live.metrics->>'memory_total_bytes')::bigint > 0
 				THEN round(100.0 * (live.metrics->>'memory_used_bytes')::bigint / (live.metrics->>'memory_total_bytes')::bigint)
 				ELSE 0 END,
