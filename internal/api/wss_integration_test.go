@@ -576,7 +576,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal("successful deployment task did not update the latest deployment")
 	}
 	agent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
-	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUPercent != 42.5 || agent.Metrics.NetworkRXBPS != 300 || agent.Metrics.ObservedPublicIP != "93.184.216.34" || agent.Version != "test" || len(agent.Features) == 0 {
+	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUAvailable || agent.Metrics.CPUPercent != 0 || agent.Metrics.NetworkRXBPS != 300 || agent.Metrics.ObservedPublicIP != "93.184.216.34" || agent.Version != "test" || len(agent.Features) == 0 {
 		t.Fatalf("live metrics snapshot not persisted: agent=%+v error=%v", agent, err)
 	}
 	if err := dataStore.SetAgentClientAddress(ctx, enrolled.AgentID, "managed.example.test"); err != nil {

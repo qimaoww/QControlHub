@@ -171,8 +171,16 @@ func TestAgentHeartbeatWithoutMetricsClearsProbes(t *testing.T) {
 	if err != nil || agent.Metrics.CPUAvailable || agent.Metrics.CPUPercent != 0 {
 		t.Fatalf("live CPU after empty heartbeat: got %+v, %v", agent.Metrics, err)
 	}
-	if !agent.Metrics.CollectedAt.IsZero() {
-		t.Fatalf("empty heartbeat retained a sample timestamp: %v", agent.Metrics.CollectedAt)
+	at := agent.Metrics.CollectedAt
+	if at.IsZero() {
+		t.Fatal("lost timestamp of the last actual sample")
+	}
+	if count, err := s.RecordAgentMetricSamples(ctx, at.Add(time.Second)); err != nil || count != 1 {
+		t.Fatalf("record last actual sample: count=%d, err=%v", count, err)
+	}
+	rows, err := s.MetricSamples(ctx, agentID, at.Add(-time.Second), 2)
+	if err != nil || len(rows) != 1 || rows[0].CPUPercent != 100 {
+		t.Fatalf("empty heartbeat changed historical CPU: %+v, %v", rows, err)
 	}
 
 	var stored []byte

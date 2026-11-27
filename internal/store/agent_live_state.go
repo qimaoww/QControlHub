@@ -89,17 +89,19 @@ func decodeAgentMetrics(snapshot []byte, observedAddress string, metrics *core.H
 	return nil
 }
 
-// An empty heartbeat withdraws the live sample. Retain only the same
-// slow-changing sections that a compact report is allowed to omit.
-func (s *Store) clearAgentLiveSample(ctx context.Context, agentID string) error {
+// A metrics-less heartbeat withdraws live CPU and probed addresses. Keep
+// other metrics and the receipt time of the last actual sample. The history
+// recorder may still need the CPU reading that belonged to that timestamp.
+func (s *Store) clearAgentLiveStateProbes(ctx context.Context, agentID string) error {
+	keys := []string{"cpu_available", "cpu_percent", "public_ipv4", "public_ipv6", "public_ipv4_source", "public_ipv6_source"}
 	if _, err := s.pool.Exec(ctx, `
-		UPDATE agent_live_state SET metrics = (
-			SELECT COALESCE(jsonb_object_agg(key, value), '{}'::jsonb)
-			FROM jsonb_each(metrics) WHERE key = ANY($2::text[])
-		), updated_at = now()
-		WHERE agent_id=$1 AND metrics - $2::text[] <> '{}'::jsonb`,
-		agentID, []string{"network_interfaces", "bbr", "clock_sync"}); err != nil {
-		return fmt.Errorf("clear agent live sample: %w", err)
+		UPDATE agent_live_state SET metrics = (metrics - $2::text[]) ||
+			CASE WHEN metrics->>'cpu_available' = 'true'
+				THEN jsonb_build_object('sampled_cpu_percent', metrics->'cpu_percent')
+				ELSE '{}'::jsonb END,
+			updated_at = now()
+		WHERE agent_id=$1 AND metrics ?| $2::text[]`, agentID, keys); err != nil {
+		return fmt.Errorf("clear agent live state probes: %w", err)
 	}
 	return nil
 }
