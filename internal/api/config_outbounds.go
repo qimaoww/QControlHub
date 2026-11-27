@@ -181,6 +181,10 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 			}
 			target, _ = native[key].(string)
 		}
+		if input.Operation == "modify" {
+			_, backups := serverconfig.ManagedOutboundBindingTargets(engine, config.Content)
+			input.FallbackTags = backups[input.InboundTag]
+		}
 		config.Content, err = serverconfig.BindManagedOutbound(engine, config.Content, input.InboundTag, input.InboundPort, target, state, input.FallbackTags...)
 		if err != nil {
 			writeError(w, 400, err.Error())

@@ -386,7 +386,7 @@ func TestMihomoInboundBindingSupportsOrderedFallbackExits(t *testing.T) {
 		t.Fatal(err)
 	}
 	updatedGroups, _ := updatedRoot["proxy-groups"].([]any)
-	if len(updatedGroups) != 1 || stringValue(mapValue(updatedGroups[0])["name"]) != managedBindingFallbackTag("first", 24111) {
+	if len(updatedGroups) != 1 || !slices.Equal(stringSliceValue(mapValue(updatedGroups[0])["proxies"]), []string{"backup-a", "backup-b"}) {
 		t.Fatalf("old Mihomo fallback group remained after rebinding: %#v", updatedGroups)
 	}
 	cleared, err := BindManagedOutbound(core.EngineMihomo, updated, "first", 24111, "primary", ManagedState{})
@@ -506,5 +506,51 @@ func TestNativeProtocolSwitchAndReferenceIdentity(t *testing.T) {
 	}
 	if !managedReferences(map[string]any{"sub-rules": map[string]any{"private": []any{"MATCH,qch-personal"}}}, "qch-personal") {
 		t.Fatal("nested native sub-rule dependency lost")
+	}
+}
+
+func TestFallbackGroupsFollowInboundLifecycle(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		t.Run(string(engine), func(t *testing.T) {
+			src := "listeners: [{name: first, type: http, port: 24111}]\nproxies: [{name: edge, type: direct}, {name: backup, type: direct}]\nrules: ['MATCH,DIRECT']\n"
+			if engine == core.EngineXray {
+				src = `{"inbounds":[{"tag":"first","port":24111,"protocol":"http"}],"outbounds":[{"tag":"edge","protocol":"freedom"},{"tag":"backup","protocol":"freedom"}],"observatory":{"subjectSelector":[]}}`
+			}
+			bind := func(source, name string, port int, primary string, backups ...string) string {
+				t.Helper()
+				result, err := BindManagedOutbound(engine, source, name, port, primary, ManagedState{}, backups...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return result
+			}
+			src = bind(src, "first", 24111, "edge", "backup")
+			// Rename and move the listener, then create a new listener with its old identity.
+			if engine == core.EngineXray {
+				src = strings.Replace(src, `"inbounds":[{"tag":"first","port":24111,"protocol":"http"}]`, `"inbounds":[{"tag":"moved","port":24112,"protocol":"http"},{"tag":"first","port":24111,"protocol":"http"}]`, 1)
+			} else {
+				src = strings.Replace(src, "[{name: first, type: http, port: 24111}]", "[{name: moved, type: http, port: 24112}, {name: first, type: http, port: 24111}]", 1)
+			}
+			src, err := ReconcilePresetInboundReferences(engine, src, "first", "moved")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src = bind(src, "first", 24111, "backup", "edge")
+			prim, fall := ManagedOutboundBindingTargets(engine, src)
+			if prim["moved"] != "edge" || !slices.Equal(fall["moved"], []string{"backup"}) || prim["first"] != "backup" {
+				t.Fatalf("sibling changed: %v %v", prim, fall)
+			}
+			src, err = ReconcilePresetInboundReferences(engine, src, "moved", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := bind(src, "first", 24111, "backup", "edge"); got != src {
+				t.Fatal("repeated bind changed source after deleting sibling")
+			}
+			cleared := bind(src, "first", 24111, "edge")
+			if strings.Contains(cleared, fallbackPrefix) {
+				t.Fatal("deleted or cleared listener left an orphan fallback group")
+			}
+		})
 	}
 }
