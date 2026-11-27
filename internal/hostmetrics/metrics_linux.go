@@ -18,30 +18,40 @@ const (
 	networkInterfaceCacheTTL = 30 * time.Second
 )
 
-// cpuUsagePercent converts two aggregate /proc/stat readings into a busy
-// percentage. Identical counters mean a tickless idle host consumed no CPU
-// time in the window, which reports as 0% rather than unavailable; counters
-// moving backwards cannot produce a trustworthy value.
-func cpuUsagePercent(previousTotal, previousIdle, total, idle uint64) (float64, bool) {
-	if total < previousTotal || idle < previousIdle {
-		return 0, false
+// Compute deltas before combining fields. Linux can revise iowait downwards.
+// Subtracting combined idle counters lets that revision cancel genuine idle
+// ticks. Steal is time the hypervisor did not give this node to execute.
+func (current procCPUTimes) usageSince(previous procCPUTimes) (float64, bool) {
+	const (
+		idle   = 3
+		iowait = 4
+		steal  = 7
+	)
+	var busy, total float64
+	for field, value := range current {
+		if value < previous[field] {
+			if field == iowait {
+				continue
+			}
+			return 0, false
+		}
+		ticks := float64(value - previous[field])
+		total += ticks
+		if field != idle && field != iowait && field != steal {
+			busy += ticks
+		}
 	}
-	totalDelta := total - previousTotal
-	idleDelta := idle - previousIdle
-	if idleDelta > totalDelta {
-		return 0, false
-	}
-	if totalDelta == 0 {
+	if total == 0 {
 		return 0, true
 	}
-	return float64(totalDelta-idleDelta) * 100 / float64(totalDelta), true
+	return busy * 100 / total, true
 }
 
 // Heartbeats and metrics pushes share this baseline. Only a complete
 // window from the same counter source and CPU capacity can produce a rate.
 func (sample *cpuSample) record(current cpuReading) {
 	previous := sample.reading
-	if previous.at.IsZero() || previous.quota != current.quota {
+	if previous.at.IsZero() || previous.quota != current.quota || previous.cgroupV1 != current.cgroupV1 {
 		*sample = cpuSample{reading: current}
 		return
 	}
@@ -49,18 +59,16 @@ func (sample *cpuSample) record(current cpuReading) {
 	if elapsed < minimumCPUSampleWindow {
 		return
 	}
-	sample.reading = current
+	*sample = cpuSample{reading: current}
 	if current.quota > 0 {
-		if current.total >= previous.total {
+		if current.usageUsec >= previous.usageUsec {
 			capacity := elapsed.Seconds() * 1_000_000 * current.quota
-			sample.percent = math.Min(100, float64(current.total-previous.total)*100/capacity)
+			sample.percent = math.Min(100, float64(current.usageUsec-previous.usageUsec)*100/capacity)
 			sample.available = true
 		}
 		return
 	}
-	if percent, ok := cpuUsagePercent(previous.total, previous.idle, current.total, current.idle); ok {
-		sample.percent, sample.available = percent, true
-	}
+	sample.percent, sample.available = current.proc.usageSince(previous.proc)
 }
 
 func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMetrics, metricSample, error) {
@@ -74,20 +82,20 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 
 	cpuRead := false
 	if contents, err := readFirstLineReuse(&next.scratch, "/proc/stat", 256<<10); err == nil {
-		total, idle, parseErr := parseCPUTimesData(contents)
+		times, parseErr := parseCPUTimesData(contents)
 		if parseErr != nil {
 			problems = append(problems, parseErr)
 		} else {
-			next.cpu.record(cpuReading{at: now, total: total, idle: idle})
+			next.cpu.record(cpuReading{at: time.Now(), proc: times})
 			cpuRead = true
 		}
 	} else {
 		problems = append(problems, fmt.Errorf("read CPU metrics: %w", err))
 	}
 	if !cpuRead {
-		usage, err := cgroupCPUUsage()
+		reading, err := cgroupCPUReading()
 		if err == nil {
-			next.cpu.record(cpuReading{at: now, total: usage, quota: cgroupCPUQuota()})
+			next.cpu.record(reading)
 			cpuRead = true
 		} else {
 			problems = append(problems, fmt.Errorf("read cgroup CPU metrics: %w", err))
@@ -95,6 +103,8 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 	}
 	if cpuRead {
 		metrics.CPUPercent, metrics.CPUAvailable = next.cpu.percent, next.cpu.available
+	} else {
+		next.cpu = cpuSample{}
 	}
 
 	memoryRead := false

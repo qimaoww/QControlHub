@@ -126,7 +126,7 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	// written to its own narrow table where the update can stay on-page. A
 	// heartbeat without metrics reports that this Agent can no longer probe.
 	if metricsState == nil {
-		if err := s.clearAgentLiveStateProbes(ctx, id); err != nil {
+		if err := s.clearAgentLiveSample(ctx, id); err != nil {
 			return err
 		}
 	} else if err := s.recordAgentLiveState(ctx, id, metricsState); err != nil {

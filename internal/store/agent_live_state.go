@@ -89,22 +89,17 @@ func decodeAgentMetrics(snapshot []byte, observedAddress string, metrics *core.H
 	return nil
 }
 
-// clearAgentLiveStateProbes drops the Agent-probed public addresses from the
-// stored snapshot.
-//
-// A heartbeat that carries no metrics means the Agent can no longer probe, so
-// addresses it probed earlier must stop being advertised. The network interface
-// snapshot is Agent-reported state as well and is retained, matching the merge
-// the single-table layout performed. Reports are serialized per Agent, so
-// rewriting the snapshot here cannot race another writer of the same row.
-func (s *Store) clearAgentLiveStateProbes(ctx context.Context, agentID string) error {
+// An empty heartbeat withdraws the live sample. Retain only the same
+// slow-changing sections that a compact report is allowed to omit.
+func (s *Store) clearAgentLiveSample(ctx context.Context, agentID string) error {
 	if _, err := s.pool.Exec(ctx, `
-		UPDATE agent_live_state
-		SET metrics = metrics - 'public_ipv4' - 'public_ipv6' - 'public_ipv4_source' - 'public_ipv6_source',
-		    updated_at = now()
-		WHERE agent_id=$1 AND metrics ?| ARRAY['public_ipv4','public_ipv6','public_ipv4_source','public_ipv6_source']`,
-		agentID); err != nil {
-		return fmt.Errorf("clear agent live state probes: %w", err)
+		UPDATE agent_live_state SET metrics = (
+			SELECT COALESCE(jsonb_object_agg(key, value), '{}'::jsonb)
+			FROM jsonb_each(metrics) WHERE key = ANY($2::text[])
+		), updated_at = now()
+		WHERE agent_id=$1 AND metrics - $2::text[] <> '{}'::jsonb`,
+		agentID, []string{"network_interfaces", "bbr", "clock_sync"}); err != nil {
+		return fmt.Errorf("clear agent live sample: %w", err)
 	}
 	return nil
 }
