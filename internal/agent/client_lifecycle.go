@@ -464,6 +464,10 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	outbox := newWireOutbox(16)
 	telemetryBaseline := newCompactTelemetryState()
 	var compactEnabled atomic.Bool
+	// Seed the first heartbeat. Only the metrics worker advances the CPU
+	// and network baselines after this, including during heartbeat bursts.
+	var latestHost atomic.Pointer[core.HostMetrics]
+	latestHost.Store(c.collectHostMetrics(sessionContext))
 
 	go func() {
 		for {
@@ -484,6 +488,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			message, ok := outbox.Pop(sessionContext)
 			if !ok {
 				return
+			}
+			if !c.prepareTelemetry(&message, latestHost.Load()) {
+				continue
 			}
 			if compactEnabled.Load() {
 				switch message.Type {
@@ -594,9 +601,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			case <-sessionContext.Done():
 				return
 			case <-metricsTrigger:
-				if msg, ok := c.buildMetricsMessage(sessionContext, true, nil); ok {
-					outbox.EnqueueMetric(msg)
-				}
+				latestHost.Store(c.collectHostMetrics(sessionContext))
+				extra := &core.HostMetrics{ClockSync: c.cachedClockSyncSnapshot(sessionContext), BBR: c.bbr.Cached()}
+				outbox.EnqueueMetric(core.WireMessage{Type: core.WireMetrics, Metrics: extra, TrafficUsage: c.traffic.Snapshot()})
 			}
 		}
 	}()

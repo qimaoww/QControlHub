@@ -531,11 +531,7 @@ func TestHeartbeatReportsCoreLogSourceAndLastDelivery(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	outgoing := make(chan core.WireMessage, 1)
-	if err := client.queueHeartbeat(ctx, outgoing); err != nil {
-		t.Fatalf("queueHeartbeat() error = %v", err)
-	}
-	message := <-outgoing
+	message := client.buildHeartbeatMessage(ctx)
 	unconfigured := message.Heartbeat.Runtime[core.EngineSingBox]
 	if unconfigured.CoreLogStatus != core.CoreLogStatusNotConfigured ||
 		unconfigured.CoreLogSource != core.CoreLogSourceFile || unconfigured.CoreLogLastAt != nil {
@@ -550,10 +546,7 @@ func TestHeartbeatReportsCoreLogSourceAndLastDelivery(t *testing.T) {
 	collector.kindStatus[core.EngineSingBox][core.CoreLogSourceJournalHost] = value
 	collector.status[core.EngineSingBox] = value
 	collector.mu.Unlock()
-	if err := client.queueHeartbeat(ctx, outgoing); err != nil {
-		t.Fatalf("queueHeartbeat() error = %v", err)
-	}
-	message = <-outgoing
+	message = client.buildHeartbeatMessage(ctx)
 	active := message.Heartbeat.Runtime[core.EngineSingBox]
 	if active.CoreLogStatus != core.CoreLogStatusActive || active.CoreLogSource != core.CoreLogSourceJournalHost {
 		t.Fatalf("delivered heartbeat state = %+v", active)

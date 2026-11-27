@@ -39,13 +39,7 @@ func (c *Client) buildHeartbeatMessage(ctx context.Context) core.WireMessage {
 			runtimeState[engine] = state
 		}
 	}
-	metrics, metricsErr := c.metrics.Collect(ctx)
-	if metricsErr != nil {
-		slog.Debug("host metrics collection was partial", "error", metricsErr)
-	}
-	metrics.ClockSync = c.cachedClockSync(ctx)
-	c.publicIP.applySnapshot(&metrics)
-	metrics.BBR = c.bbr.Collect(ctx)
+	metrics := core.HostMetrics{ClockSync: c.cachedClockSync(ctx), BBR: c.bbr.Collect(ctx)}
 	sharedInstances := c.executor.SharedInstanceStatuses(ctx)
 	if c.logs != nil {
 		logStates := c.logs.InstanceStatuses()
@@ -60,72 +54,57 @@ func (c *Client) buildHeartbeatMessage(ctx context.Context) core.WireMessage {
 	}
 	// An inactive instance can release its reserved ports only after the
 	// counter sample includes traffic received before the service stopped.
-	if c.traffic != nil {
-		c.traffic.collect(ctx, false)
+	for _, instance := range sharedInstances {
+		if c.traffic != nil && (instance.Status == "inactive" || instance.Status == "failed") {
+			c.traffic.collect(ctx, false)
+			break
+		}
 	}
 	c.diagnosticCapabilitiesMu.RLock()
 	diagnostics := c.diagnosticCapabilities
 	c.diagnosticCapabilitiesMu.RUnlock()
 	heartbeat := &core.HeartbeatRequest{
-		Diagnostics: &diagnostics,
-		Version:     c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
+		Diagnostics: &diagnostics, Metrics: &metrics,
+		Version: c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 		SharedInstances:     sharedInstances,
 		ProxyIngressReports: c.ingressReports(), ManagedProxies: readProxyReports(),
 	}
-	if metricsHaveData(metrics) || metrics.BBR != nil {
-		heartbeat.Metrics = &metrics
-	}
 	return core.WireMessage{Type: core.WireHeartbeat, Heartbeat: heartbeat}
 }
 
-func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMessage) error {
-	message := c.buildHeartbeatMessage(ctx)
-	select {
-	case outgoing <- message:
-		return nil
-	case <-ctx.Done():
-		return context.Cause(ctx)
+func (c *Client) collectHostMetrics(ctx context.Context) *core.HostMetrics {
+	sample, err := c.metrics.Collect(ctx)
+	if err != nil {
+		slog.Debug("host metrics collection was partial", "error", err)
 	}
+	return &sample
 }
 
-func (c *Client) buildMetricsMessage(ctx context.Context, nonBlockingClockSync bool, compact *compactTelemetryState) (core.WireMessage, bool) {
-	metrics, metricsErr := c.metrics.Collect(ctx)
-	if metricsErr != nil {
-		slog.Debug("host metrics collection was partial", "error", metricsErr)
+// The writer uses one complete host sample for both telemetry frame types.
+// A delayed heartbeat or queued metrics push cannot replay an earlier peak.
+// Keep the sample timestamp and network counters together even after clock steps.
+func (c *Client) prepareTelemetry(message *core.WireMessage, host *core.HostMetrics) bool {
+	var metrics **core.HostMetrics
+	switch message.Type {
+	case core.WireHeartbeat:
+		metrics = &message.Heartbeat.Metrics
+	case core.WireMetrics:
+		metrics = &message.Metrics
+	default:
+		return true
 	}
-	if nonBlockingClockSync {
-		metrics.ClockSync = c.cachedClockSyncSnapshot(ctx)
-	} else {
-		metrics.ClockSync = c.cachedClockSync(ctx)
+	sample := *host
+	if extra := *metrics; extra != nil {
+		sample.BBR, sample.ClockSync = extra.BBR, extra.ClockSync
 	}
-	if !metricsHaveData(metrics) {
-		return core.WireMessage{}, false
+	c.publicIP.applySnapshot(&sample)
+	if !metricsHaveData(sample) && sample.BBR == nil {
+		*metrics = nil
+		return message.Type == core.WireHeartbeat
 	}
-	c.publicIP.applySnapshot(&metrics)
-	metrics.BBR = c.bbr.Cached()
-	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
-	if compact != nil {
-		message = compact.CompactMetrics(message)
-	}
-	return message, true
-}
-
-// queueMetrics sends a lightweight metrics-only push between full heartbeats
-// so the panel's live resource values refresh at the configured cadence
-// instead of waiting for the heartbeat cycle. A partial sample carries CPUAvailable=false
-// so a previous percentage does not outlive a failed CPU measurement.
-func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMessage) error {
-	message, ok := c.buildMetricsMessage(ctx, false, nil)
-	if !ok {
-		return nil
-	}
-	select {
-	case outgoing <- message:
-		return nil
-	case <-ctx.Done():
-		return context.Cause(ctx)
-	}
+	*metrics = &sample
+	return true
 }
 
 // advertisedFeatures is identical across service managers: OpenRC nodes

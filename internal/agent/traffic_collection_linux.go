@@ -26,7 +26,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	}
 	manager.rulesDirty = manager.rulesDirty || forceRules
 	if len(manager.records) == 0 && !manager.rulesDirty {
-		manager.snapshot = nil
+		manager.snapshot.Store(nil)
 		return manager.saveLocked()
 	}
 	if manager.backend == nil {
@@ -81,6 +81,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		// cancelled inspection as an attribution failure that stops a share.
 		return manager.collectLocked(ctx, forceRules)
 	}
+	stopResults := map[sourceKey]error{}
 	sampledProcesses := map[sourceKey]processCheckpoint{}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
@@ -264,7 +265,12 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 					// deployed services remain deployable under listener quota protection.
 					if shared && manager.haltShare != nil && !errors.Is(err, os.ErrNotExist) {
 						manager.haltReason = "共享出口计量不可用，实例已保护性停止；请检查统计状态并重新部署"
-						if stopErr := manager.haltShare(ctx, record.Policy.Engine, record.Policy.SharedQuota.ID); stopErr != nil {
+						stopErr, attempted := stopResults[key]
+						if !attempted {
+							stopErr = manager.haltShare(ctx, key.engine, key.shareID)
+							stopResults[key] = stopErr
+						}
+						if stopErr != nil {
 							record.AccountingError += "; stop instance: " + stopErr.Error()
 						}
 					}

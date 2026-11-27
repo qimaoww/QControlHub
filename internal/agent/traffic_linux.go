@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -74,7 +75,7 @@ type TrafficManager struct {
 	statePath             string
 	backend               trafficCounterBackend
 	records               map[string]*trafficRecord
-	snapshot              []core.PortTrafficUsage
+	snapshot              atomic.Pointer[[]core.PortTrafficUsage] // immutable after publication
 	dirty                 bool
 	urgentDirty           bool
 	rulesDirty            bool
@@ -659,9 +660,10 @@ func (manager *TrafficManager) Snapshot() []core.PortTrafficUsage {
 	if manager == nil {
 		return nil
 	}
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	return append([]core.PortTrafficUsage(nil), manager.snapshot...)
+	if snapshot := manager.snapshot.Load(); snapshot != nil {
+		return slices.Clone(*snapshot)
+	}
+	return nil
 }
 
 func (manager *TrafficManager) collect(ctx context.Context, forceRules bool) {
