@@ -89,21 +89,18 @@ func decodeAgentMetrics(snapshot []byte, observedAddress string, metrics *core.H
 	return nil
 }
 
-// clearAgentLiveStateProbes drops the Agent-probed public addresses from the
-// stored snapshot.
-//
-// A heartbeat that carries no metrics means the Agent can no longer probe, so
-// addresses it probed earlier must stop being advertised. The network interface
-// snapshot is Agent-reported state as well and is retained, matching the merge
-// the single-table layout performed. Reports are serialized per Agent, so
-// rewriting the snapshot here cannot race another writer of the same row.
+// A metrics-less heartbeat withdraws live CPU and probed addresses. Keep
+// other metrics and the receipt time of the last actual sample. The history
+// recorder may still need the CPU reading that belonged to that timestamp.
 func (s *Store) clearAgentLiveStateProbes(ctx context.Context, agentID string) error {
+	keys := []string{"cpu_available", "cpu_percent", "public_ipv4", "public_ipv6", "public_ipv4_source", "public_ipv6_source"}
 	if _, err := s.pool.Exec(ctx, `
-		UPDATE agent_live_state
-		SET metrics = metrics - 'public_ipv4' - 'public_ipv6' - 'public_ipv4_source' - 'public_ipv6_source',
-		    updated_at = now()
-		WHERE agent_id=$1 AND metrics ?| ARRAY['public_ipv4','public_ipv6','public_ipv4_source','public_ipv6_source']`,
-		agentID); err != nil {
+		UPDATE agent_live_state SET metrics = (metrics - $2::text[]) ||
+			CASE WHEN metrics->>'cpu_available' = 'true'
+				THEN jsonb_build_object('sampled_cpu_percent', metrics->'cpu_percent')
+				ELSE '{}'::jsonb END,
+			updated_at = now()
+		WHERE agent_id=$1 AND metrics ?| $2::text[]`, agentID, keys); err != nil {
 		return fmt.Errorf("clear agent live state probes: %w", err)
 	}
 	return nil

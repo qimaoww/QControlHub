@@ -11,11 +11,15 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// Linux /proc/stat order through steal. Guest time is included in user/nice.
+type procCPUTimes [8]uint64
+
 type cpuReading struct {
-	at    time.Time
-	total uint64
-	idle  uint64
-	// Positive for cgroup usage in microseconds. Proc counters use ticks.
+	at        time.Time
+	proc      procCPUTimes
+	usageUsec uint64
+	cgroupV1  bool
+	// Positive for cgroup readings, in logical CPUs.
 	quota float64
 }
 

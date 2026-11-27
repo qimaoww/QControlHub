@@ -415,6 +415,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					lastStoredMetrics = mergeCompactHostMetrics(lastStoredMetrics, *message.Heartbeat.Metrics)
 					lastMetricsTrust = trust
 					lastMetricsStoredAt = now
+				} else {
+					lastStoredMetrics = nil
 				}
 				resetHeartbeatDeadline()
 				if capabilityChanged {
