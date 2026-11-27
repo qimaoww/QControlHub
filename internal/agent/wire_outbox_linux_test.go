@@ -22,9 +22,9 @@ func TestMetricsPushPublishesUnavailableCPUDuringWarmup(t *testing.T) {
 	client.metrics = NewMetricsCollector()
 	client.clockSync = &core.ClockSyncStatus{CheckedAt: time.Now(), Status: "synchronized"}
 	msg := core.WireMessage{Type: core.WireMetrics}
-	ok := client.prepareTelemetry(&msg, client.collectHostMetrics(context.Background()))
-	if !ok || msg.Metrics == nil || msg.Metrics.CPUAvailable || !msg.Metrics.MemoryAvailable {
-		t.Fatalf("first metrics push = %+v, sent=%t", msg.Metrics, ok)
+	client.prepareTelemetry(&msg, client.collectHostMetrics(context.Background()))
+	if msg.Metrics == nil || msg.Metrics.CPUAvailable || !msg.Metrics.MemoryAvailable {
+		t.Fatalf("first metrics push = %+v", msg.Metrics)
 	}
 }
 
@@ -257,9 +257,10 @@ func TestWriterReplacesQueuedPeakInBothFrameTypes(t *testing.T) {
 	outbox.EnqueueHeartbeat(core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{Metrics: peak}})
 	for range 2 {
 		msg, ok := outbox.Pop(context.Background())
-		if !ok || !client.prepareTelemetry(&msg, low) {
+		if !ok {
 			t.Fatal("queued telemetry lost")
 		}
+		client.prepareTelemetry(&msg, low)
 		got := msg.Metrics
 		if msg.Heartbeat != nil {
 			got = msg.Heartbeat.Metrics
@@ -267,5 +268,15 @@ func TestWriterReplacesQueuedPeakInBothFrameTypes(t *testing.T) {
 		if got.CPUPercent != low.CPUPercent || !got.CollectedAt.Equal(low.CollectedAt) {
 			t.Fatalf("%s replayed old sample %+v", msg.Type, got)
 		}
+	}
+}
+
+func TestCompletelyUnavailableTickClearsQueuedCPU(t *testing.T) {
+	peak := &core.HostMetrics{CPUAvailable: true, CPUPercent: 100}
+	msg := core.WireMessage{Type: core.WireMetrics, Metrics: peak}
+	client := &Client{}
+	client.prepareTelemetry(&msg, &core.HostMetrics{})
+	if msg.Metrics == nil || msg.Metrics.CPUAvailable || msg.Metrics.CPUPercent != 0 {
+		t.Fatalf("failed collection did not publish unavailable CPU: %+v", msg.Metrics)
 	}
 }

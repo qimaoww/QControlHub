@@ -489,9 +489,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			if !ok {
 				return
 			}
-			if !c.prepareTelemetry(&message, latestHost.Load()) {
-				continue
-			}
+			c.prepareTelemetry(&message, latestHost.Load())
 			if compactEnabled.Load() {
 				switch message.Type {
 				case core.WireHeartbeat:

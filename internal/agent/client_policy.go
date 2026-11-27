@@ -84,7 +84,7 @@ func (c *Client) collectHostMetrics(ctx context.Context) *core.HostMetrics {
 // The writer uses one complete host sample for both telemetry frame types.
 // A delayed heartbeat or queued metrics push cannot replay an earlier peak.
 // Keep the sample timestamp and network counters together even after clock steps.
-func (c *Client) prepareTelemetry(message *core.WireMessage, host *core.HostMetrics) bool {
+func (c *Client) prepareTelemetry(message *core.WireMessage, host *core.HostMetrics) {
 	var metrics **core.HostMetrics
 	switch message.Type {
 	case core.WireHeartbeat:
@@ -92,19 +92,19 @@ func (c *Client) prepareTelemetry(message *core.WireMessage, host *core.HostMetr
 	case core.WireMetrics:
 		metrics = &message.Metrics
 	default:
-		return true
+		return
 	}
 	sample := *host
 	if extra := *metrics; extra != nil {
 		sample.BBR, sample.ClockSync = extra.BBR, extra.ClockSync
 	}
 	c.publicIP.applySnapshot(&sample)
-	if !metricsHaveData(sample) && sample.BBR == nil {
+	if message.Type == core.WireHeartbeat && !metricsHaveData(sample) && sample.BBR == nil {
 		*metrics = nil
-		return message.Type == core.WireHeartbeat
+		return
 	}
+	// Even an entirely unavailable metrics tick must clear a previous CPU peak.
 	*metrics = &sample
-	return true
 }
 
 // advertisedFeatures is identical across service managers: OpenRC nodes
