@@ -703,3 +703,10 @@ strong, b { font-weight: 600; }
 .a-tools-measurement [data-tool=traceroute] table { min-width: 1000px; }
 .a-tools-measurement [data-tool=mtr] table { min-width: 1400px; }
 .a-tools-measurement [data-tool=ping] table { min-width: 600px; }
+
+.a-fallback-list { border: 1px solid var(--border); border-radius: var(--radius); }
+.a-fallback-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.a-fallback-row + .a-fallback-row { border-top: 1px solid var(--border); }
+.a-fallback-name { display: grid; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.a-fallback-row > .a-button { border-color: transparent; }
+.a-dialog form:has(.a-fallback-list) > .a-actions { justify-content: flex-end; }

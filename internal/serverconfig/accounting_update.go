@@ -153,8 +153,39 @@ func stripVerifiedAccounting(engine core.Engine, content, previous string) (stri
 			return "", err
 		}
 	}
+	if engine == core.EngineXray && mapValue(root["routing"]) != nil {
+		currentRouting, oldRouting := mapValue(root["routing"]), mapValue(old["routing"])
+		currentBalancers, _ := currentRouting["balancers"].([]any)
+		oldBalancers, _ := oldRouting["balancers"].([]any)
+		currentRouting["balancers"], err = strip(currentBalancers, oldBalancers, func(value any) string {
+			return stringValue(mapValue(value)["tag"])
+		})
+		if err != nil {
+			return "", err
+		}
+		if len(currentRouting["balancers"].([]any)) == 0 {
+			delete(currentRouting, "balancers")
+		}
+		key := xrayObservatoryKey(root)
+		if observer := mapValue(root[key]); observer != nil && observer["subjectSelector"] != nil {
+			selectors, _ := observer["subjectSelector"].([]any)
+			oldSelectors, _ := mapValue(old[key])["subjectSelector"].([]any)
+			observer["subjectSelector"], err = strip(selectors, oldSelectors, stringValue)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
 	currentRoute, oldRoute := mapValue(root[routeKey]), mapValue(old[routeKey])
 	target := func(v any) string { return stringValue(mapValue(v)[targetKey]) }
+	if engine == core.EngineXray {
+		target = func(v any) string {
+			if tag := stringValue(mapValue(v)["balancerTag"]); tag != "" {
+				return tag
+			}
+			return stringValue(mapValue(v)[targetKey])
+		}
+	}
 	if engine == core.EngineMihomo {
 		currentRoute, oldRoute = root, old
 		target = func(v any) string { return accountingMihomoTarget(stringValue(v)) }

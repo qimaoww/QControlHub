@@ -17,7 +17,7 @@ export function bindNodeOrdering(ctx, root, { enabled, order, save, redraw, save
     source = target = ''; touch = pointer = null; keyboard = false; preview = [];
     mark();
   };
-  const record = grip => grip.closest('article[data-agent-id],article[data-traffic-key],tr');
+  const record = grip => grip.closest('article[data-agent-id],article[data-traffic-key],[data-order-row],tr');
   const records = () => [...root.querySelectorAll('[data-node-drag]')].map(record).filter(item => item && item.getBoundingClientRect().width);
   const showPreview = () => {
     const items = records(), parents = new Set(items.map(item => item.parentElement));

@@ -46,7 +46,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	if route == nil {
 		route = map[string]any{}
 	}
-	if route["balancers"] != nil || (xray && root["endpoints"] != nil) {
+	if !xray && route["balancers"] != nil || xray && root["endpoints"] != nil {
 		return fmt.Errorf("balancer/endpoint routing requires explicit accounting mapping")
 	}
 	if root["reverse"] != nil {
@@ -148,6 +148,37 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	if xray && (!tagPattern.MatchString(apiTag) || byTag[apiTag] != nil || strings.HasPrefix(apiTag, accountingPrefix)) {
 		return fmt.Errorf("Xray API tag conflicts with proxy outbound tags")
 	}
+	balancers, ok := route["balancers"].([]any)
+	if route["balancers"] != nil && !ok {
+		return fmt.Errorf("Xray routing.balancers must be a list")
+	}
+	var originalBalancers, priorBalancers []any
+	balancersByTag := map[string]map[string]any{}
+	for _, raw := range balancers {
+		balancer := mapValue(raw)
+		tag := stringValue(balancer["tag"])
+		if strings.HasPrefix(tag, accountingPrefix) {
+			priorBalancers = append(priorBalancers, raw)
+			continue
+		}
+		if !xray || !managedFallbackTagPattern.MatchString(tag) {
+			return fmt.Errorf("balancer/endpoint routing requires explicit accounting mapping")
+		}
+		selectors := stringSliceValue(balancer["selector"])
+		fallback := stringValue(balancer["fallbackTag"])
+		validExit := func(tag string) bool {
+			out := byTag[tag]
+			return out != nil && out["protocol"] != "blackhole" && out["protocol"] != "dns"
+		}
+		if len(balancer) != 3 || len(selectors) != 1 || selectors[0] == fallback || !validExit(selectors[0]) || !validExit(fallback) || root[xrayObservatoryKey(root)] == nil {
+			return fmt.Errorf("Xray fallback balancer requires one valid primary, one fallback and an observatory")
+		}
+		if balancersByTag[tag] != nil {
+			return fmt.Errorf("Xray fallback balancer tags must be unique")
+		}
+		balancersByTag[tag] = balancer
+		originalBalancers = append(originalBalancers, raw)
+	}
 	defaultTag := stringValue(mapValue(originals[0])["tag"])
 	if !xray && stringValue(route["final"]) != "" {
 		defaultTag = stringValue(route["final"])
@@ -174,6 +205,10 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	for _, raw := range routeRules {
 		rule := mapValue(raw)
+		if xray && stringValue(rule["balancerTag"]) != "" && accountingBoundInbound(rule, true) != "" {
+			marked = true
+			continue
+		}
 		target := byTag[stringValue(rule[targetKey])]
 		if target == nil || target[kindKey] == "block" || target[kindKey] == "blackhole" || target[kindKey] == "dns" {
 			continue
@@ -226,11 +261,11 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		if rule == nil {
 			return fmt.Errorf("invalid routing rule")
 		}
-		if strings.HasPrefix(stringValue(rule[targetKey]), accountingPrefix) {
+		if strings.HasPrefix(stringValue(rule[targetKey]), accountingPrefix) || strings.HasPrefix(stringValue(rule["balancerTag"]), accountingPrefix) {
 			priorRules = append(priorRules, raw)
 			continue
 		}
-		if rule["balancerTag"] != nil || rule["rules"] != nil || rule["invert"] == true {
+		if rule["balancerTag"] != nil && (!xray || balancersByTag[stringValue(rule["balancerTag"])] == nil) || rule["rules"] != nil || rule["invert"] == true {
 			return fmt.Errorf("logical/balancer rules require explicit accounting mapping")
 		}
 		if !xray {
@@ -249,7 +284,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		originalRules = append(originalRules, raw)
 	}
-	var clones, legacyClones []any
+	var clones, legacyClones, generatedBalancers []any
 	seenPorts, seenTags := map[int]bool{}, map[string]bool{}
 	for index, raw := range inbounds {
 		in := mapValue(raw)
@@ -322,6 +357,31 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	for _, raw := range originalRules {
 		rule := mapValue(raw)
 		target := stringValue(rule[targetKey])
+		balancerTag := stringValue(rule["balancerTag"])
+		if xray && balancerTag != "" {
+			for _, entry := range plan.Ports {
+				if !accountingEntryMatches(rule[inKey], entry) {
+					continue
+				}
+				balancer := balancersByTag[balancerTag]
+				selectors := stringSliceValue(balancer["selector"])
+				cloneBalancer := map[string]any{
+					"tag":         accountingTag(entry.Port, balancerTag),
+					"selector":    []string{accountingTag(entry.Port, selectors[0])},
+					"fallbackTag": accountingTag(entry.Port, stringValue(balancer["fallbackTag"])),
+				}
+				generatedBalancers = append(generatedBalancers, cloneBalancer)
+				if err := observeXrayFallbackPrimary(root, accountingTag(entry.Port, selectors[0])); err != nil {
+					return err
+				}
+				cloneRule := cloneAccountingObject(rule)
+				cloneRule[inKey] = accountingEntryRuleTags(rule[inKey], entry)
+				cloneRule["balancerTag"] = accountingTag(entry.Port, balancerTag)
+				compiled = append(compiled, cloneRule)
+			}
+			compiled = append(compiled, raw)
+			continue
+		}
 		if target != "" && byTag[target] == nil && !(xray && target == apiTag) {
 			return fmt.Errorf("unknown route target %s", target)
 		}
@@ -376,7 +436,10 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	compiled = append(apiRules, compiled...)
 	route["rules"] = compiled
-	if !accountingGeneratedSubset(priorClones, append(legacyClones, clones...)) || !accountingGeneratedSubset(priorRules, compiled) {
+	if len(originalBalancers) > 0 {
+		route["balancers"] = append(originalBalancers, generatedBalancers...)
+	}
+	if !accountingGeneratedSubset(priorClones, append(legacyClones, clones...)) || !accountingGeneratedSubset(priorRules, compiled) || !accountingGeneratedSubset(priorBalancers, generatedBalancers) {
 		return fmt.Errorf("reserved accounting tags conflict with custom or edited routing; review configuration before migration")
 	}
 	root[routeKey] = route
@@ -469,11 +532,14 @@ func accountingBoundInbound(rule map[string]any, xray bool) string {
 		if rule[actionKey] != "field" {
 			return ""
 		}
+		if rule["balancerTag"] != nil && rule[targetKey] != nil {
+			return ""
+		}
 	} else if action := stringValue(rule[actionKey]); action != "" && action != "route" {
 		return ""
 	}
 	for key := range rule {
-		if key != inKey && key != targetKey && key != actionKey {
+		if key != inKey && key != targetKey && key != actionKey && !(xray && key == "balancerTag") {
 			return ""
 		}
 	}

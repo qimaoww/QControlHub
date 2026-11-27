@@ -59,6 +59,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 		InboundTag         string      `json:"inbound_tag"`
 		InboundPort        int         `json:"inbound_port"`
 		ReplacementTag     string      `json:"replacement_tag"`
+		FallbackTags       []string    `json:"fallback_tags"`
 		PresetBase         string      `json:"preset_base"`
 		InstallIfMissing   bool        `json:"install_if_missing"`
 		ExpectedInstanceID *string     `json:"expected_instance_id,omitempty"`
@@ -71,6 +72,10 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(w, r, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, 400, err.Error())
+		return
+	}
+	if len(input.FallbackTags) > 0 && (input.InboundTag == "" || (input.Operation != "add" && input.Operation != "bind")) {
+		writeError(w, http.StatusBadRequest, "备用出口仅用于添加并绑定或绑定已有出站")
 		return
 	}
 	config, err := s.store.AgentConfig(r.Context(), agent.ID, engine)
@@ -176,7 +181,7 @@ func (s *Server) saveManagedOutbound(w http.ResponseWriter, r *http.Request) {
 			}
 			target, _ = native[key].(string)
 		}
-		config.Content, err = serverconfig.BindManagedOutbound(engine, config.Content, input.InboundTag, input.InboundPort, target, state)
+		config.Content, err = serverconfig.BindManagedOutbound(engine, config.Content, input.InboundTag, input.InboundPort, target, state, input.FallbackTags...)
 		if err != nil {
 			writeError(w, 400, err.Error())
 			return

@@ -11,6 +11,10 @@ import (
 // exclusively from registrations and the capability registry.
 func (g *generator) annotateField(name string, field object) {
 	switch name {
+	case "fallback_tags":
+		field["type"] = []string{"array", "null"}
+		field["uniqueItems"] = true
+		field["description"] = "绑定入站时按优先级传备用出口标签，不含主出口。Mihomo 支持多个，内置 DIRECT 可作为主出口或备用出口。Xray 需配置 observatory 或 burstObservatory，最多一个备用出口。绑定时省略、null 或空数组均仅保留主出口。"
 	case "wireguard_additional_clients":
 		field["description"] = "首个客户端使用既有 wireguard_client_* 字段。此列表保存额外设备，每个公钥及隧道地址须唯一。修改多客户端入站时传完整列表，空数组移除全部额外设备。"
 	case "add_wireguard_client":
@@ -177,6 +181,11 @@ func (g *generator) annotate(op object, handler, method, path string) {
 				media["example"].(object)["plan_id"] = strings.Repeat("0", 64)
 				media["example"].(object)["task_id"] = "tsk_0123456789abcdef"
 			}
+		case "saveManagedOutbound":
+			fields := copySchema["properties"].(object)
+			fields["operation"] = object{"type": "string", "enum": []string{"add", "bind", "modify", "delete"}}
+			fields["version"] = object{"type": "integer", "minimum": 0}
+			media["example"] = object{"operation": "bind", "version": 1, "intent": "validate", "expected_instance_id": "", "inbound_tag": "http-in", "inbound_port": 8080, "tag": "DIRECT", "fallback_tags": []string{"hk-socks", "jp-vless"}}
 		case "saveServerInbound":
 			fields := copySchema["properties"].(object)
 			fields["operation"] = object{"type": "string", "enum": []string{"add", "modify", "delete"}}

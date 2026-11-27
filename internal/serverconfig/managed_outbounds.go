@@ -203,5 +203,5 @@ func MutateManagedOutbound(engine core.Engine, source, section, original, fragme
 }
 
 func managedInternalTag(tag string) bool {
-	return strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-")
+	return strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-") || managedFallbackTagPattern.MatchString(tag)
 }

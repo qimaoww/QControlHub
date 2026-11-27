@@ -30,22 +30,23 @@ type configInboundRowResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
-	SourceContent    string                           `json:"source_content,omitempty"`
-	OutboundBindings map[string]string                `json:"outbound_bindings"`
-	ClientSource     string                           `json:"client_source,omitempty"`
-	Deployment       store.ConfigManagementDeployment `json:"deployment"`
-	Management       serverconfig.ManagedState        `json:"management"`
-	ManagedObjects   []serverconfig.ManagedObject     `json:"managed_objects"`
-	AccountingPlan   *serverconfig.AccountingPlan     `json:"accounting_plan,omitempty"`
-	AccountingError  string                           `json:"accounting_error,omitempty"`
-	Agent            core.Agent                       `json:"agent"`
-	Config           *core.Config                     `json:"config,omitempty"`
-	Catalog          configschema.Catalog             `json:"catalog"`
-	Protocols        []serverconfig.Protocol          `json:"protocols"`
-	Inbounds         []serverconfig.Input             `json:"inbounds"`
-	InboundTargets   []configInboundTargetResource    `json:"inbound_targets"`
-	InboundRows      []configInboundRowResource       `json:"inbound_rows"`
-	PresentFields    map[string]bool                  `json:"present_fields"`
+	SourceContent     string                           `json:"source_content,omitempty"`
+	OutboundBindings  map[string]string                `json:"outbound_bindings"`
+	OutboundFallbacks map[string][]string              `json:"outbound_fallbacks"`
+	ClientSource      string                           `json:"client_source,omitempty"`
+	Deployment        store.ConfigManagementDeployment `json:"deployment"`
+	Management        serverconfig.ManagedState        `json:"management"`
+	ManagedObjects    []serverconfig.ManagedObject     `json:"managed_objects"`
+	AccountingPlan    *serverconfig.AccountingPlan     `json:"accounting_plan,omitempty"`
+	AccountingError   string                           `json:"accounting_error,omitempty"`
+	Agent             core.Agent                       `json:"agent"`
+	Config            *core.Config                     `json:"config,omitempty"`
+	Catalog           configschema.Catalog             `json:"catalog"`
+	Protocols         []serverconfig.Protocol          `json:"protocols"`
+	Inbounds          []serverconfig.Input             `json:"inbounds"`
+	InboundTargets    []configInboundTargetResource    `json:"inbound_targets"`
+	InboundRows       []configInboundRowResource       `json:"inbound_rows"`
+	PresentFields     map[string]bool                  `json:"present_fields"`
 }
 
 type configMutationResult struct {
@@ -213,7 +214,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		} else {
 			result.AccountingError = planErr.Error()
 		}
-		result.OutboundBindings = serverconfig.ManagedOutboundBindings(engine, config.Content)
+		result.OutboundBindings, result.OutboundFallbacks = serverconfig.ManagedOutboundBindingTargets(engine, source)
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
 		result.InboundRows = workspaceInboundRows(inventory, result.Inbounds)
 		// Selection for restrictions/deletion also includes native named
