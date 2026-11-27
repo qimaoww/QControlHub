@@ -80,6 +80,7 @@ func ReconcilePresetInboundReferences(engine core.Engine, content, previous, nex
 			}
 		}
 	}
+	retired := map[string]bool{}
 	for _, key := range keys {
 		section := mapValue(root[key])
 		rules, _ := section["rules"].([]any)
@@ -104,6 +105,9 @@ func ReconcilePresetInboundReferences(engine core.Engine, content, previous, nex
 				if len(parts) >= 3 && strings.TrimSpace(parts[0]) == "IN-NAME" && strings.TrimSpace(parts[1]) == previous {
 					changed = true
 					if next == "" {
+						if tag := strings.TrimSpace(parts[2]); managedFallbackTagPattern.MatchString(tag) {
+							retired[tag] = true
+						}
 						continue
 					}
 					parts[1] = next
@@ -115,6 +119,9 @@ func ReconcilePresetInboundReferences(engine core.Engine, content, previous, nex
 				rule := mapValue(raw)
 				value, present := rule[selector]
 				if present && containsName(value) {
+					if tag := stringValue(rule["balancerTag"]); engine == core.EngineXray && next == "" && managedFallbackTagPattern.MatchString(tag) {
+						retired[tag] = true
+					}
 					if rule["invert"] == true && next == "" {
 						return "", fmt.Errorf("入站 %s 被反向匹配规则引用，请在完整源码中同时调整", previous)
 					}
@@ -196,5 +203,5 @@ func ReconcilePresetInboundReferences(engine core.Engine, content, previous, nex
 			return "", err
 		}
 	}
-	return content, nil
+	return pruneFallbackGroups(engine, content, retired)
 }

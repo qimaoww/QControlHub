@@ -284,6 +284,15 @@
             },
             "type": "object"
           },
+          "outbound_fallbacks": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
           "present_fields": {
             "additionalProperties": {
               "type": "boolean"
@@ -10052,18 +10061,16 @@
           "content": {
             "application/json": {
               "example": {
-                "expected_instance_id": "example",
-                "fragment": "example",
-                "inbound_port": 1,
-                "inbound_tag": "example",
-                "install_if_missing": false,
-                "intent": "check-caddy",
-                "operation": "example",
-                "preset_base": "example",
-                "replacement_tag": "example",
-                "section": "example",
-                "snapshot_task_id": "example",
-                "tag": "example",
+                "expected_instance_id": "",
+                "fallback_tags": [
+                  "hk-socks",
+                  "jp-vless"
+                ],
+                "inbound_port": 8080,
+                "inbound_tag": "http-in",
+                "intent": "validate",
+                "operation": "bind",
+                "tag": "DIRECT",
                 "version": 1
               },
               "schema": {
@@ -10079,6 +10086,17 @@
                       }
                     ],
                     "description": "必须提供实际目标实例；配置任务主实例用空字符串，共享实例用实际 shr_… ID；不自动选择。"
+                  },
+                  "fallback_tags": {
+                    "description": "绑定入站时按优先级传备用出口标签，不含主出口。Mihomo 支持多个，内置 DIRECT 可作为主出口或备用出口。Xray 需配置 observatory 或 burstObservatory，最多一个备用出口。绑定时省略、null 或空数组均仅保留主出口。",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "uniqueItems": true
                   },
                   "fragment": {
                     "type": "string"
@@ -10098,6 +10116,12 @@
                     "$ref": "#/components/schemas/core_Action"
                   },
                   "operation": {
+                    "enum": [
+                      "add",
+                      "bind",
+                      "modify",
+                      "delete"
+                    ],
                     "type": "string"
                   },
                   "preset_base": {
@@ -10116,8 +10140,7 @@
                     "type": "string"
                   },
                   "version": {
-                    "description": "并发校验标识；编辑时回传最新读取值；不在界面展示内部编号。",
-                    "minimum": 1,
+                    "minimum": 0,
                     "type": "integer"
                   }
                 },
@@ -12466,6 +12489,7 @@
                     ]
                   },
                   "outbound_bindings": {},
+                  "outbound_fallbacks": {},
                   "present_fields": {},
                   "protocols": [
                     {
@@ -12897,6 +12921,7 @@
                     ]
                   },
                   "outbound_bindings": {},
+                  "outbound_fallbacks": {},
                   "present_fields": {},
                   "protocols": [
                     {

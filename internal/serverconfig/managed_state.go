@@ -360,7 +360,7 @@ func managedObjects(engine core.Engine, root map[string]any, state ManagedState)
 			if engine == core.EngineShadowsocksRust && root["server_port"] == nil {
 				tag = shadowsocksRustEntryTag(object, index)
 			}
-			if tag == "" || strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-") {
+			if tag == "" || strings.HasPrefix(tag, accountingPrefix) || strings.HasPrefix(tag, "qch-stat-") || !inbound && managedFallbackTagPattern.MatchString(tag) {
 				continue
 			}
 			if inbound && hiddenNativeInbound(engine, root, object, tag) {

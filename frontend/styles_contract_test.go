@@ -65,7 +65,8 @@ func TestNativeConsoleStylesRemainExact(t *testing.T) {
 	// the approved open tools layout, metric strips and readable route columns,
 	// plus wrapped record endpoints with independently centered direction markers,
 	// readable inbound port values at narrow desktop widths, and the responsive node proxy version rows with aligned retry feedback.
-	const expected = "c49273ab62756bdc575e5f68f2742f87bc626fd6d7fd861b7c210d669f5cdd1b"
+	// The per-inbound fallback list shares the native dialog and sorting controls.
+	const expected = "9865f543fbbad8d261391eafcefd000f27dfe32a7879a2e4dbc561d78e58f1f0"
 	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
 		t.Fatalf("native theme hash = %s, want approved surface %s", actual, expected)
 	}

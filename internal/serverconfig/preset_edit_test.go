@@ -3,6 +3,7 @@ package serverconfig
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -335,6 +336,73 @@ func TestMihomoGroupLifecycleRetainsGraphAndIndependentMarks(t *testing.T) {
 	}
 }
 
+func TestMihomoInboundBindingSupportsOrderedFallbackExits(t *testing.T) {
+	source := "listeners: [{name: first, type: http, port: 24111}]\nproxies: [{name: primary, type: direct}, {name: backup-a, type: direct}, {name: backup-b, type: direct}]\nrules: ['MATCH,DIRECT']\n"
+	bound, err := BindManagedOutbound(core.EngineMihomo, source, "first", 24111, "DIRECT", ManagedState{}, "backup-a", "backup-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := managedDocument(core.EngineMihomo, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag := managedBindingFallbackTag("first", 24111)
+	groups, _ := root["proxy-groups"].([]any)
+	var fallback map[string]any
+	for _, raw := range groups {
+		if managedTag(core.EngineMihomo, raw) == tag {
+			fallback = mapValue(raw)
+		}
+	}
+	if fallback == nil || fallback["type"] != "fallback" || strings.Join(stringSliceValue(fallback["proxies"]), ",") != "DIRECT,backup-a,backup-b" {
+		t.Fatalf("native fallback group = %#v", fallback)
+	}
+	plan, err := PrepareAccounting(core.EngineMihomo, bound)
+	if err != nil || !strings.Contains(plan.Content, "type: fallback") || !strings.Contains(plan.Content, "IN-NAME,first,") {
+		t.Fatalf("fallback group was not independently compiled: %v\n%s", err, plan.Content)
+	}
+	if err := ValidateIndependentEgress(core.EngineMihomo, bound); err != nil {
+		t.Fatalf("Mihomo rejected its generated native fallback group: %v", err)
+	}
+	reordered, err := BindManagedOutbound(core.EngineMihomo, bound, "first", 24111, "primary", ManagedState{}, "backup-b", "DIRECT", "backup-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	primary, backups := ManagedOutboundBindingTargets(core.EngineMihomo, reordered)
+	if primary["first"] != "primary" || strings.Join(backups["first"], ",") != "backup-b,DIRECT,backup-a" {
+		t.Fatalf("lost ordered binding: %v %v", primary, backups)
+	}
+	for _, tags := range [][]string{{"primary"}, {"missing"}, {"backup-b", "backup-b"}} {
+		if _, err := BindManagedOutbound(core.EngineMihomo, source, "first", 24111, "primary", ManagedState{}, tags...); err == nil {
+			t.Fatalf("accepted invalid fallback list %v", tags)
+		}
+	}
+	updated, err := BindManagedOutbound(core.EngineMihomo, reordered, "first", 24111, "backup-a", ManagedState{}, "backup-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedRoot, err := managedDocument(core.EngineMihomo, updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedGroups, _ := updatedRoot["proxy-groups"].([]any)
+	if len(updatedGroups) != 1 || !slices.Equal(stringSliceValue(mapValue(updatedGroups[0])["proxies"]), []string{"backup-a", "backup-b"}) {
+		t.Fatalf("old Mihomo fallback group remained after rebinding: %#v", updatedGroups)
+	}
+	cleared, err := BindManagedOutbound(core.EngineMihomo, updated, "first", 24111, "primary", ManagedState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clearedRoot, err := managedDocument(core.EngineMihomo, cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clearedGroups, _ := clearedRoot["proxy-groups"].([]any)
+	if len(clearedGroups) != 0 {
+		t.Fatalf("Mihomo fallback group remained after clearing fallback: %#v", clearedGroups)
+	}
+}
+
 func TestNativeOutboundBindingsKeepConditionalAndNeighborRoutes(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox} {
 		t.Run(string(engine), func(t *testing.T) {
@@ -357,6 +425,73 @@ func TestNativeOutboundBindingsKeepConditionalAndNeighborRoutes(t *testing.T) {
 	}
 }
 
+func TestXrayInboundBindingUsesNativeFallbackTag(t *testing.T) {
+	source := `{"inbounds":[{"tag":"first","port":24111,"protocol":"trojan"}],"outbounds":[{"tag":"primary","protocol":"freedom"},{"tag":"backup","protocol":"freedom"}],"observatory":{"subjectSelector":["primary"],"probeURL":"https://example.com/generate_204","probeInterval":"10s"}}`
+	bound, err := BindManagedOutbound(core.EngineXray, source, "first", 24111, "primary", ManagedState{}, "backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := managedDocument(core.EngineXray, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing := mapValue(root["routing"])
+	balancers, _ := routing["balancers"].([]any)
+	if len(balancers) != 1 || stringValue(mapValue(balancers[0])["fallbackTag"]) != "backup" {
+		t.Fatalf("native Xray fallback balancer = %#v", balancers)
+	}
+	if got := ManagedOutboundBindings(core.EngineXray, bound)["first"]; got != "primary" {
+		t.Fatalf("binding = %q", got)
+	}
+	_, backups := ManagedOutboundBindingTargets(core.EngineXray, bound)
+	if got := strings.Join(backups["first"], ","); got != "backup" {
+		t.Fatalf("fallbacks = %q", got)
+	}
+	plan, err := PrepareAccounting(core.EngineXray, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := managedDocument(core.EngineXray, plan.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(stringSliceValue(mapValue(compiled["observatory"])["subjectSelector"]), accountingTag(24111, "primary")) {
+		t.Fatal("the routed Xray primary has no health observations")
+	}
+	recovered, err := AccountingUpdateSource(core.EngineXray, plan.Content, bound)
+	if err != nil || strings.Contains(recovered, accountingPrefix) {
+		t.Fatalf("failed to strip generated fallback rules or probes: %v\n%s", err, recovered)
+	}
+	compiledRules, _ := mapValue(compiled["routing"])["rules"].([]any)
+	compiledBinding := false
+	for _, raw := range compiledRules {
+		rule := mapValue(raw)
+		if stringValue(rule["balancerTag"]) == accountingTag(24111, managedBindingFallbackTag("first", 24111)) {
+			compiledBinding = true
+		}
+	}
+	if len(plan.Ports) != 1 || plan.Ports[0].Mark == 0 || !compiledBinding {
+		t.Fatalf("fallback route was not port-isolated: %+v\n%s", plan.Ports, plan.Content)
+	}
+	if _, err := PrepareAccounting(core.EngineXray, plan.Content); err != nil {
+		t.Fatalf("compiled native fallback could not be planned again: %v", err)
+	}
+	cleared, err := BindManagedOutbound(core.EngineXray, bound, "first", 24111, "backup", ManagedState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clearedRoot, err := managedDocument(core.EngineXray, cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mapValue(clearedRoot["routing"])["balancers"].([]any)) != 0 {
+		t.Fatalf("Xray fallback balancer remained after clearing fallback: %#v", mapValue(clearedRoot["routing"])["balancers"])
+	}
+	if _, err := BindManagedOutbound(core.EngineXray, source, "first", 24111, "primary", ManagedState{}, "backup", "primary"); err == nil {
+		t.Fatal("accepted duplicate primary as fallback")
+	}
+}
+
 func TestNativeProtocolSwitchAndReferenceIdentity(t *testing.T) {
 	current := `{"tag":"edge","type":"vless","server":"old.example","uuid":"fixture","future":{"exact":9007199254740993}}`
 	before := `{"tag":"edge","type":"vless","server":"old.example","uuid":"fixture"}`
@@ -371,5 +506,51 @@ func TestNativeProtocolSwitchAndReferenceIdentity(t *testing.T) {
 	}
 	if !managedReferences(map[string]any{"sub-rules": map[string]any{"private": []any{"MATCH,qch-personal"}}}, "qch-personal") {
 		t.Fatal("nested native sub-rule dependency lost")
+	}
+}
+
+func TestFallbackGroupsFollowInboundLifecycle(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		t.Run(string(engine), func(t *testing.T) {
+			src := "listeners: [{name: first, type: http, port: 24111}]\nproxies: [{name: edge, type: direct}, {name: backup, type: direct}]\nrules: ['MATCH,DIRECT']\n"
+			if engine == core.EngineXray {
+				src = `{"inbounds":[{"tag":"first","port":24111,"protocol":"http"}],"outbounds":[{"tag":"edge","protocol":"freedom"},{"tag":"backup","protocol":"freedom"}],"observatory":{"subjectSelector":[]}}`
+			}
+			bind := func(source, name string, port int, primary string, backups ...string) string {
+				t.Helper()
+				result, err := BindManagedOutbound(engine, source, name, port, primary, ManagedState{}, backups...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return result
+			}
+			src = bind(src, "first", 24111, "edge", "backup")
+			// Rename and move the listener, then create a new listener with its old identity.
+			if engine == core.EngineXray {
+				src = strings.Replace(src, `"inbounds":[{"tag":"first","port":24111,"protocol":"http"}]`, `"inbounds":[{"tag":"moved","port":24112,"protocol":"http"},{"tag":"first","port":24111,"protocol":"http"}]`, 1)
+			} else {
+				src = strings.Replace(src, "[{name: first, type: http, port: 24111}]", "[{name: moved, type: http, port: 24112}, {name: first, type: http, port: 24111}]", 1)
+			}
+			src, err := ReconcilePresetInboundReferences(engine, src, "first", "moved")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src = bind(src, "first", 24111, "backup", "edge")
+			prim, fall := ManagedOutboundBindingTargets(engine, src)
+			if prim["moved"] != "edge" || !slices.Equal(fall["moved"], []string{"backup"}) || prim["first"] != "backup" {
+				t.Fatalf("sibling changed: %v %v", prim, fall)
+			}
+			src, err = ReconcilePresetInboundReferences(engine, src, "moved", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := bind(src, "first", 24111, "backup", "edge"); got != src {
+				t.Fatal("repeated bind changed source after deleting sibling")
+			}
+			cleared := bind(src, "first", 24111, "edge")
+			if strings.Contains(cleared, fallbackPrefix) {
+				t.Fatal("deleted or cleared listener left an orphan fallback group")
+			}
+		})
 	}
 }

@@ -52,10 +52,10 @@ func TestBindingPersistsSourceAndReusesUnchangedTask(t *testing.T) {
 				}
 				intent := "validate"
 				submissions := 100
-				bind := func(inbound string, port int, target string) configMutationResult {
+				bind := func(inbound string, port int, target string, fallbacks ...string) configMutationResult {
 					t.Helper()
 					var result configMutationResult
-					payload, _ := json.Marshal(map[string]any{"operation": "bind", "inbound_tag": inbound, "inbound_port": port, "tag": target, "version": saved.Version, "intent": intent})
+					payload, _ := json.Marshal(map[string]any{"operation": "bind", "inbound_tag": inbound, "inbound_port": port, "tag": target, "fallback_tags": fallbacks, "version": saved.Version, "intent": intent})
 					request := httptest.NewRequest("POST", "/api/v1"+base+"/outbounds", bytes.NewReader(payload))
 					request.AddCookie(client.cookie)
 					request.Header.Set(csrfHeader, client.csrf)
@@ -139,6 +139,18 @@ func TestBindingPersistsSourceAndReusesUnchangedTask(t *testing.T) {
 				}
 				if exits != expected {
 					t.Fatalf("user outbounds changed: %d", exits)
+				}
+				if engine == core.EngineMihomo {
+					ordered := bind("first", 24111, "DIRECT", "same", "edge")
+					completeConfigScopeAPITask(t, ctx, db, ordered.Task)
+					client.call("GET", base+"/workspace", nil, 200, &workspace)
+					if workspace.OutboundBindings["first"] != "DIRECT" || workspace.OutboundBindings["second"] != "edge" || strings.Join(workspace.OutboundFallbacks["first"], ",") != "same,edge" {
+						t.Fatalf("workspace lost binding priority or sibling: %v %v", workspace.OutboundBindings, workspace.OutboundFallbacks)
+					}
+					again := bind("first", 24111, "DIRECT", "same", "edge")
+					if !again.Task.Reused || again.Config.Version != ordered.Config.Version {
+						t.Fatal("identical fallback order was not idempotent")
+					}
 				}
 				if !shared {
 					foreign.call("GET", base+"/workspace", nil, 404, nil)

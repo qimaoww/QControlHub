@@ -1,4 +1,5 @@
 import { managedCoreBlockReason } from "../modules/managed-core-state.js";
+import { outboundFallbackPicker } from './outbound-fallbacks.js';
 import { bindJSONEditor } from './json-editor.js';
 import { readableConfigSource } from '../modules/code-format.js';
 import { preparedDialog, loadingForm } from "./loading.js";
@@ -571,6 +572,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
       const selection = current, config = selection.config || {version:0};
       const snapshot = selection.snapshot_task_id, snapshotQuery = snapshot ? `?snapshot=${pathID(snapshot)}` : '';
       const selecting=operation==='bind', deleting=operation==='delete';
+      if (selecting) box.classList.remove('wide');
       const sections=engine==='mihomo'?[['proxies','代理'],['proxy-groups','代理组']]:[['outbounds','出站']];
       const sectionName=object?.section||sections[0][0];
       let initialObject, content=engine==='mihomo'?`name: ${inbound?`exit-${inbound.port}`:'new-exit'}\ntype: direct\n`:JSON.stringify({tag:inbound?`exit-${inbound.port}`:'new-exit',[engine==='xray'?'protocol':'type']:engine==='xray'?'freedom':'direct'},null,2);
@@ -582,10 +584,16 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         content=selected.fragment; initialObject=selected.object?JSON.parse(selected.object):undefined;
       }
       const entries=list(current.managed_objects).filter(item=>!item.inbound&&item.enabled&&!['dns','blackhole','block'].includes(item.kind));
+      if (inbound && engine === 'mihomo' && !entries.some(item => item.tag === 'DIRECT')) entries.unshift({tag:'DIRECT', kind:'direct'});
+      const primary = selecting ? outboundBinding(inbound) : '';
+      const fallbackPicker = inbound && ['add','bind'].includes(operation) && ['mihomo','xray'].includes(engine)
+        ? outboundFallbackPicker(ctx, entries, current.outbound_fallbacks?.[inbound.tag] || [], primary, engine === 'mihomo')
+        : null;
       const form=ctx.form([
-        inbound&&muted(`${agent.name} · ${engine} · ${agent.shared_allocation?'当前共享实例':'主实例'} · 入站 ${inbound.tag} · ${inbound.port}`),
-        selecting?field('已有出站','tag',outboundBinding(inbound),{options:[['','请选择出站'],...entries.map(item=>[item.tag,item.tag])],required:true}):deleting?stack(muted(`删除 ${object.tag}？`),replacementField(object)):field('配置区域','section',sectionName,{options:sections,disabled:Boolean(object)}),
-        group('出站配置',field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',readableConfigSource(content,engine),{multiline:12,spellcheck:false,readonly:selecting||deleting}), selecting||deleting||sectionName==='proxy-groups'),
+        inbound&&muted(`${agent.name} · ${engine} · ${agent.shared_allocation?'当前共享实例':'主实例'} · 入站 ${inbound.tag} · 端口 ${inbound.port}`),
+        selecting?field('主出口','tag',primary,{options:[['','请选择出站'],...entries.map(item=>[item.tag,item.tag === 'DIRECT' && engine === 'mihomo' ? '直连出口 · DIRECT' : item.tag])],required:true}):deleting?stack(muted(`删除 ${object.tag}？`),replacementField(object)):field('配置区域','section',sectionName,{options:sections,disabled:Boolean(object)}),
+        fallbackPicker?.element,
+        group('出站配置',field(engine==='mihomo'?'出站 YAML':'出站 JSON','fragment',readableConfigSource(content,engine),{multiline:12,spellcheck:false,readonly:selecting||deleting}), deleting||sectionName==='proxy-groups'),
         object&&operation==='modify'&&muted('保存会更新所有引用此出站的入站。'),intents(),
       ],'保存并部署',async values=>{
         const raw=!selecting&&!deleting&&activePreset()?await preset.verifiedContent():values.fragment||'';
@@ -594,9 +602,13 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         if(!await preparing(values.intent))return;
         requireSelection(selection);
         const result=await write(`${base}/outbounds`,{version:config.version,snapshot_task_id:snapshot,intent:values.intent,section:object?.section||values.section||sectionName,tag:selecting?values.tag:object?.tag||'',fragment:deleting||selecting?'':raw,preset_base:operation==='modify'&&activePreset()?preset.baseline():'',replacement_tag:values.replacement_tag||'',operation,
-          ...(['add','bind'].includes(operation)&&inbound?{inbound_tag:inbound.tag,inbound_port:inbound.port}:{})},box);
+          ...(['add','bind'].includes(operation)&&inbound?{inbound_tag:inbound.tag,inbound_port:inbound.port,fallback_tags:fallbackPicker?.values() || []}:{})},box);
         await committed(result,box);
       });
+      if (selecting) {
+        form.elements.tag.addEventListener('change', () => fallbackPicker?.setPrimary(form.elements.tag.value));
+        form.querySelector('button[type=submit]').parentElement.prepend(button('取消', () => box.onRequestClose()));
+      }
       form.elements.fragment.setAttribute('aria-label',engine==='mihomo'?'出站配置 YAML':'出站配置 JSON');
       bindJSONEditor(form.elements.fragment, engine==='mihomo'?'YAML':'JSON', ctx.signal);
       if(deleting)form.querySelector('button[type=submit]').classList.add('danger');
@@ -606,7 +618,10 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         let epoch=0;
         const preview=async()=>{
           const tag=form.elements.tag.value, selected=entries.find(item=>item.tag===tag), request=++epoch;
-          form.elements.fragment.value='';if(!selected)return;
+          form.elements.fragment.value='';
+          form.elements.fragment.closest('details').hidden = !selected;
+          if (selected && !selected.section) form.elements.fragment.value = '# DIRECT 是 Mihomo 内置的直连出口。';
+          if(!selected?.section)return;
           try {
             const result=await ctx.api(`${base}/outbounds/${pathID(selected.section)}/${pathID(tag)}${snapshotQuery}`);
             if(!ctx.current()||!box.isConnected||request!==epoch||!sameSelection(current,selection))return;
@@ -705,7 +720,7 @@ export function configStudio(ctx, { agent, engine, base, workspace, getDraft, ac
         writable&&row.target_tag&&button('删除',()=>removeInbound({tag:row.target_tag,port:row.port},selection),{tone:'danger'}),
         writable&&target&&['xray','sing-box','mihomo'].includes(engine)&&button('出站',()=>{
           let binding='';try{requireSelection(selection);binding=outboundBinding(target);}catch(error){ctx.announce(error.message,'error');return;}
-          const chooser=ctx.dialog(`${target.tag} · 出站操作`,actions(['add','bind','modify','delete'].map((operation,index)=>button(['添加并绑定','绑定已有出站','修改绑定出站','删除绑定出站'][index],()=>{chooser.close();void outbound(target,operation,selection);},{disabled:['modify','delete'].includes(operation)&&!binding}))));
+          const chooser=ctx.dialog(`${target.tag} · 出站操作`,actions(['add','bind','modify','delete'].map((operation,index)=>button(['添加并绑定','绑定已有出站','修改绑定出站','删除绑定出站'][index],()=>{chooser.close();void outbound(target,operation,selection);},{disabled:['modify','delete'].includes(operation)&&!outboundObjects.some(item=>item.tag===binding)}))));
         }),
         writable&&saved&&target&&engine==='ss-rust'&&button('端口配置项',()=>commonEditor(target,selection)),
       )];

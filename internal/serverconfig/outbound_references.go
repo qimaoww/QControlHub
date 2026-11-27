@@ -97,6 +97,19 @@ func RewriteOutboundReferences(engine core.Engine, source, previous, next string
 				v[k] = changed
 			}
 		case []any:
+			if key == "subjectSelector" && engine == core.EngineXray {
+				covers := func(tag string) bool {
+					for _, raw := range v {
+						if prefix, ok := raw.(string); ok && strings.HasPrefix(tag, prefix) {
+							return true
+						}
+					}
+					return false
+				}
+				if covers(previous) && !covers(next) {
+					return append(v, next), nil
+				}
+			}
 			if key == "selector" && engine == core.EngineXray {
 				matched := false
 				for _, item := range v {
