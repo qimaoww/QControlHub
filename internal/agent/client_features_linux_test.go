@@ -87,13 +87,9 @@ func TestClientHeartbeatAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 			metrics:  NewMetricsCollector(),
 			traffic:  NewTrafficManager(statePath),
 		}
-		outgoing := make(chan core.WireMessage, 1)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := client.queueHeartbeat(ctx, outgoing); err != nil {
-			t.Fatalf("queueHeartbeat() error = %v", err)
-		}
-		message := <-outgoing
+		message := client.buildHeartbeatMessage(ctx)
 		if message.Heartbeat == nil {
 			t.Fatal("heartbeat message has no payload")
 		}

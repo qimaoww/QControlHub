@@ -21,9 +21,10 @@ func TestMetricsPushPublishesUnavailableCPUDuringWarmup(t *testing.T) {
 	client := reconnectTestClient(t)
 	client.metrics = NewMetricsCollector()
 	client.clockSync = &core.ClockSyncStatus{CheckedAt: time.Now(), Status: "synchronized"}
-	msg, ok := client.buildMetricsMessage(context.Background(), true, nil)
-	if !ok || msg.Metrics == nil || msg.Metrics.CPUAvailable || !msg.Metrics.MemoryAvailable {
-		t.Fatalf("first metrics push = %+v, sent=%t", msg.Metrics, ok)
+	msg := core.WireMessage{Type: core.WireMetrics}
+	client.prepareTelemetry(&msg, client.collectHostMetrics(context.Background()))
+	if msg.Metrics == nil || msg.Metrics.CPUAvailable || !msg.Metrics.MemoryAvailable {
+		t.Fatalf("first metrics push = %+v", msg.Metrics)
 	}
 }
 
@@ -110,5 +111,172 @@ func TestRunWebSocketCompactTelemetryWriterResync(t *testing.T) {
 		t.Fatalf("server error: %v", err)
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for runWebSocket WireTelemetryResync -> TelemetryFullSync")
+	}
+}
+
+// Runtime refreshes can arrive between any two metrics ticks. A burst must
+// leave the CPU measurement window intact, including its original timestamp.
+func TestWebSocketHeartbeatsShareOneHostSampleBetweenMetricsTicks(t *testing.T) {
+	client := reconnectTestClient(t)
+	client.config.HeartbeatEvery, client.config.MetricsEvery = time.Hour, time.Hour
+	client.runtimeRefresh = make(chan struct{}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"qcontrolhub.agent.v1"}})
+		if err != nil {
+			result <- err
+			return
+		}
+		defer conn.CloseNow()
+		var initial time.Time
+		for i := 0; i < 3; i++ {
+			var msg core.WireMessage
+			if err := wsjson.Read(ctx, conn, &msg); err != nil {
+				result <- err
+				return
+			}
+			if msg.Heartbeat == nil || msg.Heartbeat.Metrics == nil || msg.Heartbeat.Metrics.CollectedAt.IsZero() {
+				result <- fmt.Errorf("missing host sample in heartbeat %d", i)
+				return
+			}
+			at := msg.Heartbeat.Metrics.CollectedAt
+			if i == 0 {
+				initial = at
+			} else if !at.Equal(initial) {
+				result <- fmt.Errorf("runtime refresh advanced the sample from %s to %s before the metrics tick", initial, at)
+				return
+			}
+			if i < 2 {
+				client.runtimeRefresh <- struct{}{}
+			}
+		}
+		result <- nil
+	}))
+	defer server.Close()
+	client.websocketURL = "ws" + strings.TrimPrefix(server.URL, "http")
+	_ = client.runWebSocket(ctx)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+type scriptedHostSamples chan core.HostMetrics
+
+func (samples scriptedHostSamples) Collect(ctx context.Context) (core.HostMetrics, error) {
+	select {
+	case sample := <-samples:
+		return sample, nil
+	case <-ctx.Done():
+		return core.HostMetrics{}, ctx.Err()
+	}
+}
+
+func TestWebSocketPublishesCPURecoveryWhileTrafficProbeIsBlocked(t *testing.T) {
+	client := reconnectTestClient(t)
+	client.traffic = &TrafficManager{}
+	client.config.HeartbeatEvery, client.config.MetricsEvery = time.Hour, 20*time.Millisecond
+	client.runtimeRefresh = make(chan struct{}, 1)
+	samples := make(scriptedHostSamples, 1)
+	client.metrics = samples
+	peak := core.HostMetrics{CPUAvailable: true, CPUPercent: 100, CollectedAt: time.Unix(200, 0)}
+	// The node clock steps backwards during recovery.
+	low := core.HostMetrics{CPUAvailable: true, CPUPercent: 7, CollectedAt: time.Unix(190, 0)}
+	missing := core.HostMetrics{MemoryAvailable: true, CollectedAt: time.Unix(191, 0)}
+	samples <- peak
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{"qcontrolhub.agent.v1"}})
+		if err != nil {
+			result <- err
+			return
+		}
+		defer conn.CloseNow()
+		read := func(kind string, want core.HostMetrics) error {
+			var msg core.WireMessage
+			if err := wsjson.Read(ctx, conn, &msg); err != nil {
+				return err
+			}
+			got := msg.Metrics
+			if msg.Heartbeat != nil {
+				got = msg.Heartbeat.Metrics
+			}
+			if msg.Type != kind || got == nil || got.CPUAvailable != want.CPUAvailable ||
+				got.CPUPercent != want.CPUPercent || !got.CollectedAt.Equal(want.CollectedAt) {
+				return fmt.Errorf("received %s %+v, want %s %+v", msg.Type, got, kind, want)
+			}
+			return nil
+		}
+		if err := read(core.WireHeartbeat, peak); err != nil {
+			result <- err
+			return
+		}
+		client.traffic.mu.Lock()
+		defer client.traffic.mu.Unlock()
+		samples <- low
+		if err := read(core.WireMetrics, low); err != nil {
+			result <- err
+			return
+		}
+		client.runtimeRefresh <- struct{}{}
+		if err := read(core.WireHeartbeat, low); err != nil {
+			result <- err
+			return
+		}
+		samples <- missing
+		result <- read(core.WireMetrics, missing)
+	}))
+	defer server.Close()
+	client.websocketURL = "ws" + strings.TrimPrefix(server.URL, "http")
+	_ = client.runWebSocket(ctx)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func TestWriterReplacesQueuedPeakInBothFrameTypes(t *testing.T) {
+	client := &Client{}
+	peak := &core.HostMetrics{CPUAvailable: true, CPUPercent: 100, CollectedAt: time.Unix(200, 0)}
+	low := &core.HostMetrics{CPUAvailable: true, CPUPercent: 7, CollectedAt: time.Unix(190, 0)}
+	outbox := newWireOutbox(1)
+	outbox.EnqueueMetric(core.WireMessage{Type: core.WireMetrics, Metrics: peak})
+	outbox.EnqueueHeartbeat(core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{Metrics: peak}})
+	for range 2 {
+		msg, ok := outbox.Pop(context.Background())
+		if !ok {
+			t.Fatal("queued telemetry lost")
+		}
+		client.prepareTelemetry(&msg, low)
+		got := msg.Metrics
+		if msg.Heartbeat != nil {
+			got = msg.Heartbeat.Metrics
+		}
+		if got.CPUPercent != low.CPUPercent || !got.CollectedAt.Equal(low.CollectedAt) {
+			t.Fatalf("%s replayed old sample %+v", msg.Type, got)
+		}
+	}
+}
+
+func TestCompletelyUnavailableTickClearsQueuedCPU(t *testing.T) {
+	peak := &core.HostMetrics{CPUAvailable: true, CPUPercent: 100}
+	msg := core.WireMessage{Type: core.WireMetrics, Metrics: peak}
+	client := &Client{}
+	client.prepareTelemetry(&msg, &core.HostMetrics{})
+	if msg.Metrics == nil || msg.Metrics.CPUAvailable || msg.Metrics.CPUPercent != 0 {
+		t.Fatalf("failed collection did not publish unavailable CPU: %+v", msg.Metrics)
 	}
 }

@@ -17,14 +17,15 @@ func (manager *TrafficManager) settledSnapshot(ctx context.Context, task core.Ta
 	defer manager.mu.Unlock()
 	err := manager.collectLocked(ctx, false)
 	settled := err == nil
-	for _, usage := range manager.snapshot {
+	snapshot := manager.Snapshot()
+	for _, usage := range snapshot {
 		record := manager.records[usage.PolicyID]
 		if record != nil && record.Policy.Engine == task.Engine &&
 			sharedQuotaID(record.Policy.SharedQuota) == task.SharedTrafficID && !usage.EnforcementAvailable {
 			settled = false
 		}
 	}
-	return append([]core.PortTrafficUsage(nil), manager.snapshot...), settled
+	return snapshot, settled
 }
 
 func (manager *TrafficManager) refreshSnapshotLocked(available bool, message string) {
@@ -59,7 +60,7 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 			ShareID:    sharedQuotaID(record.Policy.SharedQuota), ShareUsedBytes: record.ShareUsedBytes,
 		})
 	}
-	manager.snapshot = result
+	manager.snapshot.Store(&result)
 }
 
 func cloneTrafficAccounting(accounting *core.TrafficAccounting) *core.TrafficAccounting {

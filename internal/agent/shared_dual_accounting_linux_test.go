@@ -146,8 +146,8 @@ func TestSharedDualAccountingScopesBothLegsByInstance(t *testing.T) {
 	if s := m.Snapshot(); s[0].EnforcementAvailable || s[0].UsedBytes != 1930 || !s[2].EnforcementAvailable {
 		t.Fatalf("failed sample modified totals or other user: %+v", s)
 	}
-	if len(stopped) == 0 {
-		t.Fatal("invalid attribution left shared instance running")
+	if len(stopped) != 1 || stopped[0] != policies[0].SharedQuota.ID {
+		t.Fatalf("protective stops for one failed allocation in one sample = %v, want one", stopped)
 	}
 	if _, settled := m.settledSnapshot(context.Background(), core.Task{Engine: core.EngineSingBox, SharedTrafficID: policies[0].SharedQuota.ID}); settled {
 		t.Fatal("failed source authorized final port release")
@@ -371,5 +371,27 @@ func TestSharedAccountingDoesNotReadAnUncommittedDeployment(t *testing.T) {
 	_, err = e.sharedAccounting(context.Background(), core.EngineSingBox, share)
 	if errors.Is(err, errSharedAccountingTransition) {
 		t.Fatal("sampling did not resume after deployment")
+	}
+}
+
+func TestTelemetryReadsPublishedTrafficWhileAccountingIsBusy(t *testing.T) {
+	manager, _, policies, _ := sharedTrafficFixture(t)
+	if err := manager.SetPolicies(context.Background(), policies, policies[0].AgentID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The accounting worker holds mu across nftables and service inspection.
+	// A blocked host command must not pin the last reported CPU value.
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	read := make(chan []core.PortTrafficUsage, 1)
+	go func() { read <- manager.Snapshot() }()
+	select {
+	case usage := <-read:
+		if len(usage) != len(policies) {
+			t.Fatalf("published %d policies, want %d", len(usage), len(policies))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reading telemetry blocked on traffic collection")
 	}
 }

@@ -60,6 +60,10 @@ type completedTask struct {
 	IPQuality        *core.IPQualityResult      `json:"ip_quality,omitempty"`
 }
 
+type hostMetricsSampler interface {
+	Collect(context.Context) (core.HostMetrics, error)
+}
+
 type Client struct {
 	diagnostics              *networkdiag.Manager
 	diagnosticRefreshMu      sync.Mutex
@@ -70,7 +74,7 @@ type Client struct {
 	http                     *http.Client
 	creds                    credentials
 	websocketURL             string
-	metrics                  *MetricsCollector
+	metrics                  hostMetricsSampler
 	traffic                  *TrafficManager
 	mainland                 *MainlandAccessManager
 	logs                     *CoreLogCollector

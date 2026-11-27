@@ -47,8 +47,7 @@ func (current procCPUTimes) usageSince(previous procCPUTimes) (float64, bool) {
 	return busy * 100 / total, true
 }
 
-// Heartbeats and metrics pushes share this baseline. Only a complete
-// window from the same counter source and CPU capacity can produce a rate.
+// Only a complete window from the same counter source and CPU capacity can produce a rate.
 func (sample *cpuSample) record(current cpuReading) {
 	previous := sample.reading
 	if previous.at.IsZero() || previous.quota != current.quota || previous.cgroupV1 != current.cgroupV1 {
