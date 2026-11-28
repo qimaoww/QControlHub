@@ -22,7 +22,7 @@ export async function testInboundDeploymentRuntime() {
       const region = test.root.querySelector("[data-deployment-status]");
       assert(region.textContent.includes("内核运行") && region.closest(".a-card-head")?.querySelector("h2")?.textContent === "入站配置", "runtime state is detached from the inbound heading");
       const row = test.row("second");
-      assert(row.cells[0].textContent === "21002" && row.cells[3].contains(failureButton(test)) && row.cells[3].innerText === "部署失败", "failed deployment is outside the status column or still claims enabled");
+      assert(row.cells[0].textContent === "21002" && row.cells[3].contains(failureButton(test)) && row.cells[3].innerText === "启用 · 部署失败", "failed deployment hid the enabled target state or left the status column");
       assert(failureButton(test).getBoundingClientRect().width < 140, "failure button stretches across the status column");
       failureButton(test).click();
       await waitFor(()=>test.topDialog()?.textContent.includes(test.taskError), "clicking failed port did not read its actual failure reason");
@@ -44,14 +44,29 @@ export async function testInboundDeploymentRuntime() {
       if (engine === "xray") {
         const anchor = (cell,index) => cell.getBoundingClientRect()[index === 3 && matchMedia("(max-width: 48rem)").matches ? "right" : "left"];
         const positions = [...row.cells].map(anchor);
-        for (const [status, label] of [["pending","等待执行"], ["running","部署中"], ["canceled","部署已取消"], ["succeeded","启用"]]) {
+        for (const [status, label] of [["pending","启用 · 等待执行"], ["running","启用 · 部署中"], ["canceled","启用 · 部署已取消"], ["succeeded","启用"]]) {
           test.taskStatus = status;
-          await waitFor(()=>row.cells[3].innerText === label, `deployment transition to ${label} did not replace the old status`);
+          await waitFor(()=>row.cells[3].innerText === label, `deployment transition to ${label} did not preserve the enabled target`);
           assert(![...region.querySelectorAll(".a-badge")].some(item=>!item.closest("[hidden]") && item.textContent === "已部署"), "successful deployment retained a duplicate applied badge");
           assert([...row.cells].every((cell,index)=>Math.abs(anchor(cell,index)-positions[index])<1), "deployment state changes shift the inbound columns");
         }
         test.deploymentState = "unknown";
-        await waitFor(()=>row.cells[3].innerText === "部署结果待确认", "unknown result falsely claims enabled");
+        await waitFor(()=>row.cells[3].innerText === "启用 · 部署结果待确认", "unknown result hid the enabled target state");
+      }
+    } finally { test.dispose(); }
+  }
+  await testDisabledTargetDeploymentStates();
+}
+
+async function testDisabledTargetDeploymentStates() {
+  for (const shared of [false, true]) {
+    const test = await createConfigFixture("xray", {shared, disabled:[{section:"inbounds",tag:"second"}]});
+    try {
+      const row = test.row("second");
+      assert(row.cells[3].innerText === "停用 · 待部署", "initial deployment state hid the disabled target");
+      for (const [state, label] of [["deploying","停用 · 部署中"], ["canceled","停用 · 部署已取消"], ["unknown","停用 · 部署结果待确认"], ["applied","停用"], ["failed","停用 · 部署失败"]]) {
+        test.deploymentState = state;
+        await waitFor(()=>row.cells[3].innerText === label, `${state} deployment state changed the disabled target`);
       }
     } finally { test.dispose(); }
   }
@@ -70,7 +85,7 @@ async function testSupersededDeploymentReceipts() {
       location.hash='#tasks';await waitFor(()=>!source()&&test.calls.some(call=>call.path.startsWith('/tasks?'))&&!test.root.querySelector('[aria-busy=true]'),'pending deployment did not leave for tasks');
       location.hash='#live-config?agent=node&engine=xray';
       await waitFor(()=>source()&&!test.root.querySelector('[aria-busy=true]'),'pending deployment did not recover on return');
-      assert(source().elements.content.value===firstSource&&test.row('first').cells[3].innerText==='等待执行','route return lost pending deployment or saved baseline');
+      assert(source().elements.content.value===firstSource&&test.row('first').cells[3].innerText==='启用 · 等待执行','route return lost pending deployment or enabled target state');
       const oldReceipt=test.workspace();oldReceipt.deployment={...oldReceipt.deployment,state:'applied',task_status:'succeeded'};
       test.workspaceResponses=[new Promise(resolve=>{release=()=>resolve(oldReceipt);})];
       await waitFor(()=>test.workspaceResponses.length===0,'old deployment poll did not begin');
@@ -78,9 +93,9 @@ async function testSupersededDeploymentReceipts() {
       const latest=readableConfigSource(form.elements.content.value,'xray');form.requestSubmit();await test.settle(2);
       assert(test.saved().version===3&&form.elements.content.value===latest,'new source submission lost current revision');
       release();release=null;await pause();
-      assert(source()===form&&form.elements.content.value===latest&&test.row('first').cells[3].innerText==='等待执行','old successful receipt overwrote newer pending configuration');
+      assert(source()===form&&form.elements.content.value===latest&&test.row('first').cells[3].innerText==='启用 · 等待执行','old successful receipt overwrote newer pending configuration');
       test.taskStatus='failed';
-      await waitFor(()=>test.row('first').cells[3].innerText==='部署失败','latest failure did not supersede older success');
+      await waitFor(()=>test.row('first').cells[3].innerText==='启用 · 部署失败','latest failure hid the enabled target');
       assert(form.elements.content.value===latest&&test.saved().version===3&&test.writes.length===2,'failed deployment cleared baseline or repeated write');
       test.taskStatus='succeeded';
       await waitFor(()=>test.row('first').cells[3].innerText==='启用','latest deployment did not converge after recovery');
